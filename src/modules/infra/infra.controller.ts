@@ -20,7 +20,7 @@ import { QUEUE_NAMES } from '../queue/queue-names';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { Public, RequireRole } from '../auth/decorators/auth.decorators';
+import { Public, RequireRole, RequireUnscopedKey } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import { isPathWithin, isSafeSessionName } from '../../common/utils/path-safety';
 import { writeSecretFile } from '../../common/utils/secret-file';
@@ -337,6 +337,11 @@ interface SavedConfigResponse {
 
 @ApiTags('infrastructure')
 @Controller('infra')
+// Every route here is deployment-global (data export/import, infra config, service orchestration),
+// so the guard's route-param session fence can never bite. Reject session-scoped keys outright at
+// class level, which also covers routes added later. @Public routes are unaffected: the guard
+// returns before it reads this metadata.
+@RequireUnscopedKey()
 export class InfraController implements OnApplicationBootstrap {
   private readonly logger = createLogger('InfraController');
 
@@ -1054,10 +1059,19 @@ export class InfraController implements OnApplicationBootstrap {
         this.logger.log('Teardown result', { removalResult });
       }
 
-      // Then, start containers for enabled services
-      if (profiles.length > 0) {
+      // Then, start containers for enabled services. Start shares the SAME managed allowlist as
+      // teardown above: a non-managed name reaching orchestrateProfiles could, via container-name
+      // matching, select an unrelated host container, so constrain start to the managed profiles too
+      // and drop anything else. (DockerService already hard-prefixes openwa-<service> and filters on
+      // the com.openwa.service label, so this is defense-in-depth, not the sole control.)
+      const toStart = profiles.filter(p => MANAGED_DOCKER_PROFILES.includes(p));
+      const ignoredStart = profiles.filter(p => !MANAGED_DOCKER_PROFILES.includes(p));
+      if (ignoredStart.length > 0) {
+        this.logger.warn('Ignoring non-managed profiles in profiles', { ignoredStart });
+      }
+      if (toStart.length > 0) {
         this.logger.log('Orchestrating enabled profiles...');
-        orchestrationResult = await this.dockerService.orchestrateProfiles(profiles);
+        orchestrationResult = await this.dockerService.orchestrateProfiles(toStart);
         this.logger.log('Orchestration result', { orchestrationResult });
       }
     } else {

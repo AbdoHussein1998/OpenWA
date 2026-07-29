@@ -22,7 +22,7 @@ describe('RedriveController authz', () => {
 describe('RedriveController session-scope fence', () => {
   const scopedKey = { allowedSessions: ['sess-1'] } as ApiKey;
 
-  function build(sessionScope: string | null) {
+  function build(sessionScope: string | null | undefined) {
     const redrive = { redriveInstance: jest.fn().mockResolvedValue({ redriven: 0, remaining: 0, batchSize: 100 }) };
     const instances = {
       resolve: jest
@@ -53,6 +53,24 @@ describe('RedriveController session-scope fence', () => {
 
     await expect(controller.redriveInstance('chatwoot', 'acct1', scopedKey)).rejects.toThrow(NotFoundException);
     expect(redrive.redriveInstance).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 when a scoped key redrives a missing instance (its retained DLQ rows still carry a sessionId that may be out of scope)', async () => {
+    // build(undefined) makes resolve() return null (the instance row is gone). The old guard's
+    // `inst && ...` short-circuit let a scoped key through to redriveInstance here, re-dispatching
+    // the deleted instance's retained DLQ rows unscoped. It must fail closed instead.
+    const { controller, redrive } = build(undefined);
+
+    await expect(controller.redriveInstance('chatwoot', 'acct1', scopedKey)).rejects.toThrow(NotFoundException);
+    expect(redrive.redriveInstance).not.toHaveBeenCalled();
+  });
+
+  it('lets an unrestricted key redrive a missing instance (drains retained DLQ rows for cleanup)', async () => {
+    const { controller, redrive } = build(undefined);
+
+    await controller.redriveInstance('chatwoot', 'acct1', { allowedSessions: null } as unknown as ApiKey);
+
+    expect(redrive.redriveInstance).toHaveBeenCalledWith('chatwoot', 'acct1');
   });
 
   it('answers 404 when a scoped key redrives an all-sessions (null scope) instance', async () => {

@@ -186,6 +186,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variant of the same message — a browser profile left stale by a Chromium-binary change (#663/#708) —
   is raised inside `initialize()`, caught by the adapter, and keeps its existing advisory.
 
+- Service start during Docker orchestration now applies the same managed-profile allowlist as
+  teardown. Non-managed profile names are dropped before reaching `DockerService` in both directions,
+  so the start path cannot select an unrelated host container any more than teardown can.
+
+### Security
+
+- Infrastructure routes (`/api/infra/*`) now reject API keys restricted to specific sessions.
+  These routes act on the whole deployment, so a key confined to a subset of sessions must not
+  reach them regardless of its role. Unrestricted ADMIN keys are unaffected.
+
+- Plugin installation and lifecycle routes (`/api/plugins/*`) now reject API keys restricted to
+  specific sessions. Installing or enabling a plugin runs its code in the gateway process, which is
+  a deployment-wide action. Per-session plugin activation (`PUT /api/plugins/:id/sessions`) and
+  per-session config (`PUT /api/plugins/:id/config/:sessionId`) continue to accept restricted keys
+  and remain scoped to the sessions the key allows.
+
+- The queue dashboard (`/admin/queues`, available when `QUEUE_ENABLED=true`) now refuses API keys
+  restricted to specific sessions. The dashboard exposes and mutates every queue in the deployment
+  and has no session dimension to scope against.
+
+- Cross-session statistics (`GET /api/stats/overview`, `GET /api/stats/messages`), application
+  settings (`GET /api/settings`), and session creation (`POST /api/sessions`) now require an API key
+  that is not restricted to specific sessions. Per-session statistics remain available to restricted
+  keys for the sessions they allow.
+
+- Redriving a dead-lettered integration delivery now fails closed for session-restricted keys when
+  the integration instance no longer exists. Previously the scope check was skipped for a missing
+  instance, so retained dead-letter rows could be re-dispatched for sessions outside the key's scope.
+
+- Outbound downloads that follow redirects (plugin packages and the plugin catalog) now validate
+  every redirect hop before connecting. Previously a redirect whose target was a bare IP address
+  bypassed the destination check, because the platform skips name resolution for address literals.
+  Redirect chains are also capped.
+
+- Added a build-time check that fails when a route acting on the whole deployment is added without
+  refusing session-restricted API keys, so this class of gap cannot be reintroduced silently.
+
 ## [0.11.1] - 2026-07-28
 
 ### Added
