@@ -63,7 +63,7 @@
     "@bull-board/api": "^8.3.0",
     "@bull-board/express": "^8.3.0",
     "@bull-board/nestjs": "^8.3.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.1.28",
     "@nestjs/config": "^4.0.2",
