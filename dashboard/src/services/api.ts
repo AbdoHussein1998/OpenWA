@@ -36,9 +36,9 @@ export interface Session {
     | 'disconnected'
     | 'action_required'
     | 'failed';
-  phone?: string;
-  pushName?: string;
-  lastActive?: string;
+  phone?: string | null;
+  pushName?: string | null;
+  lastActive?: string | null;
   createdAt: string;
   updatedAt: string;
   /** Human-readable reason carried while the status is 'failed' (terminal failure) or
@@ -567,8 +567,16 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     const error = await response.json().catch(() => ({}));
     // Carry the HTTP status on the Error (message unchanged, so the toast de-dup still matches) so
     // callers can tell apart a permission 403 from a real server 5xx instead of guessing from text.
-    const err = new Error(error.message || `HTTP ${response.status}`) as Error & { status?: number };
+    // Carry the machine `code` too: the gateway's stable codes (SESSION_LOGOUT_INCOMPLETE,
+    // SESSION_NAME_TEARDOWN_PENDING, …) drive specific recovery UI, and a reverse-proxy 502 that
+    // never reached the gateway carries no code at all — that distinction is exactly what the unlink
+    // classifier keys on instead of fragile message heuristics.
+    const err = new Error(error.message || `HTTP ${response.status}`) as Error & {
+      status?: number;
+      code?: string;
+    };
     err.status = response.status;
+    if (typeof error.code === 'string') err.code = error.code;
     throw err;
   }
 

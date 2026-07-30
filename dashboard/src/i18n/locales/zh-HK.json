@@ -333,11 +333,11 @@
       "warning": "WhatsApp 會將此裝置從帳戶的已連結裝置列表中移除，工作階段將停止。重新連接需要重新掃描 QR 碼或使用配對碼。如需同時清除所有本地資料，請隨後刪除該工作階段。",
       "confirm": "解除連結",
       "successTitle": "裝置已解除連結",
-      "success": "WhatsApp 已將裝置從帳戶的已連結裝置列表中移除。重新連接需要重新掃描 QR 碼或使用配對碼。",
-      "unconfirmedTitle": "解除連結未確認",
-      "unconfirmed": "工作階段已在本地停止，但 WhatsApp 未確認解除連結——裝置可能仍列於已連結裝置中。請啟動工作階段後重試。",
+      "success": "解除連結已完成：裝置已登出，本機工作階段憑證已清除。重新連線需要新的 QR 掃描或配對碼。",
       "failedTitle": "解除連結失敗",
-      "failed": "無法解除該工作階段的連結。"
+      "failed": "無法解除該工作階段的連結。",
+      "incompleteTitle": "解除連結未完成",
+      "incomplete": "工作階段已在本地停止，但登出操作未完成——裝置可能仍處於連結狀態。請啟動工作階段後重新嘗試解除連結。"
     },
     "pairing": {
       "tabQr": "QR 碼",
@@ -356,6 +356,10 @@
       "step3": "<strong>3.</strong> 點按<strong>連結裝置</strong>，然後點按<strong>改用電話號碼連結</strong>",
       "step4": "<strong>4.</strong> 在手機上輸入上方顯示的 8 位字元配對碼",
       "waitingConnection": "正在等待你的手機完成連結…"
+    },
+    "start": {
+      "teardownPendingTitle": "工作階段啟動中",
+      "teardownPending": "此工作階段的憑證拆除仍在進行中。請稍候再試。"
     }
   },
   "webhooks": {

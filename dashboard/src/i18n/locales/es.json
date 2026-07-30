@@ -333,11 +333,11 @@
       "warning": "WhatsApp elimina este dispositivo de los Dispositivos vinculados de la cuenta y la sesión se detiene. Para reconectar se requiere un nuevo código QR o código de emparejamiento. Para borrar también todos los datos locales, elimine la sesión después.",
       "confirm": "Desvincular",
       "successTitle": "Dispositivo desvinculado",
-      "success": "WhatsApp eliminó el dispositivo de los Dispositivos vinculados de la cuenta. Se requiere un nuevo código QR o código de emparejamiento para reconectar.",
-      "unconfirmedTitle": "Desvinculación no confirmada",
-      "unconfirmed": "La sesión se detuvo localmente, pero WhatsApp no confirmó la desvinculación — es posible que el dispositivo siga apareciendo en Dispositivos vinculados. Inicie la sesión e inténtelo de nuevo.",
+      "success": "Desvinculación completada: se cerró la sesión del dispositivo y se borraron las credenciales locales. Para reconectar se requiere un nuevo código QR o código de emparejamiento.",
       "failedTitle": "Error al desvincular",
-      "failed": "No se pudo desvincular la sesión."
+      "failed": "No se pudo desvincular la sesión.",
+      "incompleteTitle": "Desvinculación incompleta",
+      "incomplete": "La sesión se detuvo localmente, pero la operación de cierre de sesión está incompleta — es posible que el dispositivo siga vinculado. Inicie la sesión y vuelva a intentar la desvinculación."
     },
     "pairing": {
       "tabQr": "Código QR",
@@ -356,6 +356,10 @@
       "step3": "<strong>3.</strong> Toca <strong>Vincular dispositivo</strong> y luego toca <strong>Vincular con número de teléfono</strong>",
       "step4": "<strong>4.</strong> Introduce en tu teléfono el código de 8 caracteres que se muestra arriba",
       "waitingConnection": "Esperando a que tu teléfono se vincule…"
+    },
+    "start": {
+      "teardownPendingTitle": "Iniciando sesión",
+      "teardownPending": "El borrado de credenciales de esta sesión aún está en curso. Espere un momento e inténtelo de nuevo."
     }
   },
   "webhooks": {

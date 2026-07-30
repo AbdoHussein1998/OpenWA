@@ -18,7 +18,14 @@ import {
 import { sessionApi, type Session } from '../services/api';
 import { queryKeys } from '../hooks/queries';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { canUnlinkSession, classifyUnlinkError, isSessionStarted } from '../utils/sessionActions';
+import {
+  canForceKillSession,
+  canUnlinkSession,
+  classifyUnlinkError,
+  isSessionStarted,
+  replaceSession,
+} from '../utils/sessionActions';
+import { invalidateSessionQueries, reconcileSessionCache } from '../utils/sessionMutation';
 import { useToast } from '../components/Toast';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useRole } from '../hooks/useRole';
@@ -70,7 +77,7 @@ export function Sessions() {
       // query, so invalidation only marks the shared cache stale (no refetch here, no loop) and the
       // Dashboard/other views refetch lazily on next mount. Prefix-matches every session-scoped key
       // (sessions, sessionStats, per-session groups/chats/templates).
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+      void invalidateSessionQueries(queryClient, queryKeys.sessions);
       return data;
     } catch (err) {
       setError(err instanceof Error ? err.message : t('sessions.create.errorDefault'));
@@ -87,6 +94,23 @@ export function Sessions() {
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
+
+  // Reconcile the LOCAL view with an authoritative Session response. The previous handlers discarded
+  // the response and fabricated `{ status: 'disconnected' }`, losing phone:null, timestamps, and other
+  // server-owned fields; this keeps the card and the selected-session modal byte-for-byte with the
+  // server. Functional updates (no captured stale `sessions`) feed both the list and the selected row,
+  // and the shared cache is reconciled + invalidated so sibling views refetch. The QR modal is cleared
+  // when the session that owned it stops, so it never hangs on a disconnected session's stale code.
+  const applySessionResponse = useCallback(
+    async (updated: Session) => {
+      sessionsRef.current = replaceSession(sessionsRef.current, updated);
+      setSessions(sessionsRef.current);
+      setSelectedSession(current => (current?.id === updated.id ? updated : current));
+      if (qrData?.sessionId === updated.id) setQrData(null);
+      await reconcileSessionCache(queryClient, queryKeys.sessions, updated);
+    },
+    [queryClient, qrData?.sessionId],
+  );
 
   // Live session-feed subscription state: wildcard first, per-session fallback for scoped keys.
   const feedStateRef = useRef(createSessionFeedState());
@@ -111,6 +135,10 @@ export function Sessions() {
           s.id === event.sessionId ? { ...s, status: event.status as Session['status'] } : s,
         );
         setSessions(sessionsRef.current);
+        // Mark the shared session queries stale so sibling views refetch — but ONLY on a real
+        // transition (the dedup guard above already swallows the redundant double-signals, so this
+        // does not re-invalidate on duplicate envelopes).
+        void invalidateSessionQueries(queryClient, queryKeys.sessions);
         if (event.status === 'ready') {
           toast.success(t('sessions.toasts.readyTitle'), t('sessions.toasts.readyDesc'));
         } else if (event.status === 'disconnected') {
@@ -125,7 +153,7 @@ export function Sessions() {
           toast.error(t('sessions.toasts.failedTitle'), t('sessions.toasts.failedDesc'));
         }
       },
-      [toast, t, fetchSessions],
+      [toast, t, fetchSessions, queryClient],
     ),
     onServerError: useCallback((frame: { code: string }) => {
       setFeedErrorFrame(frame);
@@ -257,7 +285,10 @@ export function Sessions() {
     try {
       setCreating(true);
       const newSession = await sessionApi.create(newSessionName);
-      setSessions([...sessions, newSession]);
+      // Functional append: never capture a stale `sessions` (a WS or fetch between the await and the
+      // setState would otherwise drop a row). Then invalidate the prefix so stats/groups/chats refresh.
+      setSessions(current => [...current, newSession]);
+      await invalidateSessionQueries(queryClient, queryKeys.sessions);
       setNewSessionName('');
       setShowCreateModal(false);
       toast.success(t('sessions.create.successTitle'), t('sessions.create.successDesc', { name: newSession.name }));
@@ -274,7 +305,9 @@ export function Sessions() {
     const session = sessions.find(s => s.id === id);
     try {
       await sessionApi.delete(id);
-      setSessions(sessions.filter(s => s.id !== id));
+      // Functional removal (no stale `sessions` capture), then invalidate the prefix.
+      setSessions(current => current.filter(s => s.id !== id));
+      await invalidateSessionQueries(queryClient, queryKeys.sessions);
       toast.success(
         t('sessions.delete.successTitle'),
         session
@@ -299,11 +332,22 @@ export function Sessions() {
 
     try {
       await sessionApi.start(id);
-      setSessions(sessions.map(s => (s.id === id ? { ...s, status: 'connecting' } : s)));
+      setSessions(current => current.map(s => (s.id === id ? { ...s, status: 'connecting' } : s)));
       await fetchSessions();
       handleShowQR(id);
     } catch (err) {
       console.error('Failed to start:', err);
+      // A credential teardown for this name is still settling — the backend fails closed with 409 +
+      // SESSION_NAME_TEARDOWN_PENDING. It is retryable, so warn with the server message and do NOT
+      // open a QR modal (there is no engine to scan yet). Any other start error keeps the existing
+      // authoritative reload + QR fallback behavior.
+      const code = (err as { code?: string } | null | undefined)?.code;
+      if (code === 'SESSION_NAME_TEARDOWN_PENDING') {
+        const msg = err instanceof Error && err.message ? err.message : t('sessions.start.teardownPending');
+        toast.warning(t('sessions.start.teardownPendingTitle'), msg);
+        await fetchSessions();
+        return;
+      }
       const fresh = await fetchSessions();
       const current = fresh.find(s => s.id === id);
       if (current?.status !== 'ready') handleShowQR(id);
@@ -342,24 +386,25 @@ export function Sessions() {
 
   const handleStop = async (id: string) => {
     try {
-      await sessionApi.stop(id);
-      setSessions(sessions.map(s => (s.id === id ? { ...s, status: 'disconnected' } : s)));
-      if (qrData?.sessionId === id) setQrData(null);
+      const updated = await sessionApi.stop(id);
+      await applySessionResponse(updated);
     } catch (err) {
       console.error('Failed to stop:', err);
-      fetchSessions();
+      // The error response carries no Session body, so re-fetch the authoritative state — phone:null
+      // and the real status come from the list endpoint, not the error envelope.
+      await fetchSessions();
     }
   };
 
   const handleForceKill = async (id: string) => {
     try {
-      await sessionApi.forceKill(id);
-      setSessions(sessions.map(s => (s.id === id ? { ...s, status: 'disconnected' } : s)));
+      const updated = await sessionApi.forceKill(id);
+      await applySessionResponse(updated);
       toast.success(t('sessions.forceKill.successTitle'), t('sessions.forceKill.success'));
     } catch (err) {
       console.error('Failed to force-kill:', err);
       toast.error(t('sessions.forceKill.failedTitle'), t('sessions.forceKill.failed'));
-      fetchSessions();
+      await fetchSessions();
     } finally {
       setKillConfirmId(null);
     }
@@ -371,27 +416,31 @@ export function Sessions() {
     if (unlinkingId) return;
     setUnlinkingId(id);
     try {
-      await sessionApi.logout(id);
-      setSessions(sessions.map(s => (s.id === id ? { ...s, status: 'disconnected' } : s)));
-      if (qrData?.sessionId === id) setQrData(null);
+      const updated = await sessionApi.logout(id);
+      await applySessionResponse(updated);
       toast.success(t('sessions.unlink.successTitle'), t('sessions.unlink.success'));
     } catch (err) {
       console.error('Failed to unlink:', err);
-      if (classifyUnlinkError(err) === 'unconfirmed') {
-        // 502 — the session DID stop locally, but WhatsApp has not confirmed the unlink. Not a
-        // plain failure, so warn with retry guidance instead of raising an error toast.
-        toast.warning(t('sessions.unlink.unconfirmedTitle'), t('sessions.unlink.unconfirmed'));
+      // The error response carries no Session body, so re-fetch authoritative state regardless of
+      // how we classify the toast — phone:null/status come from the list endpoint.
+      await fetchSessions();
+      if (classifyUnlinkError(err) === 'incomplete') {
+        // 502 + SESSION_LOGOUT_INCOMPLETE — the session stopped locally but the unlink operation is
+        // incomplete. Surface the server's specific message/retry guidance as a warning, not an error.
+        const msg = err instanceof Error && err.message ? err.message : t('sessions.unlink.incomplete');
+        toast.warning(t('sessions.unlink.incompleteTitle'), msg);
       } else {
+        // A reverse-proxy 502 (bare or JSON without the exact code) may never have reached the
+        // gateway, so nothing was stopped — generic failure, not retry guidance.
         toast.error(t('sessions.unlink.failedTitle'), t('sessions.unlink.failed'));
       }
-      fetchSessions();
     } finally {
       setUnlinkConfirmId(null);
       setUnlinkingId(null);
     }
   };
 
-  const formatLastActive = (date?: string) => {
+  const formatLastActive = (date?: string | null) => {
     if (!date) return t('common.never');
     const diff = Date.now() - new Date(date).getTime();
     if (diff < 60000) return t('common.justNow');
@@ -913,7 +962,7 @@ export function Sessions() {
                     {t('sessions.actions.delete')}
                   </button>
                 )}
-                {canWrite && session.status === 'failed' && (
+                {canForceKillSession(session.status, canWrite) && (
                   <button className="btn-action danger" onClick={() => setKillConfirmId(session.id)}>
                     <Skull size={16} />
                     {t('sessions.actions.killStuck')}

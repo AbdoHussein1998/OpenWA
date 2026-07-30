@@ -5,6 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import i18next from 'i18next';
 
+// Source files that reference session-lifecycle locale keys — the old `unconfirmed*` keys were
+// renamed to `incomplete*`, so a stale reference would render a raw key string to the operator.
+const SESSIONS_PAGE_SOURCE = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'pages', 'Sessions.tsx'),
+  'utf8',
+);
+
 // Catalog-level assertions over the real locale files through a real i18next instance — catches
 // missing keys (a component would render the raw key), missing plural forms (a count renders the
 // wrong number form), and interpolation drift that a JSON diff can't see.
@@ -105,4 +112,66 @@ test('sessionStatus.failed and sessionStatus.authenticating resolve in every loc
   }
   assert.equal(i18n.t('sessionStatus.failed'), 'Failed');
   assert.equal(i18n.t('sessionStatus.authenticating'), 'Authenticating...');
+});
+
+// ── Session lifecycle reconciliation keys (renamed unconfirmed* → incomplete* + new start keys) ──
+// A missing key would render the raw key to the operator; these are driven directly by Sessions.tsx.
+
+const LIFECYCLE_KEYS = [
+  'sessions.unlink.success',
+  'sessions.unlink.successTitle',
+  'sessions.unlink.incomplete',
+  'sessions.unlink.incompleteTitle',
+  'sessions.unlink.failed',
+  'sessions.unlink.failedTitle',
+  'sessions.start.teardownPending',
+  'sessions.start.teardownPendingTitle',
+];
+
+test('every session lifecycle key resolves in every locale', () => {
+  for (const lng of LOCALE_IDS) {
+    for (const key of LIFECYCLE_KEYS) {
+      const value = i18n.t(key, { lng });
+      assert.ok(value && value !== key, `${lng}: ${key} missing (component would render a raw key)`);
+    }
+  }
+});
+
+test('the old unconfirmed* locale keys are gone from every locale', () => {
+  for (const lng of LOCALE_IDS) {
+    for (const key of ['sessions.unlink.unconfirmed', 'sessions.unlink.unconfirmedTitle']) {
+      // With fallbackLng disabled, a present key resolves to its value while a removed key renders
+      // the raw key string back out — which is what a stale locale file would surface too.
+      const value = i18n.t(key, { lng });
+      assert.equal(value, key, `${lng}: stale ${key} still present`);
+    }
+  }
+});
+
+test('the page source no longer references any old unconfirmed* locale key', () => {
+  for (const key of ['sessions.unlink.unconfirmedTitle', 'sessions.unlink.unconfirmed']) {
+    assert.ok(
+      !SESSIONS_PAGE_SOURCE.includes(`t('${key}')`) && !SESSIONS_PAGE_SOURCE.includes(`t("${key}")`),
+      `Sessions.tsx still references renamed key ${key}`,
+    );
+  }
+});
+
+// The success copy must NOT claim the dashboard observes the handset's Linked Devices — Task 7's 200
+// contract is "unlink operation + local cleanup completed", not an independent handset observation.
+test('English unlink success/incomplete copy does not claim handset Linked-Devices observation', () => {
+  const success = i18n.t('sessions.unlink.success', { lng: 'en' });
+  assert.ok(!/Linked Devices/i.test(success), `success copy claims handset observation: "${success}"`);
+  assert.ok(!/removed the device from/i.test(success), `success copy claims handset removal: "${success}"`);
+  // The incomplete copy may still mention "linked" as a *possibility* (the device may still be linked),
+  // which is accurate — only the SUCCESS copy must not assert it as observed.
+  const incomplete = i18n.t('sessions.unlink.incomplete', { lng: 'en' });
+  assert.ok(/incomplete/i.test(incomplete), `incomplete copy lost the "incomplete" framing: "${incomplete}"`);
+});
+
+test('English start teardown-pending copy is a retryable warning, not an error', () => {
+  const title = i18n.t('sessions.start.teardownPendingTitle', { lng: 'en' });
+  const body = i18n.t('sessions.start.teardownPending', { lng: 'en' });
+  assert.ok(/try again/i.test(body), `teardown-pending copy lost the retry guidance: "${body}"`);
+  assert.ok(title && title !== 'sessions.start.teardownPendingTitle');
 });

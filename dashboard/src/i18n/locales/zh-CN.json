@@ -333,11 +333,11 @@
       "warning": "WhatsApp 会将此设备从账号的已关联设备列表中移除，会话将停止。重新连接需要重新扫描二维码或使用配对码。如需同时清除所有本地数据，请随后删除该会话。",
       "confirm": "取消关联",
       "successTitle": "设备已取消关联",
-      "success": "WhatsApp 已将设备从账号的已关联设备列表中移除。重新连接需要重新扫描二维码或使用配对码。",
-      "unconfirmedTitle": "取消关联未确认",
-      "unconfirmed": "会话已在本地停止，但 WhatsApp 未确认取消关联——设备可能仍列在已关联设备中。请启动会话后重试。",
+      "success": "取消关联已完成：设备已登出，本地会话凭据已清除。重新连接需要新的二维码扫描或配对码。",
       "failedTitle": "取消关联失败",
-      "failed": "无法取消关联该会话。"
+      "failed": "无法取消关联该会话。",
+      "incompleteTitle": "取消关联未完成",
+      "incomplete": "会话已在本地停止，但登出操作未完成——设备可能仍处于关联状态。请启动会话后重新尝试取消关联。"
     },
     "pairing": {
       "tabQr": "QR 码",
@@ -356,6 +356,10 @@
       "step3": "<strong>3.</strong> 点击<strong>关联设备</strong>，然后点击<strong>改用电话号码关联</strong>",
       "step4": "<strong>4.</strong> 在手机上输入上方显示的 8 位字符配对码",
       "waitingConnection": "正在等待您的手机完成关联…"
+    },
+    "start": {
+      "teardownPendingTitle": "会话启动中",
+      "teardownPending": "此会话的凭据拆除仍在处理中。请稍候再试。"
     }
   },
   "webhooks": {

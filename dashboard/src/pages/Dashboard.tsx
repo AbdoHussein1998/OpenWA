@@ -59,7 +59,7 @@ export function Dashboard() {
     { label: t('dashboard.stats.totalMessages'), value: totalMessages, icon: Activity },
   ];
 
-  const formatLastActive = (date?: string) => {
+  const formatLastActive = (date?: string | null) => {
     if (!date) return t('common.never');
     const diff = Date.now() - new Date(date).getTime();
     if (diff < 60000) return t('common.justNow');
