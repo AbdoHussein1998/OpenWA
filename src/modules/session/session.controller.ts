@@ -100,6 +100,13 @@ export class SessionController {
   @ApiParam({ name: 'id', description: 'Session ID' })
   @ApiResponse({ status: 204, description: 'Session deleted' })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'A credential teardown for the same session name is still in flight. Retryable — the body ' +
+      "carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; wait for it to settle and retry. No " +
+      'destructive side effect runs before this refusal.',
+  })
   async delete(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     const session = await this.sessionService.findOne(id);
     await this.sessionService.delete(id);
@@ -123,6 +130,14 @@ export class SessionController {
   })
   @ApiResponse({ status: 400, description: 'Session already started' })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'A credential teardown for the same session name is still in flight (e.g. a prior logout ' +
+      'that owns destructive cleanup). Retryable — the body carries `code: ' +
+      'SESSION_NAME_TEARDOWN_PENDING`; wait for it to settle and retry. No destructive side ' +
+      'effect runs before this refusal.',
+  })
   async start(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.start(id);
     await this.auditService.logInfo(AuditAction.SESSION_STARTED, {
@@ -158,22 +173,51 @@ export class SessionController {
   @ApiOperation({
     summary: 'Log out of WhatsApp (unlinks this device) and stop the session',
     description:
-      "Asks WhatsApp to remove this companion device, so it disappears from the account holder's " +
-      'Linked Devices list, then tears the session down. Unlike stop and delete — which only ' +
-      'release the session locally and leave the device linked on the phone — reconnecting after ' +
-      'a logout always requires a fresh QR scan or pairing code.',
+      'Attempts an engine-native unlink of this companion device, then tears the session down ' +
+      'locally. `200` means the engine-native unlink operation completed AND the required local ' +
+      'credential cleanup completed — for Baileys a valid companion identity, an acknowledged ' +
+      '`remove-companion-device` IQ response, and removal of the on-disk auth dir; for ' +
+      'whatsapp-web.js the native `Client.logout()` promise settled. `200` is NOT an independent ' +
+      'observation that the handset UI no longer shows the linked device. Because a completed ' +
+      'unlink wipes the stored credentials, reconnecting after a `200` always requires a fresh QR ' +
+      'scan or pairing code.',
   })
   @ApiParam({ name: 'id', description: 'Session ID' })
   @ApiResponse({
     status: 200,
-    description: 'Session logged out',
+    description:
+      'Unlink operation and required local cleanup completed; session is stopped and `phone` is ' +
+      'cleared. Recorded in the audit log as `session_logged_out`.',
     type: SessionResponseDto,
+    content: {
+      'application/json': {
+        example: {
+          id: '8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a',
+          name: 'my-bot',
+          status: 'disconnected',
+          phone: null,
+          pushName: null,
+          connectedAt: null,
+          lastActive: '2026-06-25T09:01:55.000Z',
+          createdAt: '2026-06-20T11:30:00.000Z',
+          updatedAt: '2026-06-25T09:11:00.000Z',
+          lastError: null,
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 400, description: 'Session is not started' })
+  @ApiResponse({
+    status: 400,
+    description: 'Session is not started (no engine to send through); the row is left untouched',
+  })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({
     status: 502,
-    description: 'Session was stopped locally, but WhatsApp did not confirm the device unlink — retryable',
+    description:
+      'Session was stopped locally, but the logout operation is incomplete (no send, no ' +
+      'acknowledgement, timeout/transport error, or local-cleanup failure). Retryable — the ' +
+      "body carries `code: 'SESSION_LOGOUT_INCOMPLETE'`; `phone` is cleared and no success audit " +
+      'is written. Start the session again and retry the logout.',
   })
   async logout(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.logout(id);

@@ -58,9 +58,15 @@ func (s *SessionsService) Stop(ctx context.Context, sessionID string) (*SessionR
 	return &out, nil
 }
 
-// Logout unlinks this device from the WhatsApp account, then tears the session down. Unlike Stop
-// and Delete, it removes the device from the account holder's Linked Devices list, so a later
-// Start requires a fresh QR scan or pairing code. Requires a running session.
+// Logout attempts an engine-native unlink of this device, then tears the session down. A 200
+// means the unlink operation AND the required local credential cleanup completed — it is not an
+// independent observation that the handset UI no longer shows the linked device. Because a
+// completed unlink wipes the stored credentials, a later Start requires a fresh QR scan or
+// pairing code. Requires a running session. Returns an HTTP 502 error with
+// code 'SESSION_LOGOUT_INCOMPLETE' when the session was stopped locally but the logout operation
+// did not complete (no send, no acknowledgement, timeout/transport error, or local cleanup
+// failure); phone is cleared and no success audit is written. Start the session again and retry
+// the logout; do not assume the retry reconnects automatically or lands in a guaranteed QR state.
 func (s *SessionsService) Logout(ctx context.Context, sessionID string) (*SessionResponse, error) {
 	var out SessionResponse
 	err := s.client.do(ctx, "POST", "/api/sessions/"+pathEscape(sessionID)+"/logout", nil, nil, &out)

@@ -657,8 +657,8 @@ version bump lands as a single commit on `main`, and pushing the tag hands every
 Exactly four files change. Nothing else belongs in this commit.
 
 ```bash
-npm version --no-git-tag-version 0.11.0   # package.json + package-lock.json
-npm run openapi:export                     # openapi.json info.version follows package.json
+npm version --no-git-tag-version <version>   # package.json + package-lock.json
+npm run openapi:export                        # openapi.json info.version follows package.json
 ```
 
 Then in `CHANGELOG.md`, insert the new heading directly under the retained, now-empty
@@ -667,7 +667,7 @@ Then in `CHANGELOG.md`, insert the new heading directly under the retained, now-
 ```markdown
 ## [Unreleased]
 
-## [0.11.0] - 2026-07-27
+## [<version>] - <YYYY-MM-DD>
 ```
 
 `## [<version>]` is not cosmetic: `npm run check:versions` fails without it, and the GitHub Release
@@ -688,8 +688,8 @@ cd dashboard && npm run lint && npm run typecheck && npm run i18n:check && npm r
 
 ```bash
 git add package.json package-lock.json openapi.json CHANGELOG.md
-git commit -m "chore(release): v0.11.0"
-git tag -a v0.11.0 -m "v0.11.0"
+git commit -m "chore(release): v<version>"
+git tag -a v<version> -m "v<version>"
 git push origin main --follow-tags
 ```
 
@@ -724,17 +724,18 @@ are flagged prerelease on GitHub.
 
 Everything from `promote` onward is skipped, so no release tag reaches either registry and no GitHub
 Release is created — the previous release stays intact. Confirm that is what happened, fix the cause
-on `main`, then move the tag:
+on `main`, then re-tag the version **only if nothing was published under it**:
 
 ```bash
-git push origin :refs/tags/v0.11.0   # delete the remote tag
-git tag -d v0.11.0
+git push origin :refs/tags/v<version>   # delete the remote tag
+git tag -d v<version>
 # ... commit the fix ...
-git tag -a v0.11.0 -m "v0.11.0" && git push origin v0.11.0
+git tag -a v<version> -m "v<version>" && git push origin v<version>
 ```
 
-Re-using the version is safe precisely because nothing was published under it. A version that DID
-publish before a defect was found must not be re-tagged — supersede it (v0.10.3 → v0.10.4).
+Re-using a version is safe precisely because nothing was published under it. A version that DID
+publish before a defect was found must not be re-tagged — never move or reuse an already-pushed tag;
+supersede it with a new release instead (e.g. `v0.10.3` → `v0.10.4`).
 
 Two failure classes are worth anticipating because they depend on the outside world rather than on
 the change being released:
@@ -749,8 +750,8 @@ the change being released:
 
 ```bash
 gh run list --workflow=release.yml --limit 1
-gh release view v0.11.0
-docker buildx imagetools inspect ghcr.io/rmyndharis/openwa:0.11.0
+gh release view v<version>
+docker buildx imagetools inspect ghcr.io/rmyndharis/openwa:<version>
 docker buildx imagetools inspect docker.io/rmyndharis/openwa:latest
 ```
 

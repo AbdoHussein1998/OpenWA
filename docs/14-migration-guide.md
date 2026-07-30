@@ -705,6 +705,7 @@ docker compose run --rm openwa-api npm run migration:run:prod
 
 | Release  | Change                                                                              | Action                                                                                                     |
 | -------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `0.12.0` | `PUT /api/plugins/:id/sessions` is a full replacement of the global activation set and now requires an **unrestricted ADMIN** key; a session-scoped key is rejected with `403` whatever it sends | Switch any automation that drives global plugin activation from a scoped key to an unrestricted ADMIN key. The per-session config override route `PUT /api/plugins/:id/config/:sessionId` is unaffected and stays scoped to the addressed session |
 | `0.8.15` | PostgreSQL schemas bootstrapped with `DATABASE_SYNCHRONIZE=true` crash-loop on boot | Self-healing guard migration; see [14.9](#149-troubleshooting-migration-issues) for the large-table window |
 | `0.9.0`  | `GET /api/settings` no longer returns the always-zero `general.sessionTimeout`      | Remove reads of that field — there is no replacement                                                       |
 | `0.10.3` | Boolean/numeric request fields are parsed strictly (`1`, `yes`, `""` now `400`)     | Send canonical JSON values; JSON clients and the SDKs are unaffected                                       |

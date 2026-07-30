@@ -50,14 +50,20 @@ class SessionsResource:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/stop")
 
     def logout(self, session_id: str) -> SessionResponse:
-        """Request WhatsApp to unlink this device, then tear the session down.
+        """Attempt an engine-native unlink of this device, then tear the session down.
 
-        Unlike stop() and delete(), this asks WhatsApp to remove the device
-        from the account holder's Linked Devices list, so a later start()
-        requires a fresh QR scan or pairing code. Requires a running session.
-        Raises on HTTP 502 when the session was stopped locally but WhatsApp
-        did not confirm the unlink (the device may still be listed) — start
-        the session and retry to confirm.
+        A 200 means the engine-native unlink operation AND the required local
+        credential cleanup completed -- it is not an independent observation
+        that the handset UI no longer shows the linked device. Because a
+        completed unlink wipes the stored credentials, a later start() requires
+        a fresh QR scan or pairing code. Requires a running session.
+
+        Raises on HTTP 502 with ``code: 'SESSION_LOGOUT_INCOMPLETE'`` when the
+        session was stopped locally but the logout operation did not complete
+        (no send, no acknowledgement, timeout/transport error, or local
+        cleanup failure); ``phone`` is cleared and no success audit is written.
+        Start the session again and retry the logout. Do not assume the retry
+        reconnects automatically or lands in a guaranteed QR state.
         """
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/logout")
 

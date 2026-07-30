@@ -100,7 +100,7 @@ Validation failures (`statusCode: 400`) return `message` as an **array** of fiel
 | `401` | Unauthorized | Missing/invalid/expired/revoked `X-API-Key` (or `METRICS_TOKEN` for metrics), a blocked source IP, or a key used outside its `allowedSessions` scope |
 | `403` | Forbidden | A valid, in-scope key whose **role** is below the route's `@RequireRole` requirement |
 | `404` | Not Found | The addressed resource (session, message, webhook, batch, …) does not exist |
-| `409` | Conflict | A uniqueness constraint was violated (e.g. duplicate name) |
+| `409` | Conflict | A uniqueness constraint was violated (e.g. duplicate name), or a credential teardown for the same session name is still in flight on `start`/`delete` (retryable; body carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`) |
 | `413` | Payload Too Large | Base64 media exceeds the media byte cap (see §6.3) |
 | `500` | Internal Server Error | Send failed at the WhatsApp engine or an unexpected server error |
 
@@ -467,7 +467,7 @@ No request body.
 
 Returned via `transformSession`. Status typically transitions to `initializing` / `qr_ready`.
 
-**Errors:** `400` session already started / already starting · `401` · `403` · `404` not found
+**Errors:** `400` session already started / already starting · `401` · `403` · `404` not found · `409` credential teardown for the same session name still in flight (retryable; body carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; no destructive side effect runs before the refusal — a retry after cleanup settles proceeds)
 
 #### POST /api/sessions/:id/stop
 
@@ -506,40 +506,38 @@ Returned via `transformSession`; status typically becomes `disconnected`.
 
 #### POST /api/sessions/:id/logout
 
-Log out of WhatsApp — unlinking this device from the account — and tear the session down.
+Attempt an engine-native unlink of this companion device, then tear the session down locally.
 
 `stop` disconnects while keeping the stored credentials, and `delete` additionally purges the
 on-disk auth directories and the session row, but neither tells WhatsApp anything: the device stays
 listed under the account holder's **Linked Devices** on the phone until they remove it by hand.
-`logout` asks WhatsApp to remove the companion device itself. Both engines perform a real
-protocol-level unlink and clear that session's stored credentials, so a later `start` requires a
-fresh QR scan or pairing code.
+`logout` attempts the engine-native unlink operation itself.
+
+A `200` means the engine-native unlink operation **and** the required local credential cleanup both
+completed — for Baileys, a valid companion identity, an acknowledged `remove-companion-device` IQ
+response, and removal of the on-disk auth dir; for whatsapp-web.js, the native `Client.logout()`
+promise (including `LocalAuth.logout()`) settled. `200` is **not** an independent observation that
+the handset UI no longer shows the linked device — only the linked device itself can observe that,
+and callers must not claim otherwise. Because a completed unlink wipes the stored credentials, a
+later `start` always requires a fresh QR scan or pairing code.
 
 The session must be running — the unlink is a network round-trip that needs a live engine, so a
-stopped session is rejected rather than reported as a success that never reached WhatsApp. The same
-applies one level down: a session whose engine is loaded but whose underlying browser or socket has
-gone (a stuck-auth recovery, a WhatsApp-side logout still inside its reconnect backoff) also answers
-`502` rather than reporting an unlink it never sent.
+stopped session is rejected with `400` (the row is left untouched) rather than reported as a success
+that never reached WhatsApp.
 
-If the engine's logout does not complete, the session is still torn down locally but the route
-returns `502`: the unlink was not confirmed, the device may still be listed under Linked Devices, and
-no `session_logged_out` audit row is written. Start the session again and retry.
+If the engine-backed logout attempt does not complete, the session is still torn down locally
+(map reconciled, status `disconnected`) but the route returns `502` with a stable
+`code: 'SESSION_LOGOUT_INCOMPLETE'`: no send / no acknowledgement / timeout or transport error / or
+a local-cleanup failure. `phone` is cleared on this path and **no** `session_logged_out` audit row
+is written (that audit is only written on the `200` path). Start the session again and retry the
+logout. Do not assume the retry reconnects automatically or lands in a guaranteed QR state — whether
+the old credentials remain usable depends on where the failure happened, and the route does not
+report which.
 
-Whether that retry needs a QR scan depends on how the attempt failed, and the route cannot tell you
-which happened:
-
-- **The engine rejected the logout** (no live client, socket already gone). Nothing was sent and
-  nothing was deleted, so the stored credentials survive and the retry reconnects without a QR.
-- **The logout ran past the teardown deadline.** The 10s deadline bounds the *response*, not the
-  work: on whatsapp-web.js the still-running attempt ends in `LocalAuth.logout()`, which deletes the
-  profile directory. Once that lands the session comes back with a fresh QR, exactly as a successful
-  unlink would. `start` waits for that cleanup to settle before re-creating the profile, so the
-  outcome is consistent either way — but plan for a re-scan after a deadline-hit 502.
-
-With `AUTO_START_SESSIONS=true`, a session whose unlink was not confirmed keeps its credentials and
-is auto-started again on boot (the "start and retry" flow, automated) — delete it if it must stay
-down. A confirmed logout is skipped on boot: its credentials are gone, so it can only come back via
-a fresh QR scan.
+With `AUTO_START_SESSIONS=true`, auto-start selects sessions whose `phone` is non-null. Both a `200`
+and a `502` logout clear `phone`, so neither is auto-started on boot — an incomplete-logout (`502`)
+session must be started explicitly and the logout retried by hand. A session that must stay down can
+simply be left as-is.
 
 **Auth:** API key (OPERATOR)  ·  **Scope:** session-scoped
 
@@ -558,8 +556,8 @@ No request body.
   "id": "8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a",
   "name": "my-bot",
   "status": "disconnected",
-  "phone": "6281234567890",
-  "pushName": "My Bot",
+  "phone": null,
+  "pushName": null,
   "connectedAt": null,
   "lastActive": "2026-06-25T09:01:55.000Z",
   "createdAt": "2026-06-20T11:30:00.000Z",
@@ -568,10 +566,11 @@ No request body.
 }
 ```
 
-Returned via `transformSession`; status becomes `disconnected`. Recorded in the audit log as
-`session_logged_out`, distinguishing an intentional unlink from a plain stop.
+Returned via `transformSession`; status becomes `disconnected` and `phone` is cleared (so the boot
+auto-start does not resurrect the session). Recorded in the audit log as `session_logged_out`,
+distinguishing an intentional unlink from a plain stop.
 
-**Errors:** `400` session is not started · `401` · `403` · `404` not found · `502` unlink not confirmed (session stopped locally; retryable)
+**Errors:** `400` session is not started (no engine to send through; the row is left untouched) · `401` · `403` · `404` not found · `502` `SESSION_LOGOUT_INCOMPLETE` — session stopped locally but the logout operation did not complete (retryable; `phone` cleared, no success audit)
 
 #### POST /api/sessions/:id/force-kill
 
@@ -783,7 +782,7 @@ Delete a session.
 
 **Response** `204` — empty body (`@HttpCode(204)`, returns void). A `findOne` lookup runs first, so a missing id yields `404`.
 
-**Errors:** `401` missing/invalid key, or key not scoped to this session · `403` key role below OPERATOR · `404` session not found
+**Errors:** `401` missing/invalid key, or key not scoped to this session · `403` key role below OPERATOR · `404` session not found · `409` credential teardown for the same session name still in flight (retryable; body carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; on a `409` the row is **not** deleted and no hook/auth-purge runs — retry after cleanup settles)
 
 ### 6.4.2 Messages
 
@@ -4713,9 +4712,9 @@ Set (or clear) a plugin config override for a specific session.
 
 #### PUT /api/plugins/:id/sessions
 
-Set which sessions a session-scoped plugin is activated for.
+Set which sessions a session-scoped plugin is activated for. This is a **full replacement** of the plugin's global activation set: the supplied `sessions` array overwrites `activeSessions` in its entirety (not a merge), so an omitted session is deactivated and `[]` deactivates the plugin for every session.
 
-**Auth:** API key (ADMIN)  ·  **Scope:** session-scoped (the key's `allowedSessions` is enforced)
+**Auth:** API key (ADMIN) that is **not restricted to specific sessions** (`@RequireUnscopedKey`). Because the route replaces the whole activation set, a session-scoped key is rejected with `403` whatever it sends — even a request confined to its own `allowedSessions` would silently delete every other session's activation, so the fence refuses scoped keys before the handler runs. Use an unrestricted ADMIN key. (The per-session config override route `PUT /api/plugins/:id/config/:sessionId` is a different operation and stays scoped to the addressed session.)
 
 **Path parameters**
 
@@ -4735,9 +4734,7 @@ Set which sessions a session-scoped plugin is activated for.
 
 **Response** `200` — the updated `PluginDto` (reflecting the new `activeSessions`).
 
-A session-restricted key requesting `"*"` or out-of-scope sessions gets `403 API key not authorized for session(s): …`.
-
-**Errors:** `400` plugin is global · `401` · `403` key not authorized for requested sessions · `404` unknown id
+**Errors:** `400` plugin is global · `401` · `403` key is session-scoped (full activation replacement requires an unrestricted key) · `404` unknown id
 
 ---
 
