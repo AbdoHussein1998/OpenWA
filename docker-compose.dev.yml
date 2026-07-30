@@ -82,6 +82,8 @@ services:
       # Install plugins into the writable, persistent data volume (the root FS is read-only). Matches
       # docker-compose.yml; without this it falls back to ./plugins on the read-only root and install fails.
       - PLUGINS_DIR=${PLUGINS_DIR:-/app/data/plugins}
+      # Plugin install-from-URL redirect policy (ssrf-guard): off unless the exact string 'true'.
+      - PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS=${PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS:-false}
       - WEBHOOK_TIMEOUT=${WEBHOOK_TIMEOUT:-10000}
       - WEBHOOK_RETRY_DELAY=${WEBHOOK_RETRY_DELAY:-5000}
       - WEBHOOK_DISPATCH_CONCURRENCY=${WEBHOOK_DISPATCH_CONCURRENCY:-16}

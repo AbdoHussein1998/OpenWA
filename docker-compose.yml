@@ -191,6 +191,8 @@ services:
       - BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-}
       # Plugins
       - PLUGINS_DIR=${PLUGINS_DIR:-/app/data/plugins}
+      # Plugin install-from-URL redirect policy (ssrf-guard): off unless the exact string 'true'.
+      - PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS=${PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS:-false}
       # Security
       - API_MASTER_KEY=${API_MASTER_KEY:-}
       - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
