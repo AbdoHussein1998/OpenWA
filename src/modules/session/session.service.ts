@@ -770,9 +770,11 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       // race is still running and ends in an fs.rm of this session's on-disk profile — the same path
       // initializeEngine is about to populate. The fence is keyed by session NAME (the auth-dir key)
       // and FAIL CLOSED: a still-wedged teardown could still rm a fresh profile under this name, so
-      // refuse with a retryable 409 instead of proceeding. On a 409, NO lifecycle state is touched
+      // refuse with a retryable 409 instead of proceeding. On a 409, no lifecycle state is touched
       // (the stop mark, reconnect timer, engine, last status/error, and recovery budget are left as
-      // they were) — start() simply did not happen.
+      // they were) — start() simply did not happen. The one transient exception is the
+      // initializingSessions reservation added synchronously at start() entry: its finally removes it
+      // again, so a refused start does not leave a false "already starting" mark behind (briefly held).
       await this.awaitPendingTeardown(session.name);
 
       // A fresh start intentionally (re-)creates the engine — clear any stale stop/delete mark.
