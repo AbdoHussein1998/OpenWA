@@ -82,6 +82,15 @@ const BAILEYS_BROWSER: [string, string, string] = [
 ];
 
 /**
+ * How long logout() waits for WhatsApp to acknowledge the `remove-companion-device` IQ. Completion of
+ * an engine-native unlink requires a tagged IQ result from the server (NOT a WebSocket write flush),
+ * so this bound is the difference between a 502 (operation incomplete) and a 200 (unlink completed).
+ * Set above the typical round-trip but well under the service's 10s teardown deadline so a wedged
+ * transport surfaces as a retryable 502 instead of wedging the session.
+ */
+const BAILEYS_LOGOUT_ACK_TIMEOUT_MS = 8_000;
+
+/**
  * Build the Node-layer agent for a session egress proxy (#859). Both the WhatsApp WebSocket
  * (`agent`) and media up/downloads (`fetchAgent`) ride it; credentials stay in the URL and are
  * authenticated on the socket itself, so none of the Chromium CDP auth timing the wwjs engine is
@@ -431,13 +440,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
         // Credentials invalidated — terminal. Re-linking requires a fresh QR/pairing, so the now-dead
         // multi-file auth dir MUST be wiped: otherwise the next connect() reloads the stale creds and
         // Baileys silently retries them instead of emitting a new QR, leaving the session stuck (no QR).
-        this.setStatus(EngineStatus.DISCONNECTED);
-        this.sock = null;
-        // Cached call handles die with the connection — drop them so a later rejectCall() reports
-        // not-found (404) instead of acting on a dead socket (mirrors disconnect/logout/destroy).
-        this.liveCalls.clear();
-        void this.clearAuthState();
-        this.callbacks.onDisconnected?.('logged out');
+        void this.handleRemoteLoggedOut();
         return;
       }
 
@@ -560,46 +563,137 @@ export class BaileysAdapter implements IWhatsAppEngine {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
-    // Without a socket the unlink cannot be sent, and `this.sock?.logout()` would resolve as though it
-    // had been — reporting a confirmed unlink, writing the audit row, and then wiping the on-disk
-    // credentials below, leaving the device linked server-side with no way left to retry. Fail instead
-    // so the caller surfaces it and the credentials survive. Reachable: a WhatsApp-side logout nulls
-    // the socket while the engine stays registered for the whole reconnect backoff.
-    if (!this.sock) {
+    // Capture the exact live socket. Without one the unlink cannot be sent, and an optional-chained
+    // send would resolve as though it had been — reporting a confirmed unlink, writing the audit row,
+    // and then wiping the on-disk credentials, leaving the device linked server-side with nothing
+    // left to retry with. Reachable: a WhatsApp-side logout nulls the socket while the engine stays
+    // registered for the whole reconnect backoff.
+    const sourceSock = this.sock;
+    if (!sourceSock) {
       throw new Error('No live WhatsApp socket — the unlink was not sent');
     }
 
     try {
-      // Baileys' sock.logout() resolves once the WebSocket write has flushed — WhatsApp sends no
-      // iq ack for the unlink — and it transmits nothing at all when authState.creds.me is unset.
-      // A resolved promise therefore means "sent (or nothing to send)", not "unlink acknowledged".
-      await this.sock.logout();
+      // Completion of an engine-native unlink requires a tagged IQ result from WhatsApp — Baileys'
+      // own sock.logout() resolves on a WebSocket write flush (NOT an IQ ack) and transmits nothing
+      // at all when creds.me is unset, so a resolved promise proves nothing about the unlink. Use
+      // the public query() surface against the pinned `remove-companion-device` node instead.
+      const b = await this.loadLib();
+      const jid = sourceSock.user?.id;
+      if (!jid) {
+        // The companion identity is required to address the unlink; without it nothing is sent.
+        throw new Error('No linked companion identity — the unlink was not sent');
+      }
+      const response: unknown = await sourceSock.query(
+        {
+          tag: 'iq',
+          attrs: { to: b.S_WHATSAPP_NET, type: 'set', id: sourceSock.generateMessageTag(), xmlns: 'md' },
+          content: [{ tag: 'remove-companion-device', attrs: { jid, reason: 'user_initiated' } }],
+        },
+        BAILEYS_LOGOUT_ACK_TIMEOUT_MS,
+      );
+      if (!response) {
+        // query() resolved without a result — WhatsApp did not acknowledge the unlink request.
+        throw new Error('WhatsApp did not acknowledge the unlink request');
+      }
+
+      // Acknowledged. End/null the captured socket, clear live call handles, and drop to
+      // DISCONNECTED before the awaited cleanup so no send/path observes a half-torn-down socket.
+      this.localSocketShutdown(sourceSock);
+      await this.config.messageStore?.clearSession(this.config.dbSessionId).catch(() => undefined);
+      // Wipe the multi-file auth dir so a fresh link starts clean — stale creds would otherwise be
+      // reloaded on the next connect() and block re-linking (Baileys retries them, no QR emitted).
+      // A removal failure propagates: completion requires cleanup, so the operation is incomplete.
+      await this.clearAuthState();
     } catch (err) {
-      // End the socket so the session still dies locally, but keep the on-disk creds: wiping
-      // them now would leave the device linked server-side with no local way to retry the
-      // unlink. Rethrow so the caller learns the unlink was not confirmed.
-      this.logger.warn('Baileys logout failed; ending socket', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      void this.sock?.end(undefined);
-      this.sock = null;
-      this.liveCalls.clear();
-      this.setStatus(EngineStatus.DISCONNECTED);
+      // EVERY failure exit (missing identity, query rejection/timeout, empty response, OR a later
+      // auth removal failure) still stops sourceSock locally so no engine/socket orphan is left in
+      // the service map after it evicts the engine on 502. Failure before acknowledgement must NOT
+      // remove auth state — the link may still be valid server-side, and the creds are needed to
+      // retry. localSocketShutdown is identity-safe: it only nulls this.sock if it still points at
+      // sourceSock (a concurrent reconnect may have already swapped in a fresh socket).
+      this.localSocketShutdown(sourceSock);
       throw err;
     }
-    this.sock = null;
+  }
+
+  /**
+   * Identity-safe local shutdown of a captured socket: clears the reconnect timer, ends the socket,
+   * clears cached live call handles, drops to DISCONNECTED, and nulls `this.sock` ONLY if it still
+   * points at the same object (a concurrent reconnect could have swapped in a fresh one). Called at
+   * every logout exit so the service's 502 genuinely means "stopped locally, operation incomplete".
+   */
+  private localSocketShutdown(sourceSock: WASocket): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    try {
+      void sourceSock.end(undefined);
+    } catch {
+      // end() may already have run from Baileys' own close handler — a safe no-op.
+    }
+    // Cached call handles die with the connection — drop them so a later rejectCall() reports
+    // not-found (404) instead of acting on a dead socket (mirrors disconnect/destroy).
     this.liveCalls.clear();
+    if (this.sock === sourceSock) {
+      this.sock = null;
+    }
     this.setStatus(EngineStatus.DISCONNECTED);
-    await this.config.messageStore?.clearSession(this.config.dbSessionId).catch(() => undefined);
-    // Wipe the multi-file auth dir so a fresh link starts clean — stale creds would otherwise be
-    // reloaded on the next connect() and block re-linking (Baileys retries them, no QR emitted).
-    await this.clearAuthState();
+  }
+
+  /**
+   * Handle a WhatsApp-originated `loggedOut` (401) close: the credentials were invalidated server-side
+   * and re-linking requires a fresh QR/pairing, so the now-dead multi-file auth dir MUST be wiped —
+   * otherwise the next connect() reloads the stale creds and Baileys silently retries them instead of
+   * emitting a QR, leaving the session stuck (no QR).
+   *
+   * The status/socket/live-call teardown happens SYNCHRONOUSLY before any await so the session
+   * watchdog never processes a READY socket that is already dead. The strict auth removal is then
+   * awaited as a tracked cleanup (Task 5's onCredentialTeardownStarted registers it under the session
+   * NAME). On success the engine reports DISCONNECTED + onDisconnected('logged out'); on failure it
+   * reports FAILED + onError (terminal — a reconnect with known-invalid auth would loop forever).
+   */
+  private async handleRemoteLoggedOut(): Promise<void> {
+    // Synchronous teardown BEFORE any await.
+    this.setStatus(EngineStatus.DISCONNECTED);
+    const dead = this.sock;
+    this.sock = null;
+    // Cached call handles die with the connection — drop them so a later rejectCall() reports
+    // not-found (404) instead of acting on a dead socket (mirrors disconnect/logout/destroy).
+    this.liveCalls.clear();
+    void dead?.end(undefined);
+
+    const cleanup = (async (): Promise<void> => {
+      try {
+        await this.clearAuthState();
+      } catch (err) {
+        // A failed credential removal is terminal: report FAILED + onError instead of looking like a
+        // clean disconnect (the credentials did not actually get wiped).
+        this.setStatus(EngineStatus.FAILED);
+        this.callbacks.onError?.(
+          `Logged out by WhatsApp, but the local credential cleanup failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        return;
+      }
+      this.callbacks.onDisconnected?.('logged out');
+    })();
+    // Register the destructive promise the instant it begins (NOT guarded on this engine still being
+    // live): the rm targets the session NAME's auth dir and would race a (re)created session under
+    // that same name. tracked under the captured name, settled regardless of the outcome.
+    this.callbacks.onCredentialTeardownStarted?.(cleanup);
+    await cleanup;
   }
 
   /**
    * Delete this session's on-disk multi-file auth state (`authDir/sessionId`). Required after a terminal
    * logout: Baileys would otherwise reload the now-invalid creds on the next connect() and retry them
    * instead of emitting a fresh QR, leaving re-linking stuck. `force` makes a missing dir a no-op.
+   * Logs the outcome and RETHROWS on failure: completion of an engine-native unlink (logout 200) AND
+   * the loggedOut close path both require cleanup, so a removal failure must propagate (the operation
+   * is incomplete), not be swallowed.
    */
   private async clearAuthState(): Promise<void> {
     try {
@@ -609,6 +703,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       this.logger.warn('Failed to clear Baileys auth state', {
         error: err instanceof Error ? err.message : String(err),
       });
+      throw err;
     }
   }
 

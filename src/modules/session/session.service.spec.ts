@@ -324,23 +324,35 @@ describe('SessionService', () => {
       // Stop-mark stays set, like stop()/forceKill(): it blocks an in-flight reconnect
       // from resurrecting a session we just unlinked; a later start() clears it.
       expect(stoppingOf().has('sess-uuid-1')).toBe(true);
-      // A confirmed unlink wipes the stored credentials, so the session can never reach READY
-      // without a fresh QR — clearing phone takes it out of the boot auto-start query
-      // (phone IS NOT NULL) instead of resurrecting it into a QR it can never pass.
+      // A completed engine-backed unlink wipes the stored credentials on both engines, so the
+      // session can never reach READY without a fresh QR — clearing phone takes it out of the boot
+      // auto-start query (phone IS NOT NULL) instead of resurrecting it into a QR it can never pass.
       expect(repository.update).toHaveBeenCalledWith('sess-uuid-1', { phone: null });
+      // The returned row reflects the cleared phone.
       expect(result).toBeDefined();
+      expect(result.phone).toBeNull();
     });
 
-    it('logout() rejects with 502 when the unlink is unconfirmed — but the session is still torn down locally', async () => {
+    it('logout() rejects with 502 + stable code SESSION_LOGOUT_INCOMPLETE when the unlink is incomplete — but still tears down locally AND clears phone', async () => {
       (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
       (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
       const engine = { logout: jest.fn().mockRejectedValue(new Error('socket already gone')) };
       enginesOf().set('sess-uuid-1', engine);
 
-      // The distinction that matters: an unconfirmed unlink must surface as an error so the
-      // controller skips the SESSION_LOGGED_OUT audit row, instead of reporting a success
-      // that never reached WhatsApp. The local teardown still completes.
-      await expect(service.logout('sess-uuid-1')).rejects.toBeInstanceOf(BadGatewayException);
+      // An incomplete engine-backed attempt must surface as a retryable 502 carrying a stable
+      // machine code so the dashboard can branch on origin without guessing from the message. The
+      // local teardown still completes, and phone is cleared AFTER the attempt (before the throw) so
+      // the boot auto-start does not resurrect the session into an uncertain credential state.
+      const thrown = await service.logout('sess-uuid-1').catch((e: unknown) => e);
+
+      expect(thrown).toBeInstanceOf(BadGatewayException);
+      // Nest serializes the object response body into `response`; the stable code lives there.
+      const response = (thrown as BadGatewayException).getResponse() as { code?: string; message?: string };
+      expect(response.code).toBe('SESSION_LOGOUT_INCOMPLETE');
+      expect(response.message).toMatch(/operation.*incomplete/i);
+      // The message must not pin the cause to "WhatsApp did not confirm" alone — the operation could
+      // be incomplete for several reasons (no identity/no send/no ack/timeout/cleanup failure).
+      expect(response.message).not.toMatch(/^WhatsApp did not confirm/);
 
       expect(engine.logout).toHaveBeenCalledTimes(1);
       expect(enginesOf().has('sess-uuid-1')).toBe(false); // map reconciled
@@ -348,20 +360,23 @@ describe('SessionService', () => {
         'sess-uuid-1',
         expect.objectContaining({ status: SessionStatus.DISCONNECTED }),
       );
-      // The unlink was NOT confirmed — the device may still be linked server-side, so the session
-      // must stay eligible for the boot auto-start (which is the "start and retry" automation).
-      expect(repository.update).not.toHaveBeenCalledWith('sess-uuid-1', { phone: null });
+      // phone IS cleared after the engine-backed attempt even on the incomplete path: the local
+      // credentials were torn down, so re-entering boot auto-start would only resurrect a session
+      // that can no longer reach READY.
+      expect(repository.update).toHaveBeenCalledWith('sess-uuid-1', { phone: null });
     });
 
-    it('logout() rejects with 400 when no engine is loaded (session already stopped)', async () => {
+    it('logout() rejects with 400 when no engine is loaded (session already stopped) and does NOT clear phone', async () => {
       (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
       enginesOf().delete('sess-uuid-1');
 
-      // With no engine there is nothing to send the unlink through — reporting success
-      // would record a SESSION_LOGGED_OUT audit row for an unlink that never happened.
+      // With no engine there is nothing to send the unlink through — reporting success would record
+      // a SESSION_LOGGED_OUT audit row for an unlink that never happened. A 400 (no engine) does NOT
+      // change the row: phone stays exactly as it was.
       await expect(service.logout('sess-uuid-1')).rejects.toBeInstanceOf(BadRequestException);
       // The rejection happens before any teardown side effects: no stop-mark left behind.
       expect(stoppingOf().has('sess-uuid-1')).toBe(false);
+      expect(repository.update).not.toHaveBeenCalledWith('sess-uuid-1', { phone: null });
     });
 
     const pendingTeardownsOf = () =>

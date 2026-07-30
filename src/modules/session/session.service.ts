@@ -2423,31 +2423,37 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   /**
-   * Log out of WhatsApp — unlinks this device from the account — then tear the session down.
+   * Log out of WhatsApp — attempts an engine-native unlink of this device, then tears the session
+   * down locally regardless of the unlink outcome.
    *
-   * Differs from stop() in the one way that matters to a user: logout() asks WhatsApp to remove
-   * the companion device, so the entry disappears from the phone's Linked Devices list. stop() and
-   * delete() only release things locally (delete also purges the on-disk auth dirs), which leaves
-   * the device listed on the phone indefinitely — there is currently no way to clear it from the
-   * API, only by hand on the handset.
+   * Differs from stop() in the one way that matters to a user: logout() asks WhatsApp to remove the
+   * companion device, so a completed unlink eventually makes the entry disappear from the account
+   * holder's Linked Devices list. stop() and delete() only release things locally (delete also
+   * purges the on-disk auth dirs).
    *
-   * Both engines implement a real unlink, so this is not a best-effort approximation: Baileys sends
-   * <remove-companion-device reason="user_initiated"/> to s.whatsapp.net, and whatsapp-web.js calls
-   * WAWebSocketModel.Socket.logout() in the page.
+   * Completion (HTTP 200) means the engine-native unlink operation completed AND the required local
+   * credential cleanup completed — for Baileys, a valid companion identity, an acknowledged
+   * `remove-companion-device` IQ response, and removal of the on-disk auth dir; for whatsapp-web.js,
+   * `Client.logout()` including `LocalAuth.logout()` settled. 200 is NOT an independent observation
+   * that the handset UI no longer shows the linked device — only the linked-device canary observes
+   * that, and the dashboard must not claim otherwise.
    *
    * Must run while the engine is still live — logout is a network round-trip to WhatsApp, so it
    * cannot be performed after destroy()/forceDestroy(). Mirrors stop()'s lifecycle otherwise
    * (stop-mark + cancel-reconnect + bounded, isolated teardown + Map reconciliation).
    *
    * Requires a started session: with no engine loaded there is nothing to send the unlink through,
-   * so the request is rejected rather than reporting an unlink that never happened (the on-disk
-   * credentials would also survive, letting a later start() reconnect with no QR). To just release
-   * a stopped session locally, use stop()/delete().
+   * so the request is rejected with 400 rather than reporting an unlink that never happened. A 400
+   * does NOT change the row. To just release a stopped session locally, use stop()/delete().
    *
-   * Throws BadGatewayException when the engine's logout does not complete: the session is still
-   * torn down locally (map reconciled, status updated), but the unlink was not confirmed by
-   * WhatsApp, so reporting success would record a SESSION_LOGGED_OUT audit row for an unlink
-   * that never happened. The operator can start the session and retry the logout.
+   * Throws a retryable BadGatewayException (502) carrying a stable `code: 'SESSION_LOGOUT_INCOMPLETE'`
+   * when an accepted engine-backed attempt stopped locally but the unlink operation did NOT complete
+   * — no identity/no send, no IQ acknowledgement, timeout/transport error, OR local credential
+   * cleanup failure. After EVERY engine-backed attempt (200 OR 502) the session is torn down locally
+   * (map reconciled, status DISCONNECTED) and `phone` is cleared so the boot auto-start does not
+   * resurrect the session into an uncertain/invalid credential state. No success audit is written on
+   * the 502 path (the controller audits SESSION_LOGGED_OUT only after the service resolves). The
+   * operator can start the session and retry the logout.
    */
   async logout(id: string): Promise<Session> {
     const session = await this.findOne(id);
@@ -2473,18 +2479,28 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     await this.updateStatus(id, SessionStatus.DISCONNECTED);
 
     if (!unlinked) {
-      this.logger.warn(`Session stopped locally but the unlink was not confirmed: ${session.name}`, {
+      this.logger.warn(`Session stopped locally but the logout operation did not complete: ${session.name}`, {
         sessionId: id,
-        action: 'logout_unconfirmed',
+        action: 'logout_incomplete',
       });
-      throw new BadGatewayException(
-        'Session was stopped locally, but WhatsApp did not confirm the device unlink — the ' +
-          'device may still be listed under Linked Devices on the phone. Start the session and ' +
-          'retry the logout to confirm it.',
-      );
+      // The local teardown already ran (map reconciled, status DISCONNECTED), but the unlink operation
+      // did not complete. Clear `phone` AFTER the attempt and BEFORE throwing so the boot auto-start
+      // does not resurrect the session into a credential state that can no longer reach READY — the
+      // local credentials were torn down, so re-entering auto-start would only wedge it. The retryable
+      // 502 carries a stable machine code so the dashboard can branch on origin without guessing from
+      // the status/message; no success audit is written on this path.
+      await this.sessionRepository.update(id, { phone: null });
+      throw new BadGatewayException({
+        statusCode: HttpStatus.BAD_GATEWAY,
+        message:
+          'Session was stopped locally, but the logout operation is incomplete — the device may ' +
+          'still be linked. Start the session and retry the logout.',
+        error: 'Bad Gateway',
+        code: 'SESSION_LOGOUT_INCOMPLETE',
+      });
     }
 
-    // A confirmed unlink wipes the stored credentials on both engines, so this session can never
+    // A completed engine-backed unlink wipes the stored credentials, so this session can never
     // reach READY again without a fresh QR/pairing. Clear `phone` to take it out of the boot
     // auto-start query (phone IS NOT NULL) instead of resurrecting it into a QR it can never pass
     // on every restart. onReady rewrites it on the next successful link.

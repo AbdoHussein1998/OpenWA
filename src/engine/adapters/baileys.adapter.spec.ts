@@ -22,6 +22,11 @@ class FakeSock extends EventEmitter {
   public requestPairingCode = jest.fn().mockResolvedValue('ABCD-EFGH');
   public end = jest.fn();
   public logout = jest.fn().mockResolvedValue(undefined);
+  // IQ query surface used by logout(): sends a BinaryNode and resolves the tagged response.
+  // Default returns a truthy IQ result (a successful acknowledgement) so tests that don't care can
+  // just await logout(); individual tests override the implementation to simulate failure.
+  public query = jest.fn().mockResolvedValue({ tag: 'iq', attrs: { type: 'result' } });
+  public generateMessageTag = jest.fn().mockReturnValue('TAG-1');
   public sendMessage = jest.fn();
   public onWhatsApp = jest.fn();
   public sendPresenceUpdate = jest.fn().mockResolvedValue(undefined);
@@ -88,6 +93,8 @@ jest.mock('@whiskeysockets/baileys', () => ({
   ),
   // Identity passthrough by default; individual tests may override to simulate unwrapping.
   normalizeMessageContent: jest.fn((c: unknown) => c),
+  // The pinned protocol node targets this JID; exported from the real module's WABinary surface.
+  S_WHATSAPP_NET: '@s.whatsapp.net',
   DisconnectReason: { loggedOut: 401, forbidden: 403, restartRequired: 515, connectionReplaced: 440 },
   proto: {
     Message: {
@@ -196,19 +203,27 @@ describe('BaileysAdapter lifecycle & status', () => {
   });
 
   it('on a logged-out close: DISCONNECTED, onDisconnected, and NO reconnect', async () => {
-    const onDisconnected = jest.fn();
-    const adapter = newAdapter();
-    await adapter.initialize(noopCallbacks({ onDisconnected }));
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const makeWASocket = jest.requireMock('@whiskeysockets/baileys').default as jest.Mock;
-    makeWASocket.mockClear();
-    fakeSock.fire('connection.update', {
-      connection: 'close',
-      lastDisconnect: { error: { output: { statusCode: 401 } } },
-    });
-    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
-    expect(onDisconnected).toHaveBeenCalled();
-    expect(makeWASocket).not.toHaveBeenCalled(); // no reconnect
+    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    try {
+      const onDisconnected = jest.fn();
+      const adapter = newAdapter();
+      await adapter.initialize(noopCallbacks({ onDisconnected }));
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const makeWASocket = jest.requireMock('@whiskeysockets/baileys').default as jest.Mock;
+      makeWASocket.mockClear();
+      fakeSock.fire('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 401 } } },
+      });
+      // The status/socket teardown is synchronous; onDisconnected fires only after the deferred auth
+      // removal settles (see handleRemoteLoggedOut).
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+      await new Promise(r => setImmediate(r));
+      expect(onDisconnected).toHaveBeenCalledWith('logged out');
+      expect(makeWASocket).not.toHaveBeenCalled(); // no reconnect
+    } finally {
+      rmSpy.mockRestore();
+    }
   });
 
   it('on a logged-out close: clears the on-disk auth dir so a fresh connect shows a new QR', async () => {
@@ -233,12 +248,124 @@ describe('BaileysAdapter lifecycle & status', () => {
     }
   });
 
-  it('logout() clears the on-disk auth dir (stale creds would otherwise block re-linking)', async () => {
+  it('on a logged-out close: moves DISCONNECTED synchronously, registers the teardown, fires onDisconnected only after the rm resolves', async () => {
+    // The WhatsApp-originated cleanup runs as an awaited async helper. The status/socket/live-call
+    // teardown must land SYNCHRONOUSLY before any await so the watchdog never processes a READY socket
+    // that is already dead; onCredentialTeardownStarted must register the cleanup promise; and
+    // onDisconnected fires only after the strict auth removal succeeds.
+    let releaseRm!: () => void;
+    const rmPromise = new Promise<void>(res => {
+      releaseRm = res;
+    });
+    const rmSpy = jest.spyOn(fs.promises, 'rm').mockReturnValue(rmPromise);
+    const onCredentialTeardownStarted = jest.fn((op: Promise<void>) => {
+      void op.catch(() => undefined);
+    });
+    const onDisconnected = jest.fn();
+    const onError = jest.fn();
+    try {
+      const adapter = newAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const makeWASocket = jest.requireMock('@whiskeysockets/baileys').default as jest.Mock;
+      await adapter.initialize(noopCallbacks({ onCredentialTeardownStarted, onDisconnected, onError }));
+      makeWASocket.mockClear(); // only count makeWASocket calls originating from the logged-out path
+
+      fakeSock.fire('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 401 } } },
+      });
+
+      // SYNCHRONOUSLY (before the deferred rm settles): DISCONNECTED, socket nulled, live calls clear.
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+      expect((adapter as unknown as { sock: unknown }).sock).toBeNull();
+      expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
+      // The registered argument is the same promise the adapter is about to await.
+      const registeredOp = onCredentialTeardownStarted.mock.calls[0][0];
+      expect(typeof registeredOp.then).toBe('function');
+      expect(makeWASocket).not.toHaveBeenCalled(); // no reconnect scheduled
+      // onDisconnected has NOT fired yet — the rm is still pending.
+      expect(onDisconnected).not.toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+
+      releaseRm();
+      await new Promise(r => setImmediate(r)); // let the awaited helper settle
+
+      expect(rmSpy).toHaveBeenCalledWith(
+        path.join('./data/baileys', 'sess-1'),
+        expect.objectContaining({ recursive: true, force: true }),
+      );
+      expect(onDisconnected).toHaveBeenCalledWith('logged out');
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED); // still DISCONNECTED on success
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
+  it('on a logged-out close: a failed auth removal becomes terminal FAILED + onError (NOT disconnected/reconnect)', async () => {
+    // A clearAuthState() that rethrows must surface as a terminal error so the operator learns the
+    // credentials did not actually get wiped. It must not look like a clean disconnect or schedule a
+    // reconnect with known-invalid auth.
+    const rmSpy = jest.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('disk error'));
+    const onDisconnected = jest.fn();
+    const onError = jest.fn();
+    try {
+      const adapter = newAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const makeWASocket = jest.requireMock('@whiskeysockets/baileys').default as jest.Mock;
+      await adapter.initialize(noopCallbacks({ onDisconnected, onError }));
+      makeWASocket.mockClear(); // only count makeWASocket calls originating from the logged-out path
+
+      fakeSock.fire('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 401 } } },
+      });
+      await new Promise(r => setImmediate(r)); // let the awaited helper settle on the rejection
+
+      expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(expect.stringContaining('disk error'));
+      expect(onDisconnected).not.toHaveBeenCalled(); // success path did not run
+      expect(makeWASocket).not.toHaveBeenCalled(); // no reconnect
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
+  it('logout() clears the on-disk auth dir only AFTER an IQ result acknowledges the unlink', async () => {
+    // 200 = engine-native unlink completed AND required local credential cleanup completed. The auth
+    // dir must be removed only after a valid IQ response; removing it earlier would leave the device
+    // linked server-side with no local credentials to retry with.
     const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
     try {
       const adapter = newAdapter();
       await adapter.initialize(noopCallbacks({}));
+      fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+
       await adapter.logout();
+
+      // remove-companion-device IQ went out through query() with the pinned protocol node and the
+      // 8s acknowledgement timeout. Auth dir removal happened only after the truthy IQ result.
+      expect(fakeSock.query).toHaveBeenCalledTimes(1);
+      const [node, timeoutMs] = fakeSock.query.mock.calls[0] as [
+        {
+          tag: string;
+          attrs: { to: string; type: string; id: string; xmlns: string };
+          content: Array<{ tag: string; attrs: { jid: string; reason: string } }>;
+        },
+        number,
+      ];
+      expect(node.tag).toBe('iq');
+      expect(node.attrs).toEqual({
+        to: '@s.whatsapp.net',
+        type: 'set',
+        id: 'TAG-1',
+        xmlns: 'md',
+      });
+      expect(node.content).toEqual([
+        { tag: 'remove-companion-device', attrs: { jid: '628999:12@s.whatsapp.net', reason: 'user_initiated' } },
+      ]);
+      expect(timeoutMs).toBe(8_000);
       expect(rmSpy).toHaveBeenCalledWith(
         path.join('./data/baileys', 'sess-1'),
         expect.objectContaining({ recursive: true, force: true }),
@@ -248,18 +375,106 @@ describe('BaileysAdapter lifecycle & status', () => {
     }
   });
 
-  it('logout() rejects and keeps the on-disk auth dir when the server unlink fails', async () => {
-    // Wiping the auth dir on a failed unlink would leave the device linked server-side with no
-    // local way to retry — the worst of both worlds. Failure must surface and keep the creds.
+  it('logout() never calls sock.logout() — the IQ query is the unlink contract', async () => {
+    // Baileys sock.logout() resolves on WebSocket write flush (NOT an IQ ack) and transmits nothing
+    // when creds.me is unset, so it is intentionally NOT used.
     const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
     try {
       const adapter = newAdapter();
       await adapter.initialize(noopCallbacks({}));
-      fakeSock.logout.mockRejectedValueOnce(new Error('stream errored out'));
+      fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
 
-      await expect(adapter.logout()).rejects.toThrow('stream errored out');
+      await adapter.logout();
+
+      expect(fakeSock.logout).not.toHaveBeenCalled();
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
+  it('logout() with missing companion identity rejects, sends nothing, preserves auth, and stops locally', async () => {
+    // No creds.me.id → the unlink cannot be addressed. The promise must reject, query()/rm() must NOT
+    // run, and the live socket must be torn down locally so no engine orphan remains.
+    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    try {
+      const adapter = newAdapter();
+      await adapter.initialize(noopCallbacks({}));
+      fakeSock.user = undefined; // no linked companion identity
+      (adapter as unknown as { sock: unknown }).sock = fakeSock;
+
+      await expect(adapter.logout()).rejects.toThrow(/no linked companion identity/i);
+
+      expect(fakeSock.query).not.toHaveBeenCalled();
       expect(rmSpy).not.toHaveBeenCalled();
-      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED); // socket still ended locally
+      // Failure still stops the socket locally: end() called, status DISCONNECTED, socket nulled.
+      expect(fakeSock.end).toHaveBeenCalled();
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+      expect((adapter as unknown as { sock: unknown }).sock).toBeNull();
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
+  it('logout() with an undefined IQ response rejects, preserves auth, and stops locally', async () => {
+    // WhatsApp returned no result for the unlink request — completion requires a truthy response, so
+    // this is an incomplete operation (502 at the service). Auth survives; the socket still dies.
+    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    try {
+      const adapter = newAdapter();
+      await adapter.initialize(noopCallbacks({}));
+      fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+      fakeSock.query.mockResolvedValueOnce(undefined);
+
+      await expect(adapter.logout()).rejects.toThrow(/did not acknowledge the unlink/i);
+
+      expect(fakeSock.query).toHaveBeenCalledTimes(1);
+      expect(rmSpy).not.toHaveBeenCalled();
+      expect(fakeSock.end).toHaveBeenCalled();
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+      expect((adapter as unknown as { sock: unknown }).sock).toBeNull();
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
+  it('logout() with a query rejection/timeout rejects, preserves auth, and stops locally', async () => {
+    // A transport error or 8s timeout from query() is an incomplete operation. Auth must NOT be
+    // removed (the link may still be valid server-side); the socket still ends locally.
+    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    try {
+      const adapter = newAdapter();
+      await adapter.initialize(noopCallbacks({}));
+      fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+      fakeSock.query.mockRejectedValueOnce(new Error('Timed Out'));
+
+      await expect(adapter.logout()).rejects.toThrow('Timed Out');
+
+      expect(fakeSock.query).toHaveBeenCalledTimes(1);
+      expect(rmSpy).not.toHaveBeenCalled();
+      expect(fakeSock.end).toHaveBeenCalled();
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+      expect((adapter as unknown as { sock: unknown }).sock).toBeNull();
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
+  it('logout() with an acknowledged IQ but fs.rm failure STILL rejects', async () => {
+    // Completion requires auth dir removal too. Even after a valid IQ result, a failed credential
+    // removal propagates (the operation is incomplete), so 200 is never reported.
+    const rmSpy = jest.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('disk full'));
+    try {
+      const adapter = newAdapter();
+      await adapter.initialize(noopCallbacks({}));
+      fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+
+      await expect(adapter.logout()).rejects.toThrow('disk full');
+
+      expect(fakeSock.query).toHaveBeenCalledTimes(1);
+      expect(rmSpy).toHaveBeenCalledWith(
+        path.join('./data/baileys', 'sess-1'),
+        expect.objectContaining({ recursive: true, force: true }),
+      );
     } finally {
       rmSpy.mockRestore();
     }
@@ -277,7 +492,7 @@ describe('BaileysAdapter lifecycle & status', () => {
       (adapter as unknown as { sock: unknown }).sock = null;
 
       await expect(adapter.logout()).rejects.toThrow(/no live whatsapp socket/i);
-      expect(fakeSock.logout).not.toHaveBeenCalled();
+      expect(fakeSock.query).not.toHaveBeenCalled();
       expect(rmSpy).not.toHaveBeenCalled();
     } finally {
       rmSpy.mockRestore();
@@ -816,17 +1031,24 @@ describe('BaileysAdapter status honesty across the reconnect backoff', () => {
   });
 
   it('a logged-out close still reports DISCONNECTED (terminal behavior unchanged)', async () => {
-    const onDisconnected = jest.fn();
-    const adapter = await initReady({ onDisconnected });
+    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    try {
+      const onDisconnected = jest.fn();
+      const adapter = await initReady({ onDisconnected });
 
-    fakeSock.fire('connection.update', {
-      connection: 'close',
-      lastDisconnect: { error: { output: { statusCode: 401 } } },
-    });
+      fakeSock.fire('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 401 } } },
+      });
 
-    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
-    expect(onDisconnected).toHaveBeenCalledWith('logged out');
-    await expect(adapter.probeLiveness()).resolves.toBe(false);
+      // The status is DISCONNECTED synchronously; onDisconnected fires after the deferred auth removal.
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+      await new Promise(r => setImmediate(r));
+      expect(onDisconnected).toHaveBeenCalledWith('logged out');
+      await expect(adapter.probeLiveness()).resolves.toBe(false);
+    } finally {
+      rmSpy.mockRestore();
+    }
   });
 });
 
