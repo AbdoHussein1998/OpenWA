@@ -474,6 +474,21 @@ acknowledged before the companion device is allowed to stay linked. The adapter 
 and only gives up after five clicks that fail to land — at that point a human must click through it
 once, so the session stops instead of being silently unlinked by WhatsApp about five minutes later.
 
+> **If the modal is not in English:** the detector matches the English button label (`Continue`) and
+> heading ("What's new"). The language WhatsApp Web renders in follows the browser locale, which OpenWA
+> does not set, so it is whatever the browser the container launches defaults to
+> (`PUPPETEER_EXECUTABLE_PATH` — Chrome for Testing on amd64, Debian's `chromium` on arm64). You can
+> pin it yourself by appending `--lang=en-US` to `PUPPETEER_ARGS` — that variable **replaces** the
+> default list rather than adding to it, so repeat the existing flags too (dropping `--no-sandbox` in
+> a container stops Chromium launching at all). If your deployment does get a
+> localised modal, it is **not** auto-dismissed and the session never reaches `action_required` —
+> instead it links normally, then drops to `disconnected` with reason `LOGOUT` a few minutes later and
+> the device disappears from the phone's Linked devices list. Because that path wipes the stored
+> credentials, the automatic reconnect comes back with a fresh QR on its own, so the session is
+> usually already sitting at `qr_ready` rather than needing a manual start. Acknowledge the modal once
+> in a browser signed in as that account, then scan the QR. It does not recur — the modal is shown
+> once per account.
+
 **Fix:** acknowledge the modal once (open WhatsApp Web in the account holder's own browser and click
 through the "What's new" screen), **then restart the session** (`POST /sessions/:id/stop` →
 `POST /sessions/:id/start`). Acknowledging alone does not return the session to `ready` — the status

@@ -5,13 +5,22 @@ import type { Session } from '../services/api.ts';
 
 // Statuses in which the API has an engine loaded for the session. This is the single source of truth
 // for the engine-backed actions — Stop, Unlink, and Force-Kill — because they share one precondition:
-// something live to act on. Keeping them on one set is what stops a card from offering an action the
-// API rejects, and, just as importantly, from offering Start to a session that is already started (the
-// API answers 400 and the page then opens a QR modal that can never resolve).
+// something live to act on. Keeping them on one set is what stops a card in one of these states from
+// offering an action the API rejects, and from offering Start to a session that is already started
+// (the API answers 400 and the page then opens a QR modal that can never resolve).
 //
 // `authenticating` and `action_required` belong here: both hold a live engine — the whatsapp-web.js
 // adapter can sit in `authenticating` for 90 seconds, and `action_required` means the engine is
 // running but something needs a human. Without them a card in either state offered only Start.
+//
+// KNOWN GAP (pre-existing, needs a server-side signal to close): `disconnected` is deliberately NOT
+// here even though it can hold a live engine. handleEngineDisconnected writes DISCONNECTED and
+// schedules a reconnect WITHOUT evicting the engine, so one stays registered for the whole backoff —
+// and start() rejects with 400 "already started" while it is. But a session stopped via stop() is
+// also `disconnected` and has no engine, and that one legitimately needs Start. The two are
+// indistinguishable from status alone, so listing it here would break the stop/start path to fix the
+// backoff path. Closing this properly needs the session payload to expose whether an engine is
+// loaded; until then Stop over the API is the escape hatch for a session wedged mid-backoff.
 const STARTED_STATUSES = new Set([
   'initializing',
   'connecting',

@@ -323,6 +323,18 @@ const ONBOARDING_MODAL_MAX_DISMISS_CLICKS = 5;
  * "Continue", sitting within a few levels of an element that also carries the heading, is a shape the
  * chat list does not produce. The ancestor walk is bounded for the same reason: matching against
  * `<body>` would just be the loose text test again.
+ *
+ * ENGLISH-ONLY, by decision: both the button label and the heading are matched as English strings, so
+ * this only works while WhatsApp Web renders the modal in English. That language follows the browser
+ * locale — which nothing here sets (no `--lang` in the launch args, no `Accept-Language` override), so
+ * it is whatever the browser this deployment launches defaults to (`PUPPETEER_EXECUTABLE_PATH`, or
+ * Puppeteer's bundled Chromium when that is unset), NOT something derived from the linked account.
+ * Against a localised modal this returns `{modalPresent:false}` on every tick it runs: it is never
+ * dismissed and the watcher never escalates — it just ages out at the lifetime cap — so that
+ * deployment keeps the pre-#982 behaviour. Failing silent is
+ * deliberate — the alternative is carrying WhatsApp's translation table for two strings it controls,
+ * and a looser match (any visible button inside a dialog-ish container) would take healthy sessions
+ * out of READY, which is strictly worse than not fixing the modal. Limitation is in the CHANGELOG.
  */
 export function probeOnboardingModal(): { modalPresent: boolean; dismissed: boolean } {
   const isVisible = (el: Element): boolean => {
