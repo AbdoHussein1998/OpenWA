@@ -1958,7 +1958,11 @@ describe('SessionService', () => {
         .mockImplementation(() => {});
       (eventsGateway.emitSessionDisconnected as jest.Mock).mockClear();
 
+      // handleEngineDisconnected re-reads the session row BEFORE publishing disconnect side effects
+      // (so it can fence on engine identity across the await), so the emit lands only after the
+      // findOne resolves — flush it.
       callbacks.onDisconnected?.('socket closed');
+      await new Promise(resolve => setImmediate(resolve));
 
       expect(eventsGateway.emitSessionDisconnected).toHaveBeenCalledWith('sess-uuid-1', { reason: 'socket closed' });
     });
@@ -1983,6 +1987,73 @@ describe('SessionService', () => {
 
       expect(repository.update).not.toHaveBeenCalled();
       expect(webhookService.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('does not schedule reconnect when the disconnecting engine is superseded during the async session reload', async () => {
+      jest.useFakeTimers();
+      try {
+        const callbacks = await startAndCapture(); // engine A (mockEngine) registered + captured
+        // The replacement engine the map will be swapped to while A's handler is awaiting its
+        // session reload — its teardown must NEVER be triggered by A's stale reconnect timer.
+        const engineB = { destroy: jest.fn(), forceDestroy: jest.fn() };
+
+        // Control the handler's findOne so the supersession happens mid-await (the race window the
+        // original code left open: side effects fired before the DB read, and the reconnect was
+        // scheduled with no re-check that A was still the live owner).
+        let resolveReload!: (value: Session | null) => void;
+        const reloadRow = createMockSession({ status: SessionStatus.READY });
+        (repository.findOne as jest.Mock).mockImplementation(
+          () =>
+            new Promise<Session | null>(resolve => {
+              resolveReload = resolve;
+            }),
+        );
+
+        const scheduleSpy = jest
+          .spyOn(service as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
+          .mockImplementation(() => undefined);
+
+        (eventsGateway.emitSessionDisconnected as jest.Mock).mockClear();
+        (webhookService.dispatch as jest.Mock).mockClear();
+        (repository.update as jest.Mock).mockClear();
+        (hookManager.execute as jest.Mock).mockClear();
+
+        // A (mockEngine) is still the live owner when the disconnect lands — the handler proceeds past entry.
+        const handled = Promise.resolve(callbacks.onDisconnected?.('socket closed'));
+        // While the handler awaits its findOne, the id is reassigned to engine B (a stop→start or
+        // reconnect that replaced the engine mid-flight). A is now stale.
+        enginesOf().set('sess-uuid-1', engineB);
+        // Let the handler advance to (and park on) the findOne await before resolving it.
+        await Promise.resolve();
+        await Promise.resolve();
+        resolveReload(reloadRow);
+        await handled;
+
+        // A stale owner must publish no side effects and must not change the persisted status.
+        expect(eventsGateway.emitSessionDisconnected).not.toHaveBeenCalled();
+        expect(webhookService.dispatch).not.toHaveBeenCalledWith(
+          'sess-uuid-1',
+          'session.disconnected',
+          expect.anything(),
+        );
+        expect(repository.update).not.toHaveBeenCalledWith('sess-uuid-1', { status: SessionStatus.DISCONNECTED });
+        expect(hookManager.execute).not.toHaveBeenCalledWith(
+          'session:disconnected',
+          expect.anything(),
+          expect.anything(),
+        );
+
+        // And it must not schedule a reconnect (whose timer would later destroy the replacement engine B).
+        expect(scheduleSpy).not.toHaveBeenCalled();
+
+        // Advance the reconnect backoff window — engine B must survive untouched.
+        await jest.advanceTimersByTimeAsync(60_000);
+        expect(engineB.destroy).not.toHaveBeenCalled();
+        expect(engineB.forceDestroy).not.toHaveBeenCalled();
+      } finally {
+        jest.clearAllTimers();
+        jest.useRealTimers();
+      }
     });
 
     it('ignores onMessage from a superseded engine (no persist, no webhook)', async () => {

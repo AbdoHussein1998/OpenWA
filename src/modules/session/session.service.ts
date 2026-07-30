@@ -1615,10 +1615,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       },
       onDisconnected: (reason: string): void => {
         if (!this.isLiveEngine(id, engine)) return;
-        // Shared with the liveness watchdog (see handleEngineDisconnected). The handler re-reads the
-        // session row itself — this closure's `session` snapshot can be stale by the time a
-        // disconnect lands — so the reconnect always re-initializes from the current row.
-        void this.handleEngineDisconnected(id, reason);
+        // Shared with the liveness watchdog (see handleEngineDisconnected). Pass the captured
+        // engine so the handler can re-check identity across its DB await — this closure's `engine`
+        // (and `session`) snapshots can be stale by the time a disconnect lands, so the handler
+        // re-reads the row itself and fences every side effect on `engine` still being the live
+        // owner. The captured engine is the exact generation token (no numeric counter).
+        void this.handleEngineDisconnected(id, engine, reason);
       },
       onStateChanged: (engineState: EngineStatus): void => {
         if (!this.isLiveEngine(id, engine)) return;
@@ -1940,8 +1942,41 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    * watchdog detects death long after the last state change, and even the callback's closure
    * snapshot can be stale — so the reconnect always re-initializes from the current row. Never
    * throws: a DB hiccup must not turn a disconnect into an unhandled rejection.
+   *
+   * Concurrency fence: the caller has already gated entry on `isLiveEngine(id, engine)` against
+   * the synchronous-callback window, but this handler awaits a DB read and (later) schedules work
+   * off a captured `session` snapshot. Between the entry check and the awaits an id can be
+   * reassigned — a stop()/reconnect that replaces the engine mid-flight — so the captured engine
+   * is treated as an object-identity generation token: every observable side effect and the
+   * reconnect scheduling are gated on `engine` STILL being the live owner at the point they run.
+   * A stale disconnect handler must not publish disconnect side effects for a session that now
+   * belongs to a different engine, nor schedule a reconnect whose timer would later destroy the
+   * replacement engine.
    */
-  private async handleEngineDisconnected(id: string, reason: string): Promise<void> {
+  private async handleEngineDisconnected(id: string, engine: IWhatsAppEngine, reason: string): Promise<void> {
+    // Entry fence: the caller already checked liveness, but the gap between that check and this
+    // call site is enough for a stop()/reconnect to swap the engine. Re-verify before doing work.
+    if (!this.isLiveEngine(id, engine)) return;
+
+    let session: Session | null;
+    try {
+      session = await this.sessionRepository.findOne({ where: { id } });
+    } catch (err) {
+      this.logger.error('Failed to reload the session for reconnect scheduling', String(err), {
+        sessionId: id,
+        action: 'reconnect_schedule_error',
+      });
+      return;
+    }
+    // A session deleted just before this ran has nothing left to reconnect; skip it.
+    if (!session) return;
+
+    // Post-await fence: the findOne yield above is the window in which a stop()/reconnect can
+    // replace the engine for this id. Only a STILL-live owner may publish disconnect side effects
+    // or change the persisted status — otherwise a stale disconnect would (e.g.) clobber a
+    // replacement engine that is already READY.
+    if (!this.isLiveEngine(id, engine)) return;
+
     this.logger.warn(`Session disconnected: ${reason}`, {
       sessionId: id,
       reason,
@@ -1963,18 +1998,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
     void this.updateStatus(id, SessionStatus.DISCONNECTED);
 
-    let session: Session | null;
-    try {
-      session = await this.sessionRepository.findOne({ where: { id } });
-    } catch (err) {
-      this.logger.error('Failed to reload the session for reconnect scheduling', String(err), {
-        sessionId: id,
-        action: 'reconnect_schedule_error',
-      });
-      return;
-    }
-    // A session deleted just before this ran has nothing left to reconnect; skip it.
-    if (!session) return;
+    // Pre-schedule fence: scheduleReconnect's timer eventually calls executeReconnect, which does
+    // a fresh engines.get(id) and destroys whatever engine currently owns the id. If this engine
+    // was superseded since the post-await check above (no await sits between them today, but this
+    // is the load-bearing boundary for the reconnect), that timer would destroy the replacement.
+    // Object-identity is the exact generation token, so check once more immediately before arming.
+    if (!this.isLiveEngine(id, engine)) return;
 
     // Attempt to reconnect
     this.scheduleReconnect(id, session);
@@ -2066,7 +2095,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       failures,
       action: 'watchdog_disconnect',
     });
-    await this.handleEngineDisconnected(id, 'liveness probe failed (watchdog)');
+    await this.handleEngineDisconnected(id, engine, 'liveness probe failed (watchdog)');
   }
 
   private scheduleReconnect(id: string, session: Session): void {
