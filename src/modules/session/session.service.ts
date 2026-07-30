@@ -256,6 +256,19 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   // engine B the control action did not capture.
   private readonly pendingInitialStatuses = new Map<string, { engine: IWhatsAppEngine; promise: Promise<void> }>();
 
+  // The ONE-SHOT budget for an automatic stuck-auth credential reset, hoisted out of the adapter
+  // instance and keyed by session id. recoverFromStuckAuth() (a generation that authenticated but
+  // never reached readiness) claims this synchronously before it wipes LocalAuth; a claim returns true
+  // EXACTLY once per episode. Automatic reconnects build a FRESH adapter, so an instance-local budget
+  // would reset every generation and wipe credentials forever (the QR -> timeout -> clear loop). The
+  // session owns the budget so it survives across reconnect generations within one episode.
+  //
+  // Cleared ONLY on: an accepted top-level start() (after the duplicate/cap/name-fence checks pass,
+  // just before initializeEngine — boot auto-start uses the same method); onReady (recovery proved
+  // successful); and a COMMITTED delete (after the parent transaction). NOT cleared on a rejected
+  // start, executeReconnect, disconnect, QR, auth failure, engine replacement, or a failed/409 delete.
+  private readonly stuckAuthRecoveryUsed = new Set<string>();
+
   constructor(
     @InjectRepository(Session, 'data')
     private readonly sessionRepository: Repository<Session>,
@@ -723,6 +736,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         // Drop the FAILED-reason entry too: it's keyed by a now-deleted UUID that can never be read
         // again, so leaving it would grow the map without bound across create/fail/delete churn.
         this.sessionErrors.delete(id);
+        // The stuck-auth recovery budget is keyed by id; a committed delete frees it (and a recreated
+        // session under the same name gets a fresh UUID + fresh budget). Left only on a committed
+        // delete so a failed/409 delete — the session still exists — keeps the budget intact.
+        this.stuckAuthRecoveryUsed.delete(id);
       }
       // NOTE: pendingTeardowns is intentionally NOT cleared here. It is keyed by session NAME and
       // its entries self-remove on settlement (identity-checked). A delete that refused at either
@@ -800,6 +817,13 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       // so a poisoned value can't drive a NaN/immediate-relaunch storm or an unbounded loop.
       const { maxAttempts, baseDelay } = resolveReconnectConfig(session.config);
       this.reconnectStates.set(id, { attempts: 0, timer: null, maxAttempts, baseDelay });
+
+      // An accepted top-level start() re-arms the stuck-auth recovery budget: every fence above
+      // (duplicate-start, cap, credential-teardown) passed, so this is a deliberate, operator-initiated
+      // (re)start — not an automatic reconnect. The budget is hoisted to the session so an automatic
+      // reconnect can't reset it per generation; only a fresh top-level episode may spend it again.
+      // Boot auto-start reaches here through this same method, so it re-arms too.
+      this.stuckAuthRecoveryUsed.delete(id);
 
       try {
         await this.initializeEngine(id, session);
@@ -1167,6 +1191,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         // A fresh READY stretch starts the watchdog's failure budget clean too.
         this.livenessFailures.delete(id);
         this.sessionErrors.delete(id);
+        // READY proves any in-flight stuck-auth recovery succeeded (or none was needed), so the
+        // one-shot recovery budget is re-armed for a future episode.
+        this.stuckAuthRecoveryUsed.delete(id);
 
         void this.sessionRepository
           .update(id, {
@@ -1761,6 +1788,21 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         // session under that same name. `session.name` is the immutable snapshot captured at
         // initializeEngine entry, so a row delete/recreate under the same name cannot poison the key.
         this.trackPendingCredentialTeardown(session.name, operation);
+      },
+      claimStuckAuthRecovery: (): boolean => {
+        // SYNCHRONOUS atomic claim for the one-shot automatic credential-reset budget. The adapter
+        // calls this right before it would wipe LocalAuth (recoverFromStuckAuth); a denial makes the
+        // adapter fail terminally WITHOUT touching the auth dir. Two guards, in order:
+        //  1. the captured engine must still be the live owner — a stale generation (superseded by a
+        //     reconnect/restart) must never spend the budget for the current owner;
+        //  2. the session id must not already be in the Set — the budget is one claim per episode.
+        // Synchronous on purpose: the race between the stuck-auth timeout and a concurrent
+        // start()/reconnect is decided within a single event-loop turn (no await between the checks
+        // and the Set mutation).
+        if (!this.isLiveEngine(id, engine)) return false;
+        if (this.stuckAuthRecoveryUsed.has(id)) return false;
+        this.stuckAuthRecoveryUsed.add(id);
+        return true;
       },
     });
 

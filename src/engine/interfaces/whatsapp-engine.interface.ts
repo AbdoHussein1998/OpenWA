@@ -566,6 +566,23 @@ export interface EngineEventCallbacks {
    * WhatsApp-originated cleanup) simply never invoke this.
    */
   onCredentialTeardownStarted?: (operation: Promise<void>) => void;
+  /**
+   * Synchronous atomic claim for ONE automatic credential-reset attempt within a single reconnect
+   * episode. The adapter calls this BEFORE it begins the destructive credential reset that ends in
+   * an `fs.rm` of this session's on-disk auth dir (the stuck-auth recovery path: a session that
+   * authenticated but never reached readiness). Returns `true` exactly once per episode — the claim
+   * is owned by the session lifecycle, so it survives an automatic reconnect that builds a FRESH
+   * adapter (which would otherwise reset an instance-local budget and wipe LocalAuth every
+   * generation, looping forever). Returns `false` once the budget is spent, and the adapter MUST
+   * then fail terminally (FAILED + `onError`) WITHOUT touching the auth dir.
+   *
+   * SYNCHRONOUS by contract: the race between the stuck-auth timeout and any concurrent
+   * start()/reconnect is resolved within a single event-loop turn. The adapter does NOT await it.
+   *
+   * Optional: when absent (standalone adapter use/test, no session lifecycle) the adapter falls back
+   * to its own instance-local one-shot boolean so standalone behavior is unchanged.
+   */
+  claimStuckAuthRecovery?: () => boolean;
 }
 
 export interface IWhatsAppEngine {

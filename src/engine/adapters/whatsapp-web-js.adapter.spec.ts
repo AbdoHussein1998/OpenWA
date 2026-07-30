@@ -1602,6 +1602,113 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     expect(rmSpy).toHaveBeenCalledTimes(1); // auth cleared only once
     rmSpy.mockRestore();
   });
+
+  // Stuck-auth recovery budget is now owned by the SESSION, not the adapter. The adapter asks the
+  // session's synchronous claim callback before any destructive I/O; a DENIAL is terminal and must
+  // never touch the auth dir. (The instance-local boolean above remains as the fallback for standalone
+  // adapter use/test where no callback is supplied.)
+  describe('stuck-auth recovery claim/deny path', () => {
+    const newAdapter = (): WhatsAppWebJsAdapter =>
+      new WhatsAppWebJsAdapter({ sessionId: 'sess-1', sessionDataPath: './data/sessions', puppeteer: {} });
+
+    // Failing assertions throw before the per-test rmSpy.mockRestore() runs, which would leave the
+    // fs.promises.rm spy installed and let its call count leak into the next test. Restore every spy
+    // after each test so each starts from a clean fs.
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('does NOT clear auth and goes terminal FAILED when the claim callback DENIES (budget already spent by an earlier generation)', async () => {
+      const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+      const adapter = newAdapter();
+      const onError = jest.fn();
+      const onDisconnected = jest.fn();
+      // The session denies: a prior generation already used the one-shot budget.
+      (adapter as unknown as { callbacks: unknown }).callbacks = {
+        onError,
+        onDisconnected,
+        claimStuckAuthRecovery: () => false,
+      };
+      const recover = (adapter as unknown as { recoverFromStuckAuth: () => Promise<void> }).recoverFromStuckAuth.bind(
+        adapter,
+      );
+
+      await recover();
+
+      // The destructive rm must NEVER run — denial is terminal before any I/O.
+      expect(rmSpy).not.toHaveBeenCalled();
+      expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(expect.stringMatching(/could not reach readiness after re-pairing/i));
+      // A denied claim does NOT drive the reconnect path: no disconnect, no re-pair.
+      expect(onDisconnected).not.toHaveBeenCalled();
+      rmSpy.mockRestore();
+    });
+
+    it('clears auth and disconnects when the claim callback GRANTS (the recovery is allowed to proceed)', async () => {
+      const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+      const adapter = newAdapter();
+      const onDisconnected = jest.fn();
+      (adapter as unknown as { callbacks: unknown }).callbacks = {
+        onDisconnected,
+        claimStuckAuthRecovery: () => true,
+      };
+      const recover = (adapter as unknown as { recoverFromStuckAuth: () => Promise<void> }).recoverFromStuckAuth.bind(
+        adapter,
+      );
+
+      await recover();
+
+      expect(rmSpy).toHaveBeenCalledTimes(1);
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+      expect(onDisconnected).toHaveBeenCalledWith(expect.stringContaining('cleared for re-pairing'));
+      rmSpy.mockRestore();
+    });
+
+    it('still grants only once via the fallback instance-local boolean when NO claim callback is supplied (standalone adapter use stays one-shot)', async () => {
+      const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+      const adapter = newAdapter();
+      const onError = jest.fn();
+      // No claimStuckAuthRecovery callback — standalone adapter (no session lifecycle).
+      (adapter as unknown as { callbacks: { onError?: jest.Mock } }).callbacks = { onError };
+      const recover = (adapter as unknown as { recoverFromStuckAuth: () => Promise<void> }).recoverFromStuckAuth.bind(
+        adapter,
+      );
+
+      await recover(); // fallback grants: clears + disconnects
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+      await recover(); // fallback denies: terminal
+      expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
+      expect(onError).toHaveBeenCalled();
+      expect(rmSpy).toHaveBeenCalledTimes(1);
+      rmSpy.mockRestore();
+    });
+
+    it('treats a claim callback that THROWS as a denial (fail-closed: never wipe credentials on an unsettled claim)', async () => {
+      const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+      const adapter = newAdapter();
+      const onError = jest.fn();
+      const onDisconnected = jest.fn();
+      (adapter as unknown as { callbacks: unknown }).callbacks = {
+        onError,
+        onDisconnected,
+        claimStuckAuthRecovery: () => {
+          throw new Error('claim blew up');
+        },
+      };
+      const recover = (adapter as unknown as { recoverFromStuckAuth: () => Promise<void> }).recoverFromStuckAuth.bind(
+        adapter,
+      );
+
+      await recover();
+
+      expect(rmSpy).not.toHaveBeenCalled();
+      expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
+      expect(onError).toHaveBeenCalled();
+      expect(onDisconnected).not.toHaveBeenCalled();
+      rmSpy.mockRestore();
+    });
+  });
 });
 
 describe('WhatsAppWebJsAdapter.resolveContactPhone (@lid -> phone, #263)', () => {

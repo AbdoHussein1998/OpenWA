@@ -1377,18 +1377,38 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   /**
    * Recover a session that authenticated but never reached runtime readiness (stale/incompatible auth
    * or a wedged page). Clear the broken LocalAuth and disconnect so the session lifecycle re-pairs (a
-   * fresh QR) instead of hanging at "authenticating". Runs at most once per engine — a re-paired session
-   * that still can't reach readiness fails terminally rather than looping.
+   * fresh QR) instead of hanging at "authenticating". Runs at most ONCE per reconnect episode: the
+   * one-shot budget lives on the session (via the synchronous `claimStuckAuthRecovery` callback), so
+   * an automatic reconnect that builds a fresh adapter cannot reset it and wipe LocalAuth every
+   * generation. A re-paired session that still can't reach readiness fails terminally rather than looping.
+   *
+   * When the callback is ABSENT (standalone adapter use/test, no session lifecycle) the adapter falls
+   * back to its own instance-local boolean so standalone behavior stays one-shot.
    */
   private async recoverFromStuckAuth(): Promise<void> {
-    if (this.stuckAuthRecoveryAttempted) {
+    // The one-shot budget is decided SYNCHRONOUSLY before any destructive I/O. The session-owned
+    // callback is authoritative when present; the instance-local boolean is the standalone fallback.
+    // Fail-closed: a callback that throws (or already-spent budget) makes this terminal WITHOUT
+    // touching the auth dir, so a wedged claim path can never wipe the only copy of the credentials.
+    const claim = this.callbacks.claimStuckAuthRecovery;
+    let granted: boolean;
+    if (claim) {
+      try {
+        granted = claim();
+      } catch {
+        granted = false;
+      }
+    } else {
+      granted = !this.stuckAuthRecoveryAttempted;
+      this.stuckAuthRecoveryAttempted = true;
+    }
+    if (!granted) {
       this.setStatus(EngineStatus.FAILED);
       this.callbacks.onError?.(
         'WhatsApp Web could not reach readiness after re-pairing. Pin WWEBJS_WEB_VERSION to a known-good build and try again.',
       );
       return;
     }
-    this.stuckAuthRecoveryAttempted = true;
 
     const client = this.client;
     this.client = null;

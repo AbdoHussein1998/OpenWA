@@ -2103,6 +2103,204 @@ describe('SessionService', () => {
     });
   });
 
+  // ── stuck-auth recovery budget (hoisted to session lifecycle) ─────
+  // The budget for ONE automatic credential-reset per reconnect episode used to live on the adapter
+  // instance, so every automatic reconnect (which builds a fresh adapter) reset it and the loop wiped
+  // LocalAuth forever. It now lives on the session as a one-shot claim, so a second generation that
+  // never reached READY cannot clear credentials again.
+  describe('stuck-auth recovery budget (cross-generation claim)', () => {
+    type Intern = {
+      engines: Map<string, unknown>;
+      stuckAuthRecoveryUsed: Set<string>;
+      initializeEngine: (id: string, s: Session) => Promise<void>;
+    };
+    const intern = () => service as unknown as Intern;
+    const flush = () => new Promise(resolve => setImmediate(resolve));
+
+    // Build a fresh mock engine so each generation is a DISTINCT object (the lifecycle keys liveness
+    // on identity). Returns the engine plus a getter for the callbacks handed to initialize().
+    const freshEngine = (): Record<string, jest.Mock> & {
+      callbacks: () => EngineEventCallbacks;
+    } => {
+      const calls: EngineEventCallbacks[] = [];
+      const engine: Record<string, jest.Mock> = {
+        initialize: jest.fn().mockImplementation((cb: EngineEventCallbacks) => {
+          calls.push(cb);
+          return Promise.resolve();
+        }),
+        destroy: jest.fn().mockResolvedValue(undefined),
+        forceDestroy: jest.fn().mockResolvedValue(undefined),
+        disconnect: jest.fn().mockResolvedValue(undefined),
+        logout: jest.fn().mockResolvedValue(undefined),
+        getQRCode: jest.fn().mockReturnValue(null),
+      };
+      return Object.assign(engine, { callbacks: () => calls[calls.length - 1] });
+    };
+
+    // Drive initializeEngine directly (the same private method start()/executeReconnect call) so the
+    // test controls generation boundaries precisely without timers/reconnect backoff.
+    const initGeneration = async (engine: ReturnType<typeof freshEngine>): Promise<EngineEventCallbacks> => {
+      (engineFactory.create as jest.Mock).mockReturnValueOnce(engine);
+      await intern().initializeEngine('sess-uuid-1', createMockSession());
+      await flush();
+      return engine.callbacks();
+    };
+
+    beforeEach(() => {
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+    });
+
+    it('grants the first claim within a generation', async () => {
+      const callbacks = await initGeneration(freshEngine());
+      expect(callbacks.claimStuckAuthRecovery?.()).toBe(true);
+    });
+
+    it('denies a second claim within the SAME generation (one-shot per episode)', async () => {
+      const callbacks = await initGeneration(freshEngine());
+      expect(callbacks.claimStuckAuthRecovery?.()).toBe(true);
+      expect(callbacks.claimStuckAuthRecovery?.()).toBe(false);
+    });
+
+    it('denies a claim from a NEW generation that replaced the old one without reaching READY (no fresh budget per reconnect)', async () => {
+      const engineA = freshEngine();
+      const callbacksA = await initGeneration(engineA);
+      expect(callbacksA.claimStuckAuthRecovery?.()).toBe(true); // generation A spent the budget
+
+      // Automatic reconnect: old engine torn down, fresh engine B takes the slot. B is NOT READY and no
+      // manual start() happened — the episode is still the same recovery attempt.
+      const engineB = freshEngine();
+      intern().engines.delete('sess-uuid-1');
+      const callbacksB = await initGeneration(engineB);
+
+      expect(callbacksB.claimStuckAuthRecovery?.()).toBe(false);
+    });
+
+    it('denies a stale claim from a superseded engine after replacement', async () => {
+      const engineA = freshEngine();
+      const callbacksA = await initGeneration(engineA);
+      const engineB = freshEngine();
+      intern().engines.delete('sess-uuid-1');
+      await initGeneration(engineB); // B is now the live owner
+
+      // A is stale (not the live engine) — its claim must be denied regardless of the budget.
+      expect(callbacksA.claimStuckAuthRecovery?.()).toBe(false);
+    });
+
+    it('re-arms the budget after the recovering generation reaches READY (recovery proved successful)', async () => {
+      const engineA = freshEngine();
+      const callbacksA = await initGeneration(engineA);
+      expect(callbacksA.claimStuckAuthRecovery?.()).toBe(true);
+
+      // The recovering generation reaches READY — onReady clears the budget, so a later generation
+      // may claim again.
+      callbacksA.onReady?.('628123', 'Tester');
+      await flush();
+
+      const engineB = freshEngine();
+      intern().engines.delete('sess-uuid-1');
+      const callbacksB = await initGeneration(engineB);
+      expect(callbacksB.claimStuckAuthRecovery?.()).toBe(true);
+    });
+
+    it('an accepted top-level start() re-arms the budget after a terminal failure', async () => {
+      // Generation A spends the budget, then fails terminally (onError). The session is left without a
+      // live engine. A later ACCEPTED start() (the operator re-scans) must re-arm the budget.
+      const engineA = freshEngine();
+      const callbacksA = await initGeneration(engineA);
+      expect(callbacksA.claimStuckAuthRecovery?.()).toBe(true);
+      callbacksA.onError?.('WhatsApp Web could not reach readiness after re-pairing.');
+      await flush();
+      expect(intern().engines.has('sess-uuid-1')).toBe(false);
+
+      // Accepted top-level start(): a fresh engine is created and initialized.
+      const engineB = freshEngine();
+      (engineFactory.create as jest.Mock).mockReturnValueOnce(engineB);
+      await service.start('sess-uuid-1');
+      await flush();
+
+      expect(engineB.callbacks().claimStuckAuthRecovery?.()).toBe(true);
+    });
+
+    it('does NOT re-arm on a rejected duplicate start() (session already started)', async () => {
+      // Spend the budget via initializeEngine, then a duplicate start() must reject WITHOUT re-arming.
+      const callbacksA = await initGeneration(freshEngine());
+      expect(callbacksA.claimStuckAuthRecovery?.()).toBe(true);
+
+      await expect(service.start('sess-uuid-1')).rejects.toThrow(BadRequestException);
+      // The budget is still spent — a fresh generation via initializeEngine is still denied.
+      const engineB = freshEngine();
+      intern().engines.delete('sess-uuid-1');
+      const callbacksB = await initGeneration(engineB);
+      expect(callbacksB.claimStuckAuthRecovery?.()).toBe(false);
+    });
+
+    it('does NOT re-arm on a start() rejected by the concurrent-sessions cap', async () => {
+      // Spend the budget first.
+      const callbacksA = await initGeneration(freshEngine());
+      expect(callbacksA.claimStuckAuthRecovery?.()).toBe(true);
+      intern().engines.delete('sess-uuid-1'); // clear so the cap check is what rejects, not "already started"
+
+      // Two OTHER sessions fill the cap (max=2). The session under test must be rejected by the cap.
+      (configService.get as jest.Mock).mockImplementation(<T>(key: string, def?: T): T => {
+        if (key === 'sessions.maxConcurrent') return 2 as unknown as T;
+        return def as T;
+      });
+      intern().engines.set('other-1', {});
+      intern().engines.set('other-2', {});
+
+      await expect(service.start('sess-uuid-1')).rejects.toThrow(/Maximum concurrent sessions reached/);
+
+      // Budget untouched: a fresh generation is still denied.
+      const engineB = freshEngine();
+      intern().engines.delete('other-1');
+      intern().engines.delete('other-2');
+      const callbacksB = await initGeneration(engineB);
+      expect(callbacksB.claimStuckAuthRecovery?.()).toBe(false);
+    });
+
+    it('clears the budget only on a COMMITTED delete (a failed/409 delete keeps it)', async () => {
+      const callbacksA = await initGeneration(freshEngine());
+      expect(callbacksA.claimStuckAuthRecovery?.()).toBe(true);
+      intern().engines.delete('sess-uuid-1');
+
+      // Simulate a delete that FAILS inside the transaction (parent row not removed → parentDeleted=false).
+      (dataSource.transaction as jest.Mock).mockImplementationOnce(async (cb: (m: unknown) => Promise<unknown>) => {
+        await cb({
+          save: jest.fn(),
+          remove: jest.fn().mockRejectedValue(new Error('db write failed')),
+          delete: jest.fn().mockResolvedValue({ affected: 0 }),
+        });
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+
+      await expect(service.delete('sess-uuid-1')).rejects.toThrow();
+
+      // A failed delete must NOT clear the budget — the session still exists.
+      const engineB = freshEngine();
+      const callbacksB = await initGeneration(engineB);
+      expect(callbacksB.claimStuckAuthRecovery?.()).toBe(false);
+
+      // Now a COMMITTED delete clears the budget: a later start() may claim again.
+      intern().engines.delete('sess-uuid-1');
+      (dataSource.transaction as jest.Mock).mockImplementationOnce(async (cb: (m: unknown) => Promise<unknown>) => {
+        await cb({
+          save: jest.fn(),
+          remove: jest.fn().mockResolvedValue(undefined),
+          delete: jest.fn().mockResolvedValue({ affected: 0 }),
+        });
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      await service.delete('sess-uuid-1');
+
+      const engineC = freshEngine();
+      (engineFactory.create as jest.Mock).mockReturnValueOnce(engineC);
+      await service.start('sess-uuid-1');
+      await flush();
+      expect(engineC.callbacks().claimStuckAuthRecovery?.()).toBe(true);
+    });
+  });
+
   // ── engine message-event webhook dispatch ─────────────────────────
 
   describe('engine message-event webhook dispatch', () => {
