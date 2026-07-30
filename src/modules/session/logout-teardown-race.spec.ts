@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { BadGatewayException } from '@nestjs/common';
+import { BadGatewayException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SessionService } from './session.service';
 import { Session, SessionStatus } from './entities/session.entity';
@@ -13,10 +13,13 @@ import { WebhookService } from '../webhook/webhook.service';
 import { HookManager } from '../../core/hooks';
 import { StatusStoreService } from '../status-store/status-store.service';
 
+const SESSION_NAME = 'test-session';
+const SESSION_UUID = 'sess-uuid-1';
+
 function createMockSession(overrides: Partial<Session> = {}): Session {
   return {
-    id: 'sess-uuid-1',
-    name: 'test-session',
+    id: SESSION_UUID,
+    name: SESSION_NAME,
     status: SessionStatus.CREATED,
     phone: null,
     pushName: null,
@@ -31,7 +34,26 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
   };
 }
 
-describe('SessionService logout() concurrent teardown tracking', () => {
+// Shared machine-code contract for the name-scoped teardown fence. Attaches a handler synchronously
+// so a promise that already settled (or settles during a fake-timer advance before the await) is not
+// flagged as an unhandled rejection. A resolved promise fails the assertion (the operation must NOT
+// have proceeded); a rejected one asserts the stable code.
+async function expectNameTeardownPending(p: Promise<unknown>): Promise<void> {
+  // Attach a handler synchronously to mark the rejection as handled.
+  const captured = p.then(
+    () => undefined as unknown,
+    (e: unknown) => e,
+  );
+  const err = await captured;
+  // Nest serializes an object-response ConflictException into { statusCode, message, error, ...fields }.
+  // The stable code is attached on the response object so REST callers can branch on it without parsing
+  // the human message.
+  const thrown = err as { response?: { code?: string } } | undefined;
+  expect(thrown).toBeInstanceOf(ConflictException);
+  expect(thrown?.response?.code).toBe('SESSION_NAME_TEARDOWN_PENDING');
+}
+
+describe('SessionService logout() name-scoped teardown fence', () => {
   let service: SessionService;
   let repository: jest.Mocked<Partial<Repository<Session>>>;
   let engineFactory: jest.Mocked<Partial<EngineFactory>>;
@@ -87,78 +109,333 @@ describe('SessionService logout() concurrent teardown tracking', () => {
 
   const enginesOf = () => (service as unknown as { engines: Map<string, unknown> }).engines;
   const pendingOf = () => (service as unknown as { pendingTeardowns: Map<string, Promise<void>> }).pendingTeardowns;
+  const stoppingOf = () => (service as unknown as { stoppingSessions: Set<string> }).stoppingSessions;
+  const reconnectStatesOf = () => (service as unknown as { reconnectStates: Map<string, unknown> }).reconnectStates;
+  const errorsOf = () => (service as unknown as { sessionErrors: Map<string, string> }).sessionErrors;
+  const lastStatusOf = () =>
+    (service as unknown as { lastDispatchedStatus: Map<string, unknown> }).lastDispatchedStatus;
 
-  it('keeps the first teardown tracked when a second logout arrives mid-flight, so start() waits for it', async () => {
-    // The first logout's teardown wedges (its profile fs.rm outlives the request); the second
-    // logout's adapter call refuses immediately (the client is already being torn down).
-    let settleFirst: () => void = () => undefined;
-    const wedgedLogout = new Promise<void>(resolve => {
-      settleFirst = resolve;
+  it('quick-settling teardown: start waits for it, then proceeds', async () => {
+    let releaseLogout!: () => void;
+    const wedgedLogout = new Promise<void>(res => {
+      releaseLogout = res;
     });
-
-    const logout = jest
-      .fn()
-      .mockReturnValueOnce(wedgedLogout)
-      .mockReturnValueOnce(Promise.reject(new Error('No live WhatsApp Web client — the unlink was not sent')));
-
-    enginesOf().set('sess-uuid-1', { logout });
+    const engine = { logout: jest.fn().mockReturnValue(wedgedLogout) };
+    enginesOf().set(SESSION_UUID, engine);
 
     jest.useFakeTimers();
     try {
-      const first = service.logout('sess-uuid-1');
-      // let logout1 get past findOne and register its pendingTeardowns entry
-      await jest.advanceTimersByTimeAsync(0);
-      expect(pendingOf().has('sess-uuid-1')).toBe(true);
+      const logoutCall = service.logout(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(10_000); // logout loses its deadline race → 502
+      await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
+      // Tracked under the session NAME, not the UUID.
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+      expect(pendingOf().has(SESSION_UUID)).toBe(false);
 
-      // ---- a separate HTTP request, a macrotask later ----
-      const second = service.logout('sess-uuid-1');
-      await expect(second).rejects.toBeInstanceOf(BadGatewayException);
-      expect(logout).toHaveBeenCalledTimes(2); // engine still in the map => 2nd logout passed the guard
-
-      // The first (still-running) teardown must stay tracked: its late profile rm must gate start().
-      expect(pendingOf().has('sess-uuid-1')).toBe(true);
-
-      // start() must NOT re-create the profile while the first teardown's rm is pending.
-      const startCall = service.start('sess-uuid-1');
-      await jest.advanceTimersByTimeAsync(0);
+      const startCall = service.start(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(1_000); // inside the bounded wait
       expect(engineFactory.create).not.toHaveBeenCalled();
 
-      // Once the first teardown settles, start() proceeds.
-      settleFirst();
-      await jest.advanceTimersByTimeAsync(0);
-      await expect(first).resolves.toMatchObject({ id: 'sess-uuid-1' });
-      await jest.advanceTimersByTimeAsync(0);
-      expect(engineFactory.create).toHaveBeenCalledTimes(1);
+      releaseLogout();
       await startCall;
-
-      // Entry cleaned up after everything settled.
-      expect(pendingOf().has('sess-uuid-1')).toBe(false);
+      expect(engineFactory.create).toHaveBeenCalledTimes(1);
+      expect(pendingOf().has(SESSION_NAME)).toBe(false); // self-removed on settlement
     } finally {
       jest.useRealTimers();
     }
   });
 
-  it('drops a wedged logout teardown entry when the session is deleted', async () => {
-    // A logout teardown that never settles keeps its pendingTeardowns entry past the bounded waits;
-    // deleting the session must drop it — the UUID can never be read again, so leaving it would
-    // grow the map without bound across logout-fail/delete churn.
-    const wedgedLogout = new Promise<void>(() => undefined);
-    const logout = jest.fn().mockReturnValue(wedgedLogout);
-    enginesOf().set('sess-uuid-1', { logout });
+  it('quick-settling teardown: delete waits for it, then proceeds and purges', async () => {
+    (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ id: SESSION_UUID, name: SESSION_NAME }));
+
+    let releaseLogout!: () => void;
+    const wedgedLogout = new Promise<void>(res => {
+      releaseLogout = res;
+    });
+    enginesOf().set(SESSION_UUID, { logout: jest.fn().mockReturnValue(wedgedLogout) });
 
     jest.useFakeTimers();
     try {
-      const logoutCall = service.logout('sess-uuid-1');
-      await jest.advanceTimersByTimeAsync(10_000); // teardown loses its deadline race
+      const logoutCall = service.logout(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(10_000);
       await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
-      expect(pendingOf().has('sess-uuid-1')).toBe(true); // the wedged raw keeps its entry
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
 
-      const deleteCall = service.delete('sess-uuid-1');
-      await jest.advanceTimersByTimeAsync(10_000); // delete's bounded wait elapses
+      const deleteCall = service.delete(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(1_000); // inside the bounded wait
+      expect(engineFactory.purgeSessionData).not.toHaveBeenCalled();
+
+      releaseLogout();
       await deleteCall;
-      expect(pendingOf().has('sess-uuid-1')).toBe(false);
+      expect(engineFactory.purgeSessionData).toHaveBeenCalledWith(SESSION_NAME);
+      expect(pendingOf().has(SESSION_NAME)).toBe(false);
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('old-name teardown still pending past 10s: start rejects 409 and does not create the engine', async () => {
+    // The wedged logout never settles: its rm sits behind the wedge but is still "in flight" against
+    // this session NAME. A start() for a (re)created session under the SAME name must refuse rather
+    // than re-create credentials the rm could still hit.
+    const neverSettles = new Promise<void>(() => undefined);
+    const engine = { logout: jest.fn().mockReturnValue(neverSettles) };
+    enginesOf().set(SESSION_UUID, engine);
+
+    jest.useFakeTimers();
+    try {
+      const logoutCall = service.logout(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(10_000); // logout loses its race → 502; raw keeps running
+      await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+
+      const startCall = service.start(SESSION_UUID);
+      startCall.catch(() => undefined); // mark rejection handled across the timer advance below
+      await jest.advanceTimersByTimeAsync(10_000); // bounded wait exhausts → fail CLOSED
+      await expectNameTeardownPending(startCall);
+      expect(engineFactory.create).not.toHaveBeenCalled();
+      // The fence is NOT dropped on a refused start.
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('old-name teardown still pending past 10s: delete rejects 409, transaction parent removal and purgeSessionData not called (unique name still reserved)', async () => {
+    const manager = { delete: jest.fn().mockResolvedValue({ affected: 1 }), remove: jest.fn() };
+    const dataSource: Partial<DataSource> = {
+      transaction: jest.fn(async (cb: (m: unknown) => Promise<void>) =>
+        cb(manager),
+      ) as unknown as DataSource['transaction'],
+    };
+    // Swap in a dataSource whose transaction we can assert was NOT run.
+    (service as unknown as { dataSource: unknown }).dataSource = dataSource;
+    (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ id: SESSION_UUID, name: SESSION_NAME }));
+
+    const neverSettles = new Promise<void>(() => undefined);
+    enginesOf().set(SESSION_UUID, { logout: jest.fn().mockReturnValue(neverSettles) });
+
+    jest.useFakeTimers();
+    try {
+      const logoutCall = service.logout(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(10_000);
+      await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+
+      const deleteCall = service.delete(SESSION_UUID);
+      deleteCall.catch(() => undefined); // mark rejection handled across the timer advance below
+      await jest.advanceTimersByTimeAsync(10_000); // first fence already pending → fail fast
+      await expectNameTeardownPending(deleteCall);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(engineFactory.purgeSessionData).not.toHaveBeenCalled();
+      // Name still reserved: the fence survives the refused delete.
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('on a first-fence 409, start does not touch reconnect timer / engine / last status / error / recovery state', async () => {
+    // Arm a reconnect timer + a stale FAILED error + a last-dispatched status BEFORE the start attempt,
+    // then ensure a refused start (409) leaves ALL of them untouched.
+    const neverSettles = new Promise<void>(() => undefined);
+    enginesOf().set(SESSION_UUID, { logout: jest.fn().mockReturnValue(neverSettles) });
+
+    jest.useFakeTimers();
+    try {
+      const logoutCall = service.logout(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(10_000);
+      await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
+
+      // Seed lifecycle state that a buggy "clear on 409" would wipe.
+      reconnectStatesOf().set(SESSION_UUID, {
+        attempts: 3,
+        timer: setTimeout(() => undefined, 999_999),
+        maxAttempts: 5,
+        baseDelay: 1000,
+      });
+      errorsOf().set(SESSION_UUID, 'previously failed');
+      lastStatusOf().set(SESSION_UUID, SessionStatus.FAILED);
+      // The prior logout already cleared the engine from the map; capture membership NOW so the
+      // assertion checks the start's 409 did not mutate it (rather than the prior logout's effect).
+      const enginePresentBefore = enginesOf().has(SESSION_UUID);
+
+      const startCall = service.start(SESSION_UUID);
+      startCall.catch(() => undefined); // mark rejection handled across the timer advance below
+      await jest.advanceTimersByTimeAsync(10_000);
+      await expectNameTeardownPending(startCall);
+
+      // None of the pre-existing lifecycle state was cleared by the refused start.
+      expect(reconnectStatesOf().has(SESSION_UUID)).toBe(true);
+      expect(errorsOf().get(SESSION_UUID)).toBe('previously failed');
+      expect(lastStatusOf().get(SESSION_UUID)).toBe(SessionStatus.FAILED);
+      // The engine map was not mutated by the refused start either.
+      expect(enginesOf().has(SESSION_UUID)).toBe(enginePresentBefore);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a refused delete does NOT drop the pending fence', async () => {
+    const neverSettles = new Promise<void>(() => undefined);
+    enginesOf().set(SESSION_UUID, { logout: jest.fn().mockReturnValue(neverSettles) });
+
+    jest.useFakeTimers();
+    try {
+      const logoutCall = service.logout(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(10_000);
+      await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+
+      const deleteCall = service.delete(SESSION_UUID);
+      deleteCall.catch(() => undefined); // mark rejection handled across the timer advance below
+      await jest.advanceTimersByTimeAsync(10_000); // first fence exhausts its bounded wait → fail CLOSED
+      await expectNameTeardownPending(deleteCall);
+      // The fence is owned by the session NAME and outlives the refused delete.
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a logout starting after delete first fence but before engine eviction is caught by the second fence', async () => {
+    // delete() runs two fences: one right after findOne, one right after the engine is evicted. A logout
+    // that slips past fence #1 (no pending teardown yet) but captures the live engine before eviction
+    // must register its destructive promise synchronously (the adapter fires onCredentialTeardownStarted
+    // the instant engine.logout() begins), so fence #2 sees it and the delete refuses instead of freeing
+    // the name while an old remover is live.
+    (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ id: SESSION_UUID, name: SESSION_NAME }));
+
+    let releaseLogout!: () => void;
+    const logoutPromise = new Promise<void>(res => {
+      releaseLogout = res;
+    });
+    // The engine is torn down via forceDestroy during delete. A concurrent logout that captured this
+    // engine fires its credential-teardown callback synchronously inside that teardown window — between
+    // fence #1 and fence #2. Drive the service's own tracking the same way the adapter would.
+    const trackPending = (
+      service as unknown as {
+        trackPendingCredentialTeardown: (name: string, raw: Promise<void>) => void;
+      }
+    ).trackPendingCredentialTeardown.bind(service);
+    enginesOf().set(SESSION_UUID, {
+      forceDestroy: jest.fn().mockImplementation(() => {
+        // Simulate the adapter firing onCredentialTeardownStarted for a logout that captured this
+        // engine mid-delete — registers under the session name synchronously, before fence #2 runs.
+        trackPending(SESSION_NAME, logoutPromise);
+        return Promise.resolve();
+      }),
+    });
+
+    jest.useFakeTimers();
+    try {
+      const deleteCall = service.delete(SESSION_UUID);
+      deleteCall.catch(() => undefined); // mark rejection handled across the timer advance below
+      await jest.advanceTimersByTimeAsync(10_000); // second fence exhausts its bounded wait
+      await expectNameTeardownPending(deleteCall);
+      expect(engineFactory.purgeSessionData).not.toHaveBeenCalled();
+      // Row/name still reserved: the second fence refused before the transaction.
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+
+      // After the raw teardown settles, the name is released.
+      releaseLogout();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(pendingOf().has(SESSION_NAME)).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('after the raw teardown resolves, retry start succeeds and the entry self-removes', async () => {
+    let releaseLogout!: () => void;
+    const wedgedLogout = new Promise<void>(res => {
+      releaseLogout = res;
+    });
+    const engine = { logout: jest.fn().mockReturnValue(wedgedLogout) };
+    enginesOf().set(SESSION_UUID, engine);
+
+    jest.useFakeTimers();
+    try {
+      const logoutCall = service.logout(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(10_000);
+      await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
+
+      const startCall = service.start(SESSION_UUID);
+      startCall.catch(() => undefined); // mark rejection handled across the timer advance below
+      await jest.advanceTimersByTimeAsync(10_000);
+      await expectNameTeardownPending(startCall);
+
+      releaseLogout();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(pendingOf().has(SESSION_NAME)).toBe(false);
+
+      // Retry start now proceeds cleanly.
+      const retry = service.start(SESSION_UUID);
+      await jest.advanceTimersByTimeAsync(0);
+      await retry;
+      expect(engineFactory.create).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('two concurrent logouts for the same name keep the fence until BOTH settle', async () => {
+    // The first logout's raw wedges (its profile rm outlives the request); the second logout's raw
+    // rejects fast (the client is already tearing down). The fence must stay until the FIRST
+    // (still-running) raw settles — otherwise the second's fast settlement would drop the entry while
+    // the first rm is still pending.
+    let settleFirst!: () => void;
+    const wedgedLogout = new Promise<void>(res => {
+      settleFirst = res;
+    });
+    const logout = jest
+      .fn()
+      .mockImplementationOnce(() => wedgedLogout)
+      .mockImplementationOnce(() =>
+        // The client is already tearing down after the first logout captured it; mirror the adapter's
+        // own "no live client" refusal. Built lazily so no stray unhandled rejection is created.
+        Promise.reject(new Error('No live WhatsApp Web client — the unlink was not sent')),
+      );
+
+    enginesOf().set(SESSION_UUID, { logout });
+
+    jest.useFakeTimers();
+    try {
+      const first = service.logout(SESSION_UUID);
+      first.catch(() => undefined); // mark rejection handled across the timer advances below
+      await jest.advanceTimersByTimeAsync(0);
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+
+      const second = service.logout(SESSION_UUID);
+      await expect(second).rejects.toBeInstanceOf(BadGatewayException);
+
+      // The second's fast-rejecting raw has settled, but the FIRST raw is still wedged → fence stays.
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+
+      // The first loses its 10s deadline race → 502 (unconfirmed), but its raw keeps running.
+      await jest.advanceTimersByTimeAsync(10_000);
+      await expect(first).rejects.toBeInstanceOf(BadGatewayException);
+      // Still wedged → fence STILL up (the fast settlement of the second did not drop it).
+      expect(pendingOf().has(SESSION_NAME)).toBe(true);
+
+      settleFirst();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(pendingOf().has(SESSION_NAME)).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('map assertions use the session name, not the UUID', async () => {
+    // Regression guard: the key MUST be the session name (the on-disk auth-dir key), never the UUID.
+    const engine = { logout: jest.fn().mockResolvedValue(undefined) };
+    enginesOf().set(SESSION_UUID, engine);
+
+    await service.logout(SESSION_UUID);
+
+    expect(pendingOf().has(SESSION_UUID)).toBe(false);
+    // A quick-settling logout self-removes, so neither key is present.
+    expect(pendingOf().has(SESSION_NAME)).toBe(false);
+    expect(stoppingOf().has(SESSION_UUID)).toBe(true);
   });
 });

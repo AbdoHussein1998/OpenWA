@@ -386,9 +386,10 @@ describe('SessionService', () => {
         await jest.advanceTimersByTimeAsync(10_000); // deadline fires; the race is lost
         // The deadline loss means the unlink is unconfirmed, so logout() rejects 502 — but the
         // local teardown already ran and the losing promise is still tracked in pendingTeardowns
-        // (it settles only when releaseLogout() fires below).
+        // (it settles only when releaseLogout() fires below). The fence is keyed by the session
+        // NAME — the on-disk auth-dir key — not the UUID.
         await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
-        expect(pendingTeardownsOf().has('sess-uuid-1')).toBe(true); // still running past the race
+        expect(pendingTeardownsOf().has('test-session')).toBe(true); // still running past the race
 
         const startCall = service.start('sess-uuid-1');
         await jest.advanceTimersByTimeAsync(1_000); // inside the bounded wait
@@ -397,7 +398,7 @@ describe('SessionService', () => {
         releaseLogout(); // the stale rm now lands BEFORE any fresh credentials exist
         await startCall;
         expect(engineFactory.create).toHaveBeenCalledTimes(1);
-        expect(pendingTeardownsOf().has('sess-uuid-1')).toBe(false); // self-removed on settlement
+        expect(pendingTeardownsOf().has('test-session')).toBe(false); // self-removed on settlement
       } finally {
         jest.useRealTimers();
       }
@@ -422,7 +423,7 @@ describe('SessionService', () => {
         const logoutCall = service.logout('sess-uuid-1');
         await jest.advanceTimersByTimeAsync(10_000);
         await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
-        expect(pendingTeardownsOf().has('sess-uuid-1')).toBe(true);
+        expect(pendingTeardownsOf().has('test-session')).toBe(true);
 
         const deleteCall = service.delete('sess-uuid-1');
         await jest.advanceTimersByTimeAsync(1_000); // inside the bounded wait
@@ -431,13 +432,16 @@ describe('SessionService', () => {
         releaseLogout();
         await deleteCall;
         expect(engineFactory.purgeSessionData).toHaveBeenCalledWith('test-session');
-        expect(pendingTeardownsOf().has('sess-uuid-1')).toBe(false);
+        expect(pendingTeardownsOf().has('test-session')).toBe(false);
       } finally {
         jest.useRealTimers();
       }
     });
 
-    it('start() proceeds after the bounded wait when the teardown stays wedged', async () => {
+    it('start() fails CLOSED with 409 (SESSION_NAME_TEARDOWN_PENDING) when the teardown stays wedged past the bounded wait', async () => {
+      // The fence is fail-closed: a teardown that never settles could still land its rm on credentials
+      // a (re)created session under the same name would write, so start() must refuse rather than
+      // proceed and let the stale rm race the fresh profile.
       (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
       (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
       const engine = { logout: jest.fn().mockReturnValue(new Promise<void>(() => undefined)) };
@@ -447,16 +451,19 @@ describe('SessionService', () => {
       try {
         const logoutCall = service.logout('sess-uuid-1');
         await jest.advanceTimersByTimeAsync(10_000);
-        // The wedged logout never unlinks within the deadline, so it rejects 502; the losing
-        // promise keeps running and start()'s bounded wait eventually gives up on it below.
         await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
 
         const startCall = service.start('sess-uuid-1');
-        await jest.advanceTimersByTimeAsync(10_000); // bounded wait exhausted
-        await startCall;
-        // The operator is not blocked indefinitely; the still-wedged teardown's stale rm sits
-        // behind the wedge, and the residual window is logged (pending_teardown_wait_exhausted).
-        expect(engineFactory.create).toHaveBeenCalledTimes(1);
+        startCall.catch(() => undefined); // mark rejection handled across the timer advance below
+        await jest.advanceTimersByTimeAsync(10_000); // bounded wait exhausted → fail CLOSED
+        const thrown = await startCall.catch((e: unknown) => e);
+        expect(thrown).toBeInstanceOf(ConflictException);
+        expect((thrown as ConflictException).getResponse()).toMatchObject({
+          code: 'SESSION_NAME_TEARDOWN_PENDING',
+        });
+        // No engine created, and the fence is NOT dropped.
+        expect(engineFactory.create).not.toHaveBeenCalled();
+        expect(pendingTeardownsOf().has('test-session')).toBe(true);
       } finally {
         jest.useRealTimers();
       }

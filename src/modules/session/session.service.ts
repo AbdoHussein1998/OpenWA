@@ -233,10 +233,16 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   // order when different mutation kinds for the same message arrive together.
   private messageMutationChains: Map<string, Promise<void>> = new Map();
 
-  // Raw teardown promises that outlived their deadline race in teardownEngineSafely. A losing
-  // logout() promise keeps running and ends in an fs.rm of the session's on-disk profile — the
-  // same deterministic path a later start() re-creates — so start()/delete() consult this map and
-  // wait (bounded) for settlement before touching that path. Entries self-remove on settlement.
+  // Destructive credential-teardown promises (logout rms of the session's on-disk WhatsApp auth
+  // dir), keyed by session NAME — the on-disk auth-dir key (EngineFactory.wwjsAuthDir/baileysAuthDir
+  // and adapter clearLocalAuth all build the path from Session.name), NOT the UUID. A losing
+  // logout() promise keeps running past its deadline race and ends in an fs.rm of that dir — the
+  // same path a later start() under the SAME name re-creates — so start()/delete()/executeReconnect
+  // consult this map and wait (bounded, fail-closed) for settlement before touching that path. After
+  // an old UUID's session is deleted and the name is recreated, a late logout from the old UUID
+  // still targets the new session's dir (same name → same path), so keying by name keeps the fence
+  // attached to the credential path that is actually at risk. Entries self-remove on settlement
+  // (identity-checked); nothing else evicts them (delete()'s finally no longer drops them).
   private readonly pendingTeardowns = new Map<string, Promise<void>>();
 
   // The in-flight `updateStatus(INITIALIZING)` write keyed by id, carrying the EXACT engine it
@@ -384,32 +390,20 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    *
    * A teardown that loses the deadline race keeps running past the caller's return. For 'logout'
    * that leftover promise ends in an fs.rm of the session's on-disk profile — the same path a
-   * later start() re-creates — so the raw promise is registered in pendingTeardowns and start()/
-   * delete() wait (bounded) for it to settle before touching that path.
+   * later start() re-creates — so the raw promise is registered in pendingTeardowns (keyed by the
+   * session NAME, which is the auth-dir key) and start()/delete() wait (bounded, fail-closed) for
+   * it to settle before touching that path.
    */
   private async teardownEngineSafely(
     sessionId: string,
     engine: IWhatsAppEngine,
     teardown: (e: IWhatsAppEngine) => Promise<void>,
     label: 'destroy' | 'disconnect' | 'force-destroy' | 'logout',
+    sessionName?: string,
   ): Promise<boolean> {
     const raw = teardown(engine);
-    if (label === 'logout') {
-      // Settlement marker only — never rejects, so it can't drive the race below to a false
-      // "completed"; the race still observes the raw promise. A concurrent logout chains onto the
-      // previous entry instead of overwriting it, so start()/delete() keep waiting until EVERY
-      // in-flight teardown for this session has settled — otherwise the second logout's fast
-      // settlement would drop the entry while the first teardown's profile rm is still pending.
-      // Identity-checked on removal so a newer teardown's entry isn't evicted by an older one settling.
-      const tracked = raw.catch(() => undefined);
-      const previous = this.pendingTeardowns.get(sessionId);
-      const entry: Promise<void> = previous ? Promise.allSettled([previous, tracked]).then(() => undefined) : tracked;
-      this.pendingTeardowns.set(sessionId, entry);
-      void entry.finally(() => {
-        if (this.pendingTeardowns.get(sessionId) === entry) {
-          this.pendingTeardowns.delete(sessionId);
-        }
-      });
+    if (label === 'logout' && sessionName) {
+      this.trackPendingCredentialTeardown(sessionName, raw);
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -432,14 +426,45 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   /**
+   * Track a destructive credential-teardown promise under the session NAME (the on-disk auth-dir
+   * key — NOT the UUID). A logout's `engine.logout()` ends in an `fs.rm` of the same directory a
+   * later start() under the same name re-creates, so start()/delete()/executeReconnect consult this
+   * map and wait (bounded, fail-closed) before touching that path.
+   *
+   * Settlement marker only — never rejects, so it can't drive a caller's deadline race to a false
+   * "completed". A concurrent teardown for the same name CHAINS onto the previous entry instead of
+   * overwriting it (Promise.allSettled), so callers keep waiting until EVERY in-flight teardown for
+   * that name has settled — otherwise a second logout's fast settlement would drop the entry while
+   * the first teardown's profile rm is still pending. Identity-checked on removal is the ONLY path
+   * that evicts the entry, so a newer teardown's entry is never dropped by an older one settling.
+   */
+  private trackPendingCredentialTeardown(sessionName: string, raw: Promise<void>): void {
+    const tracked = raw.catch(() => undefined);
+    const previous = this.pendingTeardowns.get(sessionName);
+    const entry: Promise<void> = previous ? Promise.allSettled([previous, tracked]).then(() => undefined) : tracked;
+    this.pendingTeardowns.set(sessionName, entry);
+    void entry.finally(() => {
+      if (this.pendingTeardowns.get(sessionName) === entry) {
+        this.pendingTeardowns.delete(sessionName);
+      }
+    });
+  }
+
+  /**
    * Wait (bounded) for a teardown that lost its deadline race to settle. A losing logout() promise
    * ends in an fs.rm of the on-disk profile — the same deterministic path start() re-creates and
-   * delete() purges — so those paths call this before touching disk. If the teardown is still
-   * wedged past the bound, proceed anyway: its rm sits behind the wedge, blocking the operator
-   * indefinitely is worse, and the residual window is logged.
+   * delete() purges — so those paths call this before touching disk. The fence is FAIL CLOSED: a
+   * teardown still wedged past the bound could still land its rm on credentials a (re)created session
+   * under the same name would write, so the operation refuses with a retryable 409
+   * (SESSION_NAME_TEARDOWN_PENDING) instead of proceeding. The entry is NOT dropped on timeout — a
+   * retry after the rm eventually settles will see it gone and proceed.
+   *
+   * Keyed by the session NAME: the auth directories are built from `Session.name`, so two sessions
+   * sharing a name (a deleted UUID recreated under the same name) share the credential path and must
+   * share the fence.
    */
-  private async awaitPendingTeardown(id: string): Promise<void> {
-    const pending = this.pendingTeardowns.get(id);
+  private async awaitPendingTeardown(sessionName: string): Promise<void> {
+    const pending = this.pendingTeardowns.get(sessionName);
     if (!pending) return;
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -451,11 +476,16 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     ]);
     if (timer) clearTimeout(timer);
     if (!settled) {
-      this.logger.warn(
-        `Proceeding while a previous logout teardown for session ${id} is still wedged — its ` +
-          'stale profile cleanup may land late',
-        { sessionId: id, action: 'pending_teardown_wait_exhausted' },
-      );
+      // Fail closed: do NOT proceed. The stale rm could still hit a fresh profile under this name.
+      // Message is operator-facing and retryable, with no internal path leak.
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        message:
+          `A credential teardown for session '${sessionName}' is still in flight. Wait for it to ` +
+          'settle and retry.',
+        error: 'Conflict',
+        code: 'SESSION_NAME_TEARDOWN_PENDING',
+      });
     }
   }
 
@@ -595,10 +625,24 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   async delete(id: string): Promise<void> {
     const session = await this.findOne(id);
 
+    // FENCE #1 — fail-fast on an ALREADY-PENDING credential teardown for this session NAME, BEFORE
+    // any lifecycle mutation. A logout teardown that lost its deadline race is still running and ends
+    // in an fs.rm of this session's on-disk auth dir (keyed by name). Releasing the name via the DB
+    // delete below while that rm is live would let a recreated session under the same name race the
+    // stale rm. The fence is keyed by session NAME and fails CLOSED (409). On a 409 NOTHING else runs:
+    // no stop mark, no reconnect cancel, no engine teardown, no state cleanup — delete() simply did
+    // not happen, and the entry stays reserved.
+    await this.awaitPendingTeardown(session.name);
+
     // Mark as tearing down BEFORE cleanup so an in-flight reconnect can't resurrect it.
     this.stoppingSessions.add(id);
     // Cancel any reconnection attempts
     this.cancelReconnect(id);
+
+    // Set only after the transaction actually removes the parent row. lastDispatchedStatus /
+    // sessionErrors (and the recovery budget, Task 8) are cleared ONLY on a committed delete; a
+    // rejected 409 from fence #2 leaves them intact (the session still exists).
+    let parentDeleted = false;
 
     try {
       // Stop engine if running — time-bounded + isolated so a stuck Chromium can't wedge the delete;
@@ -614,6 +658,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         await this.teardownEngineSafely(id, engine, e => e.forceDestroy(), 'force-destroy');
         if (this.isLiveEngine(id, engine)) this.engines.delete(id);
       }
+
+      // FENCE #2 — immediately after the current engine is evicted, BEFORE the session:deleted hook
+      // and the DB transaction. A logout that started concurrently AFTER fence #1 but captured this
+      // engine before eviction registers its destructive promise synchronously (via the engine's
+      // onCredentialTeardownStarted callback), so this fence sees it and refuses — the row/name stay
+      // reserved and the transaction does not run. After eviction a NEW logout can't create a
+      // destructive promise (no live engine); one that already captured the engine is observed here.
+      await this.awaitPendingTeardown(session.name);
 
       // Execute hook BEFORE delete so plugins can access session data
       await this.hookManager.execute(
@@ -646,6 +698,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         await manager.delete(BaileysStoredMessage, { sessionId: id });
         await manager.remove(session);
       });
+      parentDeleted = true;
       this.logger.log(`Session deleted: ${session.name}`, {
         sessionId: id,
         action: 'delete',
@@ -656,20 +709,25 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       // session NAME and live independently of the (now torn-down, and on delete often never-loaded)
       // engine instance, so the teardown above doesn't touch them. Without this, recreating a session
       // under the same name reloads a stale store. Best-effort inside the factory — never fails an
-      // otherwise-successful delete. A wedged logout teardown from before this delete may still hold
-      // a pending fs.rm of the same dirs — wait (bounded) for it to settle first.
-      await this.awaitPendingTeardown(id);
+      // otherwise-successful delete. By this point both fences passed, so no old remover is live
+      // against this name (the transaction freed the name; the dirs are safe to purge).
       await this.engineFactory.purgeSessionData(session.name);
     } finally {
-      // Always clear the teardown mark so a later recreate/start with this id isn't suppressed.
+      // Always clear the teardown mark so a later recreate/start with this id isn't suppressed. This
+      // stop mark was set after fence #1, so clearing it on a rejected 409 only undoes what THIS
+      // delete added — it does NOT touch reconnect timer / engine / last status / error / recovery
+      // state (those are gated on parentDeleted below).
       this.stoppingSessions.delete(id);
-      this.lastDispatchedStatus.delete(id);
-      // Drop the FAILED-reason entry too: it's keyed by a now-deleted UUID that can never be read
-      // again, so leaving it would grow the map without bound across create/fail/delete churn.
-      this.sessionErrors.delete(id);
-      // Same for a wedged logout-teardown entry: the wait above is only bounded, so a teardown
-      // that never settles would otherwise pin its entry (and its promise chain) forever.
-      this.pendingTeardowns.delete(id);
+      if (parentDeleted) {
+        this.lastDispatchedStatus.delete(id);
+        // Drop the FAILED-reason entry too: it's keyed by a now-deleted UUID that can never be read
+        // again, so leaving it would grow the map without bound across create/fail/delete churn.
+        this.sessionErrors.delete(id);
+      }
+      // NOTE: pendingTeardowns is intentionally NOT cleared here. It is keyed by session NAME and
+      // its entries self-remove on settlement (identity-checked). A delete that refused at either
+      // fence MUST leave the entry in place — the name is still reserved against the live remover —
+      // and a delete that succeeded already saw both fences pass, so no live remover exists.
     }
   }
 
@@ -706,6 +764,17 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         }
       }
 
+      // Credential-teardown fence — runs IMMEDIATELY after the read-only findOne + duplicate/cap
+      // checks and BEFORE any lifecycle mutation (stop-mark clear, hook, reconnect-state, engine
+      // creation, recovery-budget reset) or auth-dir access. A logout teardown that lost its deadline
+      // race is still running and ends in an fs.rm of this session's on-disk profile — the same path
+      // initializeEngine is about to populate. The fence is keyed by session NAME (the auth-dir key)
+      // and FAIL CLOSED: a still-wedged teardown could still rm a fresh profile under this name, so
+      // refuse with a retryable 409 instead of proceeding. On a 409, NO lifecycle state is touched
+      // (the stop mark, reconnect timer, engine, last status/error, and recovery budget are left as
+      // they were) — start() simply did not happen.
+      await this.awaitPendingTeardown(session.name);
+
       // A fresh start intentionally (re-)creates the engine — clear any stale stop/delete mark.
       this.stoppingSessions.delete(id);
 
@@ -729,11 +798,6 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       // so a poisoned value can't drive a NaN/immediate-relaunch storm or an unbounded loop.
       const { maxAttempts, baseDelay } = resolveReconnectConfig(session.config);
       this.reconnectStates.set(id, { attempts: 0, timer: null, maxAttempts, baseDelay });
-
-      // A logout teardown that lost its deadline race may still be running, and it ends in an
-      // fs.rm of this session's on-disk profile — the same path initializeEngine is about to
-      // populate. Wait (bounded) for it to settle so the stale rm can't land on fresh credentials.
-      await this.awaitPendingTeardown(id);
 
       try {
         await this.initializeEngine(id, session);
@@ -1686,6 +1750,16 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         // make the next start() reject the session as "already started" instead of re-initializing it.
         this.evictAndForceDestroy(id, engine);
       },
+      onCredentialTeardownStarted: (operation: Promise<void>): void => {
+        // The adapter fired the moment it began the call that ends in an fs.rm of this session's
+        // on-disk auth dir. Track it under the captured session NAME (the auth-dir key) — NOT the
+        // UUID, and NOT guarded on this engine still being live: a logout that captured this engine
+        // must register its destructive promise even as a concurrent stop()/delete() evicts it,
+        // because the rm targets the session name's dir and would otherwise race a (re)created
+        // session under that same name. `session.name` is the immutable snapshot captured at
+        // initializeEngine entry, so a row delete/recreate under the same name cannot poison the key.
+        this.trackPendingCredentialTeardown(session.name, operation);
+      },
     });
 
     // engine.initialize() launches Chromium and navigates to WhatsApp Web with no internal timeout:
@@ -2254,6 +2328,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         if (this.isLiveEngine(id, oldEngine)) this.engines.delete(id);
       }
 
+      // Credential-teardown fence — BEFORE engineFactory.create (inside initializeEngine). A logout
+      // teardown that lost its deadline race is still running and ends in an fs.rm of this session's
+      // on-disk profile — the same path initializeEngine is about to populate. Keyed by session NAME
+      // (the auth-dir key) and FAIL CLOSED: a timeout becomes a failed reconnect attempt that is
+      // rescheduled WITHOUT touching the auth dir (the catch below schedules the next attempt; no
+      // engine was created, so there is nothing to evict and no dir to purge).
+      await this.awaitPendingTeardown(session.name);
+
       // Re-initialize
       await this.initializeEngine(id, session);
 
@@ -2381,7 +2463,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // Await THIS engine's in-flight INITIALIZING write before teardown / the final DISCONNECTED
     // write so a delayed pre-initialize status update can never settle after the retirement.
     await this.awaitInitialStatus(id, engine);
-    const unlinked = await this.teardownEngineSafely(id, engine, e => e.logout(), 'logout');
+    // The credential fence is keyed by session NAME (the auth-dir key). Captured immutably here so a
+    // raw logout that outlives its deadline race is tracked under the right name even if the row is
+    // later deleted/recreated.
+    const unlinked = await this.teardownEngineSafely(id, engine, e => e.logout(), 'logout', session.name);
     if (this.isLiveEngine(id, engine)) this.engines.delete(id);
     await this.updateStatus(id, SessionStatus.DISCONNECTED);
 

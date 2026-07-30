@@ -906,6 +906,110 @@ describe('WhatsAppWebJsAdapter.forceDestroy (recover a wedged session, #351)', (
   });
 });
 
+// Credential teardown is the only operation that removes this session's on-disk WhatsApp credentials
+// (the LocalAuth profile dir). Two code paths reach it: the adapter's own logout() (client.logout()
+// chains authStrategy.logout() → fs.rm) and a WhatsApp-initiated unlink (the lib emits
+// disconnected:LOGOUT, THEN awaits authStrategy.logout() → fs.rm). Both must surface the destructive
+// promise to the lifecycle via onCredentialTeardownStarted SYNCHRONOUSLY, before the awaited settle,
+// so a concurrent start()/delete()/reconnect for the same session NAME sees the in-flight rm and waits
+// for it instead of re-creating/purging credentials the rm is about to delete.
+describe('WhatsAppWebJsAdapter credential-teardown observation', () => {
+  const newAdapter = (): WhatsAppWebJsAdapter =>
+    new WhatsAppWebJsAdapter({ sessionId: 'sess-1', sessionDataPath: './data/sessions', puppeteer: {} });
+  type FakeClient = EventEmitter & {
+    info?: { wid?: { user?: string }; pushname?: string };
+    getState: jest.Mock;
+    pupPage: { evaluate: jest.Mock };
+    destroy?: jest.Mock;
+    logout?: jest.Mock;
+  };
+
+  // Mirrors the ready-reconciliation helper but wires the credential-teardown callback too.
+  const attach = (
+    adapter: WhatsAppWebJsAdapter,
+    overrides: Partial<FakeClient> = {},
+  ): { client: FakeClient; onCredentialTeardownStarted: jest.Mock } => {
+    const client = Object.assign(new EventEmitter(), {
+      info: { wid: { user: '628123' }, pushname: 'Tester' },
+      getState: jest.fn().mockResolvedValue(WAState.CONNECTED),
+      pupPage: { evaluate: jest.fn().mockResolvedValue(true) },
+      ...overrides,
+    }) as FakeClient;
+    const onCredentialTeardownStarted = jest.fn();
+    (adapter as unknown as { client: unknown }).client = client;
+    (adapter as unknown as { callbacks: unknown }).callbacks = { onCredentialTeardownStarted };
+    (adapter as unknown as { setupEventHandlers: () => void }).setupEventHandlers();
+    return { client, onCredentialTeardownStarted };
+  };
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('logout() registers the client.logout() promise via onCredentialTeardownStarted before awaiting it', async () => {
+    const adapter = newAdapter();
+    let resolveLogout!: () => void;
+    const logoutPromise = new Promise<void>(res => {
+      resolveLogout = res;
+    });
+    const { onCredentialTeardownStarted } = attach(adapter, {
+      logout: jest.fn().mockReturnValue(logoutPromise),
+      destroy: jest.fn().mockResolvedValue(undefined),
+    });
+
+    // Fire logout but do NOT settle it yet — the callback must already have been handed the promise.
+    const logoutCall = adapter.logout();
+    await Promise.resolve(); // flush the synchronous portion of logout()
+
+    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
+    const [tracked] = onCredentialTeardownStarted.mock.calls[0] as [Promise<void>];
+    expect(tracked).toBeInstanceOf(Promise);
+    // The tracked promise is the SAME destructive operation the adapter is awaiting: settling it
+    // settles logout().
+    resolveLogout();
+    await expect(tracked).resolves.toBeUndefined();
+    await expect(logoutCall).resolves.toBeUndefined();
+  });
+
+  it('a WhatsApp-originated disconnected:LOGOUT registers the credential-teardown promise synchronously before the event loop can run', async () => {
+    // The lib emits disconnected:LOGOUT BEFORE it awaits authStrategy.logout() (the fs.rm). The adapter
+    // must register the destructive cleanup synchronously within the event handler so a start()/reconnect
+    // that races on the next tick observes the in-flight rm.
+    const adapter = newAdapter();
+    const { client, onCredentialTeardownStarted } = attach(adapter);
+
+    client.emit('disconnected', 'LOGOUT');
+
+    // Synchronous: the callback was handed a promise before any await settled.
+    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
+    const [tracked] = onCredentialTeardownStarted.mock.calls[0] as [Promise<void>];
+    expect(tracked).toBeInstanceOf(Promise);
+    // The fence survives until the tracked rm settles (here it resolves).
+    await expect(tracked).resolves.toBeUndefined();
+  });
+
+  it('does not register a credential teardown for a non-LOGOUT disconnect (a transient drop, not credential removal)', () => {
+    const adapter = newAdapter();
+    const { client, onCredentialTeardownStarted } = attach(adapter);
+
+    client.emit('disconnected', 'NAVIGATION');
+
+    expect(onCredentialTeardownStarted).not.toHaveBeenCalled();
+  });
+
+  it('does not register a credential teardown for a deliberate (tearingDown) LOGOUT — the caller already owns that cleanup', () => {
+    // client.logout() during adapter.logout() also fires disconnected:LOGOUT; the adapter must not
+    // double-track (the explicit logout() path already registered the promise).
+    const adapter = newAdapter();
+    const { client, onCredentialTeardownStarted } = attach(adapter);
+    (adapter as unknown as { tearingDown: boolean }).tearingDown = true;
+
+    client.emit('disconnected', 'LOGOUT');
+
+    expect(onCredentialTeardownStarted).not.toHaveBeenCalled();
+  });
+});
+
 describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
   const newAdapter = (): WhatsAppWebJsAdapter =>
     new WhatsAppWebJsAdapter({ sessionId: 'sess-1', sessionDataPath: './data/sessions', puppeteer: {} });

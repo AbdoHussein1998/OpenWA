@@ -549,6 +549,23 @@ export interface EngineEventCallbacks {
    * recoverable and triggers reconnection.
    */
   onError?: (reason: string) => void;
+  /**
+   * Fired SYNCHRONOUSLY the instant a credential-teardown operation begins — i.e. the moment the
+   * adapter kicks off the call that ends in an `fs.rm` of this session's on-disk WhatsApp auth
+   * directory. The argument is the SAME promise the adapter is about to await (or, for a
+   * WhatsApp-originated unlink, a promise the adapter controls that represents the same rm).
+   *
+   * Unlike the other callbacks, this one is NOT guarded on the engine still being live: a logout
+   * that captured the engine registers its destructive promise even as a concurrent stop()/delete()
+   * evicts that engine, because the rm it ends in targets the session NAME's auth dir and would
+   * otherwise race a (re)created session under that same name. The lifecycle tracks the promise
+   * (keyed by the immutable captured session NAME) so start()/delete()/executeReconnect can wait
+   * (bounded, fail-closed) for it to settle before touching that path.
+   *
+   * Adapters that never remove credentials on their own (e.g. Baileys until a later task wires its
+   * WhatsApp-originated cleanup) simply never invoke this.
+   */
+  onCredentialTeardownStarted?: (operation: Promise<void>) => void;
 }
 
 export interface IWhatsAppEngine {

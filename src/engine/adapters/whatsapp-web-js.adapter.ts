@@ -934,21 +934,30 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // raises this event: client.logout() triggers the in-page Cmd 'logout' → framenavigated →
       // DISCONNECTED 'LOGOUT' while we are still awaiting it. The unlink is already acknowledged by
       // the API response and the session service writes DISCONNECTED itself, so report nothing here
-      // (mirrors the puppeteer-death gate). A WhatsApp-initiated unlink arrives with
-      // tearingDown=false and still flows through.
+      // (mirrors the puppeteer-death gate). The credential-teardown promise for that path was already
+      // registered by logout() itself, so do NOT double-register here. A WhatsApp-initiated unlink
+      // arrives with tearingDown=false and still flows through.
       if (this.tearingDown) return;
       this.clearReadyReconcile();
       // #982: LOGOUT is not a transient drop. whatsapp-web.js emits it when WhatsApp Web itself ran a
-      // logout (its in-page `Cmd` logout bus), and by then it has ALREADY deleted this session's
-      // credentials — LocalAuth.logout() removes the profile dir before the event reaches us. So the
-      // lifecycle's reconnect cannot restore the link; it can only come back with a fresh QR. Say that
-      // here rather than leaving the operator with an opaque engine token that reads like any other drop.
+      // logout (its in-page `Cmd` logout bus). The library emits `disconnected: LOGOUT` BEFORE it
+      // awaits `authStrategy.logout()` (LocalAuth.logout() → fs.rm of this session's profile dir), so
+      // at this moment the credentials are ABOUT to be removed, not already gone. The lifecycle's
+      // reconnect cannot restore the link; it can only come back with a fresh QR. Say that here rather
+      // than leaving the operator with an opaque engine token that reads like any other drop.
       if (reason === 'LOGOUT') {
+        // Surface the destructive credential cleanup to the lifecycle SYNCHRONOUSLY, before the event
+        // loop can run a start()/reconnect: the lib's authStrategy.logout() (the rm) is about to settle
+        // right after this handler returns. We can't grab the lib's internal promise, so the adapter
+        // runs its own idempotent clearLocalAuth() (fs.rm with force:true races the lib's rm safely) as
+        // the tracked operation. A concurrent start()/delete() under the SAME session name then sees the
+        // in-flight rm and waits for it instead of re-creating/purging credentials the rm is deleting.
+        const cleanup = this.clearLocalAuth();
+        this.callbacks.onCredentialTeardownStarted?.(cleanup);
         this.logger.warn(
-          'WhatsApp unlinked this device (LOGOUT). whatsapp-web.js has already deleted the stored ' +
-            'credentials for this session, so reconnecting cannot restore the link — the session comes ' +
-            'back with a fresh QR and must be re-scanned. If this was not expected, check Linked devices ' +
-            'on the phone.',
+          'WhatsApp unlinked this device (LOGOUT). whatsapp-web.js is deleting the stored credentials ' +
+            'for this session, so reconnecting cannot restore the link — the session comes back with a ' +
+            'fresh QR and must be re-scanned. If this was not expected, check Linked devices on the phone.',
         );
       }
       this.setStatus(EngineStatus.DISCONNECTED);
@@ -1548,9 +1557,22 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       throw new Error('No live WhatsApp Web client — the unlink was not sent');
     }
 
+    // client.logout() chains authStrategy.logout() (LocalAuth) → fs.rm of this session's profile dir.
+    // Surface that destructive operation to the lifecycle SYNCHRONOUSLY, before the await, so a
+    // concurrent start()/delete()/reconnect for the same session NAME observes the in-flight rm and
+    // waits for it instead of re-creating/purging credentials the rm is about to delete. Register
+    // BEFORE awaiting so the callback fires even if the await never settles.
+    const logoutOp = client.logout();
+    this.callbacks.onCredentialTeardownStarted?.(
+      logoutOp.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+
     try {
       // Logout clears session data - user will need to scan QR again
-      await client.logout();
+      await logoutOp;
     } catch (error) {
       this.logger.warn('Logout failed:', { error: String(error) });
       // Fall back to destroy so the session still dies locally — but rethrow so the caller
