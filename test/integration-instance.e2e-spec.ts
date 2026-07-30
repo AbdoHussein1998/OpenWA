@@ -349,11 +349,11 @@ describe('IntegrationInstanceController (e2e)', () => {
   });
 
   /**
-   * F-02 regression: the controller authorizes a scoped key against the instance's CURRENT
-   * sessionScope, but the DLQ also retains rows written under PRIOR bindings. After a rebind
-   * sess-old -> sess-current, a key scoped to sess-current would otherwise replay the historical
-   * sess-old row. The redrive must filter the DLQ by the authorized current binding (provenance),
-   * not just by {pluginId, instanceId}.
+   * redrive session-provenance regression: the controller authorizes a scoped key against the
+   * instance's CURRENT sessionScope, but the DLQ also retains rows written under PRIOR bindings.
+   * After a rebind sess-old -> sess-current, a key scoped to sess-current would otherwise replay
+   * the historical sess-old row. The redrive must filter the DLQ by the authorized current binding
+   * (provenance), not just by {pluginId, instanceId}.
    */
   describe('redrive session provenance (rebind replay fence)', () => {
     let scopedCurrentKey: string; // ADMIN, allowedSessions: ['sess-current']
