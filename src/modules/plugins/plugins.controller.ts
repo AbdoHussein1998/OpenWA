@@ -17,8 +17,8 @@ import { ApiTags, ApiOperation, ApiResponse, ApiConsumes } from '@nestjs/swagger
 import { PluginsService } from './plugins.service';
 import { PluginDto, PluginConfigDto, PluginSessionsDto, InstallFromUrlDto } from './dto/plugin.dto';
 import type { CatalogPlugin } from './catalog';
-import { RequireRole, CurrentApiKey, RequireUnscopedKey } from '../auth/decorators/auth.decorators';
-import { ApiKey, ApiKeyRole } from '../auth/entities/api-key.entity';
+import { RequireRole, RequireUnscopedKey } from '../auth/decorators/auth.decorators';
+import { ApiKeyRole } from '../auth/entities/api-key.entity';
 
 /** Max accepted upload size for a plugin package (compressed). */
 const MAX_PLUGIN_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -28,8 +28,9 @@ const MAX_PLUGIN_UPLOAD_BYTES = 5 * 1024 * 1024;
 // Plugin installation and lifecycle are deployment-global and execute plugin code as the OpenWA
 // process user, so session-restricted keys are fenced off route by route below. The fence is NOT
 // applied at class level because @RequireUnscopedKey takes no argument and cannot be opted out of:
-// `updateSessions` enforces the key's allowedSessions itself, and `updateSessionConfig` is already
-// covered by the guard through its own :sessionId route param.
+// `updateSessions` is fenced too (it overwrites the ENTIRE active set, so a scoped key could delete
+// another tenant's activation by sending its own session or []), and `updateSessionConfig` is
+// already covered by the guard through its own :sessionId route param.
 export class PluginsController {
   constructor(private readonly pluginsService: PluginsService) {}
 
@@ -148,14 +149,21 @@ export class PluginsController {
 
   @Put(':id/sessions')
   @RequireRole(ApiKeyRole.ADMIN)
+  @RequireUnscopedKey()
   @ApiOperation({ summary: "Set which sessions a session-scoped plugin is activated for (['*'] = all)" })
   @ApiResponse({ status: 200, description: 'Plugin session activation updated', type: PluginDto })
   @ApiResponse({ status: 400, description: 'Plugin is global (not session-scoped)' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'A session-restricted key may not replace the full active set — full activation replacement requires an unrestricted key',
+  })
   @ApiResponse({ status: 404, description: 'Plugin not found' })
-  updateSessions(@Param('id') id: string, @Body() dto: PluginSessionsDto, @CurrentApiKey() apiKey?: ApiKey): PluginDto {
-    // The target sessions live in the body, which the ApiKeyGuard (keyed off route params) never
-    // inspects — so a session-restricted key's allowedSessions scope must be enforced here.
-    return this.pluginsService.updateSessions(id, dto.sessions, apiKey?.allowedSessions);
+  updateSessions(@Param('id') id: string, @Body() dto: PluginSessionsDto): PluginDto {
+    // This is a full-replacement PUT (setPluginSessions overwrites the entire activeSessions array),
+    // so a scoped key must never reach it: sending [] or its own session would delete every other
+    // tenant's activation. The @RequireUnscopedKey fence above enforces that before the handler runs.
+    return this.pluginsService.updateSessions(id, dto.sessions);
   }
 
   @Post(':id/update')

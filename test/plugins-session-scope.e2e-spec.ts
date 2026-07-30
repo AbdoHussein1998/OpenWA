@@ -15,9 +15,12 @@ import { Session } from './../src/modules/session/entities/session.entity';
 
 /**
  * Plugin install/lifecycle routes are deployment-global and their sink is code execution as the
- * OpenWA process user, so a session-restricted key must not reach them. The two session-aware
- * routes (per-session activation and per-session config) must keep working for a scoped key —
- * they enforce scope themselves and are the reason this fence is per-route, not class-level.
+ * OpenWA process user, so a session-restricted key must not reach them. The full session
+ * activation replacement (PUT /:id/sessions) is fenced too: it overwrites the ENTIRE active set,
+ * so a scoped key could otherwise delete another tenant's activation by sending [] or its own
+ * session. The per-session config route (PUT /:id/config/:sessionId) stays reachable for a scoped
+ * key — the guard scopes against its :sessionId route param, so it is the only session-dimensioned
+ * plugin route and the reason this fence is per-route, not class-level.
  */
 describe('Plugin routes reject session-scoped keys (e2e)', () => {
   let app: INestApplication<App>;
@@ -94,25 +97,27 @@ describe('Plugin routes reject session-scoped keys (e2e)', () => {
         .expect(403);
     });
 
+    it('rejects a scoped ADMIN on PUT /api/plugins/:id/sessions (full replacement can delete other tenants)', async () => {
+      await request(app.getHttpServer())
+        .put('/api/plugins/any-plugin/sessions')
+        .set('X-API-Key', scopedKey)
+        .send({ sessions: [sessA] })
+        .expect(403);
+    });
+
     it('rejects a scoped ADMIN on DELETE /api/plugins/:id', async () => {
       await request(app.getHttpServer()).delete('/api/plugins/any-plugin').set('X-API-Key', scopedKey).expect(403);
     });
   });
 
   /**
-   * Regression guard for the deliberate carve-out. These two routes enforce the key's scope
-   * themselves; fencing them would break session-scoped plugin administration. They must NOT
-   * return 403 for a scoped key — a 404 (plugin does not exist) proves the request passed the guard.
+   * Regression guard for the deliberate carve-out. The per-session config route is the only
+   * session-dimensioned plugin route: the guard scopes against its :sessionId param, so a scoped
+   * key must still reach the handler (a 404 for the absent fixture plugin proves it passed the guard).
+   * The full session-replacement route is NOT here — it overwrites the whole active set and now
+   * carries @RequireUnscopedKey (see fenced routes above).
    */
   describe('deliberate carve-outs stay reachable for a scoped key', () => {
-    it('does not 403 a scoped ADMIN on PUT /api/plugins/:id/sessions', async () => {
-      const res = await request(app.getHttpServer())
-        .put('/api/plugins/any-plugin/sessions')
-        .set('X-API-Key', scopedKey)
-        .send({ sessions: [sessA] });
-      expect(res.status).not.toBe(403);
-    });
-
     it('does not 403 a scoped ADMIN on PUT /api/plugins/:id/config/:sessionId for an in-scope session', async () => {
       const res = await request(app.getHttpServer())
         .put(`/api/plugins/any-plugin/config/${sessA}`)
@@ -120,6 +125,14 @@ describe('Plugin routes reject session-scoped keys (e2e)', () => {
         .send({ config: {} });
       expect(res.status).not.toBe(403);
     });
+  });
+
+  it('lets an unrestricted ADMIN reach the PUT /api/plugins/:id/sessions handler (404 for an absent plugin)', async () => {
+    await request(app.getHttpServer())
+      .put('/api/plugins/any-plugin/sessions')
+      .set('X-API-Key', adminKey)
+      .send({ sessions: [sessA] })
+      .expect(404);
   });
 
   it('leaves an unrestricted ADMIN able to list plugins', async () => {

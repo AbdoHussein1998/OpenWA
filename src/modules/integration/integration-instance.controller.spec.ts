@@ -410,7 +410,8 @@ describe('IntegrationInstanceController provisioning bridge', () => {
 
 // sessionScope travels in the request body, which the ApiKeyGuard's route-param fence never sees —
 // so the controller itself confines a session-scoped key to instances bound inside its
-// allowedSessions (the same pattern plugins.controller uses for updateSessions).
+// allowedSessions (the body-scoping pattern; the plugin updateSessions route is NOT scoped this way
+// — it is a full active-set replacement and is fenced with @RequireUnscopedKey).
 describe('IntegrationInstanceController session-scope fence', () => {
   const scopedKey = { allowedSessions: ['sess-1'] } as ApiKey;
   const unrestrictedKey = { allowedSessions: null } as unknown as ApiKey;

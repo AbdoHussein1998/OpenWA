@@ -1,11 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  HttpException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, HttpException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -180,20 +173,14 @@ export class PluginsService {
     }
   }
 
-  updateSessions(id: string, sessions: string[], allowedSessions?: string[] | null): PluginDto {
+  updateSessions(id: string, sessions: string[]): PluginDto {
     const plugin = this.pluginLoader.getPlugin(id);
     if (!plugin) {
       throw new NotFoundException(`Plugin ${id} not found`);
     }
-    // A session-restricted key (non-empty allowedSessions) may only activate the plugin for sessions
-    // in its own scope — never '*' (all) or another tenant's session. An unrestricted key (null/empty)
-    // is the normal dashboard/admin path and may activate for any session, including '*'.
-    if (allowedSessions && allowedSessions.length > 0) {
-      const outOfScope = sessions.filter(s => s === '*' || !allowedSessions.includes(s));
-      if (outOfScope.length > 0) {
-        throw new ForbiddenException(`API key not authorized for session(s): ${outOfScope.join(', ')}`);
-      }
-    }
+    // Full-replacement PUT: setPluginSessions overwrites the ENTIRE activeSessions array. The route
+    // is fenced with @RequireUnscopedKey, so only an unrestricted key can reach this — a scoped key
+    // must never be allowed to delete another tenant's activation by sending [] or its own session.
     try {
       this.pluginLoader.setPluginSessions(id, sessions);
     } catch (error) {

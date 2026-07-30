@@ -17,7 +17,6 @@ import { join } from 'path';
  * Key format: `<controller file basename> :: <handler name>`. Every entry needs a reason.
  */
 const ALLOWLIST = new Map<string, string>([
-  ['plugins.controller.ts :: updateSessions', 'threads apiKey.allowedSessions into the service'],
   ['audit.controller.ts :: findAll', 'scope-filters rows via resolveSessionScope'],
   ['webhooks-list.controller.ts :: findAll', 'scope-filters rows via the calling key'],
   ['webhooks-list.controller.ts :: deliveryFailures', 'scope-filters rows via the calling key'],
