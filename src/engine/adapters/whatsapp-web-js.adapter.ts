@@ -2971,6 +2971,25 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       if (opts?.trustDeclaredType !== false && media.mimetype && media.mimetype !== 'application/octet-stream') {
         fetched.mimetype = media.mimetype;
       }
+      // Sticker path (trustDeclaredType:false): a specific fetched image/video MIME stays authoritative,
+      // but a generic/empty fetched MIME carries no information, and the caller's declared
+      // image/* or video/* would otherwise be discarded — whatsapp-web.js then rejects the format
+      // before running the sticker conversion. Fall back ONLY in that one shape: remote URL +
+      // trustDeclaredType:false + generic fetched type + convertible declared type. Canonicalize the
+      // value handed downstream (lowercased, params stripped) so a mixed-case declared type is
+      // normalized exactly once. A declared image/webp IS accepted here when the fetched response
+      // carries no usable MIME — the caller is asserting what the bytes actually are, so trusting it
+      // only in the generic-fetched shape can't bypass the sticker conversion the way globally
+      // trusting a declared WebP over a specific fetched type would. Arbitrary application/* is
+      // rejected (e.g. the DTO's own octet-stream placeholder, or application/pdf).
+      const normalizeMediaType = (value?: string): string => (value ?? '').split(';', 1)[0].trim().toLowerCase();
+      const fetchedType = normalizeMediaType(fetched.mimetype);
+      const declaredType = normalizeMediaType(media.mimetype);
+      const fetchedTypeIsGeneric = !fetchedType || fetchedType === 'application/octet-stream';
+      const declaredTypeIsConvertible = declaredType.startsWith('image/') || declaredType.startsWith('video/');
+      if (opts?.trustDeclaredType === false && fetchedTypeIsGeneric && declaredTypeIsConvertible) {
+        fetched.mimetype = declaredType;
+      }
       if (media.filename) {
         fetched.filename = media.filename;
       }

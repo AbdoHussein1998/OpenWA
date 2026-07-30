@@ -3103,6 +3103,109 @@ describe('outbound document mode (#989)', () => {
       );
     });
 
+    // A specific fetched image/video MIME stays authoritative — a host that actually says
+    // image/jpeg for the bytes is trusted over a caller that just guessed. Here the declared type
+    // is itself a convertible image type, yet the fetched type still wins.
+    it('keeps the fetched type for a sticker even when the declared type is also convertible', async () => {
+      (undiciFetch as jest.Mock).mockResolvedValue(remoteResponse({ 'content-type': 'image/jpeg' }));
+      const sendMessage = jest.fn().mockResolvedValue(sentMessage);
+
+      await ready({ sendMessage }).sendStickerMessage('628@c.us', {
+        mimetype: 'image/png',
+        data: 'https://files.example.com/actually-a-jpeg',
+      });
+
+      expect(sendMessage).toHaveBeenCalledWith(
+        '628@c.us',
+        expect.objectContaining({ mimetype: 'image/jpeg' }),
+        expect.objectContaining({ sendMediaAsSticker: true }),
+      );
+    });
+
+    // Regression guard: when the fetched MIME says nothing useful (no Content-Type, blank, or the
+    // octet-stream placeholder — including mixed case), the caller's declared convertible image/video
+    // MIME must survive, canonicalized to lowercased/param-stripped. Otherwise whatsapp-web.js rejects
+    // the format before it ever runs the sticker conversion.
+    it.each<[string, string, string, string]>([
+      ['declared image type for a sticker survives a missing Content-Type', '', 'image/png', 'image/png'],
+      ['declared image type for a sticker survives a blank Content-Type', '   ', 'image/png', 'image/png'],
+      [
+        'declared image type for a sticker survives application/octet-stream',
+        'application/octet-stream',
+        'image/png',
+        'image/png',
+      ],
+      [
+        'declared image type for a sticker survives Application/Octet-Stream (mixed case)',
+        'Application/Octet-Stream',
+        'Image/PNG',
+        'image/png',
+      ],
+      ['declared video type for a sticker survives a missing Content-Type', '', 'video/mp4', 'video/mp4'],
+      [
+        'declared image type for a sticker survives a parameterised octet-stream',
+        'application/octet-stream; charset=binary',
+        'image/png',
+        'image/png',
+      ],
+    ])('%s', async (_name, fetchedContentType, declaredMimetype, expectedMimetype) => {
+      (undiciFetch as jest.Mock).mockResolvedValue(remoteResponse({ 'content-type': fetchedContentType }));
+      const sendMessage = jest.fn().mockResolvedValue(sentMessage);
+
+      await ready({ sendMessage }).sendStickerMessage('628@c.us', {
+        mimetype: declaredMimetype,
+        data: 'https://files.example.com/sticker-source',
+      });
+
+      expect(sendMessage).toHaveBeenCalledWith(
+        '628@c.us',
+        expect.objectContaining({ mimetype: expectedMimetype }),
+        expect.objectContaining({ sendMediaAsSticker: true }),
+      );
+    });
+
+    // The fallback is narrow: a generic fetched MIME plus a non-convertible declared type (e.g. the
+    // DTO's own octet-stream placeholder, or any application/*) must NOT be promoted — that would
+    // re-open the "caller can forge any format" hole the trustDeclaredType:false branch closes.
+    it.each<[string, string]>([
+      ['does not promote a declared octet-stream placeholder', 'application/octet-stream'],
+      ['does not promote a declared application/pdf', 'application/pdf'],
+    ])('for a generic fetched response, %s over a sticker send', async (_name, declaredMimetype) => {
+      (undiciFetch as jest.Mock).mockResolvedValue(remoteResponse({ 'content-type': 'application/octet-stream' }));
+      const sendMessage = jest.fn().mockResolvedValue(sentMessage);
+
+      await ready({ sendMessage }).sendStickerMessage('628@c.us', {
+        mimetype: declaredMimetype,
+        data: 'https://files.example.com/sticker-source',
+      });
+
+      // The placeholder sticks — exactly what the DTO would have produced before this change.
+      expect(sendMessage).toHaveBeenCalledWith(
+        '628@c.us',
+        expect.objectContaining({ mimetype: 'application/octet-stream' }),
+        expect.objectContaining({ sendMediaAsSticker: true }),
+      );
+    });
+
+    // The document/image normal path (trustDeclaredType is undefined, not false) is unchanged by the
+    // new fallback: a declared type still wins over the response even when the response is generic.
+    it('does not change the document path when the fetched type is generic (declared type still wins)', async () => {
+      (undiciFetch as jest.Mock).mockResolvedValue(remoteResponse({ 'content-type': 'application/octet-stream' }));
+      const sendMessage = jest.fn().mockResolvedValue(sentMessage);
+
+      await ready({ sendMessage }).sendDocumentMessage('628@c.us', {
+        mimetype: 'application/pdf',
+        filename: 'report.pdf',
+        data: 'https://files.example.com/report',
+      });
+
+      expect(sendMessage).toHaveBeenCalledWith(
+        '628@c.us',
+        expect.objectContaining({ mimetype: 'application/pdf', filename: 'report.pdf' }),
+        expect.objectContaining({ sendMediaAsDocument: true }),
+      );
+    });
+
     // The DTO fills this in when the client said nothing, so it is a placeholder rather than a claim
     // about the bytes — the response has to win, or every URL send would go out as a generic blob.
     it('lets the response win when the declared mimetype is the octet-stream placeholder', async () => {
