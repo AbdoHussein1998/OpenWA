@@ -1362,6 +1362,53 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     expect(onQRCode).not.toHaveBeenCalled();
   });
 
+  // A 'qr' whose pre-await guard passes but whose source client disconnects during the
+  // qrcode.toDataURL() await must not publish a QR after the await resolves. The handler captures the
+  // source client reference, encodes to a LOCAL variable, and re-checks the source-client identity and
+  // the finished flags AFTER the await — so a late encode does not resurrect a finished adapter to
+  // QR_READY, does not overwrite qrCode with a stale value, and does not re-fire the publish/webhook
+  // callback. A native 'disconnected' emitted mid-encode latches disconnectReported synchronously (via
+  // setStatus(DISCONNECTED)) and is exactly the post-await-unsafe window F-06 names.
+  it('drops a QR whose encode finishes after the source client disconnects', async () => {
+    let resolveEncode!: (value: string) => void;
+    const encodePending = new Promise<string>(resolve => {
+      resolveEncode = resolve;
+    });
+    (qrcode.toDataURL as unknown as jest.Mock).mockReturnValue(encodePending);
+
+    const adapter = newAdapter();
+    const { client } = attachFakeClient(adapter);
+    const onQRCode = jest.fn();
+    const onStateChanged = jest.fn();
+    (adapter as unknown as { callbacks: { onQRCode: jest.Mock; onStateChanged: jest.Mock } }).callbacks = {
+      ...((adapter as unknown as { callbacks: unknown }).callbacks as object),
+      onQRCode,
+      onStateChanged,
+    };
+
+    // Pre-await guard passes: the adapter is fresh, no teardown, no disconnect reported.
+    client.emit('qr', '2@late');
+    await Promise.resolve();
+    // The encode is in flight (handler is parked on the awaited toDataURL).
+
+    // The source client disconnects while the encode is pending. setStatus(DISCONNECTED) latches
+    // disconnectReported synchronously — the post-await fence must observe it.
+    client.emit('disconnected', 'NAVIGATION');
+    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+    expect((adapter as unknown as { disconnectReported: boolean }).disconnectReported).toBe(true);
+
+    // The late encode resolves. The post-await fence must drop it.
+    resolveEncode('data:image/png;base64,LATEQR');
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+    expect(onQRCode).not.toHaveBeenCalled();
+    expect((adapter as unknown as { qrCode: string | null }).qrCode).toBeNull();
+    expect(onStateChanged).not.toHaveBeenCalledWith(EngineStatus.QR_READY);
+  });
+
   // #982: 'LOGOUT' is not a transient drop and the lifecycle cannot recover the link from it —
   // whatsapp-web.js has already deleted the auth profile by the time the event arrives. The opaque
   // engine token alone left operators reading it as an ordinary disconnect, so the adapter explains it.
@@ -1418,6 +1465,31 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
 
     expect(logout).toHaveBeenCalledTimes(1);
     expect(onDisconnected).not.toHaveBeenCalled();
+  });
+
+  // A duplicate native 'disconnected' (whatsapp-web.js can fire it more than once for one underlying
+  // drop) must not re-run clearReadyReconcile, re-enter setStatus(DISCONNECTED), or re-fire
+  // onDisconnected — otherwise the lifecycle schedules a second reconnect. setStatus(DISCONNECTED)
+  // already latches disconnectReported synchronously on the first event; the handler's first line must
+  // check that latch and no-op before any log/status/callback. The first reason is preserved.
+  it('emits exactly one onDisconnected when duplicate client disconnected fires', () => {
+    const adapter = newAdapter();
+    const { client } = attachFakeClient(adapter);
+    const onDisconnected = jest.fn();
+    const onStateChanged = jest.fn();
+    (adapter as unknown as { callbacks: { onDisconnected: jest.Mock; onStateChanged: jest.Mock } }).callbacks = {
+      ...((adapter as unknown as { callbacks: unknown }).callbacks as object),
+      onDisconnected,
+      onStateChanged,
+    };
+
+    client.emit('disconnected', 'NAV_TIMEOUT');
+    client.emit('disconnected', 'NAV_TIMEOUT');
+
+    expect(onDisconnected).toHaveBeenCalledTimes(1);
+    expect(onDisconnected).toHaveBeenLastCalledWith('NAV_TIMEOUT');
+    expect(onStateChanged).toHaveBeenCalledTimes(1);
+    expect(onStateChanged).toHaveBeenLastCalledWith(EngineStatus.DISCONNECTED);
   });
 
   // The same #982 window for 'authenticated': the re-injected client can re-authenticate on the browser

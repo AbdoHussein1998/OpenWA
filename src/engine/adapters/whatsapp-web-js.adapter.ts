@@ -686,8 +686,28 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       if (this.tearingDown || this.disconnectReported || this.status === EngineStatus.FAILED || !this.client) {
         return;
       }
+      // Capture the source client so the post-await fence can prove THIS client is still the live one.
+      // qrcode.toDataURL() is an awaited macrotask: a 'disconnected' (or a teardown nulling this.client)
+      // that lands during the encode leaves the pre-await guard stale. Encode to a LOCAL so the stored
+      // qrCode is only touched once the fence re-proves the source client and the finished flags.
+      const sourceClient = this.client;
       try {
-        this.qrCode = await qrcode.toDataURL(qr);
+        const encodedQr = await qrcode.toDataURL(qr);
+        // Post-await fence: the encode resolved, but the source client may have disconnected or been
+        // replaced while we were waiting. Re-check the live client identity and the finished flags before
+        // assigning state, publishing a QR, or driving any downstream callback/webhook — a late encode for
+        // a dead/finished adapter must be dropped, not resurrected. The status is read through getStatus()
+        // (not `this.status`) so the pre-await guard's narrowing does not elide this comparison:
+        // setStatus(FAILED) can run on another tick during the await.
+        if (
+          this.client !== sourceClient ||
+          this.tearingDown ||
+          this.disconnectReported ||
+          this.getStatus() === EngineStatus.FAILED
+        ) {
+          return;
+        }
+        this.qrCode = encodedQr;
         this.setStatus(EngineStatus.QR_READY);
         this.callbacks.onQRCode?.(this.qrCode);
       } catch (error) {
@@ -937,7 +957,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // (mirrors the puppeteer-death gate). The credential-teardown promise for that path was already
       // registered by logout() itself, so do NOT double-register here. A WhatsApp-initiated unlink
       // arrives with tearingDown=false and still flows through.
-      if (this.tearingDown) return;
+      //
+      // setStatus(DISCONNECTED) below latches disconnectReported synchronously on the first event, so a
+      // duplicate native 'disconnected' (whatsapp-web.js can fire it more than once for one drop) must
+      // no-op HERE — before log/status/callback — otherwise clearReadyReconcile(), setStatus, and
+      // onDisconnected re-run and the lifecycle schedules a second reconnect.
+      if (this.tearingDown || this.disconnectReported) return;
       this.clearReadyReconcile();
       // #982: LOGOUT is not a transient drop. whatsapp-web.js emits it when WhatsApp Web itself ran a
       // logout (its in-page `Cmd` logout bus). The library emits `disconnected: LOGOUT` BEFORE it
