@@ -381,6 +381,46 @@ describe('BaileysAdapter lifecycle & status', () => {
     expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
     expect(onError).toHaveBeenCalledWith('network error');
   });
+
+  // Teardown-before-initialize: the adapter is single-use once torn down. The intentionalClose latch
+  // is set by disconnect()/destroy()/forceDestroy()/logout() and must NEVER be re-armed by a later
+  // initialize() — otherwise a retired adapter opens a fresh socket no caller is tracking.
+  describe('teardown-before-initialize (single-use adapter)', () => {
+    const makeWASocket = (): jest.Mock =>
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      jest.requireMock('@whiskeysockets/baileys').default as jest.Mock;
+
+    it.each([{ method: 'disconnect' as const }, { method: 'destroy' as const }, { method: 'forceDestroy' as const }])(
+      '%s() before initialize() does not create a socket, and a later initialize() still does not',
+      async ({ method }) => {
+        makeWASocket().mockClear();
+        const adapter = newAdapter();
+        // A brand-new adapter has never connected: tearing it down must not touch the socket factory.
+        await adapter[method]();
+        expect(makeWASocket()).not.toHaveBeenCalled();
+        expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+
+        // The teardown latch must NOT be re-armed by initialize(): a retired adapter stays retired.
+        makeWASocket().mockClear();
+        await adapter.initialize(noopCallbacks({}));
+        expect(makeWASocket()).not.toHaveBeenCalled();
+      },
+    );
+
+    it('logout() before initialize() rejects (no socket) and a subsequent initialize() still does not make a socket', async () => {
+      makeWASocket().mockClear();
+      const adapter = newAdapter();
+      // No socket was ever created, so the unlink cannot be sent.
+      await expect(adapter.logout()).rejects.toThrow(/no live whatsapp socket/i);
+      expect(makeWASocket()).not.toHaveBeenCalled();
+
+      // The teardown latch set by logout() must hold: initialize() must not open a fresh socket on a
+      // retired adapter.
+      makeWASocket().mockClear();
+      await adapter.initialize(noopCallbacks({}));
+      expect(makeWASocket()).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('BaileysAdapter reconnect policy — unlimited backoff (I4 hardening)', () => {

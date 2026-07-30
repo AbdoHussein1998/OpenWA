@@ -239,6 +239,17 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   // wait (bounded) for settlement before touching that path. Entries self-remove on settlement.
   private readonly pendingTeardowns = new Map<string, Promise<void>>();
 
+  // The in-flight `updateStatus(INITIALIZING)` write keyed by id, carrying the EXACT engine it
+  // belongs to. initializeEngine registers the engine, then awaits this write before calling
+  // adapter initialize(); a lifecycle control (stop/logout/delete/forceKill) can retire the engine
+  // during that awaited write. To keep the control action the final persisted owner, every retiring
+  // control awaits the captured engine's exact pending promise (looked up by object identity) after
+  // setting the stop mark + cancelling reconnect and BEFORE its teardown / final DISCONNECTED write
+  // / parent-row deletion. Settlement and removal are identity-checked on both {engine, promise} so
+  // a delayed INITIALIZING for engine A can never be awaited as / delete the entry of a replacement
+  // engine B the control action did not capture.
+  private readonly pendingInitialStatuses = new Map<string, { engine: IWhatsAppEngine; promise: Promise<void> }>();
+
   constructor(
     @InjectRepository(Session, 'data')
     private readonly sessionRepository: Repository<Session>,
@@ -449,6 +460,38 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   /**
+   * Wait for the captured `engine`'s exact in-flight `updateStatus(INITIALIZING)` write to settle.
+   * Called by every retiring lifecycle control (stop/logout/delete/forceKill) AFTER the stop mark is
+   * set and reconnect cancelled, and BEFORE teardown / the final DISCONNECTED write / parent-row
+   * deletion. This keeps the control action the final persisted owner: a delayed INITIALIZING write
+   * always settles first, so it can never land after the DISCONNECTED write or the row removal.
+   *
+   * Identity-checked on the engine object: a control action that captured engine A awaits ONLY A's
+   * pending promise, never a replacement B's entry (and never deletes it). A bounded wait mirrors
+   * awaitPendingTeardown — the INITIALIZING write is a single DB update, but a wedged DB must not
+   * block retirement indefinitely.
+   */
+  private async awaitInitialStatus(id: string, engine: IWhatsAppEngine): Promise<void> {
+    const pending = this.pendingInitialStatuses.get(id);
+    if (!pending || pending.engine !== engine) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settled = await Promise.race([
+      pending.promise.then(() => true),
+      new Promise<boolean>(resolve => {
+        timer = setTimeout(() => resolve(false), 10_000);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!settled) {
+      this.logger.warn(`Proceeding to retire session ${id} while its INITIALIZING status write is still wedged`, {
+        sessionId: id,
+        action: 'pending_initial_status_wait_exhausted',
+      });
+    }
+  }
+
+  /**
    * Evict a terminally-failed or abandoned engine from the map and SIGKILL its browser process
    * (best-effort, time-bounded via teardownEngineSafely). An engine left in the map keeps holding a
    * concurrency slot and makes a later start() see the session as "already started"; forceDestroy()
@@ -564,6 +607,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       // no session state worth saving, and a wedged Chromium must be reaped, not left to time out.
       const engine = this.engines.get(id);
       if (engine) {
+        // Await THIS engine's in-flight INITIALIZING write before teardown and the parent-row
+        // deletion below, so a delayed pre-initialize status update can never settle after the row
+        // is gone (delete cannot be followed by a late status write). Identity-checked.
+        await this.awaitInitialStatus(id, engine);
         await this.teardownEngineSafely(id, engine, e => e.forceDestroy(), 'force-destroy');
         if (this.isLiveEngine(id, engine)) this.engines.delete(id);
       }
@@ -961,7 +1008,42 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // Mark INITIALIZING before engine.initialize(): the engine drives status forward
     // (QR_READY -> AUTHENTICATING -> READY) through the callbacks below while it
     // initializes, so writing INITIALIZING afterwards would clobber that progress.
-    await this.updateStatus(id, SessionStatus.INITIALIZING);
+    //
+    // The INITIALIZING write is awaited here, and a lifecycle control (stop/logout/delete/forceKill)
+    // can retire this engine during that await. To keep the control action the final persisted owner,
+    // the in-flight write is tracked in pendingInitialStatuses (carrying this exact engine) so each
+    // retiring control can await ITS captured engine's write before its own final mutation. After the
+    // await, ownership is re-validated by object identity + the synchronous stop mark before the
+    // adapter is allowed to initialize — a retired engine must never reach initialize() (which would
+    // re-arm a torn-down adapter and open an untracked socket).
+    const initialStatusPromise = this.updateStatus(id, SessionStatus.INITIALIZING);
+    this.pendingInitialStatuses.set(id, { engine, promise: initialStatusPromise });
+    try {
+      await initialStatusPromise;
+    } finally {
+      // Remove ONLY this engine's entry: a replacement created by a concurrent start()/reconnect
+      // (different engine object) must not have its pending entry evicted by this settlement.
+      const pending = this.pendingInitialStatuses.get(id);
+      if (pending && pending.engine === engine && pending.promise === initialStatusPromise) {
+        this.pendingInitialStatuses.delete(id);
+      }
+    }
+
+    // After the awaited DB write, re-validate ownership before scheduling initialization. The stop
+    // mark is set synchronously by every retiring control BEFORE it awaits this engine's pending
+    // write, so checking it here (no DB read on the healthy path) closes the pre-initialize window
+    // without changing reconnect-when-reload-fails semantics. isLiveEngine guards the stop-mark-less
+    // timeout path and any replacement. There is intentionally NO await between these checks and
+    // engine.initialize() below — an intervening await would re-open the retirement window.
+    if (!this.isLiveEngine(id, engine)) {
+      return;
+    }
+    if (this.stoppingSessions.has(id)) {
+      return;
+    }
+    if (!this.isLiveEngine(id, engine)) {
+      return;
+    }
 
     const initPromise = engine.initialize({
       onQRCode: (qr: string): void => {
@@ -2211,6 +2293,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // behaviour: a later start() clears it; it guards against a late reconnect resurrecting the id.)
     const engine = this.engines.get(id);
     if (engine) {
+      // Await THIS engine's in-flight INITIALIZING write before teardown / the final DISCONNECTED
+      // write so a delayed pre-initialize status update can never settle after the retirement and
+      // become the last persisted status. Identity-checked: only the captured engine's promise.
+      await this.awaitInitialStatus(id, engine);
       await this.teardownEngineSafely(id, engine, e => e.disconnect(), 'disconnect');
       if (this.isLiveEngine(id, engine)) this.engines.delete(id);
     }
@@ -2263,6 +2349,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // Cancel any reconnection attempts
     this.cancelReconnect(id);
 
+    // Await THIS engine's in-flight INITIALIZING write before teardown / the final DISCONNECTED
+    // write so a delayed pre-initialize status update can never settle after the retirement.
+    await this.awaitInitialStatus(id, engine);
     const unlinked = await this.teardownEngineSafely(id, engine, e => e.logout(), 'logout');
     if (this.isLiveEngine(id, engine)) this.engines.delete(id);
     await this.updateStatus(id, SessionStatus.DISCONNECTED);
@@ -2314,6 +2403,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     this.stoppingSessions.add(id);
     this.cancelReconnect(id);
 
+    // Await THIS engine's in-flight INITIALIZING write before teardown / the final DISCONNECTED
+    // write so a delayed pre-initialize status update can never settle after the retirement.
+    await this.awaitInitialStatus(id, engine);
     await this.teardownEngineSafely(id, engine, e => e.forceDestroy(), 'force-destroy');
     if (this.isLiveEngine(id, engine)) this.engines.delete(id);
 

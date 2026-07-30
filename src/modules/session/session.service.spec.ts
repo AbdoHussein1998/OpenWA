@@ -119,6 +119,7 @@ describe('SessionService', () => {
       destroy: jest.fn().mockResolvedValue(undefined),
       forceDestroy: jest.fn().mockResolvedValue(undefined),
       disconnect: jest.fn().mockResolvedValue(undefined),
+      logout: jest.fn().mockResolvedValue(undefined),
       getQRCode: jest.fn().mockReturnValue(null),
       getGroups: jest.fn().mockResolvedValue([]),
       getChats: jest.fn().mockResolvedValue([]),
@@ -4616,6 +4617,194 @@ describe('SessionService', () => {
       await service.onApplicationBootstrap();
 
       expect(startSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ── pre-initialize retirement race (lifecycle control during the INITIALIZING DB write) ──
+  describe('pre-initialize retirement race', () => {
+    type Internals = {
+      engines: Map<string, unknown>;
+      stoppingSessions: Set<string>;
+      initializingSessions: Set<string>;
+      reconnectStates: Map<string, unknown>;
+      sessionErrors: Map<string, string>;
+      pendingInitialStatuses: Map<string, { engine: unknown; promise: Promise<void> }>;
+    };
+    const intern = () => service as unknown as Internals;
+
+    /** Polls `check` until it stops throwing, with a bounded number of event-loop flushes. */
+    async function waitFor(check: () => void, ticks = 200): Promise<void> {
+      for (let i = 0; i < ticks; i++) {
+        try {
+          check();
+          return;
+        } catch {
+          await new Promise(r => setImmediate(r));
+        }
+      }
+      check();
+    }
+
+    /**
+     * Drives service.start() until the engine is registered in the map but engine.initialize() has
+     * NOT yet been called — i.e. start() is parked inside the deferred `updateStatus(INITIALIZING)`
+     * DB write. Yields the handle that settles the deferred write plus a `settleOrder` log that
+     * records every persisted mutation' SETTLEMENT (not invocation) so a test can prove the
+     * INITIALIZING write settled BEFORE the control action's final write.
+     */
+    async function startUntilPreInit(): Promise<{
+      resolveInit: () => void;
+      settleOrder: string[];
+      recordTxn: (mark: string) => void;
+      startPromise: Promise<unknown>;
+    }> {
+      const session = createMockSession();
+      (repository.findOne as jest.Mock).mockResolvedValue(session);
+
+      const settleOrder: string[] = [];
+      let resolveInit: () => void = () => undefined;
+      const initWrite = new Promise<void>(resolve => {
+        resolveInit = resolve;
+      });
+
+      (repository.update as jest.Mock).mockImplementation((id: unknown, payload: { status?: SessionStatus }) => {
+        if (id === 'sess-uuid-1' && payload?.status === SessionStatus.INITIALIZING) {
+          return initWrite.then(() => {
+            settleOrder.push('INITIALIZING');
+            return { affected: 1 };
+          });
+        }
+        // All other writes settle immediately and record their settlement order relative to the
+        // deferred INITIALIZING write (settlement order, not invocation order, is what persists last).
+        return Promise.resolve({ affected: 1 }).then(res => {
+          settleOrder.push(payload?.status ?? 'OTHER');
+          return res;
+        });
+      });
+
+      // Wrap the shared transaction mock so a test can record the delete transaction's commit point
+      // into the same settlement-order log (delete's "final mutation" is the row removal, not a
+      // status write, so it has no SessionStatus value to key on). The shared transaction mock is
+      // re-installed per test by beforeEach, so this override need not be restored.
+      const recordTxn = (mark: string): void => {
+        (dataSource.transaction as jest.Mock).mockImplementation(async (cb: (m: unknown) => Promise<unknown>) => {
+          const manager = {
+            save: jest.fn().mockImplementation((entity: unknown) => Promise.resolve(entity)),
+            remove: jest.fn().mockResolvedValue(undefined),
+            delete: jest.fn().mockResolvedValue({ affected: 0 }),
+          };
+          const res = await cb(manager);
+          settleOrder.push(mark);
+          return res;
+        });
+      };
+
+      // Clear any prior calls so the assertions below only see this start()'s lifecycle.
+      mockEngine.initialize.mockClear();
+
+      const startPromise = service.start('sess-uuid-1');
+      // Wait until the engine is registered (engines.set happens before the INITIALIZING write).
+      await waitFor(() => expect(intern().engines.has('sess-uuid-1')).toBe(true));
+      // The engine is in the map but initialize() must not have fired yet (it's gated behind the
+      // deferred INITIALIZING write).
+      expect(mockEngine.initialize).not.toHaveBeenCalled();
+
+      return { resolveInit, settleOrder, recordTxn, startPromise };
+    }
+
+    const expectNoInitializeAfterRetire = (): void => {
+      expect(mockEngine.initialize).not.toHaveBeenCalled();
+    };
+
+    it.each([
+      { action: 'stop' as const },
+      { action: 'logout' as const },
+      { action: 'delete' as const },
+      { action: 'forceKill' as const },
+    ])(
+      'pre-initialize: $action during the INITIALIZING write retires the engine without calling initialize',
+      async ({ action }) => {
+        const { resolveInit, settleOrder, recordTxn, startPromise } = await startUntilPreInit();
+        const oldEngine = intern().engines.get('sess-uuid-1');
+
+        // For delete, record its row-removal transaction commit into the settlement-order log so the
+        // ordering assertion below is meaningful (delete's final mutation is the transaction).
+        if (action === 'delete') recordTxn('DELETE_TXN');
+
+        // Kick off the control action while start() is parked behind the deferred INITIALIZING write.
+        // In the fixed service this awaits the captured engine's pending initial-status promise
+        // (blocked until resolveInit); in the buggy service it completes immediately. Either way it
+        // must retire the engine without initialize(). logout may reject if the mock unlink fails.
+        const control = ((): Promise<unknown> => {
+          switch (action) {
+            case 'stop':
+              return service.stop('sess-uuid-1');
+            case 'logout':
+              return service.logout('sess-uuid-1').catch(() => undefined);
+            case 'delete':
+              return service.delete('sess-uuid-1');
+            case 'forceKill':
+              return service.forceKill('sess-uuid-1');
+          }
+        })();
+
+        // Settle the delayed INITIALIZING write so any control action parked on the pending-status
+        // await can proceed, then let both control and start() finish. start() may reject (e.g. a
+        // post-init guard) — the control action owns the persisted outcome, so swallow that here.
+        resolveInit();
+        await control;
+        await startPromise.catch(() => undefined);
+        await waitFor(() => expect(intern().initializingSessions.has('sess-uuid-1')).toBe(false));
+
+        // The adapter was NEVER initialized — no fresh socket on a retired engine.
+        expectNoInitializeAfterRetire();
+
+        // The engine is retired: not in the map.
+        expect(intern().engines.get('sess-uuid-1')).not.toBe(oldEngine);
+        expect(intern().engines.has('sess-uuid-1')).toBe(false);
+
+        // Prove exact persisted ordering: the deferred INITIALIZING write settled BEFORE the control
+        // action's final persisted mutation (DISCONNECTED for stop/logout/forceKill, the row-removal
+        // transaction for delete). This is settlement order, not just the call set — the control
+        // action must remain the final persisted owner.
+        const initIdx = settleOrder.indexOf('INITIALIZING');
+        expect(initIdx).toBeGreaterThanOrEqual(0);
+        const finalMark = action === 'delete' ? 'DELETE_TXN' : SessionStatus.DISCONNECTED;
+        const finalIdx = settleOrder.lastIndexOf(finalMark);
+        expect(finalIdx).toBeGreaterThanOrEqual(0);
+        expect(initIdx).toBeLessThan(finalIdx);
+
+        // A retired start must leave no INITIALIZING persisted (the ordering assertion above), no
+        // reconnect timer, no error entry, and no concurrency slot. stop()/forceKill() intentionally
+        // leave the stop mark set (a later start() clears it), so that is not asserted here; delete()
+        // clears it in its finally.
+        expect(intern().initializingSessions.has('sess-uuid-1')).toBe(false);
+        expect(intern().reconnectStates.has('sess-uuid-1')).toBe(false);
+        expect(intern().sessionErrors.has('sess-uuid-1')).toBe(false);
+      },
+    );
+
+    it('pre-initialize: a swapped map record must not be initialized by the original pending-write path (identity fence)', async () => {
+      // The pending initial-status entry is keyed by id but carries the EXACT engine it belongs to.
+      // If the map record is replaced before the deferred INITIALIZING write settles, settling that
+      // write must NOT initialize the original (now-superseded) engine, and must NOT delete/await a
+      // pending entry belonging to a different engine. Guards a naive id-only implementation.
+      const { resolveInit, startPromise } = await startUntilPreInit();
+      const original = intern().engines.get('sess-uuid-1');
+
+      // Simulate a replacement swapping the live map record out from under the original engine.
+      const replacement = { ...mockEngine, initialize: jest.fn().mockResolvedValue(undefined) };
+      intern().engines.set('sess-uuid-1', replacement);
+
+      resolveInit();
+      await startPromise.catch(() => undefined);
+      await waitFor(() => expect(intern().initializingSessions.has('sess-uuid-1')).toBe(false));
+
+      // The original engine is no longer the live one, so its initialize() must NOT fire from the
+      // original start()'s post-write path (object-identity fence via isLiveEngine).
+      expect((original as { initialize: jest.Mock }).initialize).not.toHaveBeenCalled();
+      // The injected replacement was never driven by THIS start()'s deferred-write path either.
+      expect(replacement.initialize).not.toHaveBeenCalled();
     });
   });
 });

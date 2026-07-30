@@ -207,7 +207,15 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   async initialize(callbacks: EngineEventCallbacks): Promise<void> {
     this.callbacks = callbacks;
-    this.intentionalClose = false;
+    // Single-use after teardown: disconnect()/destroy()/forceDestroy()/logout() set this latch, and
+    // it must NOT be re-armed here. A retired adapter (e.g. one whose session was stopped/deleted
+    // during the service's pre-initialize window) would otherwise open a fresh socket no caller is
+    // tracking. A new adapter starts with the latch false, so the first initialize() proceeds; a
+    // later teardown leaves it true for the adapter's lifetime. connectInner() re-checks the latch
+    // after its auth/version awaits as a fence against teardown during those I/O steps.
+    if (this.intentionalClose) {
+      return;
+    }
     try {
       await this.connect();
     } catch (err) {
