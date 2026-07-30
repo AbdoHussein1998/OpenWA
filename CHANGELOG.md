@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-30
+
+The session-lifecycle security hardening release. Lifecycle endpoints, the
+logout operation, and plugin authorization now describe and enforce a single
+evidence-accurate contract: teardown fences fail closed, an unlink success
+reflects the engine-native operation plus local cleanup, and full plugin
+activation replacement requires an unrestricted ADMIN key. Several pre-existing
+races around engine teardown and re-initialization are closed.
+
 ### Added
 
 - **The whatsapp-web.js engine auto-dismisses a new account's "What's new on WhatsApp Web" onboarding
@@ -24,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message, satisfies a heading-only test; a control whose exact label is "Continue" sitting inside
   that same subtree is a shape the chat list does not produce. The heading match accepts the
   typographic apostrophe WhatsApp Web actually renders as well as the ASCII one.
+
+  **Limitation:** both halves of that match are English strings — the button label `Continue` and the
+  heading "What's new" — so the feature only works while WhatsApp Web renders the modal in English.
+  The rendered language follows the browser locale, which OpenWA does not set (no `--lang`, no
+  `Accept-Language` override), so in practice it is whatever the browser the image launches
+  (`PUPPETEER_EXECUTABLE_PATH`) defaults to rather than anything derived from the WhatsApp account.
+  If a deployment does get a localised modal, the probe finds nothing and does nothing: no
+  auto-dismissal, and no move to `action_required` either —
+  that deployment sees the pre-fix behaviour, where the companion is unlinked unless someone
+  acknowledges the modal in a browser signed in as that account. Matching every localisation would
+  mean carrying WhatsApp's own translation table for two strings it can change at will, so the
+  detector stays English-only and fails silent rather than guessing.
 
   A session leaves `ready` only when Continue has been clicked repeatedly and the modal is still
   there — evidence the click is not landing and a human has to acknowledge it on the phone. It then
@@ -54,13 +75,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as though it had sent one, which would have produced a success response and a `SESSION_LOGGED_OUT`
   audit row for a device still listed under Linked Devices.
 
-  If the engine's logout does not complete, the session is still torn down locally but the route
-  returns 502 — the unlink was not confirmed and no `SESSION_LOGGED_OUT` audit row is written
-  (#993). Whether the retry needs a QR scan depends on how it failed: an engine that refused the
-  logout sent and deleted nothing, so the credentials survive; an attempt that ran past the 10s
-  teardown deadline is still running, and on whatsapp-web.js it ends in the profile deletion a
-  successful unlink performs, so that session comes back with a fresh QR. `docs/06` spells both out.
-  It is additive: the stop, delete, and force-kill semantics are unchanged.
+  `200` means the engine-native unlink operation AND the required local credential cleanup both
+  completed — for Baileys a valid companion identity, an acknowledged `remove-companion-device` IQ
+  response, and removal of the on-disk auth dir; for whatsapp-web.js the native `Client.logout()`
+  promise settled. It is NOT an independent observation that the handset UI no longer shows the
+  device. Because a completed unlink wipes the stored credentials, reconnecting after a `200`
+  always requires a fresh QR scan or pairing code.
+
+  If the logout operation does not complete — no send, no acknowledgement, a timeout/transport
+  error, or a local-cleanup failure — the session is still stopped locally and `phone` is cleared,
+  but the route returns `502` with the stable `SESSION_LOGOUT_INCOMPLETE` code and no
+  `SESSION_LOGGED_OUT` audit row is written (#993). An explicit start is then required, and whether
+  the old credentials remain usable depends on the failure point; the route does not promise an
+  automatic retry or a guaranteed QR state. `docs/06` spells both cases out. The route itself is
+  additive, and the stop and delete semantics are unchanged; force-kill gains the same not-started
+  refusal (see the breaking note below).
 
 - **All five SDKs and the dashboard's API client gain the session logout operation** (#984). The
   JavaScript, Python, Go, PHP, and Java SDKs each expose a `logout` method mirroring the neighbouring
@@ -74,11 +103,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holder's Linked Devices list, and reconnecting requires a fresh QR scan or pairing code. It is
   labelled "Unlink" rather than "Logout" so it cannot be confused with the sidebar's own
   (authentication) logout. Unlink and Stop now derive their visibility from one shared definition of
-  "this session has a live engine", so the card can never offer an action the API rejects — and, in
-  the other direction, never offers Start to a session that is already started, which answers 400 and
-  then leaves a QR dialog open that cannot resolve. That definition now includes `authenticating`
-  (the whatsapp-web.js engine can hold it for 90 seconds) and `action_required`, neither of which
-  previously offered any working action. The confirmation dialog spells out both consequences (fresh QR to reconnect;
+  "this session has a live engine", so a card in one of those states cannot offer an action the API
+  rejects, nor offer Start to a session that is already started — which answers 400 and then leaves a
+  QR dialog open that cannot resolve. That definition now includes `authenticating` (the
+  whatsapp-web.js engine can hold it for 90 seconds) and `action_required`, neither of which
+  previously offered any working action. One gap remains, unchanged from previous releases: a
+  `disconnected` session keeps its engine registered for the duration of the automatic reconnect
+  backoff, and status alone cannot distinguish that from a stopped session with no engine — so Start
+  is still offered there and still answers 400. Closing it needs the API to publish whether an engine
+  is loaded, which is a separate change. The confirmation dialog spells out both consequences (fresh QR to reconnect;
   delete the session separately if local data should go too), and the 502 case — session stopped
   locally but the unlink unconfirmed by WhatsApp — surfaces as a warning toast with retry guidance
   instead of a plain error. Localized across all twelve dashboard locales.
@@ -111,10 +144,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   races an engine teardown against a 10s deadline, but the losing promise kept running — and
   `logout()`'s ends in an `fs.rm` of the session's on-disk profile, the same deterministic path a
   later `start()` re-creates. A `pupBrowser.close()` wedged past the deadline could therefore land
-  that `rm` on credentials written by a subsequent pairing. Losing `logout()` teardowns are now
-  tracked, and `start()`/`delete()` wait (bounded) for them to settle before touching the profile
-  path; a teardown still wedged past the bound no longer blocks the operator, and that residual
-  window is logged.
+  that `rm` on credentials written by a subsequent pairing. Losing teardowns are now tracked against
+  the session name, and `POST /sessions/:id/start` and `DELETE /sessions/:id` fail closed with a
+  retryable `409` (`SESSION_NAME_TEARDOWN_PENDING`) while a prior logout still owns destructive
+  cleanup for that name — they no longer touch the profile path or proceed anyway. The dashboard's
+  start path honours the refusal, so it never opens a QR modal that cannot resolve. On the rare
+  concurrent-logout case the engine may already be stopped to close the race, but the hook, DB
+  deletion and auth purge have not run; retrying the delete after cleanup settles completes it.
 
 - **`npm install` from source no longer fails on native Windows, and the whatsapp-web.js backport
   actually applies there** (#889, #1003). A unified diff's lines must begin with a space, `+`, `-` or `@`, so
@@ -191,6 +227,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   teardown. Non-managed profile names are dropped before reaching `DockerService` in both directions,
   so the start path cannot select an unrelated host container any more than teardown can.
 
+- **A session cannot be torn down before its engine has finished initializing.** The teardown path
+  previously ran against an engine handle that the initialize step had not yet produced, racing the
+  pre-init window; teardown is now retired until initialization reports an engine, so a stop/delete
+  that lands during startup cannot act on a handle that was never ready.
+
+- **An async disconnect is fenced by engine identity.** whatsapp-web.js raises its disconnect event
+  from a listener it never awaits, so a teardown that closed the browser could still deliver a stale
+  disconnect for the engine that was just destroyed. The disconnect handler now only acts when the
+  event belongs to the currently-loaded engine for that session, so a superseded client cannot drive
+  a lifecycle transition for its replacement.
+
+- **Stuck-auth recovery keeps its readiness budget across reconnects.** The 90-second
+  readiness-to-wipe budget that lets a stuck-auth self-heal clear and re-pair was reset on every
+  reconnect, so repeated short reconnects kept deferring the wipe and the session sat in
+  `authenticating` indefinitely. The budget is now hoisted above the reconnect loop, so it advances
+  across reconnects and the self-heal still fires.
+
+- **Force-kill no longer reports a kill it did not perform.** `POST /sessions/:id/force-kill` on a
+  session with no live engine used to answer `200` and write a `SESSION_FORCE_KILLED` audit row,
+  although there was no engine to SIGKILL — the audit trail recorded a recovery that never happened.
+  It now returns `400` with the same not-started message the logout route uses. ⚠️ This is a
+  behaviour change for existing callers: see the breaking note below. The side effect that call used
+  to have — writing `disconnected` over a stale row — moves to `POST /sessions/:id/stop`, which still
+  reconciles the status of a session with no live engine and remains the way to correct a row left
+  reading `ready` or `authenticating` after its engine was evicted.
+
+- **The dashboard reconciles session status from authoritative engine state.** Sessions-page
+  visibility and status now derive from one shared definition of "this session has a live engine",
+  the FAILED status no longer holds a concurrency slot (it is evicted by design, with no live engine
+  to offer actions against), force-kill is offered only while an engine-backed status exists, and
+  the logout `200`/`502` outcomes surface with matching evidence-level copy.
+
+- **Both bundled compose files forward the new plugin-download redirect flag.**
+  `PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS` (added in this release — see the https→http item under
+  Security) is read straight from the environment, so without a forward an operator could set it in
+  `.env` and see no effect on a Compose deployment: the container never received the variable. Both
+  `docker-compose.yml` and `docker-compose.dev.yml` now pass it through with its secure default
+  (`:-false`), so the documented opt-in is reachable. While the variable is unset nothing changes —
+  `:-false` and an absent variable are read identically. Once you do set it, spell it exactly `true`
+  or `false`: the value now reaches boot validation, which rejects anything else by name rather than
+  silently falling back, so a typo fails the boot instead of quietly choosing a security posture.
+  Note also that the *refusal* it opts out of is new in this release — see the Security item for the
+  upgrade impact.
+
+- **A caller's timeout now bounds the SSRF guard's own DNS resolution, and reports itself honestly.**
+  The guard resolves each host before connecting, and that step previously ignored the caller's
+  `AbortSignal` — it was bounded only by the guard's internal DNS deadline, which raises a blocked-URL
+  error. Redaction turns any such error into `Destination address is not allowed` for the client, so a
+  webhook or plugin-download timeout that landed during resolution was reported as though the
+  destination had failed the policy check. The signal is now honoured before and during the lookup and
+  its own reason propagates, so a timeout reads as a timeout, and one caller deadline covers the whole
+  chain including every redirect hop's resolution rather than each hop restarting a fresh DNS budget.
+
+- **The MCP adapter dependency is refreshed past a transitive advisory.** The bundled MCP SDK was
+  bumped past the Hono advisory in its dependency tree. The MCP adapter remains v1 and optional; the
+  refresh is a dependency-security change and does not alter the MCP wire contract.
+
 ### Security
 
 - Infrastructure routes (`/api/infra/*`) now reject API keys restricted to specific sessions.
@@ -199,9 +292,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Plugin installation and lifecycle routes (`/api/plugins/*`) now reject API keys restricted to
   specific sessions. Installing or enabling a plugin runs its code in the gateway process, which is
-  a deployment-wide action. Per-session plugin activation (`PUT /api/plugins/:id/sessions`) and
-  per-session config (`PUT /api/plugins/:id/config/:sessionId`) continue to accept restricted keys
-  and remain scoped to the sessions the key allows.
+  a deployment-wide action. Full plugin activation replacement (`PUT /api/plugins/:id/sessions`,
+  which overwrites the entire active set) now requires an unrestricted ADMIN key — sending `[]` or
+  a single session from a scoped key would otherwise delete every other tenant's activation, so a
+  scoped key receives `403` on that route. The per-session config route
+  (`PUT /api/plugins/:id/config/:sessionId`) continues to accept restricted keys and remains scoped
+  to the sessions the key allows.
 
 - The queue dashboard (`/api/admin/queues`, available when `QUEUE_ENABLED=true`) now refuses API keys
   restricted to specific sessions. The dashboard exposes and mutates every queue in the deployment
@@ -215,17 +311,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Redriving a dead-lettered integration delivery now fails closed for session-restricted keys when
   the integration instance no longer exists. Previously the scope check was skipped for a missing
   instance, so retained dead-letter rows could be re-dispatched for sessions outside the key's scope.
-  **Breaking (behavior):** the session-restricted-key denials in this section change behavior for
-  existing API consumers — a key carrying an `allowedSessions` list that previously reached these
-  deployment-global routes is now refused. Unrestricted keys are unaffected.
+  Scoped redrive additionally filters DLQ rows by the `sessionId` stored at provenance time against
+  the key's authorized binding, so each restricted key only ever re-dispatches its own sessions;
+  historical/legacy rows that carry no stored session remain available only to unrestricted redrive,
+  and the reported `remaining` depth is authority-filtered to match.
+
+- A pending credential teardown for a session name now fences its lifecycle with a retryable
+  `409` (`SESSION_NAME_TEARDOWN_PENDING`). `POST /sessions/:id/start` and `DELETE /sessions/:id`
+  refuse to run a destructive side effect while a prior logout still owns cleanup for that name,
+  closing the window where a wedged teardown could land on freshly re-paired credentials.
 
 - Outbound downloads that follow redirects (plugin packages and the plugin catalog) now validate
-  every redirect hop before connecting. Previously a redirect whose target was a bare IP address
-  bypassed the destination check, because the platform skips name resolution for address literals.
-  Redirect chains are also capped.
+  every redirect hop before connecting (hosts named in `SSRF_ALLOWED_HOSTS` remain the documented
+  opt-out). Previously a redirect whose target was a bare IP address bypassed the destination check,
+  because the platform skips name resolution for address literals. Redirect chains are also capped.
+
+- ⚠️ A redirect hop that downgrades `https` to plain `http` is now refused on those same download
+  paths. The payload is executable code, and an http hop exposes it to on-path substitution; the
+  previous implementation delegated redirect-following to the HTTP client and never inspected the
+  scheme of a hop, so such a chain was followed. A chain that starts on plain `http` is unaffected —
+  it was never secure to begin with — but an `http→https→http` chain is refused. **Upgrade impact:**
+  if your plugin or catalog host redirects an `https` URL to an `http` one, that download worked on
+  0.11.1 and now fails. `PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS=true` re-allows that specific hop;
+  it does not opt out of the other constraints on this path, which apply either way — every hop is
+  still re-checked before connecting (hosts named in `SSRF_ALLOWED_HOSTS` stay the documented
+  exception: deliberately neither resolved nor pinned), and the chain is still capped (at 5 hops,
+  where 0.11.1 inherited the HTTP client's limit of 20). Prefer checking whether the host can serve
+  the redirect target over https before setting it.
 
 - Added a build-time check that fails when a route acting on the whole deployment is added without
   refusing session-restricted API keys, so this class of gap cannot be reintroduced silently.
+
+- ⚠️ **Breaking (behavior).** Three refusals change behaviour for existing API consumers:
+
+  1. **`403` for session-restricted keys** on the deployment-global surfaces listed above — most
+     notably full plugin activation replacement (`PUT /api/plugins/:id/sessions`). Unrestricted keys
+     are unaffected.
+  2. **A retryable `409`** (`SESSION_NAME_TEARDOWN_PENDING`) from `POST /sessions/:id/start` and
+     `DELETE /sessions/:id` while a name-keyed credential teardown is still in flight. Applies to all
+     keys.
+  3. **`400` instead of `200`** from `POST /sessions/:id/force-kill` when the session has no live
+     engine. Applies to all keys.
+
+  **Migration.** For (1), use an unrestricted ADMIN key to manage plugin activation; the per-session
+  config route (`PUT /api/plugins/:id/config/:sessionId`) still accepts restricted keys. For (2),
+  treat the `409` as retryable and retry after a short delay — the body carries
+  `code: 'SESSION_NAME_TEARDOWN_PENDING'`, and no destructive side effect ran before the refusal.
+  For (3), read a force-kill `400` as "there was nothing to kill" rather than a failed recovery;
+  callers that used force-kill to reconcile a stale row should call `POST /sessions/:id/stop`
+  instead. Under SemVer 0.x these breaking changes bump the minor version.
 
 ## [0.11.1] - 2026-07-28
 
@@ -2757,7 +2891,7 @@ labelId)` instead of returning 501. WhatsApp-Business-only (rejects on personal 
 
 ### Security
 
-- Session scope is now enforced on the session-statistics overview and on per-session plugin activation, so an API key restricted to specific sessions can no longer read or change state for sessions outside its scope.
+- Session scope is now enforced on the session-statistics overview and on per-session plugin config, so an API key restricted to specific sessions can no longer read or change state for sessions outside its scope. (Full plugin activation replacement, `PUT /plugins/:id/sessions`, was later moved to unrestricted ADMIN in 0.12.0 — it replaces the entire active set, so a scoped key now receives `403` there; the per-session config route stays scoped.)
 
 ## [0.6.2] - 2026-06-23
 

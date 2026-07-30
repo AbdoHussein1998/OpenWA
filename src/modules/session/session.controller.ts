@@ -188,9 +188,9 @@ export class SessionController {
     description:
       'Unlink operation and required local cleanup completed; session is stopped and `phone` is ' +
       'cleared. Recorded in the audit log as `session_logged_out`.',
-    type: SessionResponseDto,
     content: {
       'application/json': {
+        schema: { $ref: '#/components/schemas/SessionResponseDto' },
         example: {
           id: '8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a',
           name: 'my-bot',
