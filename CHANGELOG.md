@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-08-01
+
 ### Changed
 
 - **The live engine is reachable through its own narrow port instead of through the session lifecycle
