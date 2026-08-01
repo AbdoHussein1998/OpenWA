@@ -5,11 +5,10 @@ import * as qrcode from 'qrcode';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import type * as BaileysLib from '@whiskeysockets/baileys';
-import type { WACallEvent, WAMessage, WASocket } from '@whiskeysockets/baileys';
-import { buildIncomingMessageFromBaileys, extractBaileysBody, mapBaileysStatus } from './baileys-message-mapper';
-import { buildEditedMessage } from './message-mapper';
+import type { WASocket } from '@whiskeysockets/baileys';
 import { BaileysChannels } from './baileys-channels';
 import { BaileysContacts } from './baileys-contacts';
+import { BaileysEvents } from './baileys-events';
 import { BaileysGroups } from './baileys-groups';
 import { BaileysHistory, toUnixSeconds } from './baileys-history';
 import { BaileysMessaging } from './baileys-messaging';
@@ -24,11 +23,8 @@ import {
   ContactCard,
   EngineEventCallbacks,
   EngineStatus,
-  EditedMessage,
   Group,
-  GroupEvent,
   GroupInfo,
-  IncomingCallEvent,
   IncomingMessage,
   IWhatsAppEngine,
   Label,
@@ -41,8 +37,6 @@ import {
   PollInput,
   Product,
   ProductQueryOptions,
-  ReactionEvent,
-  RevokedMessage,
   Status,
   StatusResult,
   ChatSummary,
@@ -50,19 +44,10 @@ import {
 } from '../interfaces/whatsapp-engine.interface';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
-import { CallNotFoundError } from '../../common/errors/call-not-found.error';
 import { createLogger } from '../../common/services/logger.service';
 import { BaileysAdapterConfig, BaileysLogger } from '../types/baileys.types';
 import { BaileysSessionStore } from './baileys-session-store';
-import {
-  capInboundMedia,
-  coerceDeclaredSize,
-  inboundMediaConcurrency,
-  inboundMediaMaxBytes,
-  inboundMediaTimeoutMs,
-  isMediaDownloadEnabled,
-  withInboundDownloadTimeout,
-} from './inbound-media-cap';
+import { inboundMediaConcurrency } from './inbound-media-cap';
 import { ConcurrencyLimiter } from '../../common/utils/concurrency-limiter';
 
 /** Linked-device identity shown in WhatsApp (Settings → Linked Devices). The display name is
@@ -176,6 +161,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
   private readonly statusOps: BaileysStatus;
   private readonly channels: BaileysChannels;
   private readonly history: BaileysHistory;
+  private readonly events: BaileysEvents;
   private sock: WASocket | null = null;
   private status: EngineStatus = EngineStatus.DISCONNECTED;
   private qrCode: string | null = null;
@@ -185,16 +171,15 @@ export class BaileysAdapter implements IWhatsAppEngine {
   private intentionalClose = false;
   private connecting = false;
   /** Unix-seconds timestamp of the last 'open' connection.update, used to distinguish a genuinely
-   *  live message misfiled as 'append' (see handleMessagesUpsert) from real history backfill. */
+   *  live message misfiled as 'append' (see BaileysEvents.handleMessagesUpsert) from real history backfill. */
   private connectedAt = 0;
   private reconnectAttempts = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
-  /** How long a received call's handle stays rejectable. Calls ring for roughly a minute, so
-   *  two minutes covers the ringing window with margin without pinning dead calls for long. */
-  private static readonly LIVE_CALL_TTL_MS = 2 * 60_000;
-  /** Live incoming calls by call id, holding the raw `from` JID sock.rejectCall() needs — the
-   *  call event is long gone by the time a reject arrives, so it must be cached at event time. */
-  private readonly liveCalls = new Map<string, { callFrom: string; expiresAt: number }>();
+  /** Live-call cache handle — the map is owned by the events delegate (call events + rejectCall);
+   *  lifecycle teardown clears it so a late rejectCall() reports not-found on a dead socket. */
+  private get liveCalls(): Map<string, { callFrom: string; expiresAt: number }> {
+    return this.events.liveCalls;
+  }
   /** Date.now() of the last close that scheduled a reconnect — input to the stability reset. */
   private lastConnectionCloseAt = 0;
   /** Lazily loaded @whiskeysockets/baileys module (ESM-only; loaded on first connect, not at boot). */
@@ -208,6 +193,35 @@ export class BaileysAdapter implements IWhatsAppEngine {
     // Isolate each session's auth state under its own subdirectory of the shared auth dir.
     this.authPath = path.join(config.authDir, config.sessionId);
     this.sessionStore = new BaileysSessionStore(config.lidMappingStore, config.sessionId);
+    // Constructed before messaging: the messaging delegate's own-send echo maps through
+    // events.mapMessage (and lifecycle teardown clears the live-call cache via the getter above).
+    // An object-literal getter's `this` is the literal itself, so the live connectedAt read goes
+    // through an arrow closure that captures the adapter.
+    const connectedAt = (): number => this.connectedAt;
+    this.events = new BaileysEvents({
+      getSocket: () => this.sock!,
+      getSocketOrNull: () => this.sock,
+      logger: this.logger,
+      toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
+      normalizedSelfJid: () => this.normalizedSelfJid(),
+      loadLib: () => this.loadLib(),
+      get connectedAt() {
+        return connectedAt();
+      },
+      inboundLimiter: this.inboundLimiter,
+      recordKeyLidMappings: key => this.sessionStore.recordKeyLidMappings(key),
+      recordMessage: msg => this.sessionStore.recordMessage(msg),
+      recordMessageEdit: (chatId, messageId, text) => this.sessionStore.recordMessageEdit(chatId, messageId, text),
+      putStoredMessage: msg => this.config.messageStore?.put(this.config.dbSessionId, msg),
+      getOnMessage: () => this.callbacks.onMessage,
+      getOnMessageCreate: () => this.callbacks.onMessageCreate,
+      getOnMessageRevoked: () => this.callbacks.onMessageRevoked,
+      getOnMessageEdited: () => this.callbacks.onMessageEdited,
+      getOnMessageReaction: () => this.callbacks.onMessageReaction,
+      getOnMessageAck: () => this.callbacks.onMessageAck,
+      getOnGroupEvent: () => this.callbacks.onGroupEvent,
+      getOnCall: () => this.callbacks.onCall,
+    });
     this.groups = new BaileysGroups({
       ensureReady: () => this.ensureReady(),
       getSocket: () => this.sock!,
@@ -228,7 +242,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       putStoredMessage: msg => this.config.messageStore?.put(this.config.dbSessionId, msg),
       getStoredMessage: messageId => this.config.messageStore?.getMessage(this.config.dbSessionId, messageId),
       getOnMessageCreate: () => this.callbacks.onMessageCreate,
-      mapMessage: (msg, contentType, opts) => this.mapMessage(msg, contentType, opts),
+      mapMessage: (msg, contentType, opts) => this.events.mapMessage(msg, contentType, opts),
     });
     this.contacts = new BaileysContacts({
       ensureReady: () => this.ensureReady(),
@@ -399,14 +413,14 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
     sock.ev.on('creds.update', () => void saveCreds());
     sock.ev.on('connection.update', update => this.handleConnectionUpdate(update));
-    sock.ev.on('messages.upsert', event => this.handleMessagesUpsert(event));
-    sock.ev.on('messages.update', updates => this.handleMessagesUpdate(updates));
+    sock.ev.on('messages.upsert', event => this.events.handleMessagesUpsert(event));
+    sock.ev.on('messages.update', updates => this.events.handleMessagesUpdate(updates));
     sock.ev.on('contacts.upsert', contacts => {
-      this.logContactEvent('contacts.upsert', contacts);
+      this.events.logContactEvent('contacts.upsert', contacts);
       this.sessionStore.upsertContacts(contacts);
     });
     sock.ev.on('contacts.update', updates => {
-      this.logContactEvent('contacts.update', updates);
+      this.events.logContactEvent('contacts.update', updates);
       this.sessionStore.upsertContacts(updates);
     });
     sock.ev.on('chats.upsert', chats => {
@@ -421,8 +435,8 @@ export class BaileysAdapter implements IWhatsAppEngine {
       });
       this.sessionStore.upsertChats(updates);
     });
-    sock.ev.on('group-participants.update', event => this.handleGroupParticipantsUpdate(event));
-    sock.ev.on('groups.update', updates => this.handleGroupsUpdate(updates));
+    sock.ev.on('group-participants.update', event => this.events.handleGroupParticipantsUpdate(event));
+    sock.ev.on('groups.update', updates => this.events.handleGroupsUpdate(updates));
     sock.ev.on('messaging-history.set', history => {
       this.sessionStore.upsertContacts(history.contacts);
       this.sessionStore.upsertChats(history.chats);
@@ -445,7 +459,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
     // WhatsApp pushes this when a lid<->phone mapping is learned (renamed from the pre-v7
     // 'chats.phoneNumberShare' event, whose { lid, jid } payload this shape directly replaces).
     sock.ev.on('lid-mapping.update', ({ lid, pn }) => this.sessionStore.addLidMappings([{ lid, pn }]));
-    sock.ev.on('call', calls => this.handleCallEvents(calls));
+    sock.ev.on('call', calls => this.events.handleCallEvents(calls));
   }
 
   private handleConnectionUpdate(update: {
@@ -1100,651 +1114,17 @@ export class BaileysAdapter implements IWhatsAppEngine {
   }
   /* eslint-enable @typescript-eslint/no-unused-vars */
 
-  // ----- Helpers -----
+  // ----- Events -----
 
-  private handleMessagesUpsert(event: { messages: WAMessage[]; type: string }): void {
-    for (const msg of event.messages) {
-      if (!msg.message || !msg.key?.remoteJid) {
-        continue; // protocol/empty messages carry no neutral content
-      }
-      if (event.type !== 'notify') {
-        // Baileys echoes back OUR OWN just-sent messages through this same 'append' path too, and
-        // sendContent() already emits onMessageCreate for those via emitOwnSendEcho() — always
-        // exclude fromMe here (unconditionally, regardless of timestamp) so that echo doesn't fire
-        // onMessageCreate a second time.
-        if (msg.key.fromMe === true) {
-          continue;
-        }
-        // For everyone else: gate on the message's own timestamp vs. this connection's open time,
-        // not the upsert batch's `type` tag. `type: 'append'` usually means real history-sync
-        // backfill, but Baileys can also tag a genuinely new CUSTOMER message 'append' when it
-        // arrives in the same window as a reconnect's state-sync handshake — a strict
-        // `type !== 'notify'` filter silently drops that message (observed as "the first message
-        // after a reconnect gets ignored"). A message sent AFTER this connection opened is live
-        // regardless of which tag the batch carries; true backfill always predates it.
-        if (toUnixSeconds(msg.messageTimestamp) < this.connectedAt) {
-          continue;
-        }
-      }
-      // Throttle through the limiter so a burst of media messages can't run unbounded parallel
-      // downloads (each a full decrypted buffer in heap). Ordering stays correct — the message store
-      // keeps the newest by timestamp. When the waiter queue is saturated we REJECT instead of parking
-      // forever, and re-process the message WITHOUT media: the message (body + metadata) is still
-      // emitted, but we skip the heap-heavy download that the limiter exists to bound.
-      void this.inboundLimiter
-        .run(() => this.processInboundMessage(msg))
-        .catch(() => {
-          this.logger.warn('Inbound media limiter saturated; emitting message without media', {
-            msgId: msg.key?.id ?? 'unknown',
-          });
-          return this.processInboundMessage(msg, { skipMedia: true });
-        });
-    }
-  }
-
-  /** Diagnostic: log a contacts event's size + whether records carry names/lids (and a small sample). */
-  private logContactEvent(
-    event: string,
-    records: Array<{
-      id?: string;
-      name?: string;
-      notify?: string;
-      verifiedName?: string;
-      lid?: string;
-      jid?: string;
-    }> = [],
-  ): void {
-    const list = records ?? [];
-    this.logger.debug('Baileys contacts event', {
-      action: 'baileys_contacts',
-      event,
-      count: list.length,
-      withName: list.filter(r => r.name || r.notify || r.verifiedName).length,
-      withLid: list.filter(r => r.lid).length,
-      sample: list.slice(0, 3).map(r => ({ id: r.id, name: r.name, notify: r.notify, lid: r.lid, jid: r.jid })),
-    });
-  }
-
-  private async processInboundMessage(msg: WAMessage, opts?: { skipMedia?: boolean }): Promise<void> {
-    try {
-      const b = await this.loadLib();
-      const remoteJid = msg.key.remoteJid!;
-      // Learn any lid->pn pair the key carries BEFORE canonicalizing ids below, so a fresh @lid
-      // sender resolves to its phone in this message and for later contact lookups (#362). The pairs
-      // also write through to the persistent lid->phone table via addLidMappings.
-      this.sessionStore.recordKeyLidMappings(msg.key);
-      // A live disappearing message (also viewOnce / documentWithCaption / edited) arrives wrapped, so the
-      // raw `getContentType` returns the OUTER wrapper key (e.g. 'ephemeralMessage') and downstream type/
-      // body/media/location detection would miss the real inner content. Normalize ONCE so the true inner
-      // type drives routing here AND mapMessage. normalizeMessageContent leaves protocolMessage and
-      // reactionMessage untouched, so the early-return branches below still match.
-      const normalizedRoot = b.normalizeMessageContent(msg.message ?? undefined) ?? msg.message ?? undefined;
-      const contentType = b.getContentType(normalizedRoot);
-
-      // --- protocolMessage REVOKE: don't emit onMessage ---
-      if (contentType === 'protocolMessage') {
-        const pm = msg.message?.protocolMessage;
-        if (pm?.type === b.proto.Message.ProtocolMessage.Type.REVOKE) {
-          const from = msg.key.fromMe === true ? this.normalizedSelfJid() : remoteJid;
-          const to = msg.key.fromMe === true ? remoteJid : this.normalizedSelfJid();
-          const revoked: RevokedMessage = {
-            id: pm.key?.id ?? '',
-            // The REVOKE protocolMessage's key points at the ORIGINAL deleted message,
-            // so `id` already IS the original here. Mirror it into `revokedId` so that
-            // field is the reliable cross-engine handle (wwebjs sets it separately).
-            revokedId: pm.key?.id ?? undefined,
-            chatId: this.sessionStore.toNeutralJid(remoteJid),
-            from: this.sessionStore.toNeutralJid(from),
-            to: this.sessionStore.toNeutralJid(to),
-            type: 'revoked',
-            body: '',
-            timestamp: toUnixSeconds(msg.messageTimestamp),
-          };
-          this.callbacks.onMessageRevoked?.(revoked);
-          return;
-        }
-        if (pm?.type === b.proto.Message.ProtocolMessage.Type.MESSAGE_EDIT) {
-          // MESSAGE_EDIT wraps the message's latest content. Normalize that INNER content separately
-          // so captions, type, PTT, media presence and mentions describe the edited value rather than
-          // the outer protocol envelope.
-          const normalizedEdited = b.normalizeMessageContent(pm.editedMessage ?? undefined) ?? pm.editedMessage ?? {};
-          const editedContentType = b.getContentType(normalizedEdited);
-          const editedSubMessage =
-            normalizedEdited.extendedTextMessage ??
-            normalizedEdited.imageMessage ??
-            normalizedEdited.videoMessage ??
-            normalizedEdited.audioMessage ??
-            normalizedEdited.documentMessage ??
-            normalizedEdited.stickerMessage ??
-            normalizedEdited.locationMessage;
-          const contextInfo = editedSubMessage?.contextInfo;
-          const base = buildIncomingMessageFromBaileys(
-            {
-              id: pm.key?.id ?? '',
-              remoteJid,
-              fromMe: msg.key.fromMe === true,
-              participant: msg.key.participant ?? undefined,
-              body: extractBaileysBody(normalizedEdited),
-              contentType: editedContentType,
-              isPtt: normalizedEdited.audioMessage?.ptt === true,
-              timestamp: this.toEditUnixSeconds(pm.timestampMs, msg.messageTimestamp),
-              selfJid: this.normalizedSelfJid(),
-              mentionedJids: contextInfo?.mentionedJid ?? undefined,
-            },
-            jid => this.sessionStore.toNeutralJid(jid),
-          );
-          const hasMedia =
-            editedContentType === 'imageMessage' ||
-            editedContentType === 'videoMessage' ||
-            editedContentType === 'audioMessage' ||
-            editedContentType === 'documentMessage' ||
-            editedContentType === 'documentWithCaptionMessage' ||
-            editedContentType === 'stickerMessage';
-          const edited: EditedMessage = buildEditedMessage(base, hasMedia);
-          this.sessionStore.recordMessageEdit(remoteJid, edited.messageId, edited.body);
-          this.callbacks.onMessageEdited?.(edited);
-          return;
-        }
-        // Other protocol messages (ephemeral, history sync, etc.) — skip silently.
-        return;
-      }
-
-      // --- reactionMessage: don't emit onMessage ---
-      if (contentType === 'reactionMessage') {
-        const rm = msg.message?.reactionMessage;
-        const event: ReactionEvent = {
-          messageId: rm?.key?.id ?? '',
-          chatId: this.sessionStore.toNeutralJid(remoteJid),
-          reaction: rm?.text ?? '',
-          senderId: this.sessionStore.toNeutralJid(msg.key.participant ?? remoteJid),
-        };
-        this.callbacks.onMessageReaction?.(event);
-        return;
-      }
-
-      // --- Normal message: enrich + emit ---
-      const incoming = await this.mapMessage(msg, contentType, { skipMediaDownload: opts?.skipMedia });
-      if (msg.key.fromMe === true) {
-        this.callbacks.onMessageCreate?.(incoming);
-      } else {
-        this.callbacks.onMessage?.(incoming);
-      }
-      void this.config.messageStore?.put(this.config.dbSessionId, msg).catch(err =>
-        this.logger.warn('Failed to persist message to store', {
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-      this.sessionStore.recordMessage(msg);
-    } catch (err) {
-      this.logger.error(
-        `Unhandled error processing inbound message (id=${msg.key?.id ?? 'unknown'}); dropping`,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  }
-
-  private handleMessagesUpdate(
-    updates: Array<{ key?: { id?: string | null }; update?: { status?: number | null } }>,
-  ): void {
-    for (const u of updates) {
-      const status = mapBaileysStatus(u.update?.status);
-      if (status && u.key?.id) {
-        this.callbacks.onMessageAck?.(u.key.id, status);
-      }
-    }
-  }
-
-  /**
-   * Baileys `group-participants.update`: a membership change. Only add/remove map to the neutral
-   * join/leave kinds — promote/demote (and 'modify', a phone-number-change rewrite) change no
-   * membership and are skipped. The event carries no timestamp, so it is stamped at receipt.
-   */
-  private handleGroupParticipantsUpdate(event: {
-    id?: string;
-    author?: string;
-    authorPn?: string;
-    participants?: unknown[];
-    action?: string;
-  }): void {
-    const kind = event.action === 'add' ? 'join' : event.action === 'remove' ? 'leave' : undefined;
-    if (!kind || !event.id) {
-      return;
-    }
-    const participantIds = (Array.isArray(event.participants) ? event.participants : [])
-      .map(entry => this.toNeutralGroupParticipantId(entry))
-      .filter((jid): jid is string => jid !== null);
-    const payload: GroupEvent = {
-      kind,
-      groupId: this.sessionStore.toNeutralJid(event.id),
-      participantIds,
-      timestamp: Math.floor(Date.now() / 1000),
-    };
-    // authorPn is the phone-dialect twin of a lid author: prefer it so the neutral actor id does
-    // not depend on whether the lid->pn mapping happens to be learned yet.
-    const actor = event.authorPn ?? event.author;
-    if (actor) {
-      payload.actorId = this.sessionStore.toNeutralJid(actor);
-    }
-    this.callbacks.onGroupEvent?.(payload);
-  }
-
-  /**
-   * Baileys `groups.update`: partial group metadata. Each entry becomes one neutral 'update'
-   * GroupEvent with `changes` filled from whichever of subject/desc/announce/restrict it carries
-   * (desc → description, restrict → locked). Entries about fields the neutral shape does not model
-   * (inviteCode, memberAddMode, joinApprovalMode, ...) still emit with empty changes — parity with
-   * the wwebjs adapter, which emits uninterpretable updates the same way rather than dropping them.
-   *
-   * The same event also carries FULL metadata snapshots: groupFetchAllParticipating() emits its
-   * entire result set through it (Socket/groups.js:56 `sock.ev.emit('groups.update', ...)`), and
-   * this adapter calls that on every connect (hydrateNames) and every REST getGroups(). Real deltas
-   * (Utils/process-message.js emitGroupUpdate) carry only `{id, ...oneChangedField, author?}`;
-   * snapshots are recognized by their full-metadata markers (participants/creation/subjectTime/
-   * owner/size) and skipped — otherwise every reconnect / GET /groups would flood consumers with
-   * bogus group.update webhooks whose `changes` were fabricated from the snapshot.
-   */
-  private handleGroupsUpdate(
-    updates: Array<{
-      id?: string;
-      subject?: string;
-      desc?: string;
-      announce?: boolean;
-      restrict?: boolean;
-      author?: string;
-      authorPn?: string;
-      // Full-snapshot markers (extractGroupMetadata); the values are unused — presence is the signal.
-      participants?: unknown;
-      creation?: unknown;
-      subjectTime?: unknown;
-      owner?: unknown;
-      size?: unknown;
-    }>,
-  ): void {
-    for (const update of Array.isArray(updates) ? updates : []) {
-      if (!update?.id) {
-        continue;
-      }
-      // Skip full-metadata snapshots (see the docblock): only real deltas become GroupEvents.
-      if ('participants' in update || 'creation' in update || 'subjectTime' in update || 'owner' in update) {
-        continue;
-      }
-      const changes: NonNullable<GroupEvent['changes']> = {};
-      if (typeof update.subject === 'string') changes.subject = update.subject;
-      if (typeof update.desc === 'string') changes.description = update.desc;
-      if (typeof update.announce === 'boolean') changes.announce = update.announce;
-      if (typeof update.restrict === 'boolean') changes.locked = update.restrict;
-      const payload: GroupEvent = {
-        kind: 'update',
-        groupId: this.sessionStore.toNeutralJid(update.id),
-        participantIds: [],
-        changes,
-        timestamp: Math.floor(Date.now() / 1000),
-      };
-      const actor = update.authorPn ?? update.author;
-      if (actor) {
-        payload.actorId = this.sessionStore.toNeutralJid(actor);
-      }
-      this.callbacks.onGroupEvent?.(payload);
-    }
-  }
-
-  /**
-   * Baileys `call` events carry the whole call lifecycle; only the `offer` status is a NEW incoming
-   * call (ringing/preaccept/timeout/reject/accept/terminate are progress and hang-up updates and
-   * are skipped). Offline-replayed offers (missed-while-disconnected) and the account's own
-   * outgoing calls are skipped too. The raw `from` JID is cached keyed by call id —
-   * sock.rejectCall() needs it verbatim later, when the event itself is long gone.
-   */
-  private handleCallEvents(calls: WACallEvent[]): void {
-    for (const call of Array.isArray(calls) ? calls : []) {
-      if (!call || call.status !== 'offer' || !call.id || !call.from) {
-        continue;
-      }
-      // Baileys replays offers for calls missed while disconnected with offline: true
-      // (Socket/messages-recv.js:1458 `offline: !!attrs.offline`; WACallEvent.offline is
-      // non-optional). Those calls are long dead — emitting call.received (and, with
-      // autoRejectCalls, rejecting a stale call) would be wrong, so drop them before caching.
-      if (call.offline) {
-        continue;
-      }
-      // WACallEvent has no fromMe flag, but WhatsApp can relay the account's own outgoing-call
-      // signaling — skip a call whose from/chatId is ourselves (the wwjs adapter's call.fromMe
-      // guard). Null-safe: with no socket user there is no own id to compare, so nothing is skipped.
-      const selfJid = this.normalizedSelfJid();
-      if (selfJid) {
-        const self = this.sessionStore.toNeutralJid(selfJid);
-        if (
-          this.sessionStore.toNeutralJid(call.from) === self ||
-          this.sessionStore.toNeutralJid(call.chatId) === self
-        ) {
-          continue;
-        }
-      }
-      // Baileys maps both the `offer` and `offer_notice` wire tags onto status 'offer' carrying the
-      // same call-id, so a single call can reach this loop more than once. Cache first and emit
-      // only for an id not already live, otherwise one call surfaces as several `call.received`
-      // events.
-      if (!this.cacheLiveCall(call.id, call.from)) {
-        continue;
-      }
-      const payload: IncomingCallEvent = {
-        callId: call.id,
-        // callerPn is the phone-dialect twin of a lid caller: prefer it so the neutral caller id
-        // does not depend on whether the lid->pn mapping happens to be learned yet (same rule as
-        // the group actor ids above).
-        from: this.sessionStore.toNeutralJid(call.callerPn ?? call.from),
-        isVideo: call.isVideo === true,
-        isGroup: call.isGroup === true,
-        // The event carries a real Date; fall back to receipt time when absent/unparseable.
-        timestamp:
-          call.date instanceof Date && !Number.isNaN(call.date.getTime())
-            ? Math.floor(call.date.getTime() / 1000)
-            : Math.floor(Date.now() / 1000),
-      };
-      this.callbacks.onCall?.(payload);
-    }
-  }
-
-  /**
-   * Cache a ringing call's raw caller JID for a later rejectCall(). Lazy expiry: inserting a new
-   * call drops already-expired entries, so a session that receives calls but never rejects them
-   * can't grow the map without bound; an entry that never sees another call is tiny and is dropped
-   * on teardown (disconnect/logout/destroy) or at the next call. No per-entry timer to clean up.
-   *
-   * Returns true when `callId` was not already ringing, which is what makes `call.received` fire
-   * once per call rather than once per upstream offer tag. A repeat offer still refreshes the
-   * entry, so a long-ringing call stays rejectable for a full TTL from the most recent signal.
-   */
-  private cacheLiveCall(callId: string, callFrom: string): boolean {
-    const now = Date.now();
-    for (const [id, entry] of this.liveCalls) {
-      if (entry.expiresAt <= now) {
-        this.liveCalls.delete(id);
-      }
-    }
-    const isNewCall = !this.liveCalls.has(callId);
-    this.liveCalls.set(callId, { callFrom, expiresAt: now + BaileysAdapter.LIVE_CALL_TTL_MS });
-    return isNewCall;
-  }
-
-  /**
-   * Reject a currently-ringing call. The entry is evicted on ANY attempt (a rejected/ended call
-   * will not become rejectable again); an unknown id or an expired entry maps to CallNotFoundError
-   * (HTTP 404). A failure of the library's rejectCall() itself propagates as-is.
-   */
   async rejectCall(callId: string): Promise<void> {
-    const entry = this.liveCalls.get(callId);
-    this.liveCalls.delete(callId);
-    if (!entry || entry.expiresAt <= Date.now()) {
-      throw new CallNotFoundError(callId);
-    }
-    if (!this.sock) {
-      throw new EngineNotReadyError('Cannot reject a call before the engine is initialized.');
-    }
-    await this.sock.rejectCall(callId, entry.callFrom);
+    return this.events.rejectCall(callId);
   }
 
-  /**
-   * Coerce one `group-participants.update` entry to a neutral user id. Since Baileys v7 the entries
-   * are parsed JSON objects (`{ id, phoneNumber?, lid?, ... }`, see Socket/messages-recv.js), not
-   * plain JID strings: prefer the phone JID when present (a lid `id` with a known phone resolves to
-   * the same neutral @c.us via the mapping, but the inline phoneNumber needs no lookup), then the
-   * bare id, then the lid. Plain-string entries (the pre-v7 shape) pass through the same normalizer.
-   */
-  private toNeutralGroupParticipantId(entry: unknown): string | null {
-    if (typeof entry === 'string') {
-      return entry ? this.sessionStore.toNeutralJid(entry) : null;
-    }
-    if (entry && typeof entry === 'object') {
-      const e = entry as { phoneNumber?: unknown; id?: unknown; lid?: unknown };
-      const jid = [e.phoneNumber, e.id, e.lid].find((v): v is string => typeof v === 'string' && v.length > 0);
-      return jid ? this.sessionStore.toNeutralJid(jid) : null;
-    }
-    return null;
-  }
-
-  /**
-   * Download inbound media via a stream, accumulating chunks but ABORTING (destroy + discard) once the
-   * running total exceeds `maxBytes`. Returns null on abort. Uses `downloadMediaMessage(..., 'stream')`
-   * (not the raw `downloadContentFromMessage`) so the library's expired-media re-upload retry is kept;
-   * for under-cap media the concatenated buffer is byte-identical to the 'buffer' mode it replaces.
-   */
-  private async downloadInboundMediaCapped(msg: WAMessage, maxBytes: number): Promise<Buffer | null> {
-    // Hold the stream handle in the outer scope so the timeout can destroy it. A genuine
-    // download/read error still rejects (propagating to the caller's catch as before); only a
-    // wall-clock timeout or the byte-cap overflow resolves to null.
-    let stream: (AsyncIterable<Buffer> & { destroy?: () => void }) | undefined;
-    const download = (async (): Promise<Buffer | null> => {
-      const b = await this.loadLib();
-      stream = (await b.downloadMediaMessage(
-        msg,
-        'stream',
-        {},
-        {
-          logger: createSilentLogger(),
-          reuploadRequest: this.sock!.updateMediaMessage,
-        },
-      )) as AsyncIterable<Buffer> & { destroy?: () => void };
-
-      const chunks: Buffer[] = [];
-      let total = 0;
-      for await (const chunk of stream) {
-        total += chunk.length;
-        if (total > maxBytes) {
-          stream.destroy?.();
-          return null;
-        }
-        chunks.push(chunk);
-      }
-      return Buffer.concat(chunks);
-    })();
-
-    // A slow/trickling sender never trips the byte cap, so without a deadline it pins a concurrency
-    // slot (and, on Baileys, the whole inbound handler) indefinitely. On timeout, destroy the stream
-    // and treat it as no usable media (same null the cap-abort returns).
-    return withInboundDownloadTimeout(download, inboundMediaTimeoutMs(), () => stream?.destroy?.());
-  }
-
-  private async mapMessage(
-    msg: WAMessage,
-    contentType: string | undefined,
-    opts?: { skipMediaDownload?: boolean },
-  ): Promise<IncomingMessage> {
-    const b = await this.loadLib();
-    const content = msg.message ?? {};
-    // Read body/isPtt off the NORMALIZED content: a disappearing message (ephemeralMessage), a captioned
-    // document (documentWithCaptionMessage) and viewOnce/edited wrappers nest the real text/caption under
-    // an inner message, so the raw wrapper exposes none at top level. Identity no-op when unwrapped.
-    const normalized = b.normalizeMessageContent(content) ?? content;
-
-    // Body: text first, then media caption, then WhatsApp Business interactive shapes (#562).
-    const body = extractBaileysBody(normalized);
-
-    // --- location ---
-    // ILocationMessage has name/address; ILiveLocationMessage does not — use the static variant only.
-    let location: IncomingMessage['location'];
-    if (contentType === 'locationMessage' || contentType === 'liveLocationMessage') {
-      // Read off the NORMALIZED content: an ephemeral/disappearing-chat location nests under the wrapper,
-      // so the raw `content.locationMessage` is undefined and the coordinates would be silently dropped.
-      const lm = normalized.locationMessage ?? normalized.liveLocationMessage;
-      if (lm) {
-        const staticLm = normalized.locationMessage; // only ILocationMessage has name/address
-        location = {
-          latitude: lm.degreesLatitude ?? 0,
-          longitude: lm.degreesLongitude ?? 0,
-          description: staticLm?.name ?? undefined,
-          address: staticLm?.address ?? undefined,
-        };
-      }
-    }
-
-    // --- media (image / video / audio / document / sticker) ---
-    let media: IncomingMessage['media'];
-    const isMediaType =
-      contentType === 'imageMessage' ||
-      contentType === 'videoMessage' ||
-      contentType === 'audioMessage' ||
-      contentType === 'documentMessage' ||
-      contentType === 'documentWithCaptionMessage' ||
-      contentType === 'stickerMessage';
-    if (isMediaType) {
-      // The outbound "sent" echo passes skipMediaDownload: the sender already holds the media, and for
-      // parity with the wwjs message.sent (which carries no media buffer) we emit only the marker here.
-      if (opts?.skipMediaDownload || !isMediaDownloadEnabled()) {
-        // Emit the omitted marker so the media field is present (webhook/n8n/dashboard contract).
-        // mimetype is available pre-download from the message content.
-        const normalizedContent = b.normalizeMessageContent(content) ?? content;
-        const subMessage =
-          normalizedContent.imageMessage ??
-          normalizedContent.videoMessage ??
-          normalizedContent.audioMessage ??
-          normalizedContent.documentMessage ??
-          normalizedContent.stickerMessage;
-        media = {
-          mimetype: subMessage?.mimetype ?? '',
-          filename: normalizedContent.documentMessage?.fileName ?? undefined,
-          omitted: true,
-          sizeBytes: coerceDeclaredSize(subMessage?.fileLength),
-        };
-      } else {
-        // normalizeMessageContent unwraps documentWithCaptionMessage / viewOnceMessage / ephemeralMessage
-        // so we reach the inner media sub-message — needed BEFORE download for the declared-size pre-gate.
-        const normalizedContent = b.normalizeMessageContent(content) ?? content;
-        const subMessage =
-          normalizedContent.imageMessage ??
-          normalizedContent.videoMessage ??
-          normalizedContent.audioMessage ??
-          normalizedContent.documentMessage ??
-          normalizedContent.stickerMessage;
-        const mimetype = subMessage?.mimetype ?? '';
-        const filename = normalizedContent.documentMessage?.fileName ?? undefined;
-        const maxBytes = inboundMediaMaxBytes();
-        const declared = coerceDeclaredSize(subMessage?.fileLength);
-
-        if (declared > maxBytes) {
-          // Pre-download gate: an honest over-cap sender's media is never decrypted into heap at all
-          // (Baileys integrity-checks content against the declared size, so this is a robust bound).
-          media = { mimetype, filename, omitted: true, sizeBytes: declared };
-          this.logger.warn('Inbound media declared size exceeds MEDIA_DOWNLOAD_MAX_BYTES; skipped download', {
-            msgId: msg.key.id,
-            sizeBytes: declared,
-          });
-        } else {
-          try {
-            // Stream-download with a running-total abort so a sender who understates fileLength still
-            // can't materialise an over-cap blob. For under-cap media this yields the identical buffer.
-            const buf = await this.downloadInboundMediaCapped(msg, maxBytes);
-            if (buf === null) {
-              media = { mimetype, filename, omitted: true, sizeBytes: maxBytes };
-              this.logger.warn(
-                'Inbound media download aborted (over MEDIA_DOWNLOAD_MAX_BYTES or past MEDIA_DOWNLOAD_TIMEOUT_MS); emitting omitted marker',
-                { msgId: msg.key.id },
-              );
-            } else {
-              // capInboundMedia is the last line (lazy base64, never persist/webhook/broadcast an over-cap
-              // blob); the real heap bound is the pre-gate + streaming abort + concurrency limiter.
-              media = capInboundMedia({
-                mimetype,
-                filename,
-                sizeBytes: buf.byteLength,
-                toBase64: () => buf.toString('base64'),
-              });
-            }
-          } catch (err) {
-            this.logger.debug('Failed to download inbound media; emitting message without media', {
-              error: err instanceof Error ? err.message : String(err),
-              msgId: msg.key.id,
-            });
-          }
-        }
-      }
-    }
-
-    // --- quoted message + disappearing-messages timer ---
-    let quotedMessage: IncomingMessage['quotedMessage'];
-    // Read context off the NORMALIZED content: a live disappearing message arrives wrapped in
-    // `ephemeralMessage` (also viewOnce / documentWithCaption), whose inner content carries the
-    // contextInfo. The raw wrapper exposes none at top level, so both the quote and the timer
-    // (`contextInfo.expiration`) would be missed if we read the raw content here.
-    const normalizedForContext = b.normalizeMessageContent(content) ?? content;
-    const subForContext =
-      normalizedForContext.extendedTextMessage ??
-      normalizedForContext.imageMessage ??
-      normalizedForContext.videoMessage ??
-      normalizedForContext.audioMessage ??
-      normalizedForContext.documentMessage ??
-      normalizedForContext.stickerMessage ??
-      normalizedForContext.locationMessage;
-    // A text status's styling rides on the extended-text content (proto backgroundArgb/font) —
-    // surface it so the store/viewer can render the story the way it was posted.
-    const extText = normalizedForContext.extendedTextMessage;
-    const contextInfo = (
-      subForContext as
-        | {
-            contextInfo?: {
-              stanzaId?: string | null;
-              quotedMessage?: Record<string, unknown> | null;
-              expiration?: number | null;
-              mentionedJid?: string[] | null;
-            };
-          }
-        | undefined
-    )?.contextInfo;
-    if (contextInfo?.quotedMessage && contextInfo.stanzaId) {
-      const qm = contextInfo.quotedMessage as {
-        conversation?: string | null;
-        extendedTextMessage?: { text?: string | null } | null;
-        imageMessage?: { caption?: string | null } | null;
-        videoMessage?: { caption?: string | null } | null;
-        documentMessage?: { caption?: string | null } | null;
-      };
-      const qBody =
-        qm.conversation ??
-        qm.extendedTextMessage?.text ??
-        qm.imageMessage?.caption ??
-        qm.videoMessage?.caption ??
-        qm.documentMessage?.caption ??
-        '';
-      quotedMessage = { id: contextInfo.stanzaId, body: qBody };
-    }
-
-    return buildIncomingMessageFromBaileys(
-      {
-        id: msg.key.id ?? '',
-        remoteJid: msg.key.remoteJid!,
-        fromMe: msg.key.fromMe === true,
-        participant: msg.key.participant ?? undefined,
-        body,
-        contentType,
-        isPtt: normalized.audioMessage?.ptt === true,
-        timestamp: toUnixSeconds(msg.messageTimestamp),
-        pushName: msg.pushName ?? undefined,
-        selfJid: this.normalizedSelfJid(),
-        media,
-        location,
-        quotedMessage,
-        ephemeralDuration: contextInfo?.expiration ?? undefined,
-        mentionedJids: contextInfo?.mentionedJid ?? undefined,
-        backgroundArgb: typeof extText?.backgroundArgb === 'number' ? extText.backgroundArgb : undefined,
-        font: typeof extText?.font === 'number' ? extText.font : undefined,
-      },
-      jid => this.sessionStore.toNeutralJid(jid),
-    );
-  }
+  // ----- Helpers -----
 
   private normalizedSelfJid(): string {
     const phone = this.extractPhone(this.sock?.user?.id);
     return phone ? `${phone}@s.whatsapp.net` : '';
-  }
-
-  /** Protocol-message edit timestamps are milliseconds; the enclosing message timestamp is seconds. */
-  private toEditUnixSeconds(
-    timestampMs: number | { toNumber(): number } | null | undefined,
-    fallback: number | { toNumber(): number } | null | undefined,
-  ): number {
-    if (timestampMs == null) return toUnixSeconds(fallback);
-    const milliseconds = typeof timestampMs === 'number' ? timestampMs : timestampMs.toNumber();
-    return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : toUnixSeconds(fallback);
   }
 
   private unsupported(method: string): Promise<any> {
