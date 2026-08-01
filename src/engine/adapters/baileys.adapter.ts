@@ -491,7 +491,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       this.connectedAt = Math.floor(Date.now() / 1000) - 10;
       this.setStatus(EngineStatus.READY);
       this.callbacks.onReady?.(this.phoneNumber ?? '', this.pushName ?? '');
-      // Backfill names the initial sync skipped (see hydrateNames).
+      // Backfill names the initial sync skipped (see BaileysHistory.hydrateNames).
       void this.history.hydrateNames();
     }
 

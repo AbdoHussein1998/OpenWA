@@ -1,9 +1,5 @@
 import type { WASocket } from '@whiskeysockets/baileys';
-import {
-  Group,
-  GroupInfo,
-  ParticipantOperationResult,
-} from '../interfaces/whatsapp-engine.interface';
+import { Group, GroupInfo, ParticipantOperationResult } from '../interfaces/whatsapp-engine.interface';
 import { mapBaileysGroup, mapBaileysGroupInfo } from './baileys-group-mapper';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
@@ -68,9 +64,7 @@ export class BaileysGroups {
     this.host.ensureReady();
     const all = await this.sock().groupFetchAllParticipating();
     const self = this.host.normalizedSelfJid();
-    return Object.values(all).map(metadata =>
-      mapBaileysGroup(metadata, self, jid => this.host.toNeutralJid(jid)),
-    );
+    return Object.values(all).map(metadata => mapBaileysGroup(metadata, self, jid => this.host.toNeutralJid(jid)));
   }
 
   async getGroupInfo(groupId: string): Promise<GroupInfo | null> {
