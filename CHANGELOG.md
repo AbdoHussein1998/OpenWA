@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-08-01
+
 ### Fixed
 
 - **A plugin whose code is missing can now be switched off.** `enabledByOperator` is the standing
@@ -15,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is exactly the state an install lands in when its package directory is gone: an interrupted update,
   or a directory that was never on the data volume. The registry entry survives with its config,
   `ctx.storage` and the enable decision intact, so reinstalling the code brought the plugin straight
-  back up and no API call could prevent it. The only ways out were uninstalling, which also deletes
-  the plugin's stored data, or hand-editing `registry.json`.
+  back up and no API call could prevent it. The only way out was hand-editing `registry.json`:
+  `DELETE /api/plugins/{id}` answers 404 in the same state and for the same reason, so uninstalling
+  was not an escape either.
 
   `disable` records intent rather than performing a runtime operation, so it now clears the decision
   against the registry when the plugin is not loaded and reports
@@ -37,15 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but never cleared. Setting any of them in `data/.env.generated` — a file the first-run header
   invites operators to edit directly — did nothing, with no error and no warning.
 
-  `AUTO_START_SESSIONS` is the one that got noticed. It gained its compose forward in 0.12.0; in
-  0.11.1 and earlier the variable had no route into the container at all, which is why the flag
-  appeared inert across the 0.7–0.11 range. Adding the forward without the matching clear entry
-  relocated the failure instead of ending it: the flag still resolved to off, `SessionService`'s
-  bootstrap hook returned before it looked at a single session, and previously authenticated sessions
-  stayed at `disconnected` with no engine ever created and a null `lastError`. (#981)
+  `AUTO_START_SESSIONS` is the one that got noticed, and it is worth being precise about the shape of
+  the regression. The bundled *production* compose gained its forward in 0.12.0 — before that it had
+  none, so an operator's `data/.env.generated` supplied the flag unobstructed, because there was no
+  blank value to shadow it. (The *dev* compose has forwarded it since 0.10.0, defaulting it to `true`.)
+  Adding the production forward without the matching clear entry therefore did not relocate an older
+  failure; it switched off the one route that had been working. The flag resolved to off,
+  `SessionService`'s bootstrap hook returned before it looked at a single session, and previously
+  authenticated sessions stayed at `disconnected` with no engine ever created and a null
+  `lastError`. (#981)
 
-  The clear list is now covered by a test that derives the expected set from `docker-compose.yml`
-  itself, so a forward added without its clear entry fails in CI rather than shipping inert.
+  The clear list is now covered by a test that derives the expected set from `docker-compose.yml` and
+  `docker-compose.dev.yml`, so a forward added without its clear entry fails in CI rather than
+  shipping inert.
 
 - **Restarting from Dashboard > Infrastructure no longer reloads the page into an error.** The restart
   modal polls the server and reloads once it answers, but it polled `GET /api/infra/health` — a plain
@@ -77,11 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copying `.env.generated` into the archive without ever reading it.
 
   Both scripts now resolve through the same three layers, in the application's order, so an explicit
-  environment value still wins. Only plain `KEY=value` lines are honoured: a value carrying quotes or
-  a trailing `#` comment is reported and skipped rather than guessed at, because a silently
-  mis-parsed path is the failure being fixed. The Postgres connection details `pg_dump` uses resolve
-  the same way, so a dashboard-provisioned database no longer needs its credentials restated in the
-  operator's shell.
+  environment value still wins. Only plain `KEY=value` lines are honoured: a value containing a quote
+  or a `#` anywhere is reported on stderr and skipped rather than guessed at, because a silently
+  mis-parsed path is the failure being fixed. That is deliberately broader than trailing comments — a
+  password containing `#` is skipped too, loudly, and must be passed in the environment. The Postgres
+  connection details `pg_dump` uses resolve the same way, so a dashboard-provisioned database no
+  longer needs its credentials restated in the operator's shell.
+
 - **`cp .env.example .env` pinned 23 settings the dashboard is supposed to own.** Configuration is
   filled from the process environment, then `.env`, then `data/.env.generated`, each supplying only
   what the previous layer left unset. Every value shipped uncommented in `.env.example` therefore
@@ -90,18 +99,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The blank-forward fix above cannot reach this. `clearBlankEnv` runs before `.env` is read, so it
   only clears blanks arriving from the process environment. A value in `.env` — including an *empty*
-  one, since dotenv treats `KEY=` as present rather than absent — is never cleared. That made
-  `DATABASE_PASSWORD=` the sharpest case: it shadowed a password the dashboard had provisioned, the
-  next production boot refused to start, and the dashboard could not warn about it, because the
-  save-time guard reads a snapshot taken before `.env` was loaded and so validated the file value it
-  was writing rather than the one that would win.
+  one, since dotenv treats `KEY=` as present rather than absent — is never cleared. The copied
+  `DATABASE_TYPE=sqlite` was enough on its own to shadow a dashboard switch to Postgres, leaving the
+  app quietly on SQLite; and for an operator who had also set `DATABASE_TYPE=postgres` by hand, the
+  copied `DATABASE_PASSWORD=` then shadowed the password the dashboard had provisioned and the next
+  production boot refused to start. The dashboard could not warn about either, because the save-time
+  guard reads a snapshot taken before `.env` was loaded and so validated the file value it was writing
+  rather than the one that would win.
 
-  All 23 are now commented out with their defaults shown, so copying the file pins nothing. Each was
-  checked against its application-level default first; none changes behaviour when absent. One
-  deliberate exception is called out in the file: the dev compose defaults an unset
+  All 23 blank-forwarded keys are now commented out with their defaults shown, so copying the file no
+  longer pins any of them, and a test derives that set from both compose files and fails if one is
+  shipped uncommented again. Each was checked against its application-level default first; none
+  changes behaviour *silently* when absent — `DATABASE_USERNAME` has no application default at all, so
+  under `DATABASE_TYPE=postgres` it now fails boot validation naming the variable instead of resolving
+  to `openwa`. One further exception is called out in the file: the dev compose defaults an unset
   `AUTO_START_SESSIONS` to `true`, so a dev stack that had inherited `false` from a copied
-  `.env.example` now gets the dev default it was always meant to have. A test derives the key set
-  from `docker-compose.yml` and fails if a dashboard-owned key is shipped uncommented again.
+  `.env.example` now gets the dev default it was always meant to have.
+
+  Five dashboard-managed keys are **not** covered, because they have no compose forward and so fall
+  outside both the fix and its guard: `POSTGRES_BUILTIN`, `REDIS_BUILTIN`, `MINIO_BUILTIN`,
+  `DATABASE_SSL` and `DATABASE_SSL_REJECT_UNAUTHORIZED`. Copying `.env.example` still pins those.
+
+- **A link posted to a Channel gets a sharp preview thumbnail again** (whatsapp-web.js engine).
+  WhatsApp Web selects a different preview transport for newsletters, and `whatsapp-web.js` 1.34.7
+  calls `WAWebLinkPreviewChatAction.getLinkPreview(link)` with the destination chat omitted — so the
+  action could not select that transport even though the message was afterwards handed to the
+  newsletter send job. The preview was built as if for an ordinary chat, which is why the same URL
+  rendered correctly in a 1-on-1 conversation and arrived blurred or empty on a Channel.
+
+  The function takes two parameters — read off the live WhatsApp Web build, `getLinkPreview` reports
+  arity 2 — so the chat now fills a parameter the function actually declares rather than one that
+  would be ignored. It is applied the way the existing `201832` fix already is: an exact transform of
+  the installed dependency, skipped when already present and refused outright on any other shape.
+  `postinstall` applies it best-effort so a local install never hard-fails, while the production image
+  build runs it strictly, turning dependency drift into a build failure rather than an image that
+  silently ships without it. The message-edit path is unchanged and still uses the old call. (#1006)
 
 ## [0.12.2] - 2026-08-01
 
