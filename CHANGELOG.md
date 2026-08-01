@@ -95,6 +95,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Installed plugin code now lands in the same tree as the plugin registry.** `PLUGINS_DIR` defaulted
+  to `./plugins` while `PluginStorageService` kept the registry — status, operator config, secrets,
+  `enabledByOperator` — under `<dataDir>/plugins`. The two halves of one install therefore defaulted to
+  two different trees: the loader scanned a directory that did not exist and reported "Loaded 0
+  plugins" while the registry still listed every plugin as installed. Under Docker it was worse than
+  confusing, because `/app/data` is the mounted volume and `./plugins` is not: an installed plugin's
+  code went into the ephemeral container layer and was destroyed by the next `docker compose up -d`,
+  while its config and secrets survived in the registry — a plugin that vanished on every recreate
+  with nothing in the logs pointing at why. The default is now `<dataDir>/plugins`, derived from the
+  same constant the registry path is built from so the two cannot drift apart again.
+
+  Existing installs keep working: when `PLUGINS_DIR` is unset, the old `./plugins` is still scanned as
+  a compatibility fallback, *in addition to* the configured directory (a host part-way through
+  migrating keeps both halves; the configured copy loads first and wins a duplicate id). The fallback
+  is keyed on actually finding a plugin package — a non-dot subdirectory with a `manifest.json` — not
+  on the directory existing, because `<dataDir>/plugins/<id>` doubles as each plugin's `ctx.storage`
+  dir and is routinely full of directories that hold only state. Setting `PLUGINS_DIR` disables the
+  fallback outright: an operator who named the directory has said where plugins live.
+
+- **A restart no longer overwrites the sessions an operator bound a plugin instance to.** The boot
+  scope reconciler re-derived a plugin's `activeSessions` from each instance row, which silently
+  discarded an explicit `PUT /api/plugins/{id}/sessions` — `activeSessions` is restored from
+  `registry.json` and already encodes the outcome of every prior decision, including that one. It also
+  re-bound the plugin to the row's scope even when that session had since been deleted, leaving the
+  plugin activated for a session id nothing will ever match. The boot path is now **additive**: it only
+  ever adds the row's scope and removes nothing. Retiring `'*'` on a concrete activation remains a
+  provisioning-time decision, where the operator is actually narrowing the plugin.
+
+  A concrete scope that matches no session row is now also logged once at boot
+  (`scope_binding_session_missing`). Such an instance receives no events while every signal an operator
+  can read stays reassuring — the row says `enabled`, the plugin's status says `enabled`, hooks are
+  registered and `healthCheck` is green — so this line is the only place that inertness surfaces. It is
+  diagnostic only and never alters the binding: the id may legitimately come back via an import or a
+  re-provision.
+
 - **Plugin health no longer reports a hook error from a worker that already died.** The last
   hook-handler error a sandboxed plugin reported is operator context on
   `GET /api/plugins/{id}/health`, and it is scoped to one worker generation — the field's contract was
