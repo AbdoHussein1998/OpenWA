@@ -336,6 +336,15 @@ jobs:
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Never serve the production stage's `apt-get update && apt-get install` from cache. That
+          # layer's cache key is its own command text, which does not change when Debian publishes a
+          # security update — so a cached hit silently installs whatever the apt index held when the
+          # layer was first built, and the release image ships known-vulnerable packages. It is not a
+          # theoretical risk: the first two v0.12.3 attempts installed chromium 150.0.7871.181 from a
+          # cached layer while bookworm-security already carried 151.0.7922.71 on BOTH architectures,
+          # and image-scan failed with 228 then 240 findings. The builder stage keeps its cache, so
+          # only the OS-package layer is rebuilt.
+          no-cache-filters: production
 
   # ──── Boot Smoke (amd64 + arm64) ──────────────────────────────────
   # The docker job proves the image BUILDS for both architectures; this proves the just-pushed image
