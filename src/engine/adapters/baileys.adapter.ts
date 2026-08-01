@@ -14,7 +14,7 @@ import type {
 } from '@whiskeysockets/baileys';
 import { buildIncomingMessageFromBaileys, extractBaileysBody, mapBaileysStatus } from './baileys-message-mapper';
 import { buildEditedMessage } from './message-mapper';
-import { mapBaileysGroup, mapBaileysGroupInfo } from './baileys-group-mapper';
+import { BaileysGroups, toEngineParticipants } from './baileys-groups';
 import type { ILogger } from '@whiskeysockets/baileys/lib/Utils/logger.js';
 import {
   ChatState,
@@ -56,7 +56,6 @@ import { EngineNotSupportedError } from '../../common/errors/engine-not-supporte
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
 import { CallNotFoundError } from '../../common/errors/call-not-found.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
-import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { createLogger } from '../../common/services/logger.service';
 import { BaileysAdapterConfig, BaileysLogger } from '../types/baileys.types';
@@ -178,6 +177,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
   );
   private readonly authPath: string;
   private readonly sessionStore: BaileysSessionStore;
+  private readonly groups: BaileysGroups;
   private sock: WASocket | null = null;
   private status: EngineStatus = EngineStatus.DISCONNECTED;
   private qrCode: string | null = null;
@@ -210,6 +210,14 @@ export class BaileysAdapter implements IWhatsAppEngine {
     // Isolate each session's auth state under its own subdirectory of the shared auth dir.
     this.authPath = path.join(config.authDir, config.sessionId);
     this.sessionStore = new BaileysSessionStore(config.lidMappingStore, config.sessionId);
+    this.groups = new BaileysGroups({
+      ensureReady: () => this.ensureReady(),
+      getSocket: () => this.sock!,
+      logger: this.logger,
+      toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
+      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
+      normalizedSelfJid: () => this.normalizedSelfJid(),
+    });
   }
 
   // ----- Lifecycle -----
@@ -959,115 +967,31 @@ export class BaileysAdapter implements IWhatsAppEngine {
   // ----- Groups -----
 
   async getGroups(): Promise<Group[]> {
-    this.ensureReady();
-    const all = await this.sock!.groupFetchAllParticipating();
-    const self = this.normalizedSelfJid();
-    return Object.values(all).map(metadata =>
-      mapBaileysGroup(metadata, self, jid => this.sessionStore.toNeutralJid(jid)),
-    );
+    return this.groups.getGroups();
   }
 
   async getGroupInfo(groupId: string): Promise<GroupInfo | null> {
-    this.ensureReady();
-    try {
-      const metadata = await this.sock!.groupMetadata(groupId);
-      return mapBaileysGroupInfo(metadata, jid => this.sessionStore.toNeutralJid(jid));
-    } catch (err) {
-      // Only a SERVER refusal may become null (→ service 404): the group does not exist or the
-      // account cannot see it. Anything else — a dropped socket, a timeout, a protocol error —
-      // folded into null makes a dead transport look like a missing group, so it propagates.
-      const code = BaileysAdapter.refusedStatusCode(err);
-      if (code === 401 || code === 403 || code === 404) {
-        this.logger.debug('groupMetadata refused; treating as not-found', {
-          groupId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        return null; // not a group / not visible to this account
-      }
-      throw err;
-    }
-  }
-
-  /**
-   * WA error code of a SERVER-refused Baileys query, or undefined for a transport/local failure.
-   * Baileys carries a refusal two ways: `assertNodeErrorFree` puts the numeric WA code on Boom's
-   * `data` (WABinary/generic-utils.js:57), and `extractGroupMetadata` puts it on `output.statusCode`
-   * with the error node as `data` (Socket/groups.js:280). Transport deaths ('Connection Closed',
-   * 'Timed Out') are LOCAL Booms with DisconnectReason statusCodes (408/428) and no server error
-   * node — so a numeric `data` (or an object `data` alongside a statusCode) is the discriminator.
-   */
-  private static refusedStatusCode(error: unknown): number | undefined {
-    const err = error as { data?: unknown; output?: { statusCode?: unknown } } | null | undefined;
-    if (typeof err?.data === 'number') {
-      return err.data;
-    }
-    if (err?.data !== undefined && typeof err.output?.statusCode === 'number') {
-      return err.output.statusCode;
-    }
-    return undefined;
+    return this.groups.getGroupInfo(groupId);
   }
 
   async createGroup(name: string, participants: string[]): Promise<Group> {
-    this.ensureReady();
-    const metadata = await this.sock!.groupCreate(name, this.toEngineParticipants(participants));
-    return mapBaileysGroup(metadata, this.normalizedSelfJid(), jid => this.sessionStore.toNeutralJid(jid));
+    return this.groups.createGroup(name, participants);
   }
 
   async addParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]> {
-    return this.runParticipantsUpdate(groupId, participants, 'add');
+    return this.groups.addParticipants(groupId, participants);
   }
 
   async removeParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]> {
-    return this.runParticipantsUpdate(groupId, participants, 'remove');
+    return this.groups.removeParticipants(groupId, participants);
   }
 
   async promoteParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]> {
-    return this.runParticipantsUpdate(groupId, participants, 'promote');
+    return this.groups.promoteParticipants(groupId, participants);
   }
 
   async demoteParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]> {
-    return this.runParticipantsUpdate(groupId, participants, 'demote');
-  }
-
-  /**
-   * Baileys `groupParticipantsUpdate` resolves a per-participant `[{status, jid}]` array where
-   * `status` is the server's error attr or '200' (Socket/groups.js:153-155) — discarding it turned
-   * every not-admin/not-registered/already-member refusal into a reported success. Map the entries
-   * verbatim; THROW only when the operation failed for every requested participant (a refusal of
-   * the operation itself → HTTP 403) or the server returned no outcome at all.
-   */
-  private async runParticipantsUpdate(
-    groupId: string,
-    participants: string[],
-    action: 'add' | 'remove' | 'promote' | 'demote',
-  ): Promise<ParticipantOperationResult[]> {
-    this.ensureReady();
-    const raw = await this.sock!.groupParticipantsUpdate(groupId, this.toEngineParticipants(participants), action);
-    const results: ParticipantOperationResult[] = (raw ?? []).map(entry => ({
-      id: entry.jid ? this.sessionStore.toNeutralJid(entry.jid) : '',
-      success: entry.status === '200',
-      status: Number.isFinite(Number(entry.status)) ? Number(entry.status) : undefined,
-    }));
-    if (results.length === 0) {
-      throw new EngineRefusedError(
-        `groupParticipantsUpdate(${action}) returned no per-participant outcome for group ${groupId}`,
-      );
-    }
-    if (results.every(r => !r.success)) {
-      const detail = results.map(r => `${r.id || '?'} (${r.status ?? '?'})`).join(', ');
-      throw new EngineRefusedError(
-        `${action}Participants failed for all ${results.length} participant(s) in group ${groupId}: ${detail}`,
-      );
-    }
-    return results;
-  }
-
-  /**
-   * Fold neutral `<phone>@c.us` participant ids back to the engine wire dialect (`@s.whatsapp.net`) before
-   * a group write. `@lid` (a first-class addressing mode) and the group id itself are left untouched.
-   */
-  private toEngineParticipants(participants: string[]): string[] {
-    return participants.map(p => this.sessionStore.toEngineJid(p));
+    return this.groups.demoteParticipants(groupId, participants);
   }
 
   /**
@@ -1077,71 +1001,45 @@ export class BaileysAdapter implements IWhatsAppEngine {
    * WhatsApp to render the tag — that is the caller's responsibility.
    */
   private withMentions(mentions?: string[]): { mentions?: string[] } {
-    return mentions?.length ? { mentions: this.toEngineParticipants(mentions) } : {};
+    return mentions?.length
+      ? { mentions: toEngineParticipants(mentions, jid => this.sessionStore.toEngineJid(jid)) }
+      : {};
   }
 
   async leaveGroup(groupId: string): Promise<void> {
-    this.ensureReady();
-    await this.sock!.groupLeave(groupId);
+    return this.groups.leaveGroup(groupId);
   }
 
   async setGroupSubject(groupId: string, subject: string): Promise<void> {
-    this.ensureReady();
-    await this.sock!.groupUpdateSubject(groupId, subject);
+    return this.groups.setGroupSubject(groupId, subject);
   }
 
   async setGroupDescription(groupId: string, description: string): Promise<void> {
-    this.ensureReady();
-    await this.sock!.groupUpdateDescription(groupId, description);
+    return this.groups.setGroupDescription(groupId, description);
   }
 
   async getGroupInviteCode(groupId: string): Promise<string> {
-    this.ensureReady();
-    return (await this.sock!.groupInviteCode(groupId)) ?? '';
+    return this.groups.getGroupInviteCode(groupId);
   }
 
   async revokeGroupInviteCode(groupId: string): Promise<string> {
-    this.ensureReady();
-    return (await this.sock!.groupRevokeInvite(groupId)) ?? '';
+    return this.groups.revokeGroupInviteCode(groupId);
   }
 
   async joinGroupViaInviteCode(inviteCode: string): Promise<string> {
-    this.ensureReady();
-    // Baileys resolves undefined when the invite is invalid/expired/revoked — no group id surfaces —
-    // and rejects with an IQ error (e.g. not-authorized / gone) for the same client-facing cause.
-    // Both map to a 400. A transport failure (dropped socket, timeout) is NOT a refused invite:
-    // folding it into the 400 makes a dead connection look like a bad code, so it propagates.
-    let jid: string | undefined;
-    try {
-      jid = await this.sock!.groupAcceptInvite(inviteCode);
-    } catch (error) {
-      const code = BaileysAdapter.refusedStatusCode(error);
-      if (code === undefined || code < 400 || code >= 500) {
-        throw error;
-      }
-      this.logger.warn('Group invite refused', { error: String(error) });
-      jid = undefined;
-    }
-    if (!jid) {
-      throw new InvalidInviteCodeError();
-    }
-    // The returned group JID crosses the engine boundary, so it is neutralized like every other emission.
-    return this.sessionStore.toNeutralJid(jid);
+    return this.groups.joinGroupViaInviteCode(inviteCode);
   }
 
   async setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
-    this.ensureReady();
-    await this.sock!.groupSettingUpdate(groupId, adminsOnly ? 'announcement' : 'not_announcement');
+    return this.groups.setGroupMessagesAdminsOnly(groupId, adminsOnly);
   }
 
   async setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
-    this.ensureReady();
-    await this.sock!.groupSettingUpdate(groupId, adminsOnly ? 'locked' : 'unlocked');
+    return this.groups.setGroupInfoAdminsOnly(groupId, adminsOnly);
   }
 
   async setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
-    this.ensureReady();
-    await this.sock!.groupToggleEphemeral(groupId, durationSec);
+    return this.groups.setGroupEphemeral(groupId, durationSec);
   }
 
   async getProfilePicture(contactId: string): Promise<string | null> {
