@@ -231,6 +231,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **⚠️ Four unfixed Chromium CVEs are accepted in the `linux/arm64` image.** `CVE-2026-16804`,
+  `-16805`, `-16806` and `-16807` affect the `chromium`, `chromium-common` and `chromium-sandbox`
+  packages. They are arm64-only by construction: Chrome for Testing publishes no linux-arm64 build,
+  so the amd64 image uses CfT while arm64 installs Debian's chromium — the amd64 image is unaffected.
+  **There is no fixed package to upgrade to:** the image carries `150.0.7871.181-1~deb12u1`, and the
+  fixed `151.0.7922.47-1` exists only in Debian sid — bookworm and trixie are both still on `150.x`,
+  so neither a rebuild nor a move to trixie clears it.
+
+  Two of the four (`-16804`, `-16807`) are sandbox escapes, and the image already runs Chromium with
+  `--no-sandbox` (the container is the confinement boundary: `cap_drop ALL`, `no-new-privileges`,
+  read-only rootfs), so they buy an attacker nothing. The other two are use-after-free / arbitrary
+  code execution in Blink, and those are **not** neutralised by that: Chromium renders sender-
+  controlled content, so a crafted message is a plausible path to code execution as the `openwa` user
+  inside the arm64 container. This is accepted so the release can ship while Debian has no fixed
+  build — not because it is harmless. **Operators running arm64 who cannot accept this should stay on
+  their current image until the entry is removed.** The four are recorded in `.trivyignore` with the
+  removal condition: drop them once bookworm ships `chromium >= 151.0.7922.47`.
+
 - **A sandboxed plugin can no longer serve the gateway's search queries without declaring a permission
   for it.** `ctx.registerSearchProvider` is installed unconditionally in every worker context, and a
   plugin declares itself a provider by sending `search-provider-register` over IPC — a path that never
