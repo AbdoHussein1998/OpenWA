@@ -5,12 +5,14 @@ import * as qrcode from 'qrcode';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import type * as BaileysLib from '@whiskeysockets/baileys';
-import type { AnyMessageContent, WACallEvent, WAMessage, WASocket } from '@whiskeysockets/baileys';
+import type { WACallEvent, WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { buildIncomingMessageFromBaileys, extractBaileysBody, mapBaileysStatus } from './baileys-message-mapper';
 import { buildEditedMessage } from './message-mapper';
+import { BaileysChannels } from './baileys-channels';
 import { BaileysContacts } from './baileys-contacts';
 import { BaileysGroups } from './baileys-groups';
-import { BaileysMessaging, resolveMediaBuffer } from './baileys-messaging';
+import { BaileysMessaging } from './baileys-messaging';
+import { BaileysStatus } from './baileys-status';
 import type { ILogger } from '@whiskeysockets/baileys/lib/Utils/logger.js';
 import {
   ChatState,
@@ -45,11 +47,9 @@ import {
   ChatSummary,
   StatusPostOptions,
 } from '../interfaces/whatsapp-engine.interface';
-import { BadRequestException } from '@nestjs/common';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { CallNotFoundError } from '../../common/errors/call-not-found.error';
-import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { createLogger } from '../../common/services/logger.service';
 import { BaileysAdapterConfig, BaileysLogger } from '../types/baileys.types';
 import { BaileysSessionStore } from './baileys-session-store';
@@ -172,6 +172,8 @@ export class BaileysAdapter implements IWhatsAppEngine {
   private readonly groups: BaileysGroups;
   private readonly messaging: BaileysMessaging;
   private readonly contacts: BaileysContacts;
+  private readonly statusOps: BaileysStatus;
+  private readonly channels: BaileysChannels;
   private sock: WASocket | null = null;
   private status: EngineStatus = EngineStatus.DISCONNECTED;
   private qrCode: string | null = null;
@@ -236,6 +238,17 @@ export class BaileysAdapter implements IWhatsAppEngine {
       resolvePhone: contactId => this.sessionStore.resolvePhone(contactId),
       listChats: () => this.sessionStore.listChats(),
       lastMessage: chatId => this.sessionStore.lastMessage(chatId),
+    });
+    this.statusOps = new BaileysStatus({
+      ensureReady: () => this.ensureReady(),
+      getSocket: () => this.sock!,
+      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
+      normalizedSelfJid: () => this.normalizedSelfJid(),
+      toUnixSeconds: ts => this.toUnixSeconds(ts),
+    });
+    this.channels = new BaileysChannels({
+      ensureReady: () => this.ensureReady(),
+      getSocket: () => this.sock!,
     });
   }
 
@@ -1020,25 +1033,15 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.unsupported('getSubscribedChannels');
   }
   async getChannelById(channelId: string): Promise<Channel | null> {
-    this.ensureReady();
-    // newsletterMetadata resolves ANY channel by jid (richer than the wwjs subscribed-list lookup).
-    const meta = await this.sock!.newsletterMetadata('jid', channelId);
-    return meta ? this.toChannel(meta) : null;
+    return this.channels.getChannelById(channelId);
   }
 
   async subscribeToChannel(inviteCode: string): Promise<Channel> {
-    this.ensureReady();
-    const meta = await this.sock!.newsletterMetadata('invite', inviteCode);
-    if (!meta) {
-      throw new ChannelNotFoundError(inviteCode);
-    }
-    await this.sock!.newsletterFollow(meta.id);
-    return this.toChannel(meta);
+    return this.channels.subscribeToChannel(inviteCode);
   }
 
   async unsubscribeFromChannel(channelId: string): Promise<void> {
-    this.ensureReady();
-    await this.sock!.newsletterUnfollow(channelId);
+    return this.channels.unsubscribeFromChannel(channelId);
   }
 
   // getChannelMessages is not wired: Baileys' newsletterFetchMessages returns the RAW query
@@ -1048,31 +1051,6 @@ export class BaileysAdapter implements IWhatsAppEngine {
   getChannelMessages(_channelId: string, _limit?: number): Promise<ChannelMessage[]> {
     return this.unsupported('getChannelMessages');
   }
-
-  /** Map a Baileys NewsletterMetadata to the neutral Channel shape (optionals only when present). */
-  private toChannel(meta: {
-    id: string;
-    name: string;
-    description?: string;
-    invite?: string;
-    creation_time?: number;
-    subscribers?: number;
-    picture?: { url?: string };
-    verification?: string;
-    thread_metadata?: { creation_time?: number };
-  }): Channel {
-    const createdAt = meta.creation_time ?? meta.thread_metadata?.creation_time;
-    return {
-      id: meta.id,
-      name: meta.name,
-      ...(meta.description ? { description: meta.description } : {}),
-      ...(meta.invite ? { inviteCode: meta.invite } : {}),
-      ...(meta.subscribers !== undefined ? { subscriberCount: meta.subscribers } : {}),
-      ...(meta.picture?.url ? { picture: meta.picture.url } : {}),
-      ...(meta.verification ? { verified: meta.verification === 'VERIFIED' } : {}),
-      ...(createdAt !== undefined ? { createdAt } : {}),
-    };
-  }
   getContactStatuses(): Promise<Status[]> {
     return this.unsupported('getContactStatuses');
   }
@@ -1080,43 +1058,16 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.unsupported('getContactStatus');
   }
   postTextStatus(text: string, options: StatusPostOptions): Promise<StatusResult> {
-    return this.postStatus({ text }, options);
+    return this.statusOps.postTextStatus(text, options);
   }
   postImageStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
-    return this.postMediaStatus('image', media, options);
+    return this.statusOps.postImageStatus(media, options);
   }
   postVideoStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
-    return this.postMediaStatus('video', media, options);
+    return this.statusOps.postVideoStatus(media, options);
   }
-  private async postMediaStatus(
-    kind: 'image' | 'video',
-    media: MediaInput,
-    options: StatusPostOptions,
-  ): Promise<StatusResult> {
-    this.ensureReady();
-    const { data, mimetype } = await resolveMediaBuffer(media);
-    const content: AnyMessageContent =
-      kind === 'image'
-        ? { image: data, caption: options.caption, mimetype }
-        : { video: data, caption: options.caption, mimetype };
-    return this.postStatus(content, options);
-  }
-  /**
-   * Best-effort status revoke. Unlike deleteMessage, status messages are NOT persisted, so the revoke
-   * key must be constructed from statusId alone (no messageStore lookup). The participant is the
-   * engine-dialect self JID (`<me>@s.whatsapp.net`). The revoke shape is empirically UNVERIFIED — the
-   * live spike only tested posting; if WhatsApp rejects it, fall back to EngineNotSupportedError.
-   */
   async deleteStatus(statusId: string): Promise<void> {
-    this.ensureReady();
-    await this.sock!.sendMessage('status@broadcast', {
-      delete: {
-        remoteJid: 'status@broadcast',
-        fromMe: true,
-        id: statusId,
-        participant: this.sessionStore.toEngineJid(this.normalizedSelfJid()),
-      },
-    });
+    return this.statusOps.deleteStatus(statusId);
   }
   getCatalog(): Promise<Catalog | null> {
     return this.unsupported('getCatalog');
@@ -1900,39 +1851,6 @@ export class BaileysAdapter implements IWhatsAppEngine {
     if (timestampMs == null) return this.toUnixSeconds(fallback);
     const milliseconds = typeof timestampMs === 'number' ? timestampMs : timestampMs.toNumber();
     return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : this.toUnixSeconds(fallback);
-  }
-
-  /**
-   * Post a status (story) to `status@broadcast` with a denormalized `statusJidList` (the allow-list of
-   * neutral recipients folded back to the engine dialect). Image/video variants route through here too.
-   * The outbound status echo is NOT persisted — status isn't a chat message (the inbound filter in
-   * handleMessagesUpsert already skips `type:'append'` echoes).
-   */
-  private async postStatus(content: AnyMessageContent, options: StatusPostOptions): Promise<StatusResult> {
-    this.ensureReady();
-    // Baileys posts to exactly the statusJidList allow-list, so unlike whatsapp-web.js (which
-    // broadcasts) an absent/empty recipients list would publish to nobody — reject it as a client
-    // error here rather than send a status no contact can see.
-    if (!options.recipients?.length) {
-      throw new BadRequestException('recipients is required to post a status on the Baileys engine');
-    }
-    const statusJidList = options.recipients.map(r => this.sessionStore.toEngineJid(r));
-    const sent = await this.sock!.sendMessage('status@broadcast', content, {
-      statusJidList,
-      backgroundColor: options.backgroundColor,
-      font: options.font,
-    });
-    return this.toStatusResult(sent);
-  }
-
-  /** Shape a Baileys send result into a StatusResult; expiresAt is timestamp + 24h (WhatsApp status TTL). */
-  private toStatusResult(sent: WAMessage | undefined): StatusResult {
-    const ts = sent?.messageTimestamp ? new Date(this.toUnixSeconds(sent.messageTimestamp) * 1000) : new Date();
-    return {
-      statusId: sent?.key?.id ?? '',
-      timestamp: ts,
-      expiresAt: new Date(ts.getTime() + 24 * 3_600_000),
-    };
   }
 
   private unsupported(method: string): Promise<any> {
