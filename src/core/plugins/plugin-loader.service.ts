@@ -190,7 +190,7 @@ export class PluginLoaderService implements OnModuleInit, OnApplicationBootstrap
     private readonly pluginStorage: PluginStorageService,
     // Handed straight to PluginHostServices below, which owns the reasoning: ModuleRef rather than
     // constructor injection avoids the provider cycle
-    // PluginLoaderService -> SessionService -> EngineFactory -> PluginLoaderService.
+    // PluginLoaderService -> SessionService -> SessionEngineLifecycle -> EngineFactory -> PluginLoaderService.
     private readonly moduleRef: ModuleRef,
     // Shared lid->phone table (EngineModule is @Global and exports it). Optional so the many unit tests
     // that construct this service with the 4 prior args still compile; when absent, canonicalChatId
