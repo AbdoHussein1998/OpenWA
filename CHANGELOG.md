@@ -27,19 +27,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   around twenty call sites as `isLiveEngine(id, e) && engines.delete(id)`. It is now `isLive` /
   `deleteIfLive` on the registry, written once.
 
-- **Five self-contained concerns were lifted out of `SessionService`.** Each was previously reachable
+- **Six self-contained concerns were lifted out of `SessionService`.** Each was previously reachable
   only by driving the full session lifecycle, so the trickiest logic in the file had the least direct
   coverage. The `@lid`→phone read-through cache became `SessionLidResolver` (and took an `@Optional`
   constructor dependency with it); the reconnect backoff *decision* became a pure `decideReconnect()`
   with injected clock and jitter, leaving the service to apply only the effects; the liveness watchdog
   became `SessionLivenessWatchdog`, which owns its interval and failure counter and reports back
   through a single `onDead` callback; the per-message serialization chain became a general
-  `KeyedMutationQueue`; and every path that turns an engine message callback into a persisted row —
+  `KeyedMutationQueue`; every path that turns an engine message callback into a persisted row —
   live inbound, own-send echo, ack reconciliation, revoke, reactions, edits and history backfill —
   became `MessageProjector`, which owns the one mutation chain that IS the per-message ordering
-  guarantee. Behaviour is unchanged — the existing session specs pass untouched — and the
-  split adds 77 tests over branches that previously needed hours of uptime or live engine callbacks to
-  reach: the FIFO eviction that bounds the lid cache, the stability reset that stops a long-lived
+  guarantee; and the transient failure reason behind `lastError` became `SessionErrorStore`, the one
+  map that eight lifecycle paths write and exactly one reader — the session read model — consumes.
+
+  Behaviour is unchanged. The existing session specs still pass, edited only mechanically: they
+  register the new collaborators as real providers (not mocks) and reach their state instead of the
+  service's own fields — no assertion was changed or removed. The split adds 69 tests over branches
+  that previously needed hours of uptime or live engine callbacks to reach: the FIFO eviction that
+  bounds the lid cache, the stability reset that stops a long-lived
   session slowly wedging `FAILED` across unrelated transient drops, the loop-alert re-arm after a
   stable stretch, the non-finite-delay fallback that keeps an operator typo from becoming a relaunch
   storm, the watchdog's stale-result guard for an engine superseded mid-probe, and the mutation-chain
@@ -52,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the by-type stats), and `storableWaMessageId()` makes the empty-sentinel chokepoint real rather than
   a comment repeated at each call site.
 
-  `initializeEngine` itself drops from 807 lines to 327. Nearly all of it was engine-callback bodies
+  `initializeEngine` itself drops from 801 lines to 324. Nearly all of it was engine-callback bodies
   inlined into one object literal, which hid the wiring — which events exist, and in what order —
   under the handling; the five largest (inbound message, own-send echo, ack, ready, revoke) are now
   named methods and the function reads as the event table it is. Pure code motion: each method takes
@@ -139,6 +144,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `USER` directive, which is a runtime property no static check can see, and this script is the only
   thing that verifies it. CI's shellcheck step now covers every script in `scripts/` instead of three
   of them; the BOM is exactly what it reports as SC1082, so the narrow scope is what let it survive.
+
+- **An e2e run no longer rewrites the developer's `data/.api-key`.** The bootstrap key file is written
+  on first boot (which every e2e run is, having no keys yet) and unlinked when that key is revoked or
+  deleted. Its path was a module const evaluated at import from `process.cwd()`, so nothing could
+  redirect it — an e2e boot whose setup already redirects both databases still reached straight into
+  the real repo-root `data/.api-key`. The four file operations now have one owner
+  (`bootstrap-key-file.ts`) that resolves the path per call and honours a `BOOTSTRAP_KEY_FILE`
+  override, which the e2e setup points at the same throwaway temp dir as the databases. The file is an
+  operator convenience only — never read for seeding or authentication — so this changes nothing about
+  how a key is issued or validated.
+
+- **Opening or closing the QR modal no longer rebuilds the session start/stop/logout handlers.**
+  `applySessionResponse` read `qrData` to decide whether the modal it was clearing belonged to the
+  session being updated, so `qrData?.sessionId` had to sit in its dependency array — and all three
+  lifecycle handlers hold that callback. The functional updater form removes the read and the
+  dependency with it, and is the more correct shape besides: it sees the CURRENT modal rather than
+  whichever one was captured when the callback was last built.
+
+- **A message for a chat the sidebar does not yet have refetches the chat list once, not twice.**
+  The sidebar updater called `loadChats()` from inside a `setChats` updater; React double-invokes
+  updaters under `StrictMode` (which `main.tsx` enables), so the refetch fired twice per such message
+  in development. The decision now lives in a reducer that REPORTS `needsSidebarRefetch` and the caller
+  fires the refetch once, outside the updater — a shape that cannot hide a side effect the way an
+  inline updater could. Both sidebar reducers moved to `utils/chatList.ts`, which also makes the
+  reorder rules, the location-label substitution and the #583 LID-echo suppression reachable from a
+  test for the first time.
 
 - **A stray directory under `data/plugins` no longer reads as a plugin fault.** Anything in there
   without a `manifest.json` is skipped and logged, once per directory on every boot. The wording was a

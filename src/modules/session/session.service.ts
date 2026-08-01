@@ -1231,11 +1231,6 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     }
   }
 
-  /**
-   * Apply one reaction event to the stored message's reactions map (read-modify-write of the JSON
-   * column). Invoked through the per-message serialization chain in onMessageReaction, so concurrent
-   * reactions on the same message run sequentially and don't clobber each other.
-   */
   /** Engine callback body, lifted out of initializeEngine so the wiring table stays readable. */
   private handleEngineReady(id: string, engine: IWhatsAppEngine, phone: string, pushName: string): void {
     if (!this.isLiveEngine(id, engine)) return;
