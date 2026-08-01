@@ -8,6 +8,7 @@ import type * as BaileysLib from '@whiskeysockets/baileys';
 import type { AnyMessageContent, WACallEvent, WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { buildIncomingMessageFromBaileys, extractBaileysBody, mapBaileysStatus } from './baileys-message-mapper';
 import { buildEditedMessage } from './message-mapper';
+import { BaileysContacts } from './baileys-contacts';
 import { BaileysGroups } from './baileys-groups';
 import { BaileysMessaging, resolveMediaBuffer } from './baileys-messaging';
 import type { ILogger } from '@whiskeysockets/baileys/lib/Utils/logger.js';
@@ -170,6 +171,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
   private readonly sessionStore: BaileysSessionStore;
   private readonly groups: BaileysGroups;
   private readonly messaging: BaileysMessaging;
+  private readonly contacts: BaileysContacts;
   private sock: WASocket | null = null;
   private status: EngineStatus = EngineStatus.DISCONNECTED;
   private qrCode: string | null = null;
@@ -223,6 +225,17 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getStoredMessage: messageId => this.config.messageStore?.getMessage(this.config.dbSessionId, messageId),
       getOnMessageCreate: () => this.callbacks.onMessageCreate,
       mapMessage: (msg, contentType, opts) => this.mapMessage(msg, contentType, opts),
+    });
+    this.contacts = new BaileysContacts({
+      ensureReady: () => this.ensureReady(),
+      getSocket: () => this.sock!,
+      logger: this.logger,
+      normalizedSelfJid: () => this.normalizedSelfJid(),
+      listContacts: () => this.sessionStore.listContacts(),
+      findContact: contactId => this.sessionStore.findContact(contactId),
+      resolvePhone: contactId => this.sessionStore.resolvePhone(contactId),
+      listChats: () => this.sessionStore.listChats(),
+      lastMessage: chatId => this.sessionStore.lastMessage(chatId),
     });
   }
 
@@ -913,112 +926,59 @@ export class BaileysAdapter implements IWhatsAppEngine {
   }
 
   async getProfilePicture(contactId: string): Promise<string | null> {
-    this.ensureReady();
-    try {
-      return (await this.sock!.profilePictureUrl(contactId, 'image')) ?? null;
-    } catch (err) {
-      this.logger.debug('profilePictureUrl failed; no picture or hidden', {
-        contactId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null; // no picture set, or hidden by privacy
-    }
+    return this.contacts.getProfilePicture(contactId);
   }
 
   async blockContact(contactId: string): Promise<void> {
-    this.ensureReady();
-    await this.sock!.updateBlockStatus(contactId, 'block');
+    return this.contacts.blockContact(contactId);
   }
 
   async unblockContact(contactId: string): Promise<void> {
-    this.ensureReady();
-    await this.sock!.updateBlockStatus(contactId, 'unblock');
+    return this.contacts.unblockContact(contactId);
   }
 
   // ----- Profile (own account) -----
 
   async setProfileName(name: string): Promise<void> {
-    this.ensureReady();
-    await this.sock!.updateProfileName(name);
+    return this.contacts.setProfileName(name);
   }
 
   async setProfileStatus(status: string): Promise<void> {
-    this.ensureReady();
-    await this.sock!.updateProfileStatus(status);
+    return this.contacts.setProfileStatus(status);
   }
 
   async setProfilePicture(media: MediaInput): Promise<void> {
-    this.ensureReady();
-    const selfJid = this.normalizedSelfJid();
-    if (!selfJid) {
-      throw new Error('cannot set the profile picture: the own JID is not known yet');
-    }
-    // updateProfilePicture takes a WAMediaUpload; resolveMediaBuffer covers Buffer | base64 | URL,
-    // the same conversion the media sends use.
-    const { data } = await resolveMediaBuffer(media);
-    await this.sock!.updateProfilePicture(selfJid, data);
+    return this.contacts.setProfilePicture(media);
   }
 
   // ----- Contacts & chats -----
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async getContacts(): Promise<Contact[]> {
-    this.ensureReady();
-    return this.sessionStore.listContacts();
+    return this.contacts.getContacts();
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async getContactById(contactId: string): Promise<Contact | null> {
-    this.ensureReady();
-    return this.sessionStore.findContact(contactId);
+    return this.contacts.getContactById(contactId);
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async resolveContactPhone(contactId: string): Promise<string | null> {
-    this.ensureReady();
-    return this.sessionStore.resolvePhone(contactId);
+    return this.contacts.resolveContactPhone(contactId);
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async getChats(): Promise<ChatSummary[]> {
-    this.ensureReady();
-    return this.sessionStore.listChats();
+    return this.contacts.getChats();
   }
 
   async sendSeen(chatId: string): Promise<boolean> {
-    this.ensureReady();
-    const last = this.sessionStore.lastMessage(chatId);
-    if (!last) {
-      return false; // nothing known to mark read
-    }
-    await this.sock!.readMessages([last.key]);
-    return true;
+    return this.contacts.sendSeen(chatId);
   }
 
   async markUnread(chatId: string): Promise<boolean> {
-    this.ensureReady();
-    const last = this.sessionStore.lastMessage(chatId);
-    if (!last) {
-      return false; // Baileys' unread toggle needs the last message; can't synthesize it
-    }
-    await this.sock!.chatModify(
-      { markRead: false, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      chatId,
-    );
-    return true;
+    return this.contacts.markUnread(chatId);
   }
 
   async deleteChat(chatId: string): Promise<boolean> {
-    this.ensureReady();
-    const last = this.sessionStore.lastMessage(chatId);
-    if (!last) {
-      return false; // Baileys' delete needs the last message; can't synthesize it
-    }
-    await this.sock!.chatModify(
-      { delete: true, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      chatId,
-    );
-    return true;
+    return this.contacts.deleteChat(chatId);
   }
 
   // ----- Gated: not supported by this minimal slice (no store) -----
