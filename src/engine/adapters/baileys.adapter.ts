@@ -11,6 +11,7 @@ import { buildEditedMessage } from './message-mapper';
 import { BaileysChannels } from './baileys-channels';
 import { BaileysContacts } from './baileys-contacts';
 import { BaileysGroups } from './baileys-groups';
+import { BaileysHistory, toUnixSeconds } from './baileys-history';
 import { BaileysMessaging } from './baileys-messaging';
 import { BaileysStatus } from './baileys-status';
 import type { ILogger } from '@whiskeysockets/baileys/lib/Utils/logger.js';
@@ -174,6 +175,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
   private readonly contacts: BaileysContacts;
   private readonly statusOps: BaileysStatus;
   private readonly channels: BaileysChannels;
+  private readonly history: BaileysHistory;
   private sock: WASocket | null = null;
   private status: EngineStatus = EngineStatus.DISCONNECTED;
   private qrCode: string | null = null;
@@ -221,7 +223,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
       toEngineJid: jid => this.sessionStore.toEngineJid(jid),
       getEphemeralExpiration: chatId => this.sessionStore.getEphemeralExpiration(chatId),
-      toUnixSeconds: ts => this.toUnixSeconds(ts),
+      toUnixSeconds,
       loadLib: () => this.loadLib(),
       putStoredMessage: msg => this.config.messageStore?.put(this.config.dbSessionId, msg),
       getStoredMessage: messageId => this.config.messageStore?.getMessage(this.config.dbSessionId, messageId),
@@ -244,11 +246,23 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getSocket: () => this.sock!,
       toEngineJid: jid => this.sessionStore.toEngineJid(jid),
       normalizedSelfJid: () => this.normalizedSelfJid(),
-      toUnixSeconds: ts => this.toUnixSeconds(ts),
+      toUnixSeconds,
     });
     this.channels = new BaileysChannels({
       ensureReady: () => this.ensureReady(),
       getSocket: () => this.sock!,
+    });
+    this.history = new BaileysHistory({
+      getSocket: () => this.sock!,
+      logger: this.logger,
+      toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
+      normalizedSelfJid: () => this.normalizedSelfJid(),
+      loadLib: () => this.loadLib(),
+      recordMessage: msg => this.sessionStore.recordMessage(msg),
+      upsertContacts: records => this.sessionStore.upsertContacts(records),
+      upsertChats: records => this.sessionStore.upsertChats(records),
+      extractEphemeralDuration: msg => this.sessionStore.extractEphemeralDuration(msg),
+      getOnHistoryMessages: () => this.callbacks.onHistoryMessages,
     });
   }
 
@@ -413,7 +427,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       this.sessionStore.upsertContacts(history.contacts);
       this.sessionStore.upsertChats(history.chats);
       this.sessionStore.addLidMappings(history.lidPnMappings ?? []);
-      void this.captureHistoryMessages(history.messages ?? []);
+      void this.history.captureHistoryMessages(history.messages ?? []);
       this.logger.debug('History sync received', {
         action: 'baileys_history_set',
         sessionId: this.config.sessionId,
@@ -464,7 +478,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       this.setStatus(EngineStatus.READY);
       this.callbacks.onReady?.(this.phoneNumber ?? '', this.pushName ?? '');
       // Backfill names the initial sync skipped (see hydrateNames).
-      void this.hydrateNames();
+      void this.history.hydrateNames();
     }
 
     if (connection === 'close') {
@@ -1108,7 +1122,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
         // `type !== 'notify'` filter silently drops that message (observed as "the first message
         // after a reconnect gets ignored"). A message sent AFTER this connection opened is live
         // regardless of which tag the batch carries; true backfill always predates it.
-        if (this.toUnixSeconds(msg.messageTimestamp) < this.connectedAt) {
+        if (toUnixSeconds(msg.messageTimestamp) < this.connectedAt) {
           continue;
         }
       }
@@ -1184,7 +1198,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
             to: this.sessionStore.toNeutralJid(to),
             type: 'revoked',
             body: '',
-            timestamp: this.toUnixSeconds(msg.messageTimestamp),
+            timestamp: toUnixSeconds(msg.messageTimestamp),
           };
           this.callbacks.onMessageRevoked?.(revoked);
           return;
@@ -1703,7 +1717,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
         body,
         contentType,
         isPtt: normalized.audioMessage?.ptt === true,
-        timestamp: this.toUnixSeconds(msg.messageTimestamp),
+        timestamp: toUnixSeconds(msg.messageTimestamp),
         pushName: msg.pushName ?? undefined,
         selfJid: this.normalizedSelfJid(),
         media,
@@ -1718,129 +1732,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
     );
   }
 
-  /**
-   * Persist the bulk history Baileys pushes on connect (`messaging-history.set`) - the only
-   * pre-connection history source. Maps each message media-free and hands the batch to the dispatch-free
-   * `onHistoryMessages` callback, harvesting `pushName` into contacts on the way (history `contacts`
-   * carry no names) and seeding each chat's last-message preview.
-   */
-  private async captureHistoryMessages(messages: WAMessage[]): Promise<void> {
-    if (!messages.length) {
-      return;
-    }
-    const b = await this.loadLib();
-    const nameUpdates: { id: string; notify: string }[] = [];
-    const mapped: IncomingMessage[] = [];
-    for (const msg of messages) {
-      if (msg.key?.fromMe !== true && msg.pushName) {
-        const sender = msg.key?.participant ?? msg.key?.remoteJid;
-        if (sender) {
-          nameUpdates.push({ id: sender, notify: msg.pushName });
-        }
-      }
-      // Seed the chat's last-message preview + sort time (newest wins); else history-only chats
-      // would read "No messages yet".
-      this.sessionStore.recordMessage(msg);
-      const incoming = this.mapHistoryMessage(b, msg);
-      if (incoming) {
-        mapped.push(incoming);
-      }
-    }
-    if (nameUpdates.length) {
-      this.sessionStore.upsertContacts(nameUpdates);
-    }
-    if (mapped.length) {
-      this.callbacks.onHistoryMessages?.(mapped);
-    }
-  }
-
-  /**
-   * Backfill chat/contact display names after connect. Baileys 6.7.x often skips the initial app-state
-   * sync (the state machine goes Online before it runs) and the PUSH_NAME sync can fail to decrypt, so
-   * names never arrive. Fetch group subjects (reliable) and best-effort re-trigger the app-state sync;
-   * both are non-fatal, and DM push-names still arrive via `contacts.update` on live messages.
-   */
-  private async hydrateNames(): Promise<void> {
-    try {
-      const groups = await this.sock!.groupFetchAllParticipating();
-      const named = Object.values(groups)
-        .filter(g => g?.id && g.subject)
-        .map(g => ({ id: g.id, name: g.subject }));
-      if (named.length) {
-        this.sessionStore.upsertChats(named);
-        this.logger.debug('Hydrated group names', { action: 'baileys_hydrate_groups', count: named.length });
-      }
-    } catch (err) {
-      this.logger.warn('Group name hydration failed', { error: err instanceof Error ? err.message : String(err) });
-    }
-    try {
-      const b = await this.loadLib();
-      await this.sock!.resyncAppState(b.ALL_WA_PATCH_NAMES, false);
-      this.logger.debug('Re-synced app state for contact names', { action: 'baileys_resync_appstate' });
-    } catch (err) {
-      this.logger.warn('App-state resync for contact names failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  /**
-   * Media-free WAMessage -> IncomingMessage map for bulk history (downloading media for thousands of
-   * messages would be ruinous; the type is kept, the payload dropped). Returns null for protocol /
-   * reaction / key / empty messages, which carry nothing for the chat view.
-   */
-  private mapHistoryMessage(b: typeof BaileysLib, msg: WAMessage): IncomingMessage | null {
-    const raw = msg.message;
-    if (!raw || !msg.key?.remoteJid || !msg.key.id) {
-      return null;
-    }
-    // Unwrap ephemeral/viewOnce/documentWithCaption/edited wrappers so the real type and body surface —
-    // else a disappearing-chat message maps to type 'unknown' with an empty body. Identity no-op when
-    // already unwrapped. Derive ONE contentType from the normalized content for both the skip-filter and
-    // the type mapping, and reuse extractBaileysBody (the same body extraction the live path uses).
-    const content = b.normalizeMessageContent(raw) ?? raw;
-    const contentType = b.getContentType(content);
-    if (
-      !contentType ||
-      contentType === 'protocolMessage' ||
-      contentType === 'reactionMessage' ||
-      contentType === 'senderKeyDistributionMessage'
-    ) {
-      return null;
-    }
-    const body = extractBaileysBody(content);
-    return buildIncomingMessageFromBaileys(
-      {
-        id: msg.key.id,
-        remoteJid: msg.key.remoteJid,
-        fromMe: msg.key.fromMe === true,
-        participant: msg.key.participant ?? undefined,
-        body,
-        contentType,
-        isPtt: content.audioMessage?.ptt === true,
-        timestamp: this.toUnixSeconds(msg.messageTimestamp),
-        pushName: msg.pushName ?? undefined,
-        selfJid: this.normalizedSelfJid(),
-        // Populate the disappearing-messages timer using the same extraction the live path and the
-        // session-store cache share (`msg.ephemeralDuration` primary, `contextInfo.expiration` fallback),
-        // so the history sink can apply the STORE_EPHEMERAL_MESSAGES opt-out symmetrically with onMessage.
-        ephemeralDuration: this.sessionStore.extractEphemeralDuration(msg),
-      },
-      jid => this.sessionStore.toNeutralJid(jid),
-    );
-  }
-
   private normalizedSelfJid(): string {
     const phone = this.extractPhone(this.sock?.user?.id);
     return phone ? `${phone}@s.whatsapp.net` : '';
-  }
-
-  /** Baileys timestamps are `number | Long`; normalize to unix seconds. */
-  private toUnixSeconds(ts: number | { toNumber(): number } | null | undefined): number {
-    if (ts == null) {
-      return Math.floor(Date.now() / 1000);
-    }
-    return typeof ts === 'number' ? ts : ts.toNumber();
   }
 
   /** Protocol-message edit timestamps are milliseconds; the enclosing message timestamp is seconds. */
@@ -1848,9 +1742,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
     timestampMs: number | { toNumber(): number } | null | undefined,
     fallback: number | { toNumber(): number } | null | undefined,
   ): number {
-    if (timestampMs == null) return this.toUnixSeconds(fallback);
+    if (timestampMs == null) return toUnixSeconds(fallback);
     const milliseconds = typeof timestampMs === 'number' ? timestampMs : timestampMs.toNumber();
-    return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : this.toUnixSeconds(fallback);
+    return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : toUnixSeconds(fallback);
   }
 
   private unsupported(method: string): Promise<any> {
