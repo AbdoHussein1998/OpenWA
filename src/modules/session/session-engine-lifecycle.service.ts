@@ -23,14 +23,8 @@ import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { resolveEngineInitTimeoutMs } from '../../engine/engine-init-timeout';
-import { DEFAULT_MEDIA_MAX_BYTES, STATUS_TTL_MS, StatusStoreService } from '../status-store/status-store.service';
-import { buildIncomingStatus } from '../status-store/incoming-status';
-import {
-  IWhatsAppEngine,
-  EngineStatus,
-  GroupEvent,
-  IncomingCallEvent,
-} from '../../engine/interfaces/whatsapp-engine.interface';
+import { StatusStoreService } from '../status-store/status-store.service';
+import { IWhatsAppEngine, GroupEvent } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { ShutdownService } from '../../common/services/shutdown.service';
 import {
@@ -42,17 +36,13 @@ import { WebhookService } from '../webhook/webhook.service';
 import { HookManager } from '../../core/hooks';
 import { SessionLifecycleFences } from './session-lifecycle-fences';
 import { SessionStatusBroadcaster } from './session-status-broadcaster';
+import { SessionEngineLeafEvents } from './session-engine-leaf-events';
+import { SessionEngineEventWiring, SessionEngineWiringHost } from './session-engine-event-wiring';
 
 // Message types that carry downloadable media. Any persisted row of these types must have a media
 // marker in metadata — never NULL — or the dashboard renders an empty bubble (no placeholder) and the
 // by-type stats filter skips the row. Sources that lack the payload (wwjs own-send echo, media-free
 // history sync) get the omitted marker synthesized at the persistence chokepoints.
-
-// How many recent status-broadcast messages the connect-time seed pulls (each with its media).
-// ponytail: fixed ceiling — the most-recent 50 cover a normal account's 24h of stories; anything
-// posted after connect still lands live via onMessage. Make it configurable only if a flood account
-// proves 50 too few.
-const STATUS_SEED_LIMIT = 50;
 
 interface ReconnectState extends ReconnectAttemptState {
   /** The pending attempt's timer. Lives here, not in the policy, which stays free of side effects. */
@@ -154,6 +144,9 @@ export class SessionEngineLifecycle {
   // keep every call site and spec poke byte-identical (the baileys forwarder precedent).
   private readonly fences: SessionLifecycleFences;
   private readonly broadcaster: SessionStatusBroadcaster;
+  private readonly leafEvents: SessionEngineLeafEvents;
+  private readonly eventWiring: SessionEngineEventWiring;
+  private readonly wiringHost: SessionEngineWiringHost;
 
   // Reconnection state per session
   private reconnectStates: Map<string, ReconnectState> = new Map();
@@ -253,6 +246,50 @@ export class SessionEngineLifecycle {
       webhookService: this.webhookService,
       logger: this.logger,
     });
+    this.leafEvents = new SessionEngineLeafEvents({
+      sessionRepository: this.sessionRepository,
+      eventsGateway: this.eventsGateway,
+      webhookService: this.webhookService,
+      configService: this.configService,
+      statusStore: this.statusStore,
+      logger: this.logger,
+    });
+    this.eventWiring = new SessionEngineEventWiring({ logger: this.logger });
+    // The wiring host is built ONCE here: arrow closures bind the live methods/state (never a
+    // stale copy — specs replace some deps at runtime), and the leaf deps are handed over by
+    // reference. Every closure is a deliberately NON-async passthrough returning the callee's own
+    // promise object untouched (the Task-1 delegate rule: an `async` wrapper would adopt the inner
+    // promise and add settlement hops the retirement-race specs assert against).
+    this.wiringHost = {
+      isLiveEngine: (id, engine) => this.isLiveEngine(id, engine),
+      handleEngineReady: (id, engine, phone, pushName) => this.handleEngineReady(id, engine, phone, pushName),
+      handleEngineDisconnected: (id, engine, reason) => this.handleEngineDisconnected(id, engine, reason),
+      updateStatus: (id, status) => this.updateStatus(id, status),
+      cancelReconnect: id => this.cancelReconnect(id),
+      evictAndForceDestroy: (id, engine) => this.evictAndForceDestroy(id, engine),
+      trackPendingCredentialTeardown: (sessionName, raw) => this.trackPendingCredentialTeardown(sessionName, raw),
+      claimStuckAuthRecovery: (id, engine) => {
+        // SYNCHRONOUS atomic claim for the one-shot automatic credential-reset budget. The adapter
+        // calls this right before it would wipe LocalAuth (recoverFromStuckAuth); a denial makes the
+        // adapter fail terminally WITHOUT touching the auth dir. Two guards, in order:
+        //  1. the captured engine must still be the live owner — a stale generation (superseded by a
+        //     reconnect/restart) must never spend the budget for the current owner;
+        //  2. the session id must not already be in the Set — the budget is one claim per episode.
+        // Synchronous on purpose: the race between the stuck-auth timeout and a concurrent
+        // start()/reconnect is decided within a single event-loop turn (no await between the checks
+        // and the Set mutation).
+        if (!this.isLiveEngine(id, engine)) return false;
+        if (this.stuckAuthRecoveryUsed.has(id)) return false;
+        this.stuckAuthRecoveryUsed.add(id);
+        return true;
+      },
+      messages: this.messages,
+      sessionErrors: this.sessionErrors,
+      webhookService: this.webhookService,
+      eventsGateway: this.eventsGateway,
+      hookManager: this.hookManager,
+      leafEvents: this.leafEvents,
+    };
   }
 
   /** findOne-or-404 with the last-error projection, mirroring SessionService.findOne. */
@@ -327,6 +364,27 @@ export class SessionEngineLifecycle {
   /** Delegate: SessionLifecycleFences.evictAndForceDestroy. */
   private evictAndForceDestroy(id: string, engine: IWhatsAppEngine): void {
     this.fences.evictAndForceDestroy(id, engine);
+  }
+
+  // --- Leaf-event delegates (SessionEngineLeafEvents) ------------------------------------------
+  // Same-named, same-signature forwarders onto the extracted unit, so handleEngineReady's call
+  // site stays byte-identical (the wiring reaches the unit directly through host.leafEvents).
+  // The method contracts (docblocks) moved to session-engine-leaf-events.ts with the bodies.
+  // The promise-returning forwarders are deliberately NON-async (the Task-1 rule above).
+
+  /** Delegate: SessionEngineLeafEvents.seedStatuses. */
+  private seedStatuses(sessionId: string, engine: IWhatsAppEngine): Promise<void> {
+    return this.leafEvents.seedStatuses(sessionId, engine);
+  }
+
+  /** Delegate: SessionEngineLeafEvents.dispatchGroupEvent. */
+  private dispatchGroupEvent(id: string, event: GroupEvent): void {
+    this.leafEvents.dispatchGroupEvent(id, event);
+  }
+
+  /** Delegate: SessionEngineLeafEvents.maybeAutoRejectCall. */
+  private maybeAutoRejectCall(id: string, engine: IWhatsAppEngine, callId: string): Promise<void> {
+    return this.leafEvents.maybeAutoRejectCall(id, engine, callId);
   }
 
   async delete(id: string): Promise<void> {
@@ -591,80 +649,6 @@ export class SessionEngineLifecycle {
     return this.engines.isLive(id, engine);
   }
 
-  /**
-   * Backfill currently-active statuses from the engine on connect, so the store has today's stories
-   * even for ones posted before this session came online (live posts land via onMessage). Best-effort:
-   * Baileys doesn't support this (throws EngineNotSupportedError) and any other engine error must not
-   * take down the ready path, so every failure is swallowed here. Ingest is idempotent on
-   * `(sessionId, waStatusId)`, so this can never double-count a status onMessage already ingested.
-   */
-  private async seedStatuses(sessionId: string, engine: IWhatsAppEngine): Promise<void> {
-    try {
-      // Read the status-broadcast chat's own recent messages rather than getContactStatuses(): on
-      // whatsapp-web.js the latter reads the StatusV3 collection, which loads asynchronously and is
-      // near-empty right after ready, so a status posted before connect would silently never reach the
-      // store. Fetching the chat's messages (the same on-demand fetch the chat-history endpoint uses)
-      // reliably returns the currently-active statuses with downloadable media/video, and each maps
-      // through the very buildIncomingStatus the live onMessage path uses — so a seeded status is
-      // indistinguishable from one that arrives live. No status.received webhook is dispatched here:
-      // this is a backfill of posts that predate the connection, not a live arrival.
-      // Pre-gate media downloads at the store's own cap: a larger blob would be discarded as
-      // over_cap on ingest anyway, so downloading it is pure waste (heap + bandwidth).
-      const mediaMaxBytes =
-        this.configService?.get<number>('status.mediaMaxBytes', DEFAULT_MEDIA_MAX_BYTES) ?? DEFAULT_MEDIA_MAX_BYTES;
-      const messages = await engine.getChatHistory('status@broadcast', STATUS_SEED_LIMIT, true, mediaMaxBytes);
-      // getChatHistory maps a message's contact from the sync cache only, so status posters (usually
-      // @lid ids) come back nameless. Resolve each unique poster once via getContactById — the same
-      // lookup the contacts API uses, which maps the @lid to the real contact — so a seeded status
-      // carries the poster's name like a live one does. Cached per JID: one lookup per contact, not
-      // one per status.
-      const contactNames = new Map<string, { name?: string; pushName?: string }>();
-      const resolvePoster = async (jid: string): Promise<{ name?: string; pushName?: string }> => {
-        const cached = contactNames.get(jid);
-        if (cached) return cached;
-        let resolved: { name?: string; pushName?: string } = {};
-        try {
-          const contact = await engine.getContactById(jid);
-          if (contact) resolved = { name: contact.name, pushName: contact.pushName };
-        } catch {
-          // Best-effort: a failed lookup just leaves the status nameless.
-        }
-        contactNames.set(jid, resolved);
-        return resolved;
-      };
-      for (const msg of messages) {
-        try {
-          // Mirrors the live path's own-send drop: the broadcast chat's history also contains the
-          // account's OWN active statuses, which must not come back as if a contact had posted them.
-          if (msg.fromMe) continue;
-          // A status whose 24h already ran out is hidden by WhatsApp and would only live until the
-          // next purge sweep — don't backfill it (its media was downloaded by getChatHistory
-          // regardless; this just skips the row).
-          if (msg.timestamp * 1000 + STATUS_TTL_MS <= Date.now()) continue;
-          const status = buildIncomingStatus(msg);
-          if (!status) continue;
-          if (!status.contactName && !status.contactPushName) {
-            const poster = await resolvePoster(status.contactJid);
-            status.contactName = poster.name;
-            status.contactPushName = poster.pushName;
-          }
-          await this.statusStore.ingest(sessionId, status);
-        } catch (itemErr) {
-          // One bad item must not abort the whole backfill.
-          this.logger.warn('Status seed item skipped', {
-            sessionId,
-            error: itemErr instanceof Error ? itemErr.message : String(itemErr),
-          });
-        }
-      }
-    } catch (err) {
-      this.logger.debug('Status seed skipped', {
-        sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
   private async initializeEngine(id: string, session: Session): Promise<void> {
     this.logger.log(`Initializing engine for session: ${session.name}`, {
       sessionId: id,
@@ -722,202 +706,12 @@ export class SessionEngineLifecycle {
       return;
     }
 
-    const initPromise = engine.initialize({
-      onQRCode: (qr: string): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        this.logger.log('QR code generated', {
-          sessionId: id,
-          action: 'qr_generated',
-        });
-
-        void this.webhookService.dispatch(id, 'session.qr', { sessionId: id, qr });
-
-        // Push the QR to subscribed dashboard clients over the WebSocket (the `session.qr` event is
-        // advertised + consumed there, so clients can render it live instead of polling GET /qr).
-        this.eventsGateway.emitQRCode(id, qr);
-
-        // Execute hook for QR event
-        void this.hookManager.execute(
-          'session:qr',
-          { sessionId: id },
-          {
-            sessionId: id,
-            source: 'Engine',
-          },
-        );
-
-        void this.updateStatus(id, SessionStatus.QR_READY);
-      },
-      onReady: (phone, pushName): void => this.handleEngineReady(id, engine, phone, pushName),
-      onMessage: (message): void => this.messages.handleInboundMessage(id, engine, message),
-      onHistoryMessages: (messages): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        // Persist for the chat view only; no dispatch (these predate the live session).
-        void this.messages
-          .persistHistoryMessages(id, messages)
-          .catch(err => this.logger.error(`Failed to persist history messages for ${id}`, String(err)));
-      },
-      onMessageCreate: (message): void => this.messages.handleOwnSendEcho(id, engine, message),
-      onMessageAck: (messageId, status): void => this.messages.handleMessageAck(id, engine, messageId, status),
-      onMessageRevoked: (message): void => this.messages.handleMessageRevoked(id, engine, message),
-      onMessageReaction: (event): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        if (!event.messageId) {
-          this.logger.warn('Ignoring message reaction without a target message id', {
-            sessionId: id,
-            action: 'message_reaction_ignored',
-          });
-          return;
-        }
-        this.logger.debug(`Message reaction received: ${event.messageId} -> ${event.reaction}`, {
-          sessionId: id,
-          messageId: event.messageId,
-          action: 'message_reaction_received',
-        });
-
-        this.messages.applyReactionQueued(id, event);
-      },
-      onMessageEdited: (message): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        if (!message.messageId) {
-          this.logger.warn('Ignoring message edit without a target message id', {
-            sessionId: id,
-            action: 'message_edit_ignored',
-          });
-          return;
-        }
-        this.logger.debug(`Message edited: ${message.messageId}`, {
-          sessionId: id,
-          messageId: message.messageId,
-          action: 'message_edited',
-        });
-
-        this.messages.applyMessageEditQueued(id, message);
-      },
-      onGroupEvent: (event): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        this.logger.debug(`Group event: ${event.kind} in ${event.groupId}`, {
-          sessionId: id,
-          groupId: event.groupId,
-          kind: event.kind,
-          action: 'group_event',
-        });
-        this.dispatchGroupEvent(id, event);
-      },
-      onCall: (event: IncomingCallEvent): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        this.logger.log(`Incoming call from ${event.from}`, {
-          sessionId: id,
-          callId: event.callId,
-          isVideo: event.isVideo,
-          isGroup: event.isGroup,
-          action: 'call_received',
-        });
-        const payload: Record<string, unknown> = { ...event };
-        this.eventsGateway.emitCallReceived(id, payload);
-        void this.webhookService.dispatch(id, 'call.received', payload);
-        // Opt-in auto-reject runs AFTER the dispatch so a reject failure can never eat the event.
-        void this.maybeAutoRejectCall(id, engine, event.callId);
-      },
-      onDisconnected: (reason: string): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        // Shared with the liveness watchdog (see handleEngineDisconnected). Pass the captured
-        // engine so the handler can re-check identity across its DB await — this closure's `engine`
-        // (and `session`) snapshots can be stale by the time a disconnect lands, so the handler
-        // re-reads the row itself and fences every side effect on `engine` still being the live
-        // owner. The captured engine is the exact generation token (no numeric counter).
-        void this.handleEngineDisconnected(id, engine, reason);
-      },
-      onStateChanged: (engineState: EngineStatus): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        const statusMap: Record<EngineStatus, SessionStatus> = {
-          [EngineStatus.DISCONNECTED]: SessionStatus.DISCONNECTED,
-          [EngineStatus.INITIALIZING]: SessionStatus.INITIALIZING,
-          [EngineStatus.QR_READY]: SessionStatus.QR_READY,
-          [EngineStatus.AUTHENTICATING]: SessionStatus.AUTHENTICATING,
-          [EngineStatus.READY]: SessionStatus.READY,
-          [EngineStatus.ACTION_REQUIRED]: SessionStatus.ACTION_REQUIRED,
-          [EngineStatus.FAILED]: SessionStatus.FAILED,
-        };
-        const newStatus = statusMap[engineState];
-        if (newStatus) {
-          void this.updateStatus(id, newStatus);
-        }
-      },
-      onActionRequired: (reason: string): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        this.logger.warn(`Session requires operator action: ${reason}`, {
-          sessionId: id,
-          reason,
-          action: 'action_required',
-        });
-        // Record the reason so the last-error projection surfaces it while the session is
-        // ACTION_REQUIRED, then updateStatus (via onStateChanged above) has already written the
-        // status. Set here too to be defensive: the callback order is onStateChanged then
-        // onActionRequired, but persisting the reason here means it is available regardless.
-        this.sessionErrors.set(id, reason);
-        void this.hookManager.execute('session:error', { reason }, { sessionId: id, source: 'Engine' });
-      },
-      onError: (reason: string): void => {
-        if (!this.isLiveEngine(id, engine)) return;
-        this.logger.error(`Session engine failed: ${reason}`, undefined, {
-          sessionId: id,
-          reason,
-          action: 'engine_error',
-        });
-
-        // Remember the reason so findOne/findAll can surface it to the dashboard,
-        // then persist the FAILED status. This is terminal — no reconnect is
-        // scheduled (unlike onDisconnected), since re-scanning is required.
-        this.sessionErrors.set(id, reason);
-
-        // A prior onDisconnected may have scheduled a reconnect. This failure is terminal
-        // (re-scan required), so cancel it — otherwise the pending timer would resurrect a
-        // session the operator must manually restart.
-        this.cancelReconnect(id);
-
-        void this.hookManager.execute(
-          'session:error',
-          { reason },
-          {
-            sessionId: id,
-            source: 'Engine',
-          },
-        );
-
-        void this.updateStatus(id, SessionStatus.FAILED);
-
-        // onError is terminal (no reconnect is scheduled — re-scan is required). Evict the dead engine
-        // and SIGKILL its process: leaving it in the map would hold a concurrency slot indefinitely and
-        // make the next start() reject the session as "already started" instead of re-initializing it.
-        this.evictAndForceDestroy(id, engine);
-      },
-      onCredentialTeardownStarted: (operation: Promise<void>): void => {
-        // The adapter fired the moment it began the call that ends in an fs.rm of this session's
-        // on-disk auth dir. Track it under the captured session NAME (the auth-dir key) — NOT the
-        // UUID, and NOT guarded on this engine still being live: a logout that captured this engine
-        // must register its destructive promise even as a concurrent stop()/delete() evicts it,
-        // because the rm targets the session name's dir and would otherwise race a (re)created
-        // session under that same name. `session.name` is the immutable snapshot captured at
-        // initializeEngine entry, so a row delete/recreate under the same name cannot poison the key.
-        this.trackPendingCredentialTeardown(session.name, operation);
-      },
-      claimStuckAuthRecovery: (): boolean => {
-        // SYNCHRONOUS atomic claim for the one-shot automatic credential-reset budget. The adapter
-        // calls this right before it would wipe LocalAuth (recoverFromStuckAuth); a denial makes the
-        // adapter fail terminally WITHOUT touching the auth dir. Two guards, in order:
-        //  1. the captured engine must still be the live owner — a stale generation (superseded by a
-        //     reconnect/restart) must never spend the budget for the current owner;
-        //  2. the session id must not already be in the Set — the budget is one claim per episode.
-        // Synchronous on purpose: the race between the stuck-auth timeout and a concurrent
-        // start()/reconnect is decided within a single event-loop turn (no await between the checks
-        // and the Set mutation).
-        if (!this.isLiveEngine(id, engine)) return false;
-        if (this.stuckAuthRecoveryUsed.has(id)) return false;
-        this.stuckAuthRecoveryUsed.add(id);
-        return true;
-      },
-    });
+    // The 17-callback table moved to SessionEngineEventWiring (session-engine-event-wiring.ts):
+    // per-callback liveness gating (five callbacks are deliberately UNGATED), every nested call's
+    // order, and the synchronous one-shot stuck-auth claim are preserved there, reaching the
+    // lifecycle's live methods/state through the wiringHost built in the constructor.
+    // `session.name` is handed over as the immutable snapshot onCredentialTeardownStarted keys on.
+    const initPromise = engine.initialize(this.eventWiring.buildCallbacks(id, engine, session.name, this.wiringHost));
 
     // engine.initialize() launches Chromium and navigates to WhatsApp Web with no internal timeout:
     // whatsapp-web.js calls page.goto(..., { timeout: 0 }) and its web-version-cache fetch has none
@@ -1044,82 +838,6 @@ export class SessionEngineLifecycle {
     // posts arrive through onMessage below; this just backfills what was already up before we
     // connected. Not awaited — onReady must not block on it.
     void this.seedStatuses(id, engine);
-  }
-
-  /**
-   * Fan a neutral engine GroupEvent out to consumers: the WebSocket room and the webhook stream.
-   * The `kind` selects the event name (`group.join` / `group.leave` / `group.update`); the payload
-   * is the same plain camelCase shape on both channels, with `kind` itself carried by the name.
-   * There is no persistence here — group membership/metadata lives in the engine, not the message
-   * store — so unlike message edits there is nothing to apply before notifying.
-   */
-  private dispatchGroupEvent(id: string, event: GroupEvent): void {
-    const payload: Record<string, unknown> = {
-      groupId: event.groupId,
-      participantIds: event.participantIds,
-      timestamp: event.timestamp,
-    };
-    // Optional fields are added only when present so consumers never see explicit `undefined`s.
-    if (event.actorId !== undefined) {
-      payload.actorId = event.actorId;
-    }
-    if (event.changes !== undefined) {
-      payload.changes = event.changes;
-    }
-
-    switch (event.kind) {
-      case 'join':
-        this.eventsGateway.emitGroupJoin(id, payload);
-        void this.webhookService.dispatch(id, 'group.join', payload);
-        break;
-      case 'leave':
-        this.eventsGateway.emitGroupLeave(id, payload);
-        void this.webhookService.dispatch(id, 'group.leave', payload);
-        break;
-      case 'update':
-        this.eventsGateway.emitGroupUpdate(id, payload);
-        void this.webhookService.dispatch(id, 'group.update', payload);
-        break;
-    }
-  }
-
-  /**
-   * Reject a ringing call when the session opted in via `config.autoRejectCalls`. The session row
-   * is re-read here rather than trusting initializeEngine's closure snapshot — a call can arrive
-   * long after start, and the row is the only always-current source (mirrors
-   * handleEngineDisconnected). `config` is an untyped JSON column: only a strict boolean `true`
-   * opts in — truthy strings/numbers are ignored (the coercion discipline of
-   * resolveReconnectConfig). Never throws: a reject failure is logged, and the `call.received`
-   * dispatch already happened before this ran.
-   */
-  private async maybeAutoRejectCall(id: string, engine: IWhatsAppEngine, callId: string): Promise<void> {
-    let session: Session | null;
-    try {
-      session = await this.sessionRepository.findOne({ where: { id } });
-    } catch (err) {
-      this.logger.error('Failed to reload the session for call auto-reject', String(err), {
-        sessionId: id,
-        action: 'call_auto_reject_error',
-      });
-      return;
-    }
-    if (session?.config?.autoRejectCalls !== true) {
-      return;
-    }
-    try {
-      await engine.rejectCall(callId);
-      this.logger.log('Auto-rejected incoming call', {
-        sessionId: id,
-        callId,
-        action: 'call_auto_rejected',
-      });
-    } catch (err) {
-      this.logger.warn('Failed to auto-reject incoming call', {
-        sessionId: id,
-        callId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
   }
 
   /**
