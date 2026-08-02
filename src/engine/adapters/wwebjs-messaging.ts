@@ -89,7 +89,7 @@ export async function loadRemoteMedia(url: string): Promise<MessageMedia> {
 /**
  * True when a send error is whatsapp-web.js's "recipient needs a LID we don't have" failure, raised
  * when sending to a `@c.us` for a contact WhatsApp has migrated to `@lid`.
- * ponytail: matched on the wwjs error text — there is no structured code; revisit if wwjs changes it.
+ * Matched on the wwjs error text — there is no structured code; revisit if wwjs changes it.
  */
 export function isNoLidForUserError(err: unknown): boolean {
   return err instanceof Error && err.message.includes('No LID for user');
@@ -190,8 +190,8 @@ export class WwebjsMessaging {
   // confirmed resolution keeps ordinary sends from re-probing on each message (#580). A `@lid` is
   // stable; a stale entry (a contact that migrates mid-session) self-heals via the retry in
   // `sendResolved`.
-  // ponytail: unbounded Map, bounded in practice by distinct recipients per session; add an LRU only
-  // if a session ever addresses a truly unbounded set of fresh numbers.
+  // Unbounded Map, bounded in practice by distinct recipients per session; add an LRU only if a
+  // session ever addresses a truly unbounded set of fresh numbers.
   private readonly resolvedSendIds = new Map<string, string>();
 
   /**

@@ -26,11 +26,14 @@ interface ChatComposerProps {
   setReplyingTo: Dispatch<SetStateAction<ChatMessageView | null>>;
   onMessageAppended: (direction: ScrollDirection) => void;
   setChats: Dispatch<SetStateAction<Chat[]>>;
+  messageInput: string;
+  setMessageInput: Dispatch<SetStateAction<string>>;
 }
 
 // The composer half of the chat room: attachment preview, emoji panel, reply banner, and the input
 // bar with the whole optimistic-send flow. `replyingTo` is shared with the thread (its reply action
-// sets it), so it lives in the page and is handed down; everything else is local.
+// sets it), and `messageInput` lives in the page so a typed draft survives closing the room;
+// everything else is local.
 function ChatComposer({
   selectedSessionId,
   activeChat,
@@ -38,6 +41,8 @@ function ChatComposer({
   setReplyingTo,
   onMessageAppended,
   setChats,
+  messageInput,
+  setMessageInput,
 }: ChatComposerProps) {
   const { t } = useTranslation();
   const { canWrite } = useRole();
@@ -45,7 +50,6 @@ function ChatComposer({
   const { appendMessage, updateMessage } = useChatMessagesActions();
   const queryClient = useQueryClient();
 
-  const [messageInput, setMessageInput] = useState<string>('');
   const [sending, setSending] = useState<boolean>(false);
 
   // File attachments

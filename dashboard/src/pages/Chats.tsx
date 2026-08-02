@@ -187,6 +187,8 @@ export function Chats() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const [replyingTo, setReplyingTo] = useState<ChatMessageView | null>(null);
+  // Draft text lives here (not in ChatComposer) so it survives closing/switching the room.
+  const [messageInput, setMessageInput] = useState<string>('');
 
   // Per-chat scroll-position memory + auto-scroll heuristic.
   // Pass `messages.length > 0` as the loaded signal: it stays stable once the
@@ -886,6 +888,8 @@ export function Chats() {
                   setReplyingTo={setReplyingTo}
                   onMessageAppended={onMessageAppended}
                   setChats={setChats}
+                  messageInput={messageInput}
+                  setMessageInput={setMessageInput}
                 />
               </div>
             ) : activeChannel ? (

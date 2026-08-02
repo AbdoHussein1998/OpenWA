@@ -4,7 +4,8 @@
 // same providers App.tsx uses (QueryClientProvider → RoleProvider → ToastProvider; i18n via the
 // side-effect import; Chats uses no router hooks, so no Router is needed) and the backend is
 // stubbed at the fetch layer with canned JSON for every endpoint the page hits on mount,
-// on chat open, and on send.
+// on chat open, on send, and on status-compose. Every stubbed request is recorded so tests can
+// assert the wire effect (POST body) of a UI action, not just its optimistic DOM echo.
 //
 // Runner constraints honored here: plain .ts with React.createElement (the runner cannot parse
 // JSX), loader hooks registered before any app-module import (see test-helpers/register-hooks),
@@ -52,6 +53,10 @@ const DB_MESSAGE: ChatMessage = {
   createdAt: new Date(1_700_000_000_000).toISOString(),
 };
 
+// Contact for the status-compose recipient picker (Baileys requires an explicit allow-list).
+const CONTACT = { id: '15550002222@c.us', name: 'Bob', number: '15550002222' };
+const STATUS_TEXT = 'status text here';
+
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -59,8 +64,30 @@ function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
+// Every request the stub serves is recorded (method, path, parsed JSON body) so tests can assert
+// the WIRE effect of a UI action — an optimistic bubble alone would pass even if the POST broke.
+interface FetchCall {
+  method: string;
+  path: string;
+  body?: unknown;
+}
+
+const fetchCalls: FetchCall[] = [];
+
+function resetFetchCalls(): void {
+  fetchCalls.length = 0;
+}
+
+function findFetchCall(method: string, path: string): FetchCall | undefined {
+  return fetchCalls.find(c => c.method === method && c.path === path);
+}
+
+function countFetchCalls(method: string, path: string): number {
+  return fetchCalls.filter(c => c.method === method && c.path === path).length;
+}
+
 // URL router for every endpoint the page (and the hooks/components under it) can hit during the
-// smoke flow below. Anything else gets a 404 so an unexpected request fails loudly in the test
+// smoke flows below. Anything else gets a 404 so an unexpected request fails loudly in the test
 // output instead of resolving into a confusing downstream crash.
 function installFetchStub(): void {
   const chatId = encodeURIComponent(CHAT.id);
@@ -68,6 +95,16 @@ function installFetchStub(): void {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const method = init?.method ?? 'GET';
     const path = url.replace(/^https?:\/\/[^/]+/, '');
+
+    let body: unknown;
+    if (typeof init?.body === 'string') {
+      try {
+        body = JSON.parse(init.body);
+      } catch {
+        body = init.body;
+      }
+    }
+    fetchCalls.push({ method, path, body });
 
     if (method === 'GET' && path === '/api/sessions') return Promise.resolve(jsonResponse([SESSION]));
     if (method === 'GET' && path === '/api/infra/engines/current') {
@@ -82,17 +119,26 @@ function installFetchStub(): void {
     if (method === 'GET' && path === `/api/sessions/${SESSION.id}/contacts/${chatId}/profile-picture`) {
       return Promise.resolve(jsonResponse({ url: null }));
     }
+    if (method === 'GET' && path === `/api/sessions/${SESSION.id}/contacts`) {
+      return Promise.resolve(jsonResponse([CONTACT]));
+    }
     if (method === 'GET' && path.startsWith(`/api/sessions/${SESSION.id}/messages?`)) {
       return Promise.resolve(jsonResponse({ messages: [DB_MESSAGE], total: 1 }));
     }
     if (method === 'GET' && path.startsWith(`/api/sessions/${SESSION.id}/messages/${chatId}/history`)) {
       return Promise.resolve(jsonResponse([]));
     }
+    if (method === 'GET' && path === `/api/sessions/${SESSION.id}/status`) {
+      return Promise.resolve(jsonResponse({ statuses: [] }));
+    }
     if (method === 'POST' && path === `/api/sessions/${SESSION.id}/chats/read`) {
       return Promise.resolve(jsonResponse({ success: true }));
     }
     if (method === 'POST' && path === `/api/sessions/${SESSION.id}/messages/send-text`) {
       return Promise.resolve(jsonResponse({ messageId: 'wamid.out.1', timestamp: 1_700_000_100 }));
+    }
+    if (method === 'POST' && path === `/api/sessions/${SESSION.id}/status/send-text`) {
+      return Promise.resolve(jsonResponse({ success: true }));
     }
     return Promise.resolve(jsonResponse({ message: `unstubbed ${method} ${path}` }, 404));
   };
@@ -150,10 +196,11 @@ function renderChats(): { container: HTMLElement } {
   );
 }
 
-// ── Smoke test ───────────────────────────────────────────────────────────────
+// ── Smoke tests ──────────────────────────────────────────────────────────────
 
 test('Chats renders: session/chat list loads, a chat opens, and a message sends', async () => {
-  const { screen, fireEvent, within } = rtl;
+  const { screen, fireEvent, within, waitFor } = rtl;
+  resetFetchCalls();
   const { container } = renderChats();
 
   // Sidebar: the session selector shows the stubbed ready session, and the chat list row
@@ -179,4 +226,75 @@ test('Chats renders: session/chat list loads, a chat opens, and a message sends'
   assert.equal(sendButton.disabled, false);
   fireEvent.click(sendButton);
   await within(thread).findByText('hello back');
+
+  // The optimistic bubble alone would pass even if the POST never fired — assert the wire call.
+  await waitFor(() => {
+    const call = findFetchCall('POST', `/api/sessions/${SESSION.id}/messages/send-text`);
+    assert.ok(call, 'expected a POST to the send-text endpoint');
+    assert.deepEqual(call.body, { chatId: CHAT.id, text: 'hello back' });
+  });
+});
+
+test('status compose modal posts a text status with the baileys recipient allow-list', async () => {
+  const { screen, fireEvent, within, waitFor } = rtl;
+  resetFetchCalls();
+  renderChats();
+
+  // The compose trigger lives in the sidebar's Status tab. The engine stub answers 'baileys',
+  // so the modal enables its contacts query and requires an explicit recipient allow-list.
+  await screen.findByText('Main (15551234567)');
+  fireEvent.click(screen.getByRole('tab', { name: 'Status' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Post a status' }));
+
+  const dialog = await screen.findByRole('dialog');
+  // Text status body (the textarea's placeholder is chats.status.composeText).
+  fireEvent.change(within(dialog).getByPlaceholderText('Text'), { target: { value: STATUS_TEXT } });
+  // Pick the stubbed contact once the contacts query resolves.
+  await within(dialog).findByText('Bob');
+  fireEvent.click(within(dialog).getByRole('checkbox'));
+
+  const postButton = within(dialog).getByRole('button', { name: 'Post' }) as HTMLButtonElement;
+  assert.equal(postButton.disabled, false); // text + recipient + known engine → submittable
+  fireEvent.click(postButton);
+
+  // The wire call: POST status/send-text with the text and the selected allow-list
+  // (backgroundColor/font are dropped from the body while unset).
+  await waitFor(() => {
+    const call = findFetchCall('POST', `/api/sessions/${SESSION.id}/status/send-text`);
+    assert.ok(call, 'expected a POST to the status send-text endpoint');
+    assert.deepEqual(call.body, { text: STATUS_TEXT, recipients: [CONTACT.id] });
+  });
+
+  // Success path: the modal closes and onPosted refetches the status list (one GET from the
+  // tab switch, one from the refetch).
+  await waitFor(() => assert.equal(screen.queryByRole('dialog'), null));
+  await waitFor(() => {
+    assert.ok(
+      countFetchCalls('GET', `/api/sessions/${SESSION.id}/status`) >= 2,
+      'expected the status list to refetch after posting',
+    );
+  });
+});
+
+test('a typed draft survives closing and reopening the room', async () => {
+  const { screen, fireEvent, within } = rtl;
+  resetFetchCalls();
+  const { container } = renderChats();
+
+  // Open the chat and type (but do NOT send) a draft.
+  await screen.findByText('Main (15551234567)');
+  fireEvent.click(await screen.findByText('Alice'));
+  await within(container.querySelector('.room-messages') as HTMLElement).findByText('hello from alice');
+  fireEvent.change(screen.getByPlaceholderText('Type a message...'), { target: { value: 'draft survives' } });
+
+  // Close the room with the back button (aria-label = common.back); the composer unmounts.
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  assert.equal(screen.queryByRole('button', { name: 'Back' }), null);
+
+  // Reopen the same chat (room closed → 'Alice' matches only the sidebar row): the draft must
+  // still be in the input — the page owns messageInput precisely so it survives this round trip.
+  fireEvent.click(screen.getByText('Alice'));
+  await within(container.querySelector('.room-messages') as HTMLElement).findByText('hello from alice');
+  const input = screen.getByPlaceholderText('Type a message...') as HTMLInputElement;
+  assert.equal(input.value, 'draft survives');
 });

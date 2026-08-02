@@ -144,13 +144,7 @@ export { extractLinkedParentJID } from './wwebjs-groups';
 
 // Messaging helpers moved to ./wwebjs-messaging with the messaging operations; re-exported because
 // existing callers (the adapter spec) still import them from here.
-export {
-  isHttpUrl,
-  loadRemoteMedia,
-  extractWwebjsCall,
-  isNoLidForUserError,
-  wwebjsAckToDeliveryStatus,
-} from './wwebjs-messaging';
+export { isHttpUrl, loadRemoteMedia, extractWwebjsCall, wwebjsAckToDeliveryStatus } from './wwebjs-messaging';
 
 // Proxy launch helpers moved to ./wwebjs-proxy; re-exported because existing callers (the adapter
 // spec) still import them from here.

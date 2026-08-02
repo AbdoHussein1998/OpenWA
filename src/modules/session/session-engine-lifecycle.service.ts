@@ -48,9 +48,9 @@ import { HookManager } from '../../core/hooks';
 // history sync) get the omitted marker synthesized at the persistence chokepoints.
 
 // How many recent status-broadcast messages the connect-time seed pulls (each with its media).
-// ponytail: fixed ceiling — the most-recent 50 cover a normal account's 24h of stories; anything
-// posted after connect still lands live via onMessage. Make it configurable only if a flood account
-// proves 50 too few.
+// Fixed ceiling: the most-recent 50 cover a normal account's 24h of stories; anything posted after
+// connect still lands live via onMessage. Make it configurable only if a flood account proves 50
+// too few.
 const STATUS_SEED_LIMIT = 50;
 
 interface ReconnectState extends ReconnectAttemptState {
