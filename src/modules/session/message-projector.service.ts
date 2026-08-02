@@ -9,6 +9,8 @@ import { EngineRegistry } from '../../engine/engine-registry.service';
 import { KeyedMutationQueue } from '../../common/utils/keyed-mutation-queue';
 import { SessionLidResolver } from './session-lid-resolver.service';
 import { buildMessageMetadata, storableWaMessageId } from './message-row.mapper';
+import { MessageMutationProjector } from './message-mutation-projector';
+import { persistHistoryMessages } from './message-history-projector';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { StatusStoreService } from '../status-store/status-store.service';
@@ -81,6 +83,10 @@ export class MessageProjector {
     this.logger.error(`Unexpected failure applying message mutation: ${key}`, String(err));
   });
 
+  // Reaction/edit applies, extracted to a plain collaborator. It shares this instance's
+  // messageMutations queue, so the public enqueue path and the queued applies serialize on one chain.
+  private readonly mutationProjector: MessageMutationProjector;
+
   constructor(
     @InjectRepository(Message, 'data')
     private readonly messageRepository: Repository<Message>,
@@ -94,7 +100,15 @@ export class MessageProjector {
     private readonly lidResolver: SessionLidResolver,
     @Optional()
     private readonly configService?: ConfigService,
-  ) {}
+  ) {
+    this.mutationProjector = new MessageMutationProjector(
+      this.messageRepository,
+      this.eventsGateway,
+      this.webhookService,
+      this.messageMutations,
+      this.logger,
+    );
+  }
 
   /** Engine callback body, lifted out of initializeEngine so the wiring table stays readable. */
   handleInboundMessage(id: string, engine: IWhatsAppEngine, message: IncomingMessage): void {
@@ -533,179 +547,29 @@ export class MessageProjector {
     this.eventsGateway.emitMessageRevoked(id, revokedPayload);
   }
 
-  /**
-   * Persist pre-connection history into the `messages` table for the chat view, without webhook/hook/ws
-   * dispatch (it predates the live session). De-duplicated by `waMessageId` so re-syncs never duplicate.
-   */
-  async persistHistoryMessages(id: string, messages: IncomingMessage[]): Promise<void> {
-    const storeEphemeralMessages = resolveFeatureFlags(this.configService).storeEphemeralMessages;
-    const byId = new Map<string, IncomingMessage>();
-    for (const m of messages) {
-      // Need an id to de-dup; chatId/from/to are NOT NULL; status/story posts aren't chats.
-      if (!m.id || m.isStatusBroadcast || !m.chatId || !m.from || !m.to) {
-        continue;
-      }
-      // Mirror the live onMessage guard: skip disappearing messages when the operator opted out, so a
-      // history backfill can't bypass STORE_EPHEMERAL_MESSAGES=false. No-op when the flag is at its
-      // default (true); only a message with a positive timer is dropped, never a regular one.
-      if (!storeEphemeralMessages && (m.ephemeralDuration ?? 0) > 0) {
-        continue;
-      }
-      byId.set(m.id, m);
-    }
-    if (byId.size === 0) {
-      return;
-    }
-    // Chunk the dedup query: a batch can be thousands, past SQLite's bound-variable limit for IN (...).
-    const ids = [...byId.keys()];
-    const CHUNK = 400;
-    let inserted = 0;
-    for (let i = 0; i < ids.length; i += CHUNK) {
-      const chunkIds = ids.slice(i, i + CHUNK);
-      const existing = await this.messageRepository.find({
-        where: { sessionId: id, waMessageId: In(chunkIds) },
-        select: { waMessageId: true },
-      });
-      const seen = new Set(existing.map(r => r.waMessageId));
-      const rows = chunkIds
-        .filter(x => !seen.has(x))
-        .map(x => {
-          const m = byId.get(x)!;
-          const metadata = buildMessageMetadata(m, true);
-          const row = this.messageRepository.create({
-            sessionId: id,
-            waMessageId: m.id,
-            chatId: m.chatId,
-            // Group poster for inbound rows only — the account's own backfilled group messages must
-            // not carry author (the column's contract is "null on outgoing echoes").
-            author: m.fromMe ? undefined : m.author,
-            from: m.from,
-            to: m.to,
-            body: m.body,
-            type: m.type,
-            direction: m.fromMe ? MessageDirection.OUTGOING : MessageDirection.INCOMING,
-            timestamp: m.timestamp,
-            status: MessageStatus.SENT,
-            metadata,
-          });
-          // The chat panel orders by createdAt; stamp the real time so history sorts correctly.
-          if (m.timestamp) {
-            row.createdAt = new Date(m.timestamp * 1000);
-          }
-          return row;
-        });
-      if (rows.length) {
-        // Insert-or-ignore: a live onMessage insert can land between the `seen` SELECT above and this
-        // write, colliding on UNIQUE(sessionId, waMessageId). orIgnore skips the collision instead of
-        // throwing and aborting the whole batch (history is best-effort, persist-never-dispatch).
-        await this.messageRepository
-          .createQueryBuilder()
-          .insert()
-          .values(rows as unknown as QueryDeepPartialEntity<Message>[])
-          .orIgnore()
-          .execute();
-        inserted += rows.length;
-      }
-    }
-    if (inserted) {
-      this.logger.log(`Persisted ${inserted} history message(s)`, {
-        sessionId: id,
-        inserted,
-        action: 'history_messages_persisted',
-      });
-    }
+  /** History backfill persist, extracted to message-history-projector.ts (stateless function). */
+  persistHistoryMessages(id: string, messages: IncomingMessage[]): Promise<void> {
+    return persistHistoryMessages(this.messageRepository, this.configService, id, messages, this.logger);
   }
 
-  /**
-   * Queue a reaction apply. Reactions read-modify-write the metadata column, so they must be
-   * serialized per message; the caller only knows it has an event to apply.
-   */
+  /** Reaction apply, queued on the per-message mutation chain — see MessageMutationProjector. */
   applyReactionQueued(id: string, event: ReactionEvent): void {
-    this.enqueueMessageMutation(id, event.messageId, () => this.applyReaction(id, event));
+    this.mutationProjector.applyReactionQueued(id, event);
   }
 
-  /**
-   * Queue an edit apply. Shares the reaction chain so rapid edit-vs-reaction on the same message
-   * stays ordered rather than racing.
-   */
+  /** Edit apply, queued on the per-message mutation chain — see MessageMutationProjector. */
   applyMessageEditQueued(id: string, message: EditedMessage): void {
-    this.enqueueMessageMutation(id, message.messageId, () => this.applyMessageEdit(id, message));
+    this.mutationProjector.applyMessageEditQueued(id, message);
   }
 
   /** Queue a message-scoped mutation. A failed operation is isolated so later events still run. */
   enqueueMessageMutation(id: string, messageId: string, work: () => Promise<void>): void {
-    this.messageMutations.enqueue(`${id}:${messageId}`, work);
+    this.mutationProjector.enqueueMessageMutation(id, messageId, work);
   }
 
-  private async applyReaction(id: string, event: ReactionEvent): Promise<void> {
-    try {
-      // Guard the lookup key before it reaches TypeORM: `findOne` DROPS an undefined condition from
-      // the where-clause rather than matching nothing, so an engine that couldn't resolve the reacted
-      // message's id would silently match an arbitrary row and clobber/emit its reactions. `!msg` is
-      // no protection against that — the row it finds is real, just the wrong one.
-      if (!event.messageId) return;
-
-      const msg = await this.messageRepository.findOne({ where: { sessionId: id, waMessageId: event.messageId } });
-      if (!msg) return;
-
-      const metadata = msg.metadata || {};
-      const reactions = (metadata.reactions as Record<string, string>) || {};
-      if (!event.reaction) {
-        delete reactions[event.senderId];
-      } else {
-        reactions[event.senderId] = event.reaction;
-      }
-      metadata.reactions = reactions;
-      // Scoped update of ONLY the metadata column. A full-row save(msg) would re-persist the `status`
-      // read at findOne time, clobbering a concurrent ack UPDATE (SENT→DELIVERED/READ) that committed in
-      // the window between this findOne and the write — the mutation chain serializes reaction-vs-reaction
-      // but NOT reaction-vs-ack, so scoping the write to metadata is what keeps delivery state monotonic
-      // (#220). Other metadata fields are carried through untouched (they were read into `metadata`).
-      await this.messageRepository.update({ sessionId: id, waMessageId: event.messageId }, {
-        metadata,
-      } as QueryDeepPartialEntity<Message>);
-
-      this.eventsGateway.emitMessageReaction(id, { ...event, reactions });
-      // Webhook parity with the WebSocket broadcast: same payload (event + post-apply snapshot), so a
-      // webhook-only consumer observes reactions too. Idempotency for this event is salted per dispatch.
-      void this.webhookService.dispatch(id, 'message.reaction', { ...event, reactions });
-    } catch (err) {
-      this.logger.error(`Failed to update message reaction: ${event.messageId}`, String(err));
-    }
-  }
-
-  /** Persist an edit before notifying consumers, while still surfacing the occurrence if storage fails. */
-  private async applyMessageEdit(id: string, message: EditedMessage): Promise<void> {
-    try {
-      await this.messageRepository.update({ sessionId: id, waMessageId: message.messageId }, { body: message.body });
-    } catch (err) {
-      this.logger.error(`Failed to update edited message: ${message.messageId}`, String(err));
-    }
-
-    const editedPayload = message as unknown as Record<string, unknown>;
-    this.eventsGateway.emitMessageEdited(id, editedPayload);
-    void this.webhookService.dispatch(id, 'message.edited', editedPayload);
-  }
-
-  /**
-   * Reflect an OUTBOUND edit (REST MessageService.editMessage) in the stored row, routed through the
-   * same per-message mutation queue as the inbound edit/reaction paths so the two writers cannot
-   * interleave (latest-write-wins holds across both directions). Same best-effort semantics as
-   * applyMessageEdit: a missing row or a failed write must not fail the request — the engine edit
-   * already succeeded. Resolves once the queued write has run.
-   */
-  async recordOutboundMessageEdit(sessionId: string, messageId: string, body: string): Promise<void> {
-    await new Promise<void>(resolve => {
-      this.enqueueMessageMutation(sessionId, messageId, async () => {
-        try {
-          await this.messageRepository.update({ sessionId, waMessageId: messageId }, { body });
-        } catch (err) {
-          this.logger.warn(`Failed to update stored body of edited message ${messageId}`, { error: String(err) });
-        } finally {
-          resolve();
-        }
-      });
-    });
+  /** Stored-row update for a REST outbound edit, on the same mutation chain — see MessageMutationProjector. */
+  recordOutboundMessageEdit(sessionId: string, messageId: string, body: string): Promise<void> {
+    return this.mutationProjector.recordOutboundMessageEdit(sessionId, messageId, body);
   }
 
   /**
