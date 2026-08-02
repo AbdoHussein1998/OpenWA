@@ -10,10 +10,13 @@ import { type createLogger } from '../../common/services/logger.service';
  * reference, so this unit and the lifecycle (and every spec poking the maps through the lifecycle)
  * always observe the same instances; method bodies below moved verbatim, which is why they read
  * `this.pendingTeardowns` / `this.pendingInitialStatuses` / `this.engines` / `this.logger` against
- * the same-named fields assigned here. The lifecycle keeps same-named delegates for all six
- * methods (the baileys forwarder precedent), so every existing call site and spec poke
- * (`trackPendingCredentialTeardown` is invoked by name in logout-teardown-race.spec) stays
- * byte-identical.
+ * the same-named fields assigned here. The lifecycle keeps same-named delegates for the four
+ * methods its own core still calls — `teardownEngineSafely`, `trackPendingCredentialTeardown`,
+ * `awaitPendingTeardown`, `evictAndForceDestroy` (the baileys forwarder precedent) — so every
+ * existing call site and spec poke (`trackPendingCredentialTeardown` is invoked by name in
+ * logout-teardown-race.spec) stays byte-identical. The other two methods,
+ * `destroyEngineSafely` and `awaitInitialStatus`, are reached by the controls unit through this
+ * instance directly (`this.fences.…`) and have no lifecycle delegate.
  */
 export class SessionLifecycleFences {
   private readonly engines: EngineRegistry;

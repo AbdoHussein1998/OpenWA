@@ -21,9 +21,11 @@ const STATUS_SEED_LIMIT = 50;
  * constructor. Zero shared state: every method reads only its deps and arguments, so the method
  * bodies below moved verbatim, which is why they read `this.sessionRepository` /
  * `this.eventsGateway` / `this.webhookService` / `this.configService` / `this.statusStore` /
- * `this.logger` against the same-named fields assigned here. The lifecycle keeps same-named
- * delegates for all three methods (the baileys forwarder precedent), so every existing call site
- * stays byte-identical.
+ * `this.logger` against the same-named fields assigned here. The lifecycle keeps a same-named
+ * delegate only for `seedStatuses` — the one method its own core calls (the baileys forwarder
+ * precedent) — so that call site stays byte-identical. `dispatchGroupEvent` and
+ * `maybeAutoRejectCall` are reached by the event wiring through `host.leafEvents` directly and
+ * have no lifecycle delegate.
  */
 export class SessionEngineLeafEvents {
   private readonly sessionRepository: Repository<Session>;
