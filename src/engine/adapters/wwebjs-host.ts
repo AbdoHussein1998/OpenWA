@@ -1,5 +1,5 @@
 import { type Client, type Message } from 'whatsapp-web.js';
-import { type IncomingMessage } from '../interfaces/whatsapp-engine.interface';
+import { type EngineEventCallbacks, type IncomingMessage } from '../interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
 
@@ -20,4 +20,8 @@ export interface WwebjsEngineHost {
   getNumberId(number: string): Promise<string | null>;
   capInboundMediaFor(msg: Message, maxBytesOverride?: number): Promise<IncomingMessage['media'] | undefined>;
   readonly config: WhatsAppWebJsConfig;
+  /** Live callbacks bag — read per event, since initialize() installs it after delegates are built. */
+  getCallbacks(): EngineEventCallbacks;
+  /** Own account wid, or undefined while no client exists (late events during teardown). */
+  getSelfWid(): string | undefined;
 }
