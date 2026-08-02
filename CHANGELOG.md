@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.4] - 2026-08-02
+
+A large internal release with a deliberately small external surface: roughly 30,000 changed lines,
+almost all of it code motion. The five largest god objects at 0.12.3 were decomposed into cohesive
+units — both engine adapters into per-domain delegates, `SessionService` into a lifecycle owner plus
+focused collaborators, `InfraController` into four controllers by resource, the plugin sandbox IPC
+bridge out of the plugin loader, and the `Chats` dashboard page into per-section components — along
+with the largest god methods in the webhook dispatcher, the queue processor, the bulk-message
+batcher and the storage service. The largest single method in the codebase went from 8,366 to 4,819
+characters.
+
+None of it was meant to change behavior, and the HTTP contract bears that out: the 129 paths in
+`openapi.json`, their methods, parameters, request bodies, response schemas, security requirements
+and all 68 component schemas are identical to 0.12.3. The entries below cover the externally visible
+consequences.
+
 ### Changed
 
 - **12 `operationId` values in `openapi.json` were renamed.** `InfraController` was split into four
