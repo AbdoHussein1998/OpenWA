@@ -15,11 +15,14 @@ import { SessionEngineLeafEvents } from './session-engine-leaf-events';
 
 /**
  * The call-ins SessionEngineEventWiring needs from the lifecycle core. Built ONCE in the
- * lifecycle's constructor: arrow closures bind the lifecycle's live methods/state (never a stale
- * copy — specs replace some deps at runtime) and the leaf deps are handed over by reference.
- * The closures are deliberately NON-async passthroughs returning the callee's own promise object
- * untouched (the Task-1 delegate rule: an `async` wrapper would adopt the inner promise and add
- * settlement hops the retirement-race specs assert against).
+ * lifecycle's constructor. Only the CLOSURE members are live-read: the arrow closures bind the
+ * lifecycle's live methods/state (never a stale copy — specs replace some deps at runtime). The
+ * dependency VALUE members (messages, sessionErrors, webhookService, eventsGateway, hookManager,
+ * leafEvents) are captured once at construction — the same reads the pre-extraction inline code
+ * made of the lifecycle's readonly constructor fields. The closures are deliberately NON-async
+ * passthroughs returning the callee's own promise object untouched (the Task-1 delegate rule: an
+ * `async` wrapper would adopt the inner promise and add settlement hops the retirement-race specs
+ * assert against).
  */
 export interface SessionEngineWiringHost {
   /** Liveness gate: true only while `engine` is still the live engine registered for `id`. */
