@@ -9,6 +9,7 @@ import { createLogger } from '../../common/services/logger.service';
 import { HookManager, HookEvent, KNOWN_HOOK_EVENTS, isKnownHookEvent } from '../hooks';
 import {
   PluginCapabilityPermission,
+  PluginContext,
   PluginManifest,
   PluginInstance,
   PluginRegistryEntry,
@@ -81,6 +82,13 @@ const SANDBOX_HOOK_ERROR_LOG_INTERVAL_MS = 60000;
 const SANDBOX_LOG_MAX_PER_WINDOW = 200;
 const SANDBOX_LOG_WINDOW_MS = 10000;
 const SANDBOX_LOG_MAX_MESSAGE_LENGTH = 8192;
+
+/** Per-enable log-relay rate-limit window, shared by the onLog relay and the onWorkerExit final flush. */
+interface SandboxLogRelayState {
+  windowStart: number;
+  count: number;
+  dropped: number;
+}
 
 /**
  * Host process.env keys an untrusted plugin worker is allowed to see. Everything else — secrets like
@@ -1097,19 +1105,75 @@ export class PluginLoaderService implements OnModuleInit, OnApplicationBootstrap
     // identically. The worker can only ask; the host is the gatekeeper.
     const context = this.capabilities.createPluginContext(plugin);
 
-    // When the worker subscribes to a hook, register a shim with the hook manager that dispatches the
-    // event into the worker (time-bounded, so a wedged plugin can't stall the chain). The shim looks
-    // the host up at fire time, so disabling the plugin (which removes it + unregisters hooks) stops it.
-    // Harden the IPC boundary against an untrusted worker flooding the host hook registry. HookEvent is
-    // a type-only union and the wire payload is an arbitrary string, so a hostile/buggy worker can post
-    // 'hook-subscribe' with (a) the same event repeatedly and (b) unbounded fabricated event names
-    // ('x:0','x:1',…). Without guards each call adds a live host-side registration (unbounded host-heap
-    // growth + an O(n log n) re-sort). Three guards, all local to this enableSandboxed call (dropped on
-    // disable): reject unknown events (bounds growth to the finite known set + drops events that can
-    // never fire), dedup per event, and a belt-and-suspenders size cap.
+    const onHookSubscribe = this.buildHookSubscribeHandler(pluginId, plugin);
+
+    // When the worker claims an ingress route, record it against the manifest-declared routes so the
+    // host knows which routes this worker will handle. Same hardening as onHookSubscribe (the wire
+    // `route` is an arbitrary untrusted string): drop when the manifest lacks 'webhook:ingress', drop
+    // an undeclared route (warn once), dedup, and cap. subscribedRoutes is local to this enable call,
+    // so it is dropped on disable exactly as subscribedEvents is.
+    const subscribedRoutes = new Set<string>();
+    const declaredRoutes = new Set((plugin.manifest.ingress ?? []).map(r => r.route));
+    const onWebhookSubscribe = makeOnWebhookSubscribe({
+      pluginId,
+      declaredRoutes,
+      hasPermission: (plugin.manifest.permissions ?? []).includes(PluginCapabilityPermission.WEBHOOK_INGRESS),
+      subscribed: subscribedRoutes,
+      maxRoutes: declaredRoutes.size,
+      warn: (message, meta) => this.logger.warn(message, meta),
+    });
+
+    const logRelayState: SandboxLogRelayState = { windowStart: Date.now(), count: 0, dropped: 0 };
+    const onLog = this.buildLogRelay(pluginId, context, logRelayState);
+
+    const onSearchProviderRegister = this.buildSearchProviderRegistrar(pluginId, plugin);
+
+    const onWorkerExit = this.buildWorkerExitHandler(pluginId, logRelayState);
+
+    const host = this.createSandboxHost(
+      (verb, args) => dispatchCapabilityVerb(context, verb, args),
+      onHookSubscribe,
+      onWebhookSubscribe,
+      onLog,
+      // Re-establish the in-flight hook context for worker-initiated capability calls, so a sandboxed
+      // plugin that sends from within a send hook can't loop the event back into itself unboundedly.
+      (events, run) => this.hookManager.runInFlight(events as HookEvent[], run),
+      onSearchProviderRegister,
+      onWorkerExit,
+    );
+    this.sandboxHosts.set(pluginId, host);
+    try {
+      await host.load(mainPath, { pluginId, config: plugin.config }, SANDBOX_LIFECYCLE_TIMEOUT_MS);
+      await host.runLifecycle('onLoad', SANDBOX_LIFECYCLE_TIMEOUT_MS);
+      await host.runLifecycle('onEnable', SANDBOX_LIFECYCLE_TIMEOUT_MS);
+    } catch (error) {
+      this.sandboxHosts.delete(pluginId);
+      // Drop a search provider registered mid-onEnable before the failure: without this, a plugin that
+      // registers then throws leaves a dead provider as the ACTIVE registry entry in auto mode, so every
+      // /search routes to a terminated worker → outage. Mirrors disablePlugin's cleanup.
+      unregisterPluginSearchProvider(this.hostServices.getSearchRegistry(), pluginId);
+      await host.terminate().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  // When the worker subscribes to a hook, register a shim with the hook manager that dispatches the
+  // event into the worker (time-bounded, so a wedged plugin can't stall the chain). The shim looks
+  // the host up at fire time, so disabling the plugin (which removes it + unregisters hooks) stops it.
+  // Harden the IPC boundary against an untrusted worker flooding the host hook registry. HookEvent is
+  // a type-only union and the wire payload is an arbitrary string, so a hostile/buggy worker can post
+  // 'hook-subscribe' with (a) the same event repeatedly and (b) unbounded fabricated event names
+  // ('x:0','x:1',…). Without guards each call adds a live host-side registration (unbounded host-heap
+  // growth + an O(n log n) re-sort). Three guards, all local to this enableSandboxed call (dropped on
+  // disable): reject unknown events (bounds growth to the finite known set + drops events that can
+  // never fire), dedup per event, and a belt-and-suspenders size cap.
+  private buildHookSubscribeHandler(
+    pluginId: string,
+    plugin: PluginInstance,
+  ): (event: string, priority?: number) => void {
     const subscribedEvents = new Set<HookEvent>();
     let unknownEventWarned = false;
-    const onHookSubscribe = (event: string, priority?: number): void => {
+    return (event: string, priority?: number): void => {
       if (!isKnownHookEvent(event)) {
         if (!unknownEventWarned) {
           unknownEventWarned = true; // warn at most once per plugin so a flood isn't a log-flood vector
@@ -1197,49 +1261,36 @@ export class PluginLoaderService implements OnModuleInit, OnApplicationBootstrap
         priority,
       );
     };
+  }
 
-    // When the worker claims an ingress route, record it against the manifest-declared routes so the
-    // host knows which routes this worker will handle. Same hardening as onHookSubscribe (the wire
-    // `route` is an arbitrary untrusted string): drop when the manifest lacks 'webhook:ingress', drop
-    // an undeclared route (warn once), dedup, and cap. subscribedRoutes is local to this enable call,
-    // so it is dropped on disable exactly as subscribedEvents is.
-    const subscribedRoutes = new Set<string>();
-    const declaredRoutes = new Set((plugin.manifest.ingress ?? []).map(r => r.route));
-    const onWebhookSubscribe = makeOnWebhookSubscribe({
-      pluginId,
-      declaredRoutes,
-      hasPermission: (plugin.manifest.permissions ?? []).includes(PluginCapabilityPermission.WEBHOOK_INGRESS),
-      subscribed: subscribedRoutes,
-      maxRoutes: declaredRoutes.size,
-      warn: (message, meta) => this.logger.warn(message, meta),
-    });
-
-    // Route the worker plugin's ctx.logger.* calls to the same per-plugin logger an in-process plugin
-    // uses, so sandboxed plugins log identically (prefixed + structured) instead of bare stdout. The
-    // relay is bounded: oversized lines are truncated and throughput is capped per window — a chatty
-    // or buggy plugin must not flood the host log. Dropped lines are counted and surfaced as one warn
-    // per window (never one line per drop, or the bound itself would be a flood vector), plus a final
-    // flush on worker exit so a plugin that goes quiet first doesn't silently lose the count. State is
-    // local to this enable call, so it resets on disable.
-    let logWindowStart = Date.now();
-    let logCount = 0;
-    let logDropped = 0;
-    const onLog = (level: PluginLogLevel, message: string, meta?: Record<string, unknown>): void => {
+  // Route the worker plugin's ctx.logger.* calls to the same per-plugin logger an in-process plugin
+  // uses, so sandboxed plugins log identically (prefixed + structured) instead of bare stdout. The
+  // relay is bounded: oversized lines are truncated and throughput is capped per window — a chatty
+  // or buggy plugin must not flood the host log. Dropped lines are counted and surfaced as one warn
+  // per window (never one line per drop, or the bound itself would be a flood vector), plus a final
+  // flush on worker exit so a plugin that goes quiet first doesn't silently lose the count. State is
+  // local to this enable call, so it resets on disable.
+  private buildLogRelay(
+    pluginId: string,
+    context: PluginContext,
+    state: SandboxLogRelayState,
+  ): (level: PluginLogLevel, message: string, meta?: Record<string, unknown>) => void {
+    return (level: PluginLogLevel, message: string, meta?: Record<string, unknown>): void => {
       const now = Date.now();
-      if (now - logWindowStart >= SANDBOX_LOG_WINDOW_MS) {
-        if (logDropped > 0) {
+      if (now - state.windowStart >= SANDBOX_LOG_WINDOW_MS) {
+        if (state.dropped > 0) {
           this.logger.warn(
-            `Dropped ${logDropped} log messages from sandboxed plugin ${pluginId} (log relay rate limit)`,
-            { pluginId, action: 'sandbox_log_relay_dropped', dropped: logDropped },
+            `Dropped ${state.dropped} log messages from sandboxed plugin ${pluginId} (log relay rate limit)`,
+            { pluginId, action: 'sandbox_log_relay_dropped', dropped: state.dropped },
           );
         }
-        logWindowStart = now;
-        logCount = 0;
-        logDropped = 0;
+        state.windowStart = now;
+        state.count = 0;
+        state.dropped = 0;
       }
-      logCount++;
-      if (logCount > SANDBOX_LOG_MAX_PER_WINDOW) {
-        logDropped++;
+      state.count++;
+      if (state.count > SANDBOX_LOG_MAX_PER_WINDOW) {
+        state.dropped++;
         return;
       }
       const bounded =
@@ -1249,14 +1300,16 @@ export class PluginLoaderService implements OnModuleInit, OnApplicationBootstrap
       if (level === 'error') context.logger.error(bounded, undefined, meta);
       else context.logger[level](bounded, meta);
     };
+  }
 
-    // When the worker declares itself a search provider (ctx.registerSearchProvider →
-    // search-provider-register), register a PluginSearchProvider in the SearchProviderRegistry. The host
-    // is in sandboxHosts by the time registration fires (during onLoad/onEnable), so look it up lazily
-    // like onHookSubscribe. Search disabled (no registry, or SEARCH_PROVIDER=none) → the util skips, and
-    // a manifest without 'search:provide' is denied there — the wire declaration is untrusted input, and
-    // this bridge bypasses the capability router that gates the ctx.* capabilities.
-    const onSearchProviderRegister = (): void => {
+  // When the worker declares itself a search provider (ctx.registerSearchProvider →
+  // search-provider-register), register a PluginSearchProvider in the SearchProviderRegistry. The host
+  // is in sandboxHosts by the time registration fires (during onLoad/onEnable), so look it up lazily
+  // like onHookSubscribe. Search disabled (no registry, or SEARCH_PROVIDER=none) → the util skips, and
+  // a manifest without 'search:provide' is denied there — the wire declaration is untrusted input, and
+  // this bridge bypasses the capability router that gates the ctx.* capabilities.
+  private buildSearchProviderRegistrar(pluginId: string, plugin: PluginInstance): () => void {
+    return (): void => {
       const liveHost = this.sandboxHosts.get(pluginId);
       if (!liveHost) return;
       registerPluginSearchProvider({
@@ -1270,22 +1323,27 @@ export class PluginLoaderService implements OnModuleInit, OnApplicationBootstrap
         warn: (message, meta) => this.logger.warn(message, meta),
       });
     };
+  }
 
-    // A worker that crashes AFTER a successful enable is otherwise invisible to the loader (handleExit only
-    // drains in-flight calls). Drop the plugin's search-provider entry so the registry falls back to
-    // builtin-fts instead of routing every /search to a dead worker (auto mode would otherwise pin the dead
-    // provider ACTIVE). Mirrors the enable-failure cleanup. Broader crash-lifecycle cleanup (status, hooks)
-    // is a pre-existing gap for all bridges and out of scope here.
-    const onWorkerExit = (code: number, intentional: boolean): void => {
+  // A worker that crashes AFTER a successful enable is otherwise invisible to the loader (handleExit only
+  // drains in-flight calls). Drop the plugin's search-provider entry so the registry falls back to
+  // builtin-fts instead of routing every /search to a dead worker (auto mode would otherwise pin the dead
+  // provider ACTIVE). Mirrors the enable-failure cleanup. Broader crash-lifecycle cleanup (status, hooks)
+  // is a pre-existing gap for all bridges and out of scope here.
+  private buildWorkerExitHandler(
+    pluginId: string,
+    logRelayState: SandboxLogRelayState,
+  ): (code: number, intentional: boolean) => void {
+    return (code: number, intentional: boolean): void => {
       // Final log-relay flush: the per-window drop warn above only fires when a new line arrives in a
       // later window, so without this a plugin that goes quiet (or is disabled) before the rollover
       // silently discards its pending count. The worker is gone, so no further lines can arrive.
-      if (logDropped > 0) {
+      if (logRelayState.dropped > 0) {
         this.logger.warn(
-          `Dropped ${logDropped} log messages from sandboxed plugin ${pluginId} (log relay rate limit)`,
-          { pluginId, action: 'sandbox_log_relay_dropped', dropped: logDropped },
+          `Dropped ${logRelayState.dropped} log messages from sandboxed plugin ${pluginId} (log relay rate limit)`,
+          { pluginId, action: 'sandbox_log_relay_dropped', dropped: logRelayState.dropped },
         );
-        logDropped = 0;
+        logRelayState.dropped = 0;
       }
       // Always release the search-provider slot so the registry can fall back to builtin-fts. On a crash
       // this is the only cleanup; on a deliberate disable/enable-failure the explicit unregister already
@@ -1310,32 +1368,6 @@ export class PluginLoaderService implements OnModuleInit, OnApplicationBootstrap
         action: 'sandbox_worker_exit',
       });
     };
-
-    const host = this.createSandboxHost(
-      (verb, args) => dispatchCapabilityVerb(context, verb, args),
-      onHookSubscribe,
-      onWebhookSubscribe,
-      onLog,
-      // Re-establish the in-flight hook context for worker-initiated capability calls, so a sandboxed
-      // plugin that sends from within a send hook can't loop the event back into itself unboundedly.
-      (events, run) => this.hookManager.runInFlight(events as HookEvent[], run),
-      onSearchProviderRegister,
-      onWorkerExit,
-    );
-    this.sandboxHosts.set(pluginId, host);
-    try {
-      await host.load(mainPath, { pluginId, config: plugin.config }, SANDBOX_LIFECYCLE_TIMEOUT_MS);
-      await host.runLifecycle('onLoad', SANDBOX_LIFECYCLE_TIMEOUT_MS);
-      await host.runLifecycle('onEnable', SANDBOX_LIFECYCLE_TIMEOUT_MS);
-    } catch (error) {
-      this.sandboxHosts.delete(pluginId);
-      // Drop a search provider registered mid-onEnable before the failure: without this, a plugin that
-      // registers then throws leaves a dead provider as the ACTIVE registry entry in auto mode, so every
-      // /search routes to a terminated worker → outage. Mirrors disablePlugin's cleanup.
-      unregisterPluginSearchProvider(this.hostServices.getSearchRegistry(), pluginId);
-      await host.terminate().catch(() => undefined);
-      throw error;
-    }
   }
 
   getPlugin(pluginId: string): PluginInstance | undefined {
