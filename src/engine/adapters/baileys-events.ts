@@ -24,7 +24,7 @@ import {
 } from './inbound-media-cap';
 import type { ConcurrencyLimiter } from '../../common/utils/concurrency-limiter';
 import { type createLogger } from '../../common/services/logger.service';
-import { BaileysLogger } from '../types/baileys.types';
+import { createSilentLogger } from './baileys-logger';
 
 /**
  * Inbound event handling extracted from BaileysAdapter: the socket event handlers
@@ -71,21 +71,6 @@ export interface BaileysEventsHost {
   getOnGroupEvent(): EngineEventCallbacks['onGroupEvent'];
   /** The currently-registered onCall callback, if any (assigned at initialize()). */
   getOnCall(): EngineEventCallbacks['onCall'];
-}
-
-/** Fully silent logger so Baileys does not spam stdout; diagnostics flow via connection.update. */
-function createSilentLogger(): BaileysLogger {
-  const noop = (): void => {};
-  const logger: BaileysLogger = {
-    level: 'silent',
-    child: () => logger,
-    trace: noop,
-    debug: noop,
-    info: noop,
-    warn: noop,
-    error: noop,
-  };
-  return logger;
 }
 
 export class BaileysEvents {
