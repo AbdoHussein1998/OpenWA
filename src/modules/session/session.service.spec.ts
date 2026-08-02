@@ -18,6 +18,7 @@ import {
   SESSION_WATCHDOG_MAX_FAILURES,
   SESSION_WATCHDOG_PROBE_TIMEOUT_MS,
 } from './session.service';
+import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { Session, SessionStatus } from './entities/session.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
 import { MessageBatch } from '../message/entities/message-batch.entity';
@@ -68,6 +69,9 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
 
 describe('SessionService', () => {
   let service: SessionService;
+  // The engine-lifecycle verbs/state moved out of SessionService (god-object split); the white-box
+  // pokes below target the lifecycle owner directly, the public-API tests stay on `service`.
+  let lifecycle: SessionEngineLifecycle;
   let repository: jest.Mocked<Partial<Repository<Session>>>;
   let messageRepository: jest.Mocked<Partial<Repository<Message>>>;
   let dataSource: jest.Mocked<Partial<DataSource>>;
@@ -190,6 +194,7 @@ describe('SessionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SessionService,
+        SessionEngineLifecycle,
         SessionErrorStore,
         {
           provide: getRepositoryToken(Session, 'data'),
@@ -221,6 +226,7 @@ describe('SessionService', () => {
     }).compile();
 
     service = module.get<SessionService>(SessionService);
+    lifecycle = module.get<SessionEngineLifecycle>(SessionEngineLifecycle);
   });
 
   // ── shutdown ──────────────────────────────────────────────────────
@@ -244,7 +250,7 @@ describe('SessionService', () => {
   // ── delete/stop teardown resilience ───────────────────────────────
   describe('teardown resilience', () => {
     const enginesOf = () => (service as unknown as { engines: Map<string, unknown> }).engines;
-    const stoppingOf = () => (service as unknown as { stoppingSessions: Set<string> }).stoppingSessions;
+    const stoppingOf = () => (lifecycle as unknown as { stoppingSessions: Set<string> }).stoppingSessions;
 
     it('delete() completes when engine.forceDestroy() rejects — map reconciled, row removed, stop-mark cleared', async () => {
       (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
@@ -395,7 +401,7 @@ describe('SessionService', () => {
     });
 
     const pendingTeardownsOf = () =>
-      (service as unknown as { pendingTeardowns: Map<string, Promise<void>> }).pendingTeardowns;
+      (lifecycle as unknown as { pendingTeardowns: Map<string, Promise<void>> }).pendingTeardowns;
 
     it('start() waits for a logout teardown that lost its deadline race before creating the engine', async () => {
       (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
@@ -543,7 +549,7 @@ describe('SessionService', () => {
   // ── stopOrphanEngines (infra import path) ─────────────────────────
   describe('stopOrphanEngines', () => {
     const enginesOf = () => (service as unknown as { engines: Map<string, unknown> }).engines;
-    const stoppingOf = () => (service as unknown as { stoppingSessions: Set<string> }).stoppingSessions;
+    const stoppingOf = () => (lifecycle as unknown as { stoppingSessions: Set<string> }).stoppingSessions;
 
     it('stops each running orphan engine, reconciles the map, and reports stopped', async () => {
       const g1 = { destroy: jest.fn().mockResolvedValue(undefined) };
@@ -610,7 +616,7 @@ describe('SessionService', () => {
       const engine = { destroy: jest.fn().mockResolvedValue(undefined) };
       enginesOf().set('g1', engine);
       const reconnectStates = (
-        service as unknown as {
+        lifecycle as unknown as {
           reconnectStates: Map<string, unknown>;
         }
       ).reconnectStates;
@@ -768,7 +774,7 @@ describe('SessionService', () => {
       releaseFindOne(createMockSession());
       await started;
       // The reservation is cleared once start() settles; the registered engine keeps the id active.
-      const initializing = (service as unknown as { initializingSessions: Set<string> }).initializingSessions;
+      const initializing = (lifecycle as unknown as { initializingSessions: Set<string> }).initializingSessions;
       expect(initializing.has('sess-uuid-1')).toBe(false);
       expect(service.getActiveSessionIds()).toContain('sess-uuid-1');
     });
@@ -843,7 +849,7 @@ describe('SessionService', () => {
       (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
       (engineFactory.create as jest.Mock).mockClear().mockReturnValue(mockEngine);
 
-      const internals = service as unknown as {
+      const internals = lifecycle as unknown as {
         engines: Map<string, unknown>;
         initializingSessions: Set<string>;
       };
@@ -1011,7 +1017,7 @@ describe('SessionService', () => {
       executeReconnect: (id: string, s: Session, st: unknown) => Promise<void>;
       engines: Map<string, unknown>;
     }
-    const intern = () => service as unknown as I;
+    const intern = () => lifecycle as unknown as I;
     const flush = () => new Promise(resolve => setImmediate(resolve));
 
     it('onError evicts the failed engine and force-destroys it, so the slot frees and a restart is not blocked', async () => {
@@ -1035,7 +1041,7 @@ describe('SessionService', () => {
       mockEngine.initialize.mockRejectedValueOnce(new Error('chromium launch failed'));
       // Suppress the real reconnect timer scheduled by the catch block.
       jest
-        .spyOn(service as unknown as { scheduleReconnect: () => void }, 'scheduleReconnect')
+        .spyOn(lifecycle as unknown as { scheduleReconnect: () => void }, 'scheduleReconnect')
         .mockImplementation(() => undefined);
       const state = { attempts: 1, timer: null, maxAttempts: 5, baseDelay: 5000 };
 
@@ -1081,7 +1087,7 @@ describe('SessionService', () => {
       // A start()-path timeout must NOT auto-schedule a reconnect (reconnect is executeReconnect's
       // domain; a manual start that times out leaves the session DISCONNECTED for the operator).
       const scheduleReconnect = jest.spyOn(
-        service as unknown as { scheduleReconnect: (...a: unknown[]) => void },
+        lifecycle as unknown as { scheduleReconnect: (...a: unknown[]) => void },
         'scheduleReconnect',
       );
       try {
@@ -1150,7 +1156,7 @@ describe('SessionService', () => {
 
   describe('scheduleReconnect (max attempts)', () => {
     it('reports "auto-reconnect disabled" (not "failed after 0 attempts") when maxAttempts is 0', async () => {
-      const i = service as unknown as {
+      const i = lifecycle as unknown as {
         reconnectStates: Map<string, { attempts: number; timer: null; maxAttempts: number; baseDelay: number }>;
         sessionErrors: Map<string, string>;
         scheduleReconnect: (id: string, session: Session) => void;
@@ -1169,7 +1175,7 @@ describe('SessionService', () => {
       // A terminal FAILED session must not hold an engine entry — otherwise isActive() stays true,
       // the concurrency cap leaks a slot, and a later start() rejects the session as "already started".
       // This mirrors onError's terminal path, which evicts for exactly that reason.
-      const i = service as unknown as {
+      const i = lifecycle as unknown as {
         reconnectStates: Map<string, { attempts: number; timer: null; maxAttempts: number; baseDelay: number }>;
         sessionErrors: Map<string, string>;
         engines: Map<string, { forceDestroy: jest.Mock }>;
@@ -1194,7 +1200,7 @@ describe('SessionService', () => {
     it('does not throw when the engine was already evicted (executeReconnect-catch path)', () => {
       // executeReconnect evicts the half-built engine before scheduling a reconnect, so by the time
       // the maxAttempts branch runs there the engine is gone. The eviction guard must handle that.
-      const i = service as unknown as {
+      const i = lifecycle as unknown as {
         reconnectStates: Map<string, { attempts: number; timer: null; maxAttempts: number; baseDelay: number }>;
         sessionErrors: Map<string, string>;
         engines: Map<string, unknown>;
@@ -1224,7 +1230,7 @@ describe('SessionService', () => {
       scheduleReconnect: (id: string, session: Session) => void;
       executeReconnect: (...args: unknown[]) => Promise<void>;
     };
-    const internals = (): PolicyInternals => service as unknown as PolicyInternals;
+    const internals = (): PolicyInternals => lifecycle as unknown as PolicyInternals;
 
     it('keeps scheduling past the old 5-attempt budget by default (unlimited), the backoff parking at the 1h cap', () => {
       jest.useFakeTimers();
@@ -1331,7 +1337,7 @@ describe('SessionService', () => {
       >;
       scheduleReconnect: (id: string, session: Session) => void;
     };
-    const internals = (): LoopInternals => service as unknown as LoopInternals;
+    const internals = (): LoopInternals => lifecycle as unknown as LoopInternals;
     const loopDispatches = (): unknown[][] =>
       ((webhookService.dispatch as jest.Mock).mock.calls as unknown[][]).filter(c => c[1] === 'session.reconnect_loop');
 
@@ -1436,7 +1442,7 @@ describe('SessionService', () => {
 
   describe('start() stale reconnect timer', () => {
     it('cancels a pending reconnect timer before recreating the engine', async () => {
-      const i = service as unknown as {
+      const i = lifecycle as unknown as {
         reconnectStates: Map<
           string,
           { attempts: number; timer: NodeJS.Timeout | null; maxAttempts: number; baseDelay: number }
@@ -1473,7 +1479,7 @@ describe('SessionService', () => {
       stoppingSessions: Set<string>;
       engines: Map<string, unknown>;
     }
-    const internals = (): Internals => service as unknown as Internals;
+    const internals = (): Internals => lifecycle as unknown as Internals;
     const reconnectState = { attempts: 1, timer: null, maxAttempts: 5, baseDelay: 5000 };
 
     it('does not create an engine when the session was already stopped (early guard)', async () => {
@@ -1549,7 +1555,7 @@ describe('SessionService', () => {
       // Re-init succeeds and registers a live engine; the retirement DB read then fails transiently.
       // It must NOT be misread as a reconnect failure that reaps the healthy engine we just recovered.
       jest
-        .spyOn(service as unknown as { isSessionRetired: () => Promise<boolean> }, 'isSessionRetired')
+        .spyOn(lifecycle as unknown as { isSessionRetired: () => Promise<boolean> }, 'isSessionRetired')
         .mockRejectedValue(new Error('transient db blip'));
 
       await i.executeReconnect('sess-uuid-1', createMockSession(), reconnectState);
@@ -1562,7 +1568,7 @@ describe('SessionService', () => {
     it('does not stack reconnect timers when scheduled twice back-to-back', () => {
       jest.useFakeTimers();
       try {
-        const i = service as unknown as {
+        const i = lifecycle as unknown as {
           reconnectStates: Map<
             string,
             { attempts: number; timer: NodeJS.Timeout | null; maxAttempts: number; baseDelay: number }
@@ -1598,7 +1604,7 @@ describe('SessionService', () => {
     it('does not spawn a fresh engine while the process is draining', () => {
       jest.useFakeTimers();
       try {
-        const i = service as unknown as ReconnectInternals;
+        const i = lifecycle as unknown as ReconnectInternals;
         i.reconnectStates.set('sess-uuid-1', { attempts: 0, timer: null, maxAttempts: 5, baseDelay: 5000 });
         // Drain in progress: a disconnect during the shutdown window must NOT schedule a reconnect that
         // would launch a fresh Chromium racing onModuleDestroy's teardown.
@@ -1620,7 +1626,7 @@ describe('SessionService', () => {
     it('schedules a reconnect normally when not shutting down', () => {
       jest.useFakeTimers();
       try {
-        const i = service as unknown as ReconnectInternals;
+        const i = lifecycle as unknown as ReconnectInternals;
         i.reconnectStates.set('sess-uuid-2', { attempts: 0, timer: null, maxAttempts: 5, baseDelay: 5000 });
         i.shutdownService = { isShuttingDown: () => false };
         const exec = jest.spyOn(i, 'executeReconnect').mockResolvedValue(undefined);
@@ -1649,7 +1655,7 @@ describe('SessionService', () => {
       watchdog: { failures: Map<string, number>; timer: NodeJS.Timeout | null };
       scheduleReconnect: (id: string, session: Session) => void;
     };
-    const internals = (): WatchdogInternals => service as unknown as WatchdogInternals;
+    const internals = (): WatchdogInternals => lifecycle as unknown as WatchdogInternals;
     const livenessFailures = (): Map<string, number> => internals().watchdog.failures;
 
     // Auto-start is OFF in these tests — the watchdog must start regardless.
@@ -1950,7 +1956,7 @@ describe('SessionService', () => {
       const callbacks = await startAndCapture();
       jest.useFakeTimers();
       try {
-        const i = service as unknown as { scheduleReconnect: (id: string, s: Session) => void };
+        const i = lifecycle as unknown as { scheduleReconnect: (id: string, s: Session) => void };
         // A prior onDisconnected scheduled a reconnect…
         i.scheduleReconnect('sess-uuid-1', createMockSession());
         expect(jest.getTimerCount()).toBe(1);
@@ -2061,7 +2067,7 @@ describe('SessionService', () => {
       // The live onDisconnected handler schedules a reconnect timer after emitting; neutralize
       // it so the test leaves no pending timer (same pattern as the reconnect specs).
       jest
-        .spyOn(service as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
+        .spyOn(lifecycle as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
         .mockImplementation(() => {});
       (eventsGateway.emitSessionDisconnected as jest.Mock).mockClear();
 
@@ -2117,7 +2123,7 @@ describe('SessionService', () => {
         );
 
         const scheduleSpy = jest
-          .spyOn(service as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
+          .spyOn(lifecycle as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
           .mockImplementation(() => undefined);
 
         (eventsGateway.emitSessionDisconnected as jest.Mock).mockClear();
@@ -2199,7 +2205,7 @@ describe('SessionService', () => {
       stuckAuthRecoveryUsed: Set<string>;
       initializeEngine: (id: string, s: Session) => Promise<void>;
     };
-    const intern = () => service as unknown as Intern;
+    const intern = () => lifecycle as unknown as Intern;
     const flush = () => new Promise(resolve => setImmediate(resolve));
 
     // Build a fresh mock engine so each generation is a DISTINCT object (the lifecycle keys liveness
@@ -2927,7 +2933,7 @@ describe('SessionService', () => {
 
       // The queue lives on the projector now; reach the instance SessionService delegates to so
       // this still asserts the real chain drained rather than an object that no longer exists.
-      const chains = (service as unknown as { messages: { messageMutations: KeyedMutationQueue } }).messages
+      const chains = (lifecycle as unknown as { messages: { messageMutations: KeyedMutationQueue } }).messages
         .messageMutations;
       expect(chains.size).toBe(0);
     });
@@ -3671,7 +3677,7 @@ describe('SessionService', () => {
       expect(typeof callbacks.onDisconnected).toBe('function');
       // Isolate the dispatch from the reconnect scheduler, which would otherwise leave a live timer.
       jest
-        .spyOn(service as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
+        .spyOn(lifecycle as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
         .mockImplementation(() => undefined);
 
       callbacks.onDisconnected!('logged out');
@@ -4199,7 +4205,7 @@ describe('SessionService', () => {
 
       // Simulate a concurrent stop()/delete() landing WHILE engine.initialize() is in flight.
       mockEngine.initialize.mockImplementationOnce(() => {
-        (service as unknown as { stoppingSessions: Set<string> }).stoppingSessions.add('sess-uuid-1');
+        (lifecycle as unknown as { stoppingSessions: Set<string> }).stoppingSessions.add('sess-uuid-1');
         return Promise.resolve();
       });
 
@@ -4221,7 +4227,7 @@ describe('SessionService', () => {
       // session row before this init resolves — the mark alone can't catch it, so the post-init guard
       // must re-check existence. start() then surfaces the now-missing session as NotFound.
       mockEngine.initialize.mockImplementationOnce(() => {
-        (service as unknown as { stoppingSessions: Set<string> }).stoppingSessions.delete('sess-uuid-1');
+        (lifecycle as unknown as { stoppingSessions: Set<string> }).stoppingSessions.delete('sess-uuid-1');
         (repository.findOne as jest.Mock).mockResolvedValue(null);
         return Promise.resolve();
       });
@@ -4629,7 +4635,7 @@ describe('SessionService', () => {
       // The inbound edit lands first; the REST outbound edit for the same message must queue BEHIND
       // it instead of racing the row directly (latest-write-wins across both directions).
       onMessageEdited(inboundEdit);
-      const outbound = (service as unknown as { messages: MessageProjector }).messages.recordOutboundMessageEdit(
+      const outbound = (lifecycle as unknown as { messages: MessageProjector }).messages.recordOutboundMessageEdit(
         'sess-uuid-1',
         'WA_MSG_EDIT_1',
         'outbound edit',
@@ -4656,7 +4662,7 @@ describe('SessionService', () => {
       (messageRepository.update as jest.Mock).mockRejectedValueOnce(new Error('db down'));
 
       await expect(
-        (service as unknown as { messages: MessageProjector }).messages.recordOutboundMessageEdit(
+        (lifecycle as unknown as { messages: MessageProjector }).messages.recordOutboundMessageEdit(
           'sess-uuid-1',
           'GONE',
           'x',
@@ -5019,7 +5025,7 @@ describe('SessionService', () => {
       sessionErrors: Map<string, string>;
       pendingInitialStatuses: Map<string, { engine: unknown; promise: Promise<void> }>;
     };
-    const intern = () => service as unknown as Internals;
+    const intern = () => lifecycle as unknown as Internals;
 
     /** Polls `check` until it stops throwing, with a bounded number of event-loop flushes. */
     async function waitFor(check: () => void, ticks = 200): Promise<void> {

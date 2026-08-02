@@ -37,7 +37,8 @@ import {
  *
  * This is the data path for messages: inbound arrivals, own-send echoes, delivery acks, revokes,
  * reactions, edits, and the pre-connection history backfill. It is deliberately separate from
- * SessionService, which owns the session *lifecycle* (start/stop/delete/reconnect). The two share
+ * SessionEngineLifecycle, which owns the session *lifecycle* (start/stop/delete/reconnect). The two
+ * share
  * only the engine identity guard — a late event from a superseded engine must never mutate a
  * session that now belongs to a different one, or to none — which both read from EngineRegistry.
  *
