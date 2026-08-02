@@ -102,7 +102,7 @@ function installFetchStub(): void {
 
 type RTL = typeof import('@testing-library/react');
 type ChatsModule = typeof import('./Chats.tsx');
-type RoleModule = typeof import('../hooks/useRole.tsx');
+type RoleModule = typeof import('../components/RoleProvider.tsx');
 type ToastModule = typeof import('../components/Toast.tsx');
 
 let rtl: RTL;
@@ -123,7 +123,7 @@ before(async () => {
   // handled by the registered loader hooks).
   await import('../i18n/index.ts');
   rtl = await import('@testing-library/react');
-  ({ RoleProvider } = await import('../hooks/useRole.tsx'));
+  ({ RoleProvider } = await import('../components/RoleProvider.tsx'));
   ({ ToastProvider } = await import('../components/Toast.tsx'));
   ({ Chats } = await import('./Chats.tsx'));
 });

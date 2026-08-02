@@ -20,7 +20,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useInfraStatusQuery, useInfraConfigQuery, useEnginesQuery, useCurrentEngineQuery } from '../hooks/queries';
 import { PageHeader } from '../components/PageHeader';
 import { Modal } from '../components/Modal';
-import { useToast } from '../components/Toast';
+import { useToast } from '../hooks/useToast';
 import './Infrastructure.css';
 
 import sqliteIcon from '../assets/icons/sqlite.svg';

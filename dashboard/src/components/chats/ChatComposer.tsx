@@ -7,7 +7,7 @@ import { mergeOrAppend, type ChatMessageView } from '../../utils/chatMessages';
 import { promoteChatWithSnippet } from '../../utils/chatList';
 import { messagesQueryKey, useChatMessagesActions } from '../../hooks/useChatMessages';
 import { useRole } from '../../hooks/useRole';
-import { useToast } from '../Toast';
+import { useToast } from '../../hooks/useToast';
 import type { ScrollDirection } from '../../utils/scrollDecision';
 
 // Map an attachment MIME type to the neutral MessageType for the optimistic outgoing bubble, so the

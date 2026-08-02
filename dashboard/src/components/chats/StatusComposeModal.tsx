@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { contactApi, sessionApi } from '../../services/api';
 import { useCurrentEngineQuery } from '../../hooks/queries';
-import { useToast } from '../Toast';
+import { useToast } from '../../hooks/useToast';
 import { Modal } from '../Modal';
 
 // Mirrors @ArrayMaxSize(256) on the send-status DTOs — the picker caps selection client-side so the
