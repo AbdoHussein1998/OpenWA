@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **12 `operationId` values in `openapi.json` were renamed.** `InfraController` was split into four
+  controllers by resource — `InfraStatusController`, `InfraConfigController`, `InfraDataController`
+  and `InfraStorageController` — and NestJS derives an operation's id from its controller class name,
+  so every `/api/infra` operation is now `Infra<Resource>Controller_<method>` instead of
+  `InfraController_<method>` (for example `InfraController_getStatus` →
+  `InfraStatusController_getStatus`). 12 of the specification's 158 operations are affected, all of
+  them under `/api/infra`.
+
+  Nothing on the wire moved. The 129 paths, their HTTP methods, parameters, request bodies, response
+  schemas, security requirements and the 68 component schemas are byte-identical to 0.12.3 — a client
+  that calls the REST API by URL needs no change at all. The rename matters only if you generate a
+  client from the specification and its generator names methods after `operationId`: those method
+  names change, and the generated client has to be regenerated.
+
+- **A file attached but not yet sent in Dashboard > Chats is now dropped when you open a different
+  conversation.** Previously the staged file outlived the room it was picked in: attaching in one
+  chat, going back, and opening another left the attachment sitting in the second chat's composer,
+  where the next send would deliver it to the wrong recipient. It is now cleared as soon as another
+  chat is opened, and cleared when the session is switched.
+
+  Closing and reopening the *same* room still keeps it, so the round trip is lossless — the same
+  guarantee the typed message draft already had. Both lifetimes are pinned by regression tests.
+
 ## [0.12.3] - 2026-08-01
 
 ### Fixed

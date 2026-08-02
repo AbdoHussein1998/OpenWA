@@ -7,7 +7,7 @@ describe('PluginsController authorization', () => {
   const reflector = new Reflector();
 
   // Plugin reads expose installed versions, non-secret config, and health/error text — privileged
-  // inventory on par with the ADMIN-gated write routes and the InfraController convention. A
+  // inventory on par with the ADMIN-gated write routes and the infra controllers' convention. A
   // VIEWER/OPERATOR key (or a session-scoped key) must not be able to enumerate it via the raw API.
   const adminOnly = [
     'findAll',

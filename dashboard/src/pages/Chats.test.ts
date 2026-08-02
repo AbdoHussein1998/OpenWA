@@ -39,6 +39,19 @@ const CHAT: Chat = {
   lastMessage: 'hello from alice',
 };
 
+// A second conversation, so the attachment tests can distinguish "closed and reopened the SAME
+// room" (staged file survives) from "moved to ANOTHER chat" (staged file is dropped). Named to
+// avoid colliding with CONTACT below, which the status-compose test matches by name.
+const CHAT_2: Chat = {
+  id: '15550003333@c.us',
+  name: 'Carol',
+  isGroup: false,
+  kind: 'individual',
+  unreadCount: 0,
+  timestamp: 1_700_000_050,
+  lastMessage: 'hello from carol',
+};
+
 const DB_MESSAGE: ChatMessage = {
   id: 'db-1',
   waMessageId: 'wamid.1',
@@ -90,7 +103,6 @@ function countFetchCalls(method: string, path: string): number {
 // smoke flows below. Anything else gets a 404 so an unexpected request fails loudly in the test
 // output instead of resolving into a confusing downstream crash.
 function installFetchStub(): void {
-  const chatId = encodeURIComponent(CHAT.id);
   globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const method = init?.method ?? 'GET';
@@ -111,12 +123,13 @@ function installFetchStub(): void {
       return Promise.resolve(jsonResponse({ engineType: 'baileys' }));
     }
     if (method === 'GET' && path === `/api/sessions/${SESSION.id}/chats`) {
-      return Promise.resolve(jsonResponse([CHAT]));
+      return Promise.resolve(jsonResponse([CHAT, CHAT_2]));
     }
     if (method === 'GET' && path.startsWith(`/api/sessions/${SESSION.id}/contacts/profile-pictures`)) {
       return Promise.resolve(jsonResponse({ pictures: {} }));
     }
-    if (method === 'GET' && path === `/api/sessions/${SESSION.id}/contacts/${chatId}/profile-picture`) {
+    // Matched for any chat id (both CHAT and CHAT_2 open in these tests), not just the first.
+    if (method === 'GET' && /\/contacts\/[^/]+\/profile-picture$/.test(path)) {
       return Promise.resolve(jsonResponse({ url: null }));
     }
     if (method === 'GET' && path === `/api/sessions/${SESSION.id}/contacts`) {
@@ -125,7 +138,7 @@ function installFetchStub(): void {
     if (method === 'GET' && path.startsWith(`/api/sessions/${SESSION.id}/messages?`)) {
       return Promise.resolve(jsonResponse({ messages: [DB_MESSAGE], total: 1 }));
     }
-    if (method === 'GET' && path.startsWith(`/api/sessions/${SESSION.id}/messages/${chatId}/history`)) {
+    if (method === 'GET' && /\/messages\/[^/]+\/history/.test(path)) {
       return Promise.resolve(jsonResponse([]));
     }
     if (method === 'GET' && path === `/api/sessions/${SESSION.id}/status`) {
@@ -297,4 +310,63 @@ test('a typed draft survives closing and reopening the room', async () => {
   await within(container.querySelector('.room-messages') as HTMLElement).findByText('hello from alice');
   const input = screen.getByPlaceholderText('Type a message...') as HTMLInputElement;
   assert.equal(input.value, 'draft survives');
+});
+
+// Stage a file in the open room and wait for the preview banner. A non-image type is used on
+// purpose: the image branch calls URL.createObjectURL, which JSDOM does not implement.
+//
+// The File MUST come from the JSDOM window, not the bare `File` global: installJsdomGlobals only
+// copies window properties that Node does not already define, so `Blob`/`File` stay Node's while
+// `FileReader` is JSDOM's — and JSDOM's readAsDataURL brand-checks its argument against JSDOM's
+// own Blob ("parameter 1 is not of type 'Blob'").
+async function stageAttachment(container: HTMLElement, filename: string): Promise<void> {
+  const { fireEvent, waitFor } = rtl;
+  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+  const file = new window.File(['%PDF-1.4 stub'], filename, { type: 'application/pdf' });
+  fireEvent.change(fileInput, { target: { files: [file] } });
+  // The bytes arrive through FileReader.onload, so the banner is asynchronous.
+  await waitFor(() => {
+    assert.ok(container.querySelector('.attachment-preview-banner'), 'attachment banner did not appear');
+  });
+}
+
+test('a staged attachment survives closing and reopening the same room', async () => {
+  const { screen, fireEvent, within } = rtl;
+  resetFetchCalls();
+  const { container } = renderChats();
+
+  await screen.findByText('Main (15551234567)');
+  fireEvent.click(await screen.findByText('Alice'));
+  await within(container.querySelector('.room-messages') as HTMLElement).findByText('hello from alice');
+  await stageAttachment(container, 'contract.pdf');
+
+  // Close the room: ChatComposer unmounts, so the file only survives because the page owns it.
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  assert.equal(container.querySelector('.attachment-preview-banner'), null);
+
+  fireEvent.click(screen.getByText('Alice'));
+  await within(container.querySelector('.room-messages') as HTMLElement).findByText('hello from alice');
+  assert.ok(container.querySelector('.attachment-preview-banner'), 'attachment was lost on reopen');
+  assert.equal(container.querySelector('.preview-filename')?.textContent, 'contract.pdf');
+});
+
+test('a staged attachment is dropped when a different chat is opened', async () => {
+  const { screen, fireEvent, within } = rtl;
+  resetFetchCalls();
+  const { container } = renderChats();
+
+  await screen.findByText('Main (15551234567)');
+  fireEvent.click(await screen.findByText('Alice'));
+  await within(container.querySelector('.room-messages') as HTMLElement).findByText('hello from alice');
+  await stageAttachment(container, 'for-alice.pdf');
+
+  // Move to another conversation without closing the room first. Carrying the file over would let
+  // the next send deliver it to the wrong recipient, so it must be dropped.
+  fireEvent.click(screen.getByText('Carol'));
+  await within(container.querySelector('.room-header') as HTMLElement).findByText('Carol');
+  assert.equal(
+    container.querySelector('.attachment-preview-banner'),
+    null,
+    "Alice's attachment followed the user into Carol's room",
+  );
 });

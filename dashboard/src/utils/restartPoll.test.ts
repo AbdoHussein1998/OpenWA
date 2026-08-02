@@ -18,7 +18,7 @@ test('an estimate the floor already covers does not shorten the deadline', () =>
 });
 
 test('a full-profile restart gets more room than the server estimated', () => {
-  // 15 base + 20 postgres + 13 redis + 15 minio — the worst case infra.controller computes.
+  // 15 base + 20 postgres + 13 redis + 15 minio — the worst case infra-config.controller computes.
   assert.equal(restartPollAttempts(63), 126);
 });
 

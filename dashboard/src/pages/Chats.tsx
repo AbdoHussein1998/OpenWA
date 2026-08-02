@@ -51,7 +51,7 @@ import MediaLightbox, { type LightboxItem } from '../components/chats/MediaLight
 import KindIcon from '../components/chats/KindIcon';
 import ChatSidebar from '../components/chats/ChatSidebar';
 import ChatThread from '../components/chats/ChatThread';
-import ChatComposer from '../components/chats/ChatComposer';
+import ChatComposer, { type StagedAttachment } from '../components/chats/ChatComposer';
 import StatusMedia from '../components/chats/StatusMedia';
 import StatusComposeModal from '../components/chats/StatusComposeModal';
 import './Chats.css';
@@ -189,6 +189,37 @@ export function Chats() {
   const [replyingTo, setReplyingTo] = useState<ChatMessageView | null>(null);
   // Draft text lives here (not in ChatComposer) so it survives closing/switching the room.
   const [messageInput, setMessageInput] = useState<string>('');
+  // The staged attachment lives here for the same reason the draft text does — ChatComposer
+  // unmounts when the room closes, which would silently discard a picked file. Unlike the text
+  // draft it is dropped when a DIFFERENT chat is opened (see the effect below): a file that
+  // follows the user into another conversation can be sent to the wrong recipient.
+  const [attachment, setAttachment] = useState<StagedAttachment | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // Revoke the object URL created for an image-attachment preview once it is replaced or cleared.
+  // The cleanup runs with the previous value on every change, so this single effect covers all
+  // paths (new file, remove, send, chat switch) — otherwise each preview leaks a blob held for the
+  // lifetime of the document. It lives here, not in ChatComposer: revoking on the composer's
+  // unmount would hand a reopened room a dead blob URL for an attachment that is still staged.
+  useEffect(() => {
+    if (!previewUrl) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  // Drop a staged attachment when the user moves to a DIFFERENT chat. Closing the room
+  // (`activeChat` → null) deliberately keeps it, so close/reopen is a lossless round trip; only an
+  // actual change of conversation clears. The composer invalidates its in-flight FileReader on the
+  // same transition, so a late read cannot re-stage the file against the new chat.
+  const lastRoomIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const current = activeChat?.id ?? null;
+    if (current === null) return;
+    const previous = lastRoomIdRef.current;
+    lastRoomIdRef.current = current;
+    if (previous === null || previous === current) return;
+    setAttachment(null);
+    setPreviewUrl(null);
+  }, [activeChat]);
 
   // Per-chat scroll-position memory + auto-scroll heuristic.
   // Pass `messages.length > 0` as the loaded signal: it stays stable once the
@@ -268,8 +299,13 @@ export function Chats() {
       setActiveChat(null);
       setActiveChannel(null);
       setActiveStatusContactId(null);
-      // The composer unmounts with the closed room, dropping its attachment/preview state and
-      // running its own cleanups (object-URL revoke, FileReader invalidation).
+      // A staged attachment belongs to a chat in the session being left, so it is dropped here
+      // rather than carried across — the close/reopen round trip that preserves it is scoped to a
+      // single session. Clearing previewUrl runs the revoke effect's cleanup; the composer
+      // unmounts with the closed room and invalidates its own in-flight FileReader.
+      setAttachment(null);
+      setPreviewUrl(null);
+      lastRoomIdRef.current = null;
     }
   }, [selectedSessionId, loadChats]);
 
@@ -890,6 +926,10 @@ export function Chats() {
                   setChats={setChats}
                   messageInput={messageInput}
                   setMessageInput={setMessageInput}
+                  attachment={attachment}
+                  setAttachment={setAttachment}
+                  previewUrl={previewUrl}
+                  setPreviewUrl={setPreviewUrl}
                 />
               </div>
             ) : activeChannel ? (

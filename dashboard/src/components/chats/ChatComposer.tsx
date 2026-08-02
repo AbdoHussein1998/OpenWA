@@ -19,6 +19,14 @@ const messageTypeFromMime = (mimetype: string): MessageType => {
   return 'document';
 };
 
+/** A picked-but-unsent file, staged until send, removal, or a move to another chat. */
+export interface StagedAttachment {
+  file: File;
+  base64: string;
+  mimetype: string;
+  filename: string;
+}
+
 interface ChatComposerProps {
   selectedSessionId: string;
   activeChat: Chat;
@@ -28,12 +36,16 @@ interface ChatComposerProps {
   setChats: Dispatch<SetStateAction<Chat[]>>;
   messageInput: string;
   setMessageInput: Dispatch<SetStateAction<string>>;
+  attachment: StagedAttachment | null;
+  setAttachment: Dispatch<SetStateAction<StagedAttachment | null>>;
+  previewUrl: string | null;
+  setPreviewUrl: Dispatch<SetStateAction<string | null>>;
 }
 
 // The composer half of the chat room: attachment preview, emoji panel, reply banner, and the input
 // bar with the whole optimistic-send flow. `replyingTo` is shared with the thread (its reply action
-// sets it), and `messageInput` lives in the page so a typed draft survives closing the room;
-// everything else is local.
+// sets it), and `messageInput` plus the staged attachment live in the page so a draft survives
+// closing the room; everything else is local.
 function ChatComposer({
   selectedSessionId,
   activeChat,
@@ -43,6 +55,10 @@ function ChatComposer({
   setChats,
   messageInput,
   setMessageInput,
+  attachment,
+  setAttachment,
+  previewUrl,
+  setPreviewUrl,
 }: ChatComposerProps) {
   const { t } = useTranslation();
   const { canWrite } = useRole();
@@ -52,27 +68,20 @@ function ChatComposer({
 
   const [sending, setSending] = useState<boolean>(false);
 
-  // File attachments
-  const [attachment, setAttachment] = useState<{
-    file: File;
-    base64: string;
-    mimetype: string;
-    filename: string;
-  } | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false);
   // Monotonic token invalidating an in-flight attachment FileReader: picking a second file (or
   // removing the attachment) before `onload` fires must win over the late-arriving bytes —
   // otherwise the slower read overwrites the newer pick. Same pattern as composeImageReadSeq.
   const attachmentReadSeq = useRef(0);
 
-  // Unmounting with a read still in flight: invalidate the reader so its late
-  // onload handler drops the bytes instead of setting state on a dead component.
+  // Leaving this conversation — switching to another chat, or unmounting when the room closes —
+  // invalidates an in-flight read, so its late `onload` drops the bytes instead of staging them
+  // against whichever chat is open by then. The attachment state itself lives in the page.
   useEffect(() => {
     return () => {
       attachmentReadSeq.current += 1;
     };
-  }, []);
+  }, [activeChat.id]);
 
   // References
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -98,15 +107,6 @@ function ChatComposer({
     '🚀',
     '✨',
   ];
-
-  // Revoke the object URL created for an image-attachment preview once it is replaced, cleared, or
-  // the component unmounts. The cleanup runs with the previous value on every change, so this single
-  // effect covers all paths (new file, remove, session switch) — otherwise each preview leaks a
-  // blob held for the lifetime of the document.
-  useEffect(() => {
-    if (!previewUrl) return;
-    return () => URL.revokeObjectURL(previewUrl);
-  }, [previewUrl]);
 
   // 5. Handle file selection & base64 conversion
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
