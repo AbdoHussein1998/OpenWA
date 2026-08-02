@@ -83,10 +83,10 @@ interface SavedConfigResponse {
   engine: { type: string; headless: boolean; sessionDataPath: string; browserArgs: string };
 }
 
-// Mutable accumulator threaded through the per-section appliers extracted from saveConfig:
-// `updates` collects the values this payload writes, `staleKeys` the keys a mode switch makes
-// obsolete (dropped from the merged result), and `profiles` the Docker profiles the new config
-// requires.
+// Mutable accumulator threaded through the pipeline stages and per-section appliers extracted
+// from saveConfig: `updates` collects the values this payload writes, `staleKeys` the keys a mode
+// switch makes obsolete (dropped from the merged result), and `profiles` the Docker profiles the
+// new config requires.
 interface ConfigSectionContext {
   updates: Record<string, string>;
   staleKeys: Set<string>;
@@ -197,121 +197,14 @@ export class InfraConfigController {
 
       const ctx: ConfigSectionContext = { updates, staleKeys, profiles };
 
-      if (config.database) {
-        this.applyDatabaseSection(config.database, existing, ctx);
-      }
+      this.applyConfigSections(config, existing, ctx);
+      this.assertNoLineBreakValues(updates);
+      const merged = this.mergeWithExisting(existing, ctx);
+      this.assertProductionBootable(merged);
+      this.persistGeneratedEnv(envPath, merged);
+      this.auditConfigSaved(config, profiles);
 
-      // Redis and queue are independent sections: a payload carrying only one of them must
-      // not rewrite (or disable) the other's saved keys.
-      if (config.redis) {
-        this.applyRedisSection(config.redis, existing, ctx);
-      }
-      if (config.queue) {
-        if (config.queue.enabled !== undefined) updates.QUEUE_ENABLED = config.queue.enabled ? 'true' : 'false';
-      }
-
-      if (config.storage) {
-        this.applyStorageSection(config.storage, existing, ctx);
-      }
-
-      if (config.engine) {
-        this.applyEngineSection(config.engine, existing, ctx);
-      }
-
-      // .env.generated is one KEY=value per line, loaded on the next boot. A value carrying a
-      // line break would write a second line and inject an arbitrary env var the operator never
-      // set, so refuse any such value before writing anything.
-      for (const [key, value] of Object.entries(updates)) {
-        if (/[\r\n]/.test(value)) {
-          throw new BadRequestException(`Invalid configuration value for ${key}: line breaks are not allowed`);
-        }
-      }
-
-      // Existing values are the base; this payload's values win (secrets handled above).
-      const merged: Record<string, string> = { ...existing, ...updates };
-      // Drop keys made obsolete by a mode switch (postgres->sqlite, s3->local, built-in->external).
-      for (const k of staleKeys) {
-        delete merged[k];
-      }
-
-      // Save-time production guard. The file is loaded on the NEXT boot, which may run with
-      // NODE_ENV=production regardless of this process's environment — so evaluate the merged
-      // result with the very same boot guard (as production) and refuse the save when that boot
-      // would refuse to start. This is what stops a built-in->external flip with no fresh
-      // credentials from persisting a config that crash-loops the next production boot.
-      // Evaluate what that boot would actually SEE, not just what the file holds: load-env.ts
-      // loads with dotenv override:false, so a value supplied via the container environment
-      // (compose `environment:`) wins over this file — the precedence the file header documents.
-      // Without that, a deployment providing DATABASE_PASSWORD & co. through the environment is
-      // refused on EVERY save even though its boot passes the guard. A blank compose-forwarded
-      // value counts as unset exactly like clearBlankEnv treats it at boot.
-      //
-      // Only a HOST-supplied key may win. load-env also merges .env and data/.env.generated into
-      // process.env, so reading process.env alone would hand back the very file this save is
-      // replacing — the guard would then bless a flip by validating the OLD config (a built-in ->
-      // external switch keeping the bundled 'openwa' password would save cleanly and crash-loop the
-      // next production boot, the exact case this guard exists for). isOsProvidedEnv separates the
-      // two using the snapshot load-env takes before either file is loaded.
-      const bootValue = (key: string): string | undefined => {
-        const envValue = isOsProvidedEnv(key) ? process.env[key] : undefined;
-        if (envValue !== undefined && (envValue.trim() !== '' || !BLANK_SHADOWED_ENV_KEYS.includes(key))) {
-          return envValue;
-        }
-        return merged[key];
-      };
-      try {
-        assertNoDefaultSecretsInProduction({
-          nodeEnv: 'production',
-          databaseType: bootValue('DATABASE_TYPE'),
-          databasePassword: bootValue('DATABASE_PASSWORD'),
-          postgresBuiltIn: bootValue('POSTGRES_BUILTIN'),
-          databaseHost: bootValue('DATABASE_HOST'),
-          storageType: bootValue('STORAGE_TYPE'),
-          s3AccessKey: bootValue('S3_ACCESS_KEY_ID'),
-          s3SecretKey: bootValue('S3_SECRET_ACCESS_KEY'),
-          s3Endpoint: bootValue('S3_ENDPOINT'),
-          minioBuiltIn: bootValue('MINIO_BUILTIN'),
-          redisPassword: bootValue('REDIS_PASSWORD'),
-        });
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        throw new BadRequestException(
-          `Refusing to save a configuration that would be rejected at production boot. ${detail}`,
-        );
-      }
-      const body = Object.keys(merged)
-        .sort()
-        .map(key => `${key}=${merged[key]}`);
-      const contents = [
-        '# OpenWA Configuration',
-        `# Generated at ${new Date().toISOString()}`,
-        '# Managed via Dashboard > Infrastructure. Values in process env or project .env take precedence.',
-        '',
-        ...body,
-        '',
-      ].join('\n');
-
-      // Write to data/ so it persists across container restarts. Owner-only (0600): this file holds
-      // the DB/S3/Redis credentials, so it must not be world-readable between save and next restart.
-      writeSecretFile(envPath, contents);
-      this.logger.log('Configuration saved', { envPath });
-
-      // Audit the credential-bearing env mutation. Fire-and-forget (not awaited) so saveConfig stays
-      // synchronous — its validation rejections must remain synchronous throws the tests assert via
-      // `.toThrow`. Only section names + Docker profiles are recorded; secret values are never logged.
-      void this.auditService?.logInfo(AuditAction.INFRA_CONFIG_SAVED, {
-        metadata: { sections: Object.keys(config ?? {}), profiles },
-      });
-
-      const profileMsg = profiles.length > 0 ? ` Docker profiles required: ${profiles.join(', ')}.` : '';
-
-      return {
-        message: `Configuration saved successfully.${profileMsg} Server restart required to apply changes.`,
-        saved: true,
-        // Return a cwd-relative path so the response doesn't disclose the absolute host filesystem layout.
-        envPath: path.relative(process.cwd(), envPath),
-        profiles,
-      };
+      return this.buildSaveResponse(envPath, profiles);
     } catch (error) {
       // A validation rejection (unknown engine type, or a newline-injected value) is a BadRequestException
       // and MUST surface as its real 4xx status, not be masked as an HTTP 200 {saved:false} — a client
@@ -328,6 +221,148 @@ export class InfraConfigController {
         profiles: [],
       };
     }
+  }
+
+  // Dispatch each present payload section to its applier; an absent section leaves its saved keys alone.
+  private applyConfigSections(
+    config: SaveConfigDto,
+    existing: Record<string, string>,
+    ctx: ConfigSectionContext,
+  ): void {
+    const { updates } = ctx;
+    if (config.database) {
+      this.applyDatabaseSection(config.database, existing, ctx);
+    }
+
+    // Redis and queue are independent sections: a payload carrying only one of them must
+    // not rewrite (or disable) the other's saved keys.
+    if (config.redis) {
+      this.applyRedisSection(config.redis, existing, ctx);
+    }
+    if (config.queue) {
+      if (config.queue.enabled !== undefined) updates.QUEUE_ENABLED = config.queue.enabled ? 'true' : 'false';
+    }
+
+    if (config.storage) {
+      this.applyStorageSection(config.storage, existing, ctx);
+    }
+
+    if (config.engine) {
+      this.applyEngineSection(config.engine, existing, ctx);
+    }
+  }
+
+  private assertNoLineBreakValues(updates: Record<string, string>): void {
+    // .env.generated is one KEY=value per line, loaded on the next boot. A value carrying a
+    // line break would write a second line and inject an arbitrary env var the operator never
+    // set, so refuse any such value before writing anything.
+    for (const [key, value] of Object.entries(updates)) {
+      if (/[\r\n]/.test(value)) {
+        throw new BadRequestException(`Invalid configuration value for ${key}: line breaks are not allowed`);
+      }
+    }
+  }
+
+  private mergeWithExisting(existing: Record<string, string>, ctx: ConfigSectionContext): Record<string, string> {
+    const { updates, staleKeys } = ctx;
+    // Existing values are the base; this payload's values win (secrets handled above).
+    const merged: Record<string, string> = { ...existing, ...updates };
+    // Drop keys made obsolete by a mode switch (postgres->sqlite, s3->local, built-in->external).
+    for (const k of staleKeys) {
+      delete merged[k];
+    }
+    return merged;
+  }
+
+  private assertProductionBootable(merged: Record<string, string>): void {
+    // Save-time production guard. The file is loaded on the NEXT boot, which may run with
+    // NODE_ENV=production regardless of this process's environment — so evaluate the merged
+    // result with the very same boot guard (as production) and refuse the save when that boot
+    // would refuse to start. This is what stops a built-in->external flip with no fresh
+    // credentials from persisting a config that crash-loops the next production boot.
+    // Evaluate what that boot would actually SEE, not just what the file holds: load-env.ts
+    // loads with dotenv override:false, so a value supplied via the container environment
+    // (compose `environment:`) wins over this file — the precedence the file header documents.
+    // Without that, a deployment providing DATABASE_PASSWORD & co. through the environment is
+    // refused on EVERY save even though its boot passes the guard. A blank compose-forwarded
+    // value counts as unset exactly like clearBlankEnv treats it at boot.
+    //
+    // Only a HOST-supplied key may win. load-env also merges .env and data/.env.generated into
+    // process.env, so reading process.env alone would hand back the very file this save is
+    // replacing — the guard would then bless a flip by validating the OLD config (a built-in ->
+    // external switch keeping the bundled 'openwa' password would save cleanly and crash-loop the
+    // next production boot, the exact case this guard exists for). isOsProvidedEnv separates the
+    // two using the snapshot load-env takes before either file is loaded.
+    const bootValue = (key: string): string | undefined => {
+      const envValue = isOsProvidedEnv(key) ? process.env[key] : undefined;
+      if (envValue !== undefined && (envValue.trim() !== '' || !BLANK_SHADOWED_ENV_KEYS.includes(key))) {
+        return envValue;
+      }
+      return merged[key];
+    };
+    try {
+      assertNoDefaultSecretsInProduction({
+        nodeEnv: 'production',
+        databaseType: bootValue('DATABASE_TYPE'),
+        databasePassword: bootValue('DATABASE_PASSWORD'),
+        postgresBuiltIn: bootValue('POSTGRES_BUILTIN'),
+        databaseHost: bootValue('DATABASE_HOST'),
+        storageType: bootValue('STORAGE_TYPE'),
+        s3AccessKey: bootValue('S3_ACCESS_KEY_ID'),
+        s3SecretKey: bootValue('S3_SECRET_ACCESS_KEY'),
+        s3Endpoint: bootValue('S3_ENDPOINT'),
+        minioBuiltIn: bootValue('MINIO_BUILTIN'),
+        redisPassword: bootValue('REDIS_PASSWORD'),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new BadRequestException(
+        `Refusing to save a configuration that would be rejected at production boot. ${detail}`,
+      );
+    }
+  }
+
+  private persistGeneratedEnv(envPath: string, merged: Record<string, string>): void {
+    const body = Object.keys(merged)
+      .sort()
+      .map(key => `${key}=${merged[key]}`);
+    const contents = [
+      '# OpenWA Configuration',
+      `# Generated at ${new Date().toISOString()}`,
+      '# Managed via Dashboard > Infrastructure. Values in process env or project .env take precedence.',
+      '',
+      ...body,
+      '',
+    ].join('\n');
+
+    // Write to data/ so it persists across container restarts. Owner-only (0600): this file holds
+    // the DB/S3/Redis credentials, so it must not be world-readable between save and next restart.
+    writeSecretFile(envPath, contents);
+    this.logger.log('Configuration saved', { envPath });
+  }
+
+  private auditConfigSaved(config: SaveConfigDto, profiles: string[]): void {
+    // Audit the credential-bearing env mutation. Fire-and-forget (not awaited) so saveConfig stays
+    // synchronous — its validation rejections must remain synchronous throws the tests assert via
+    // `.toThrow`. Only section names + Docker profiles are recorded; secret values are never logged.
+    void this.auditService?.logInfo(AuditAction.INFRA_CONFIG_SAVED, {
+      metadata: { sections: Object.keys(config ?? {}), profiles },
+    });
+  }
+
+  private buildSaveResponse(
+    envPath: string,
+    profiles: string[],
+  ): { message: string; saved: boolean; envPath: string; profiles: string[] } {
+    const profileMsg = profiles.length > 0 ? ` Docker profiles required: ${profiles.join(', ')}.` : '';
+
+    return {
+      message: `Configuration saved successfully.${profileMsg} Server restart required to apply changes.`,
+      saved: true,
+      // Return a cwd-relative path so the response doesn't disclose the absolute host filesystem layout.
+      envPath: path.relative(process.cwd(), envPath),
+      profiles,
+    };
   }
 
   // Database. NOTE: these keys must match what src/config/configuration.ts reads.
