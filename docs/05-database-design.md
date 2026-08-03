@@ -177,37 +177,37 @@ erDiagram
         varchar name UK
         varchar status
         varchar phone
-        varchar push_name
+        varchar pushName
         json config
-        varchar proxy_url
-        varchar proxy_type
-        timestamp connected_at
-        timestamp last_active_at
-        timestamp created_at
-        timestamp updated_at
+        varchar proxyUrl
+        varchar proxyType
+        timestamp connectedAt
+        timestamp lastActiveAt
+        timestamp createdAt
+        timestamp updatedAt
     }
 
     WEBHOOK {
         uuid id PK
-        uuid session_id FK
+        uuid sessionId FK
         varchar url
         json events
         varchar secret
         json headers
         json filters
         boolean active
-        int retry_count
-        timestamp last_triggered_at
-        timestamp created_at
-        timestamp updated_at
+        int retryCount
+        timestamp lastTriggeredAt
+        timestamp createdAt
+        timestamp updatedAt
     }
 
     MESSAGE {
         uuid id PK
-        uuid session_id FK
-        varchar wa_message_id
-        varchar chat_id
-        varchar chat_name
+        uuid sessionId FK
+        varchar waMessageId
+        varchar chatId
+        varchar chatName
         varchar author
         varchar from
         varchar to
@@ -217,47 +217,59 @@ erDiagram
         bigint timestamp
         json metadata
         varchar status
-        timestamp created_at
-        varchar media_path
-        varchar media_mimetype
+        timestamp createdAt
+        varchar mediaPath
+        varchar mediaMimetype
     }
 
     API_KEY {
         uuid id PK
         varchar name
-        varchar key_hash UK
-        varchar key_prefix
+        varchar keyHash UK
+        varchar keyPrefix
         varchar role
-        simple_array allowed_ips
-        simple_array allowed_sessions
-        boolean is_active
-        timestamp expires_at
-        timestamp last_used_at
-        int usage_count
-        timestamp created_at
-        timestamp updated_at
+        simple_array allowedIps
+        simple_array allowedSessions
+        boolean isActive
+        timestamp expiresAt
+        timestamp lastUsedAt
+        int usageCount
+        timestamp createdAt
+        timestamp updatedAt
     }
 
     AUDIT_LOG {
         uuid id PK
         varchar action
         varchar severity
-        varchar api_key_id
-        varchar api_key_name
-        varchar session_id
-        varchar session_name
-        varchar ip_address
-        varchar user_agent
+        varchar apiKeyId
+        varchar apiKeyName
+        varchar sessionId
+        varchar sessionName
+        varchar ipAddress
+        varchar userAgent
         varchar method
         varchar path
-        int status_code
+        int statusCode
         json metadata
-        text error_message
-        timestamp created_at
+        text errorMessage
+        timestamp createdAt
     }
 ```
 
 ## 5.3 Table Specifications
+
+> [!IMPORTANT]
+> **Column names are camelCase — with one exception.** There is no snake_case naming strategy on
+> either connection, so the columns really are `"sessionId"`, `"createdAt"`, `"waMessageId"` and so
+> on, and hand-written SQL must quote them: unquoted, PostgreSQL folds them to lowercase and the
+> statement fails at runtime.
+>
+> The exception is **`message_batches`**, whose columns genuinely are `batch_id` / `session_id` /
+> `created_at` — it was created that way and never renamed. So no single rule covers the whole
+> schema; the DDL below states each table's real names, and `SELECT * FROM <table> LIMIT 0` settles
+> any doubt. The **types** in these blocks stay illustrative (they are dialect-portable and defined
+> by the TypeORM entities), but every identifier is literal.
 
 ### 5.3.1 sessions
 
@@ -269,19 +281,19 @@ CREATE TABLE sessions (
     name VARCHAR(100) NOT NULL UNIQUE,
     status VARCHAR(50) NOT NULL DEFAULT 'created',
     phone VARCHAR(20),
-    push_name VARCHAR(100),
+    "pushName" VARCHAR(100),
     config JSONB NOT NULL DEFAULT '{}',
-    proxy_url VARCHAR(255),
-    proxy_type VARCHAR(10),
-    connected_at TIMESTAMP WITH TIME ZONE,
-    last_active_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    "proxyUrl" VARCHAR(255),
+    "proxyType" VARCHAR(10),
+    "connectedAt" TIMESTAMP WITH TIME ZONE,
+    "lastActiveAt" TIMESTAMP WITH TIME ZONE,
+    "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 ```
 
 > [!NOTE]
-> The SQL above is illustrative — the schema is defined by the TypeORM entity (`src/modules/session/entities/session.entity.ts`), and column types are dialect-portable (`jsonColumnType()` → `simple-json`, dates via `DateTransformer`). The `sessions` entity declares only the index implied by the `UNIQUE` constraint on `name`; there are no separate `status`/`phone`/`created_at` indexes.
+> The **types** above are illustrative — the schema is defined by the TypeORM entity (`src/modules/session/entities/session.entity.ts`) and column types are dialect-portable (`jsonColumnType()` → `simple-json`, dates via `DateTransformer`). The **column names are literal**: see the naming note in §5.3 below before writing SQL against any of these tables. The `sessions` entity declares only the index implied by the `UNIQUE` constraint on `name`; there are no separate `status`/`phone`/`createdAt` indexes.
 
 > [!NOTE]
 > Auth state is **not** stored in this table. Both engines persist credentials on the **filesystem** (`whatsapp-web.js` LocalAuth; Baileys `useMultiFileAuthState`). The `baileys_stored_messages` table holds only Baileys' serialized message store (the library ships none), not credentials.
@@ -341,7 +353,7 @@ clears it, and so does a gateway restart.
 | `autoRejectCalls`      | `false`    | Auto-reject an incoming call as soon as it rings                            |
 
 > [!NOTE]
-> Proxy settings are **not** read from `config` — they live in the dedicated `proxy_url` / `proxy_type` columns shown in the DDL above. Puppeteer options are global engine configuration from the environment (`engine.puppeteer.*`), not per-session. Anything else placed in `config` is stored but ignored.
+> Proxy settings are **not** read from `config` — they live in the dedicated `proxyUrl` / `proxyType` columns shown in the DDL above. Puppeteer options are global engine configuration from the environment (`engine.puppeteer.*`), not per-session. Anything else placed in `config` is stored but ignored.
 
 ---
 
@@ -352,17 +364,17 @@ Stores webhook endpoint configurations.
 ```sql
 CREATE TABLE webhooks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    "sessionId" UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     url VARCHAR(2048) NOT NULL,
     events JSONB NOT NULL DEFAULT '["message.received"]',
     secret VARCHAR(255),
     headers JSONB DEFAULT '{}',
     filters JSONB,                       -- optional smart pre-filter; null = fire on every subscribed event
     active BOOLEAN NOT NULL DEFAULT true,
-    retry_count INTEGER NOT NULL DEFAULT 3,
-    last_triggered_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    "retryCount" INTEGER NOT NULL DEFAULT 3,
+    "lastTriggeredAt" TIMESTAMP WITH TIME ZONE,
+    "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 ```
 
@@ -400,10 +412,10 @@ Stores message history (optional, can be disabled). This is a **plain (non-parti
 ```sql
 CREATE TABLE messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID NOT NULL,
-    wa_message_id VARCHAR,                -- nullable; transient outgoing rows have none yet
-    chat_id VARCHAR NOT NULL,
-    chat_name VARCHAR,                    -- nullable; contact pushName / group name when known
+    "sessionId" UUID NOT NULL,
+    "waMessageId" VARCHAR,                -- nullable; transient outgoing rows have none yet
+    "chatId" VARCHAR NOT NULL,
+    "chatName" VARCHAR,                   -- nullable; contact pushName / group name when known
     author VARCHAR,                       -- nullable; participant JID for a group message ("from" is the group)
     "from" VARCHAR NOT NULL,
     "to" VARCHAR NOT NULL,
@@ -413,23 +425,24 @@ CREATE TABLE messages (
     timestamp BIGINT,                     -- WhatsApp epoch seconds; read back as a JS number
     metadata JSONB,
     status VARCHAR NOT NULL DEFAULT 'sent',          -- pending | sent | delivered | read | failed
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    media_path VARCHAR,                   -- nullable; storage key of the archived media copy
-    media_mimetype VARCHAR                -- nullable; mimetype of that archived copy
+    "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    "mediaPath" VARCHAR,                  -- nullable; storage key of the archived media copy
+    "mediaMimetype" VARCHAR               -- nullable; mimetype of that archived copy
 );
 
--- Indexes (declared on the entity)
--- There is deliberately NO standalone session_id index: the composites below lead with
--- session_id, so they already serve session-only lookups (see DropRedundantMessagesSessionIdIndex).
-CREATE INDEX idx_messages_session_created ON messages(session_id, created_at);
-CREATE INDEX idx_messages_chat_id ON messages(chat_id);
-CREATE INDEX idx_messages_status ON messages(status);
-CREATE INDEX "IDX_messages_createdAt" ON messages(created_at);   -- created_at-only stats aggregates
+-- Indexes (declared on the entity). Names TypeORM derives are hashes, not readable slugs —
+-- the literal names are below so `DROP INDEX` / EXPLAIN output can be matched against them.
+-- There is deliberately NO standalone "sessionId" index: the composite below leads with
+-- "sessionId", so it already serves session-only lookups (see DropRedundantMessagesSessionIdIndex).
+CREATE INDEX "IDX_399833392126349ef0b04b9bed" ON messages("sessionId", "createdAt");
+CREATE INDEX "IDX_36bc604c820bb9adc4c75cd411" ON messages("chatId");
+CREATE INDEX "IDX_befd307485dbf0559d17e4a4d2" ON messages(status);
+CREATE INDEX "IDX_messages_createdAt" ON messages("createdAt");   -- createdAt-only stats aggregates
 
--- Inbound dedup (issue #464): one row per (session_id, wa_message_id).
--- NULL wa_message_id rows are exempt (SQL treats NULLs as distinct).
+-- Inbound dedup (issue #464): one row per ("sessionId", "waMessageId").
+-- NULL "waMessageId" rows are exempt (SQL treats NULLs as distinct).
 CREATE UNIQUE INDEX "UQ_messages_sessionId_waMessageId"
-    ON messages(session_id, wa_message_id);
+    ON messages("sessionId", "waMessageId");
 ```
 
 > [!NOTE]
@@ -455,24 +468,24 @@ Stores API keys for authentication. Lives on the **main** (always-SQLite) connec
 CREATE TABLE api_keys (
     id VARCHAR PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    key_hash VARCHAR(64) NOT NULL,                 -- UNIQUE index
-    key_prefix VARCHAR(12) NOT NULL,               -- shown in the UI; the full key is never stored
+    "keyHash" VARCHAR(64) NOT NULL,                -- UNIQUE index
+    "keyPrefix" VARCHAR(12) NOT NULL,              -- shown in the UI; the full key is never stored
     role VARCHAR(20) NOT NULL DEFAULT 'operator',  -- admin | operator | viewer
-    allowed_ips TEXT,                              -- simple-array (comma-joined), null = any IP
-    allowed_sessions TEXT,                         -- simple-array, null = all sessions
-    is_active BOOLEAN NOT NULL DEFAULT 1,
-    expires_at DATETIME,
-    last_used_at DATETIME,
-    usage_count INTEGER NOT NULL DEFAULT 0,
-    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+    "allowedIps" TEXT,                             -- simple-array (comma-joined), null = any IP
+    "allowedSessions" TEXT,                        -- simple-array, null = all sessions
+    "isActive" BOOLEAN NOT NULL DEFAULT 1,
+    "expiresAt" DATETIME,
+    "lastUsedAt" DATETIME,
+    "usageCount" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT (datetime('now')),
+    "updatedAt" DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE UNIQUE INDEX "IDX_api_keys_keyHash" ON api_keys(key_hash);
+CREATE UNIQUE INDEX "IDX_df3b25181df0b4b59bd93f16e1" ON api_keys("keyHash");
 ```
 
 > [!NOTE]
-> Access control is **role-based** (`admin` / `operator` / `viewer`), optionally scoped by `allowed_ips` and `allowed_sessions`. There is no granular `permissions` string array — see [04 - Security Design](./04-security-design.md) for what each role can do.
+> Access control is **role-based** (`admin` / `operator` / `viewer`), optionally scoped by `allowedIps` and `allowedSessions`. There is no granular `permissions` string array — see [04 - Security Design](./04-security-design.md) for what each role can do.
 
 ---
 
@@ -485,25 +498,25 @@ CREATE TABLE audit_logs (
     id VARCHAR PRIMARY KEY,
     action VARCHAR(50) NOT NULL,                   -- e.g. session_created, message_sent, webhook_failed
     severity VARCHAR(10) NOT NULL DEFAULT 'info',  -- info | warn | error
-    api_key_id VARCHAR(36),
-    api_key_name VARCHAR(100),
-    session_id VARCHAR(36),
-    session_name VARCHAR(100),
-    ip_address VARCHAR(45),
-    user_agent VARCHAR(500),
+    "apiKeyId" VARCHAR(36),
+    "apiKeyName" VARCHAR(100),
+    "sessionId" VARCHAR(36),
+    "sessionName" VARCHAR(100),
+    "ipAddress" VARCHAR(45),
+    "userAgent" VARCHAR(500),
     method VARCHAR(10),
     path VARCHAR(500),
-    status_code INTEGER,
+    "statusCode" INTEGER,
     metadata TEXT,                                 -- simple-json
-    error_message TEXT,
-    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+    "errorMessage" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
--- Indexes (declared on the entity)
-CREATE INDEX "IDX_audit_logs_action"    ON audit_logs(action);
-CREATE INDEX "IDX_audit_logs_apiKeyId"  ON audit_logs(api_key_id);
-CREATE INDEX "IDX_audit_logs_sessionId" ON audit_logs(session_id);
-CREATE INDEX "IDX_audit_logs_createdAt" ON audit_logs(created_at);
+-- Indexes (declared on the entity; TypeORM-derived hash names)
+CREATE INDEX "IDX_cee5459245f652b75eb2759b4c" ON audit_logs(action);
+CREATE INDEX "IDX_741fa976d1e04e695f3aa23cb8" ON audit_logs("apiKeyId");
+CREATE INDEX "IDX_dd2b6e43c767b6b5b2bb227ace" ON audit_logs("sessionId");
+CREATE INDEX "IDX_c69efb19bf127c97e6740ad530" ON audit_logs("createdAt");
 ```
 
 **Audit actions** are an enum (`AuditAction`) spanning API-key lifecycle (`api_key_created`,
@@ -594,31 +607,32 @@ These indexes are the ones declared on the entities (see §5.3); the rows below 
 | -------------------------------- | ----------------------------------------------------- | --------- |
 | Get session by ID                | `sessions.id` (PK)                                    | Very High |
 | Get session by name              | `sessions.name` (UNIQUE)                              | High      |
-| List messages by session (paged) | `(session_id, created_at)` composite                  | Very High |
-| Look up message by chat          | `chat_id`                                             | High      |
+| List messages by session (paged) | `("sessionId", "createdAt")` composite                | Very High |
+| Look up message by chat          | `"chatId"`                                            | High      |
 | Ack/dedup a message              | `UQ_messages_sessionId_waMessageId` (UNIQUE)          | Very High |
 | Message stats over a date range  | `IDX_messages_createdAt`                              | Medium    |
 | Find a session's webhooks        | `IDX_webhooks_sessionId`                              | Very High |
-| Authenticate API key             | `IDX_api_keys_keyHash` (UNIQUE, main DB)              | Very High |
-| Filter audit logs                | `IDX_audit_logs_action` / `_apiKeyId` / `_sessionId`  | Medium    |
+| Authenticate API key             | UNIQUE on `api_keys("keyHash")`, main DB              | Very High |
+| Filter audit logs                | `audit_logs` indexes on `action` / `apiKeyId` / `sessionId` | Medium |
 
 ### Composite & Unique Indexes (as implemented)
 
 ```sql
 -- messages: paged listing per session + ack-driven status update / inbound dedup
-CREATE INDEX        idx_messages_session_created          ON messages(session_id, created_at);
-CREATE UNIQUE INDEX "UQ_messages_sessionId_waMessageId"   ON messages(session_id, wa_message_id);
-CREATE INDEX        "IDX_messages_createdAt"              ON messages(created_at);
+CREATE INDEX        "IDX_399833392126349ef0b04b9bed"      ON messages("sessionId", "createdAt");
+CREATE UNIQUE INDEX "UQ_messages_sessionId_waMessageId"   ON messages("sessionId", "waMessageId");
+CREATE INDEX        "IDX_messages_createdAt"              ON messages("createdAt");
 
 -- webhooks: the dispatch path filters by session on every emitted event
-CREATE INDEX "IDX_webhooks_sessionId" ON webhooks(session_id);
+CREATE INDEX "IDX_webhooks_sessionId" ON webhooks("sessionId");
 
--- message_batches: batch ids are unique per session, not globally
+-- message_batches: batch ids are unique per session, not globally.
+-- Note the snake_case: this table really is named that way — see the naming note in §5.3.
 CREATE UNIQUE INDEX "UQ_message_batches_session_id_batch_id" ON message_batches(session_id, batch_id);
 
 -- audit_logs (main DB): filter by action / key / session, ordered by time
-CREATE INDEX "IDX_audit_logs_action"    ON audit_logs(action);
-CREATE INDEX "IDX_audit_logs_createdAt" ON audit_logs(created_at);
+CREATE INDEX "IDX_cee5459245f652b75eb2759b4c" ON audit_logs(action);
+CREATE INDEX "IDX_c69efb19bf127c97e6740ad530" ON audit_logs("createdAt");
 ```
 
 > [!NOTE]

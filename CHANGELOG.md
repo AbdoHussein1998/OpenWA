@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`docs/05-database-design.md` documented column names that do not exist.** Every table but
+  `message_batches` was written in snake_case while the real columns are camelCase, so SQL copied out
+  of the document referenced columns no database has — and PostgreSQL, which folds unquoted
+  identifiers to lowercase, would fail on them at runtime rather than at review. The DDL blocks, the
+  ER diagram, the index tables and the surrounding prose now carry the literal names, and the
+  TypeORM-derived index names replace the readable slugs that were never real.
+
+  `message_batches` genuinely is snake_case, which is what made the rest so easy to get wrong: no
+  single rule covers the schema. That exception is now stated once, up front, where the tables begin.
+
+  A spec builds the schema from the entities and checks every documented column against it, so the
+  document cannot drift from the code again.
+
 ### Added
 
 - **Send pacing now bounds cold reachouts separately** (`SEND_PACING_COLD_DAILY_CAP`). A send counts
