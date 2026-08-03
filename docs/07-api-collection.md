@@ -548,6 +548,25 @@ curl -X GET "$BASE/api/sessions/$SESSION_ID/contacts/12345678901234@lid/phone" \
   -H "X-API-Key: $API_KEY"
 ```
 
+#### PUT /api/sessions/:sessionId/contacts/:contactId
+
+Save or edit an addressbook contact.
+
+```bash
+curl -X PUT "$BASE/api/sessions/$SESSION_ID/contacts/628123456789@c.us" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"firstName":"Ada","lastName":"Lovelace"}'
+```
+
+#### DELETE /api/sessions/:sessionId/contacts/:contactId
+
+Remove an addressbook contact.
+
+```bash
+curl -X DELETE "$BASE/api/sessions/$SESSION_ID/contacts/628123456789@c.us" \
+  -H "X-API-Key: $API_KEY"
+```
+
 #### POST /api/sessions/:sessionId/contacts/:contactId/block
 
 Block a contact (requires an OPERATOR key). Send an empty body.

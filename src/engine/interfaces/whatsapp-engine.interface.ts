@@ -750,6 +750,15 @@ export interface IWhatsAppEngine {
   blockContact(contactId: string): Promise<void>;
   unblockContact(contactId: string): Promise<void>;
 
+  /**
+   * Save a contact to the account's addressbook, or edit an existing entry. `contactId` is a
+   * neutral JID; whatsapp-web.js addresses the entry by phone number and Baileys by JID, so the
+   * adapters convert. An empty `lastName` is normal — WhatsApp stores single-name contacts.
+   */
+  upsertContact(contactId: string, firstName: string, lastName?: string): Promise<void>;
+  /** Remove a contact from the account's addressbook. Does not block or delete the chat. */
+  deleteContact(contactId: string): Promise<void>;
+
   // Profile (own account)
   /** Set the account's display name. */
   setProfileName(name: string): Promise<void>;

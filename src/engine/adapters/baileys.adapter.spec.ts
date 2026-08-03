@@ -49,6 +49,8 @@ class FakeSock extends EventEmitter {
   public updateProfileStatus = jest.fn().mockResolvedValue(undefined);
   public updateProfilePicture = jest.fn().mockResolvedValue(undefined);
   public updateBlockStatus = jest.fn().mockResolvedValue(undefined);
+  public addOrEditContact = jest.fn().mockResolvedValue(undefined);
+  public removeContact = jest.fn().mockResolvedValue(undefined);
   public readMessages = jest.fn().mockResolvedValue(undefined);
   public chatModify = jest.fn().mockResolvedValue(undefined);
   public addChatLabel = jest.fn().mockResolvedValue(undefined);
@@ -3734,6 +3736,32 @@ describe('BaileysAdapter sendSeen + markUnread + deleteChat', () => {
     fakeSock.fire('connection.update', { connection: 'open' });
     expect(await adapter.clearChatMessages('628999@s.whatsapp.net')).toBe(false);
     expect(fakeSock.chatModify).not.toHaveBeenCalled();
+  });
+
+  it('upsertContact addresses the entry by JID and composes fullName', async () => {
+    const adapter = await readyWithMessage();
+    await adapter.upsertContact('628111@s.whatsapp.net', 'Ada', 'Lovelace');
+    // Baileys wants the JID here, unlike whatsapp-web.js which wants a bare phone number.
+    expect(fakeSock.addOrEditContact).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      firstName: 'Ada',
+      fullName: 'Ada Lovelace',
+      saveOnPrimaryAddressbook: false,
+    });
+  });
+
+  it('upsertContact leaves no trailing space in fullName for a single-name contact', async () => {
+    const adapter = await readyWithMessage();
+    await adapter.upsertContact('628111@s.whatsapp.net', 'Ada');
+    expect(fakeSock.addOrEditContact).toHaveBeenCalledWith(
+      '628111@s.whatsapp.net',
+      expect.objectContaining({ fullName: 'Ada' }),
+    );
+  });
+
+  it('deleteContact removes by JID', async () => {
+    const adapter = await readyWithMessage();
+    await adapter.deleteContact('628111@s.whatsapp.net');
+    expect(fakeSock.removeContact).toHaveBeenCalledWith('628111@s.whatsapp.net');
   });
 
   it.each([true, false])('archiveChat(%s) modifies the chat with the last message', async archive => {

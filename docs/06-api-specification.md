@@ -1889,6 +1889,45 @@ Resolve a contact id (e.g. an `@lid`) to a phone number (MSISDN digits), best-ef
 
 **Errors:** `400` session is not started · `401` missing/invalid API key
 
+#### PUT /api/sessions/:sessionId/contacts/:contactId
+
+Save a contact to the account's addressbook, or edit an existing entry. This is the WhatsApp
+contact record — it does not block, delete, or otherwise touch the chat.
+
+**Auth:** API key (OPERATOR)
+
+**Path parameters**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| sessionId | string | Session ID |
+| contactId | string | Contact ID (e.g. `628xxx@c.us`) |
+
+**Request body** — `UpsertContactDto`
+
+| Field | Type | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| firstName | string | Yes | 1–100 chars | The contact's first name |
+| lastName | string | No | ≤ 100 chars | Omit for a single-name contact — WhatsApp allows those |
+
+**Response** `200` — `{ "success": true, "message": "Contact saved" }`
+
+> The entry is saved to the WhatsApp addressbook only; it is **not** synced through to the device
+> addressbook. Both engines are called with their sync-to-device flag off, so behaviour matches
+> across engines rather than depending on which one is running.
+
+**Errors:** `400` session not active or invalid request · `401` missing/invalid API key · `403` key lacks OPERATOR role
+
+#### DELETE /api/sessions/:sessionId/contacts/:contactId
+
+Remove a contact from the account's addressbook. Does not block the contact or delete the chat.
+
+**Auth:** API key (OPERATOR)
+
+**Response** `200` — `{ "success": true, "message": "Contact deleted" }`
+
+**Errors:** `400` session not active · `401` missing/invalid API key · `403` key lacks OPERATOR role
+
 #### POST /api/sessions/:sessionId/contacts/:contactId/block
 
 Block a contact.

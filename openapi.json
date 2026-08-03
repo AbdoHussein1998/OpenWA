@@ -3187,6 +3187,86 @@
         "tags": [
           "contacts"
         ]
+      },
+      "put": {
+        "operationId": "ContactController_upsertContact",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "contactId",
+            "required": true,
+            "in": "path",
+            "description": "Contact ID (e.g., 628xxx@c.us)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertContactDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contact saved"
+          },
+          "400": {
+            "description": "Session not active or invalid request"
+          }
+        },
+        "summary": "Save a contact to the account's addressbook, or edit an existing entry",
+        "tags": [
+          "contacts"
+        ]
+      },
+      "delete": {
+        "operationId": "ContactController_deleteContact",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "contactId",
+            "required": true,
+            "in": "path",
+            "description": "Contact ID (e.g., 628xxx@c.us)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contact deleted"
+          },
+          "400": {
+            "description": "Session not active"
+          }
+        },
+        "summary": "Remove a contact from the account's addressbook",
+        "tags": [
+          "contacts"
+        ]
       }
     },
     "/api/sessions/{sessionId}/contacts/check/{number}": {
@@ -7867,6 +7947,24 @@
             }
           }
         }
+      },
+      "UpsertContactDto": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "description": "The contact's first name.",
+            "maxLength": 100
+          },
+          "lastName": {
+            "type": "string",
+            "description": "The contact's last name. Omit for a single-name contact — WhatsApp allows those.",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "firstName"
+        ]
       },
       "JoinGroupDto": {
         "type": "object",

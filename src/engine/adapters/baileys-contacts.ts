@@ -43,6 +43,24 @@ export class BaileysContacts {
     }
   }
 
+  async upsertContact(contactId: string, firstName: string, lastName = ''): Promise<void> {
+    this.host.ensureReady();
+    const fullName = [firstName, lastName].filter(Boolean).join(' ');
+    // Baileys addresses the entry by JID, unlike whatsapp-web.js which wants a bare phone number.
+    // saveOnPrimaryAddressbook stays false to match the wwjs default (syncToAddressbook=false):
+    // writing through to the device addressbook is a heavier action than saving the contact.
+    await this.sock().addOrEditContact(contactId, {
+      firstName,
+      fullName,
+      saveOnPrimaryAddressbook: false,
+    });
+  }
+
+  async deleteContact(contactId: string): Promise<void> {
+    this.host.ensureReady();
+    await this.sock().removeContact(contactId);
+  }
+
   async blockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
     await this.sock().updateBlockStatus(contactId, 'block');

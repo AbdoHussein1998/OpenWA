@@ -101,6 +101,14 @@ export class ContactService {
     return this.getEngine(sessionId).blockContact(contactId);
   }
 
+  upsertContact(sessionId: string, contactId: string, firstName: string, lastName?: string) {
+    return this.getEngine(sessionId).upsertContact(contactId, firstName, lastName);
+  }
+
+  deleteContact(sessionId: string, contactId: string) {
+    return this.getEngine(sessionId).deleteContact(contactId);
+  }
+
   unblockContact(sessionId: string, contactId: string) {
     return this.getEngine(sessionId).unblockContact(contactId);
   }

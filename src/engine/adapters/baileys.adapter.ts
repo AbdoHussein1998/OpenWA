@@ -433,6 +433,14 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.contacts.blockContact(contactId);
   }
 
+  async upsertContact(contactId: string, firstName: string, lastName?: string): Promise<void> {
+    return this.contacts.upsertContact(contactId, firstName, lastName);
+  }
+
+  async deleteContact(contactId: string): Promise<void> {
+    return this.contacts.deleteContact(contactId);
+  }
+
   async unblockContact(contactId: string): Promise<void> {
     return this.contacts.unblockContact(contactId);
   }

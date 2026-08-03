@@ -281,6 +281,21 @@ describe('ChatsResource.clearMessages', () => {
   });
 });
 
+describe('ContactsResource addressbook', () => {
+  it('PUTs the contact and DELETEs it by the same path', async () => {
+    const t = new MockTransport()
+      .on('PUT', /\/contacts\/[^/]+$/, { body: { success: true } })
+      .on('DELETE', /\/contacts\/[^/]+$/, { body: { success: true } });
+    const c = client(t);
+    await c.contacts.upsert('s', 'a@c.us', { firstName: 'Ada' });
+    expect(t.lastCall!.method).toBe('PUT');
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/contacts/a@c.us');
+    expect(t.lastCall!.body).toEqual({ firstName: 'Ada' });
+    await c.contacts.delete('s', 'a@c.us');
+    expect(t.lastCall!.method).toBe('DELETE');
+  });
+});
+
 describe('ChatsResource.archive', () => {
   it('posts chatId and the archive flag', async () => {
     const t = new MockTransport().on('POST', /\/chats\/archive$/, { body: { success: true } });
