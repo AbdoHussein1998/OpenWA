@@ -8,6 +8,7 @@ import { HookManager } from '../../core/hooks';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { SendImageStatusDto, SendVideoStatusDto } from './dto/send-media-status.dto';
+import { SendPacingService } from '../message/send-pacing.service';
 
 describe('StatusService media validation and selection', () => {
   const engine = {
@@ -32,6 +33,9 @@ describe('StatusService media validation and selection', () => {
     hookManager as unknown as HookManager,
     store as unknown as StatusStoreService,
     storageService as unknown as StorageService,
+    {
+      assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SendPacingService,
   );
 
   beforeEach(() => {

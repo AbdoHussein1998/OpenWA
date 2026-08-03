@@ -5,6 +5,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import type { Status, StatusResult, StatusPostOptions } from '../../engine/interfaces/whatsapp-engine.interface';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from '../message/media-cap.util';
 import { HookManager, applySendingGate } from '../../core/hooks';
+import { SendPacingService } from '../message/send-pacing.service';
 
 /** Stored status media is only ever an image or video; a sender-declared mimetype outside that is
  * served as inert octet-stream so the media endpoint can't be turned into active content (HTML/JS)
@@ -20,6 +21,7 @@ export class StatusService {
     private readonly hookManager: HookManager,
     private readonly store: StatusStoreService,
     private readonly storageService: StorageService,
+    private readonly pacing: SendPacingService,
   ) {}
 
   /**
@@ -30,7 +32,11 @@ export class StatusService {
    * Note for plugin authors: `input` here is NOT a send DTO — it carries no `chatId`. Text posts
    * receive `{ text, options }` and media posts `{ media: { mimetype, data }, options }`.
    */
-  private gate<T extends object>(sessionId: string, type: string, input: T): Promise<T> {
+  private async gate<T extends object>(sessionId: string, type: string, input: T): Promise<T> {
+    // Pacing first, for the same reason as the chat path: a post the policy forbids is never offered
+    // to plugins. A status post is published to the account's contacts, so it counts as outbound
+    // traffic even though it addresses no single chat.
+    await this.pacing.assertSendAllowed(sessionId);
     return applySendingGate(this.hookManager, sessionId, type, input, 'StatusService');
   }
 

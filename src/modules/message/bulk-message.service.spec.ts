@@ -14,6 +14,7 @@ import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import type { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { MessageService } from './message.service';
+import { SendPacingService } from './send-pacing.service';
 import { HookManager } from '../../core/hooks';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 
@@ -70,6 +71,12 @@ describe('BulkMessageService.onApplicationBootstrap', () => {
         { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
         EngineRegistry,
         { provide: MessageService, useValue: { saveOutgoingMessage: jest.fn() } },
+        {
+          // Pacing is off by default; its own spec covers the governor. Here it must simply not
+          // refuse, so the bulk assertions exercise the paths they were written for.
+          provide: SendPacingService,
+          useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) },
+        },
         {
           provide: HookManager,
           useValue: {
@@ -167,6 +174,10 @@ describe('BulkMessageService.processBatch', () => {
         { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
         { provide: EngineRegistry, useValue: engines },
         { provide: MessageService, useValue: messageService },
+        {
+          provide: SendPacingService,
+          useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: HookManager, useValue: hookManager },
       ],
     }).compile();
@@ -579,6 +590,10 @@ describe('BulkMessageService.cancelBatch', () => {
         { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
         EngineRegistry,
         { provide: MessageService, useValue: {} },
+        {
+          provide: SendPacingService,
+          useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: HookManager, useValue: { execute: jest.fn() } },
       ],
     }).compile();
@@ -654,6 +669,10 @@ describe('BulkMessageService.createBatch base64 media cap', () => {
         { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
         { provide: EngineRegistry, useValue: engines },
         { provide: MessageService, useValue: messageService },
+        {
+          provide: SendPacingService,
+          useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) },
+        },
         {
           provide: HookManager,
           useValue: {

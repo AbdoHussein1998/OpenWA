@@ -8,6 +8,7 @@ import {
   getSessionReconnectLoopAlertsTotal,
 } from '../../common/metrics/session-reconnect-metrics';
 import { getRestrictedSessionCount } from '../../common/metrics/session-restriction-metrics';
+import { getSendPacingRefusals } from '../../common/metrics/send-pacing-metrics';
 import { renderHttpRequestMetrics } from '../../common/metrics/request-metrics';
 
 /**
@@ -121,6 +122,17 @@ export class MetricsService {
     lines.push('# HELP openwa_sessions_restricted Sessions whose account WhatsApp is currently restricting.');
     lines.push('# TYPE openwa_sessions_restricted gauge');
     lines.push(`openwa_sessions_restricted ${getRestrictedSessionCount()}`);
+
+    // Emitted only once a refusal has actually happened, like the HTTP series: a family that appears
+    // at its first occurrence is easier to alert on than one pinned at zero for every reason.
+    const refusals = getSendPacingRefusals();
+    if (refusals.size > 0) {
+      lines.push('# HELP openwa_send_pacing_refusals_total Sends refused by the pacing governor since process start.');
+      lines.push('# TYPE openwa_send_pacing_refusals_total counter');
+      for (const [reason, count] of refusals) {
+        lines.push(`openwa_send_pacing_refusals_total{reason="${this.escapeLabel(reason)}"} ${count}`);
+      }
+    }
 
     // HTTP RED metrics (request rate + duration per route), recorded by RequestMetricsInterceptor.
     // Included in the same cached render — a few seconds of staleness is fine for Prometheus.

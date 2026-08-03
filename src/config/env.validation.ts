@@ -243,6 +243,9 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     // Read by the SSRF guard's redirect loop with `=== 'true'`: a typo silently keeps the secure
     // default, but an accidental 'true'-ish string is not the flag the operator meant to audit.
     'PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS',
+    // Read with `=== 'true'`, so a typo leaves sends unpaced — the silent failure this whole
+    // feature exists to avoid, and invisible without this check.
+    'SEND_PACING_ENABLED',
   ]) {
     checkBool(key);
   }

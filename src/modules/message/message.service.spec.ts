@@ -13,6 +13,15 @@ import { TemplateService } from '../template/template.service';
 import { Template } from '../template/entities/template.entity';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
+import { SendPacingService } from './send-pacing.service';
+
+/** Pacing is off by default in these tests; the governor's own spec covers its behaviour. */
+const inertPacing = (): SendPacingService =>
+  ({
+    assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+    recordSendFailure: jest.fn(),
+    recordSendSuccess: jest.fn(),
+  }) as unknown as SendPacingService;
 
 const mockEngineResult = { id: 'wa-msg-1', timestamp: 1706868000 };
 
@@ -101,6 +110,14 @@ describe('MessageService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MessageService,
+        {
+          provide: SendPacingService,
+          useValue: {
+            assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+            recordSendFailure: jest.fn(),
+            recordSendSuccess: jest.fn(),
+          },
+        },
         { provide: getRepositoryToken(Message, 'data'), useValue: repository },
         { provide: SessionService, useValue: sessionService },
         { provide: EngineRegistry, useValue: engines },
@@ -404,7 +421,7 @@ describe('MessageService', () => {
     it('honors a configured template.renderMaxChars override', async () => {
       const configService = {
         get: (key: string, fallback: unknown) => (key === 'template.renderMaxChars' ? 10 : fallback),
-      } as unknown as ConstructorParameters<typeof MessageService>[7];
+      } as unknown as ConstructorParameters<typeof MessageService>[8];
       const capped = new MessageService(
         repository as Repository<Message>,
         sessionService as unknown as SessionService,
@@ -413,6 +430,7 @@ describe('MessageService', () => {
         hookManager as HookManager,
         templateService as unknown as TemplateService,
         lidMappingStore as unknown as LidMappingStoreService,
+        inertPacing(),
         configService,
       );
       (templateService.resolve as jest.Mock).mockResolvedValue(mockTemplate({ body: 'Hello {{customer}}' }));
@@ -1492,6 +1510,7 @@ describe('MessageService', () => {
         hookManager as HookManager,
         templateService as unknown as TemplateService,
         lidMappingStore as unknown as LidMappingStoreService,
+        inertPacing(),
         undefined,
         archive as never,
         store as never,

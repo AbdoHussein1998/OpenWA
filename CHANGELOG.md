@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Opt-in send pacing, to keep a young or struggling account from sending its way into a ban:**
+  `SEND_PACING_ENABLED=false` by default, so nothing changes until you turn it on. When enabled, two
+  rules can refuse an outbound send:
+
+  - a **warm-up daily cap** whose allowance grows with the session's age
+    (`SEND_PACING_WARMUP_SCHEDULE`), because a brand-new account that immediately sends at volume is
+    the pattern that gets numbers banned;
+  - a **failure breaker** that pauses sending after `SEND_PACING_BREAKER_THRESHOLD` consecutive send
+    failures — usually the sign that WhatsApp has already started refusing the account — and releases
+    after a cooldown or on the first success.
+
+  Refusals are `429` carrying `code: "SEND_PACING_LIMITED"` and `retryAfterSeconds`. That code is what
+  separates them from the global rate limiter's own `429`, which carries none: the throttler's clears
+  in seconds, a daily cap does not. Refusals are counted per rule in the new
+  `openwa_send_pacing_refusals_total` Prometheus counter.
+
+  It covers every path that reaches WhatsApp with a message: all the `send-*` routes and `edit`, bulk
+  batches, status posts, and `send-product` — the last of which never went through the message
+  service and so had no moderation gate either. Inside a batch a refusal fails just that item, not
+  the batch, since the allowance may free up and a killed batch cannot be resumed. Reactions, poll
+  votes, pins and deletes are deliberately not paced: they act on conversations that already exist,
+  which is not the traffic that gets accounts banned.
+
+  **Plugin-visible behaviour change:** the pacing check runs *before* the `message:sending` hook, so a
+  paced-out send does not fire it. Plugins are not asked to moderate, and cannot rewrite, traffic that
+  policy already forbids — but a plugin treating that hook as a complete record of send *attempts*
+  will no longer see refused ones. It remains complete for sends actually attempted against WhatsApp.
+  A plugin veto is still `400`.
+
+  Daily counts are read from the messages table rather than a counter of their own, so they survive
+  restarts, cannot drift from what was really sent, and needed no new table or migration.
+
 - **WhatsApp-imposed account restrictions are now surfaced, instead of being lost inside a generic
   disconnect:** a new `restriction` field on every session response, a `session.restriction` webhook,
   and an `openwa_sessions_restricted` Prometheus gauge. Modelled in the JavaScript, Python, Go and
