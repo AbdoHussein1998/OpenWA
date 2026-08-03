@@ -638,6 +638,18 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
    * off the prototype, so a throw hidden behind a delegate call is invisible to it and the
    * `not-available` matrix row would go unverified; inline, the gate checks it.
    */
+  createChannel(name: string, description?: string): Promise<Channel> {
+    return this.channels.createChannel(name, description);
+  }
+
+  deleteChannel(channelId: string): Promise<void> {
+    return this.channels.deleteChannel(channelId);
+  }
+
+  muteChannel(channelId: string, mute: boolean): Promise<void> {
+    return this.channels.muteChannel(channelId, mute);
+  }
+
   getChatsByLabel(labelId: string): Promise<ChatSummary[]> {
     return this.labels.getChatsByLabel(labelId);
   }

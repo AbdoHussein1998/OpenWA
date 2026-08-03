@@ -61,6 +61,10 @@ class FakeSock extends EventEmitter {
   public getCatalog = jest.fn();
   public getCollections = jest.fn();
   public newsletterFollow = jest.fn().mockResolvedValue(undefined);
+  public newsletterCreate = jest.fn().mockResolvedValue({ id: 'c@newsletter', name: 'c' });
+  public newsletterDelete = jest.fn().mockResolvedValue(undefined);
+  public newsletterMute = jest.fn().mockResolvedValue(undefined);
+  public newsletterUnmute = jest.fn().mockResolvedValue(undefined);
   public newsletterUnfollow = jest.fn().mockResolvedValue(undefined);
   public rejectCall = jest.fn().mockResolvedValue(undefined);
   public presenceSubscribe = jest.fn().mockResolvedValue(undefined);
@@ -4414,5 +4418,61 @@ describe('BaileysAdapter label editing', () => {
     const adapter = await readyAdapter();
 
     await expect(adapter.getChatsByLabel('l1')).rejects.toThrow(/getChatsByLabel/);
+  });
+});
+
+// Baileys has first-class newsletter admin, so these pin the mapping and the mute/unmute split
+// rather than any failure translation.
+describe('BaileysAdapter channel administration', () => {
+  const CHANNEL = '120363401234567890@newsletter';
+
+  beforeEach(() => {
+    fakeSock.user = undefined;
+    fakeSock.resetEmitter();
+    jest.clearAllMocks();
+  });
+
+  const readyAdapter = async () => {
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({}));
+    fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+    fakeSock.fire('connection.update', { connection: 'open' });
+    return adapter;
+  };
+
+  it('creates a channel and maps the metadata to the neutral shape', async () => {
+    fakeSock.newsletterCreate.mockResolvedValue({
+      id: CHANNEL,
+      name: 'Product updates',
+      description: 'Release notes',
+      invite: 'ABC123',
+    });
+    const adapter = await readyAdapter();
+
+    const channel = await adapter.createChannel('Product updates', 'Release notes');
+
+    expect(fakeSock.newsletterCreate).toHaveBeenCalledWith('Product updates', 'Release notes');
+    expect(channel).toMatchObject({ id: CHANNEL, name: 'Product updates', inviteCode: 'ABC123' });
+  });
+
+  it('deletes a channel by id', async () => {
+    const adapter = await readyAdapter();
+
+    await expect(adapter.deleteChannel(CHANNEL)).resolves.toBeUndefined();
+
+    expect(fakeSock.newsletterDelete).toHaveBeenCalledWith(CHANNEL);
+  });
+
+  // Two separate library calls, so the boolean must actually pick between them — a wrong branch
+  // silently does the opposite of what was asked.
+  it('routes mute and unmute to their own library calls', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.muteChannel(CHANNEL, true);
+    expect(fakeSock.newsletterMute).toHaveBeenCalledWith(CHANNEL);
+    expect(fakeSock.newsletterUnmute).not.toHaveBeenCalled();
+
+    await adapter.muteChannel(CHANNEL, false);
+    expect(fakeSock.newsletterUnmute).toHaveBeenCalledWith(CHANNEL);
   });
 });

@@ -5703,3 +5703,100 @@ describe('WhatsAppWebJsAdapter labels', () => {
     expect(String(body)).toMatch(/EngineNotSupportedError/);
   });
 });
+
+// whatsapp-web.js signals channel-admin failures by RETURNING them, not throwing: createChannel
+// resolves an error STRING and deleteChannel resolves false. Both look like success to an unguarded
+// caller, which is the whole reason these tests exist.
+describe('WhatsAppWebJsAdapter channel administration', () => {
+  const CHANNEL = '120363401234567890@newsletter';
+
+  const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = client;
+    return adapter;
+  };
+
+  it('maps a created channel to the neutral shape, with the invite CODE rather than the link', async () => {
+    const createChannel = jest.fn().mockResolvedValue({
+      title: 'Product updates',
+      nid: { _serialized: CHANNEL },
+      inviteLink: 'https://whatsapp.com/channel/ABC123',
+    });
+
+    const channel = await readyAdapter({ createChannel }).createChannel('Product updates', 'Release notes');
+
+    expect(createChannel).toHaveBeenCalledWith('Product updates', { description: 'Release notes' });
+    // inviteCode, not inviteLink: it is what subscribeToChannel takes.
+    expect(channel).toEqual({
+      id: CHANNEL,
+      name: 'Product updates',
+      description: 'Release notes',
+      inviteCode: 'ABC123',
+    });
+  });
+
+  // The library returns 'CreateChannelError: …' as a plain string. Unguarded, that string is truthy
+  // and would be mapped into a Channel of undefineds and reported as a successful creation.
+  it('turns the returned error string into a refusal instead of a phantom channel', async () => {
+    const createChannel = jest.fn().mockResolvedValue('CreateChannelError: A channel creation is not enabled');
+
+    await expect(readyAdapter({ createChannel }).createChannel('Nope')).rejects.toBeInstanceOf(EngineRefusedError);
+    await expect(readyAdapter({ createChannel }).createChannel('Nope')).rejects.toThrow(/not enabled/);
+  });
+
+  it('refuses a result with no channel id rather than returning one', async () => {
+    const createChannel = jest.fn().mockResolvedValue({ title: 'x' });
+
+    await expect(readyAdapter({ createChannel }).createChannel('x')).rejects.toBeInstanceOf(EngineRefusedError);
+  });
+
+  it('omits the description when the caller gave none', async () => {
+    const createChannel = jest.fn().mockResolvedValue({ nid: { _serialized: CHANNEL }, title: 'x' });
+
+    const channel = await readyAdapter({ createChannel }).createChannel('x');
+
+    expect(createChannel).toHaveBeenCalledWith('x', {});
+    expect(channel).not.toHaveProperty('description');
+  });
+
+  it('surfaces a refused delete rather than reporting success', async () => {
+    const deleteChannel = jest.fn().mockResolvedValue(false);
+
+    await expect(readyAdapter({ deleteChannel }).deleteChannel(CHANNEL)).rejects.toBeInstanceOf(EngineRefusedError);
+  });
+
+  it('resolves a successful delete', async () => {
+    const deleteChannel = jest.fn().mockResolvedValue(true);
+
+    await expect(readyAdapter({ deleteChannel }).deleteChannel(CHANNEL)).resolves.toBeUndefined();
+  });
+
+  // Mute lives on the Channel structure, reached through getChatById — the client itself has no
+  // channel mute.
+  it.each([
+    [true, 'mute'],
+    [false, 'unmute'],
+  ])('routes mute=%s to Channel.%s', async (mute, method) => {
+    const act = jest.fn().mockResolvedValue(true);
+    const getChatById = jest.fn().mockResolvedValue({ [method]: act });
+
+    await expect(readyAdapter({ getChatById }).muteChannel(CHANNEL, mute)).resolves.toBeUndefined();
+
+    expect(getChatById).toHaveBeenCalledWith(CHANNEL);
+    expect(act).toHaveBeenCalled();
+  });
+
+  it('surfaces a refused mute rather than reporting success', async () => {
+    const getChatById = jest.fn().mockResolvedValue({ mute: jest.fn().mockResolvedValue(false) });
+
+    await expect(readyAdapter({ getChatById }).muteChannel(CHANNEL, true)).rejects.toBeInstanceOf(EngineRefusedError);
+  });
+
+  // A non-channel chat has no mute() at all; that is a wrong-id error, not a refusal.
+  it('reports an unknown or non-channel id as not-found', async () => {
+    const getChatById = jest.fn().mockResolvedValue(null);
+
+    await expect(readyAdapter({ getChatById }).muteChannel(CHANNEL, true)).rejects.toBeInstanceOf(ChannelNotFoundError);
+  });
+});

@@ -113,6 +113,18 @@ export interface UpsertLabelRequest {
   color?: number;
 }
 
+/** Body for creating a channel. */
+export interface CreateChannelRequest {
+  name: string;
+  description?: string;
+}
+
+/** Body for muting or unmuting a channel. */
+export interface MuteChannelRequest {
+  /** True mutes, false unmutes. The subscription is unaffected either way. */
+  mute: boolean;
+}
+
 export interface CreateSessionRequest {
   /** Alphanumeric + hyphens, 3–50 chars. */
   name: string;

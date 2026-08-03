@@ -107,7 +107,14 @@ export interface MessageWithReactions extends Omit<Message, 'hasReaction' | 'get
  */
 export interface BusinessClient extends Omit<
   Client,
-  'subscribeToChannel' | 'unsubscribeFromChannel' | 'getLabels' | 'getLabelById' | 'getChannels' | 'getChatsByLabelId'
+  | 'subscribeToChannel'
+  | 'unsubscribeFromChannel'
+  | 'getLabels'
+  | 'getLabelById'
+  | 'getChannels'
+  | 'getChatsByLabelId'
+  | 'createChannel'
+  | 'deleteChannel'
 > {
   getLabels(): Promise<Array<{ id: string; name: string; hexColor: string }>>;
   getLabelById(id: string): Promise<{ id: string; name: string; hexColor: string } | null>;
@@ -120,6 +127,16 @@ export interface BusinessClient extends Omit<
   getChannels(): Promise<WwjsChannelData[]>;
   /** Takes a channel ID (`…@newsletter`), NOT an invite code; resolves true only on success. */
   subscribeToChannel(channelId: string): Promise<boolean>;
+  /**
+   * Resolves a RESULT OBJECT on success and an error STRING on failure — it does not throw
+   * (Client.js:2474-2510), so callers must narrow before using it.
+   */
+  createChannel(
+    title: string,
+    options?: { description?: string },
+  ): Promise<{ title?: string; nid: { _serialized: string }; inviteLink?: string } | string>;
+  /** False when the channel was not found or the server refused. */
+  deleteChannel(channelId: string): Promise<boolean>;
   /** Resolves true only when the unsubscription completed. */
   unsubscribeFromChannel(id: string, options?: Record<string, unknown>): Promise<boolean>;
 }

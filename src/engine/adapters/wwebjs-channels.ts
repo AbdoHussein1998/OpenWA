@@ -35,6 +35,63 @@ export class WwebjsChannels {
     }));
   }
 
+  /**
+   * Create a channel.
+   *
+   * whatsapp-web.js signals failure by RETURNING A STRING ('CreateChannelError: …') rather than
+   * throwing — both when channel creation is disabled for the account and when the server refuses
+   * (Client.js:2474-2510). Left unchecked that string would be treated as a successful result and
+   * mapped into a Channel with undefined everything, so it is turned into a refusal here.
+   */
+  async createChannel(name: string, description?: string): Promise<Channel> {
+    this.host.ensureReady();
+    const result = await (this.client() as unknown as BusinessClient).createChannel(
+      name,
+      description === undefined ? {} : { description },
+    );
+    if (typeof result === 'string' || !result?.nid) {
+      throw new EngineRefusedError(typeof result === 'string' ? result : `Failed to create the channel '${name}'`);
+    }
+    return {
+      id: String(result.nid._serialized),
+      name: String(result.title ?? name),
+      ...(description === undefined ? {} : { description }),
+      // The library hands back a full invite LINK; the neutral shape carries the code, which is what
+      // subscribeToChannel takes.
+      ...(result.inviteLink ? { inviteCode: result.inviteLink.split('/').pop() } : {}),
+    };
+  }
+
+  /** Delete a channel. `false` means the channel was not found or the server refused. */
+  async deleteChannel(channelId: string): Promise<void> {
+    this.host.ensureReady();
+    const ok = await (this.client() as unknown as BusinessClient).deleteChannel(channelId);
+    if (!ok) {
+      throw new EngineRefusedError(`Failed to delete channel ${channelId}`);
+    }
+  }
+
+  /**
+   * Mute or unmute a channel. Reached through the Chat model rather than the client: whatsapp-web.js
+   * puts mute on the Channel structure, and `getChatById` yields one for a `@newsletter` id
+   * (ChatFactory.create → isChannel). Both return false rather than throwing when refused.
+   */
+  async muteChannel(channelId: string, mute: boolean): Promise<void> {
+    this.host.ensureReady();
+    const chat = (await this.client().getChatById(channelId)) as unknown as {
+      mute?: () => Promise<boolean>;
+      unmute?: () => Promise<boolean>;
+    } | null;
+    const act = mute ? chat?.mute : chat?.unmute;
+    if (!act) {
+      throw new ChannelNotFoundError(channelId);
+    }
+    const ok = await act.call(chat);
+    if (!ok) {
+      throw new EngineRefusedError(`Failed to ${mute ? 'mute' : 'unmute'} channel ${channelId}`);
+    }
+  }
+
   async getChannelById(channelId: string): Promise<Channel | null> {
     this.host.ensureReady();
     // wwebjs 1.34.x exposes no client.getChannelById; resolve from the subscribed-channel list (#625).
