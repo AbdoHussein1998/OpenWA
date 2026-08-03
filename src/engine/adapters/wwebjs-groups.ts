@@ -3,6 +3,7 @@ import {
   Group,
   GroupInfo,
   GroupMemberAddMode,
+  MediaInput,
   GroupParticipant,
   ParticipantOperationResult,
 } from '../interfaces/whatsapp-engine.interface';
@@ -12,6 +13,7 @@ import { EngineTransportError } from '../../common/errors/engine-transport.error
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { GroupNotFoundError } from '../../common/errors/group-not-found.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
+import { toMessageMedia } from './wwebjs-messaging';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -374,6 +376,23 @@ export class WwebjsGroups {
       throw new EngineRefusedError(
         `Failed to update the messages-admins-only setting for group ${groupId} — admin rights required`,
       );
+    }
+  }
+
+  async setGroupPicture(groupId: string, media: MediaInput): Promise<void> {
+    const groupChat = await this.requireGroupChat(groupId);
+    // GroupChat.setPicture, NOT Client.setProfilePicture — the latter targets the own account.
+    const ok = await groupChat.setPicture(await toMessageMedia(media));
+    if (!ok) {
+      throw new EngineRefusedError(`Failed to set the picture for group ${groupId} — admin rights required`);
+    }
+  }
+
+  async deleteGroupPicture(groupId: string): Promise<void> {
+    const groupChat = await this.requireGroupChat(groupId);
+    const ok = await groupChat.deletePicture();
+    if (!ok) {
+      throw new EngineRefusedError(`Failed to delete the picture for group ${groupId} — admin rights required`);
     }
   }
 

@@ -10,7 +10,9 @@ import com.rmyndharis.openwa.model.GroupInfo;
 import com.rmyndharis.openwa.model.GroupSettings;
 import com.rmyndharis.openwa.model.GroupSubjectRequest;
 import com.rmyndharis.openwa.model.GroupSummary;
+import com.rmyndharis.openwa.model.GroupPictureResponse;
 import com.rmyndharis.openwa.model.InviteCodeResponse;
+import com.rmyndharis.openwa.model.SetGroupPictureRequest;
 import com.rmyndharis.openwa.model.JoinGroupRequest;
 import com.rmyndharis.openwa.model.JoinGroupResponse;
 import com.rmyndharis.openwa.model.ListGroupsQuery;
@@ -151,6 +153,36 @@ public final class GroupsResource {
         return client.request(
             HttpMethod.POST,
             "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId) + "/leave",
+            null,
+            null,
+            SuccessResult.class);
+    }
+
+    /** Get the group's picture URL (null when it has none). */
+    public GroupPictureResponse getPicture(String sessionId, String groupId) {
+        return client.request(
+            HttpMethod.GET,
+            "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId) + "/picture",
+            null,
+            null,
+            GroupPictureResponse.class);
+    }
+
+    /** Set the group's picture. Requires admin rights on the group. */
+    public SuccessResult setPicture(String sessionId, String groupId, SetGroupPictureRequest body) {
+        return client.request(
+            HttpMethod.PUT,
+            "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId) + "/picture",
+            null,
+            body,
+            SuccessResult.class);
+    }
+
+    /** Remove the group's picture. Requires admin rights on the group. */
+    public SuccessResult deletePicture(String sessionId, String groupId) {
+        return client.request(
+            HttpMethod.DELETE,
+            "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId) + "/picture",
             null,
             null,
             SuccessResult.class);

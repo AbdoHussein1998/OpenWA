@@ -62,6 +62,9 @@ func TestRouting(t *testing.T) {
 		{"Contacts.Block", func(c *Client) { c.Contacts.Block(ctx, "s1", "u1") }, "POST", "/api/sessions/s1/contacts/u1/block"},
 		{"Contacts.Unblock", func(c *Client) { c.Contacts.Unblock(ctx, "s1", "u1") }, "DELETE", "/api/sessions/s1/contacts/u1/block"},
 
+		{"Groups.GetPicture", func(c *Client) { c.Groups.GetPicture(ctx, "s1", "g1") }, "GET", "/api/sessions/s1/groups/g1/picture"},
+		{"Groups.SetPicture", func(c *Client) { c.Groups.SetPicture(ctx, "s1", "g1", SetGroupPictureRequest{}) }, "PUT", "/api/sessions/s1/groups/g1/picture"},
+		{"Groups.DeletePicture", func(c *Client) { c.Groups.DeletePicture(ctx, "s1", "g1") }, "DELETE", "/api/sessions/s1/groups/g1/picture"},
 		{"Groups.List", func(c *Client) { c.Groups.List(ctx, "s1", nil) }, "GET", "/api/sessions/s1/groups"},
 		{"Groups.Get", func(c *Client) { c.Groups.Get(ctx, "s1", "g1") }, "GET", "/api/sessions/s1/groups/g1"},
 		{"Groups.Create", func(c *Client) { c.Groups.Create(ctx, "s1", CreateGroupRequest{}) }, "POST", "/api/sessions/s1/groups"},

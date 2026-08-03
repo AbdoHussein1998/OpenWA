@@ -2058,6 +2058,43 @@ Raw object (no envelope). `engine.getGroupInfo()` returns `GroupInfo | null`; th
 
 **Errors:** `400` session is not started · `401` missing/invalid `X-API-Key` · `404` `Group <groupId> not found`
 
+#### GET /api/sessions/:sessionId/groups/:groupId/picture
+
+Get the group's picture URL.
+
+**Auth:** API key
+
+**Response** `200` — `{ "url": "https://…" }`, or `{ "url": null }` when the group has no picture or
+it is hidden by privacy settings.
+
+#### PUT /api/sessions/:sessionId/groups/:groupId/picture
+
+Set the group's picture. The account must be a group admin.
+
+**Auth:** API key (OPERATOR)
+
+**Request body** — `SetGroupPictureDto` (same shape as the profile-picture body)
+
+| Field | Type | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| url | string | One of url/base64 | http(s) URL | Fetched server-side through the SSRF guard |
+| base64 | string | One of url/base64 | — | Wins over `url` when both are present |
+| mimetype | string | With `base64` | must match `image/*` | Defaults to `image/jpeg` |
+
+**Response** `200` — `{ "success": true, "message": "Group picture updated" }`
+
+**Errors:** `400` session not active, or neither `url` nor `base64` supplied · `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` group not found
+
+#### DELETE /api/sessions/:sessionId/groups/:groupId/picture
+
+Remove the group's picture. The account must be a group admin.
+
+**Auth:** API key (OPERATOR)
+
+**Response** `200` — `{ "success": true, "message": "Group picture removed" }`
+
+**Errors:** `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` group not found
+
 #### GET /api/sessions/:sessionId/groups/:groupId/invite-code
 
 Get the group invite code and full invite link.

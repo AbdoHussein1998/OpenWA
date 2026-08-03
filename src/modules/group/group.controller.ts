@@ -8,6 +8,7 @@ import {
   GroupDescriptionDto,
   JoinGroupDto,
   GroupSettingsDto,
+  SetGroupPictureDto,
 } from './dto/group.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
@@ -212,6 +213,46 @@ export class GroupController {
   }
 
   // ========== Gap Quick Wins: Invite Link ==========
+
+  @Get(':groupId/picture')
+  @ApiOperation({ summary: "Get the group's picture URL" })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'groupId', description: 'Group ID' })
+  @ApiResponse({ status: 200, description: 'Picture URL, or null when the group has none' })
+  async getPicture(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
+    return { url: await this.groupService.getGroupPicture(sessionId, groupId) };
+  }
+
+  @Put(':groupId/picture')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Set the group's picture" })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'groupId', description: 'Group ID' })
+  @ApiResponse({ status: 200, description: 'Group picture updated' })
+  @ApiResponse({ status: 400, description: 'Session not active, or neither url nor base64 supplied' })
+  @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights required' })
+  async setPicture(
+    @Param('sessionId') sessionId: string,
+    @Param('groupId') groupId: string,
+    @Body() dto: SetGroupPictureDto,
+  ) {
+    await this.groupService.setGroupPicture(sessionId, groupId, dto);
+    return { success: true, message: 'Group picture updated' };
+  }
+
+  @Delete(':groupId/picture')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Remove the group's picture" })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'groupId', description: 'Group ID' })
+  @ApiResponse({ status: 200, description: 'Group picture removed' })
+  @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights required' })
+  async deletePicture(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
+    await this.groupService.deleteGroupPicture(sessionId, groupId);
+    return { success: true, message: 'Group picture removed' };
+  }
 
   @Get(':groupId/invite-code')
   @ApiOperation({ summary: 'Get group invite code/link' })

@@ -281,6 +281,22 @@ describe('ChatsResource.clearMessages', () => {
   });
 });
 
+describe('GroupsResource picture', () => {
+  it('GETs, PUTs and DELETEs the picture sub-resource', async () => {
+    const t = new MockTransport()
+      .on('GET', /\/groups\/[^/]+\/picture$/, { body: { url: 'https://x/p.jpg' } })
+      .on('PUT', /\/groups\/[^/]+\/picture$/, { body: { success: true } })
+      .on('DELETE', /\/groups\/[^/]+\/picture$/, { body: { success: true } });
+    const c = client(t);
+    expect(await c.groups.getPicture('s', 'g@g.us')).toEqual({ url: 'https://x/p.jpg' });
+    await c.groups.setPicture('s', 'g@g.us', { url: 'https://x/new.jpg' });
+    expect(t.lastCall!.method).toBe('PUT');
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/groups/g@g.us/picture');
+    await c.groups.deletePicture('s', 'g@g.us');
+    expect(t.lastCall!.method).toBe('DELETE');
+  });
+});
+
 describe('ContactsResource addressbook', () => {
   it('PUTs the contact and DELETEs it by the same path', async () => {
     const t = new MockTransport()

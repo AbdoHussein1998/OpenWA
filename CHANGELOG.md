@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Group pictures can be read, set and removed:**
+  `GET|PUT|DELETE /api/sessions/:sessionId/groups/:groupId/picture`. Supported on both engines and
+  exposed in all five SDKs as `groups.getPicture` / `setPicture` / `deletePicture`. The `PUT` body
+  matches the profile-picture one (`url` or `base64` + `mimetype`). Setting or removing requires
+  admin rights on the group; a refusal comes back as `403` rather than a silent success.
+
+  The read needed no new engine method — the existing profile-picture lookup already accepts a group
+  JID on both engines — so only the two writes were added.
+
 - **Addressbook contacts can be saved, edited and removed:**
   `PUT /api/sessions/:sessionId/contacts/:contactId` with `{ firstName, lastName? }`, and
   `DELETE` on the same path. Supported on both engines and exposed in all five SDKs as

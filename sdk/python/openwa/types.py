@@ -643,6 +643,14 @@ class PinMessageRequest(TypedDict, total=False):
     durationSeconds: int
 
 
+class SetGroupPictureRequest(TypedDict, total=False):
+    """Group picture: provide url OR base64 (base64 wins); mimetype required with base64."""
+
+    url: str
+    base64: str
+    mimetype: str
+
+
 class UpsertContactRequest(TypedDict, total=False):
     """Save or edit an addressbook contact. lastName is optional."""
 

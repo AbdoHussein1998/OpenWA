@@ -691,6 +691,14 @@ export interface IWhatsAppEngine {
   setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
   /** Set the "only admins can edit group info" group setting (WhatsApp locked/restrict). */
   setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
+  /**
+   * Set the group's picture. Requires admin rights on both engines; the engines report a refusal
+   * differently, so the adapters normalise it. Reading the current picture needs no dedicated
+   * method — `getProfilePicture` accepts a group JID.
+   */
+  setGroupPicture(groupId: string, media: MediaInput): Promise<void>;
+  /** Remove the group's picture. */
+  deleteGroupPicture(groupId: string): Promise<void>;
   /** Set who may add participants to the group. */
   setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void>;
   /**

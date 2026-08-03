@@ -3,9 +3,11 @@ import {
   Group,
   GroupInfo,
   GroupMemberAddMode,
+  MediaInput,
   ParticipantOperationResult,
 } from '../interfaces/whatsapp-engine.interface';
 import { mapBaileysGroup, mapBaileysGroupInfo } from './baileys-group-mapper';
+import { resolveMediaBuffer } from './baileys-messaging';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { type createLogger } from '../../common/services/logger.service';
@@ -205,6 +207,18 @@ export class BaileysGroups {
   async setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
     this.host.ensureReady();
     await this.sock().groupSettingUpdate(groupId, adminsOnly ? 'locked' : 'unlocked');
+  }
+
+  async setGroupPicture(groupId: string, media: MediaInput): Promise<void> {
+    this.host.ensureReady();
+    // Same socket call as the own-account picture, addressed at the group JID.
+    const { data } = await resolveMediaBuffer(media);
+    await this.sock().updateProfilePicture(groupId, data);
+  }
+
+  async deleteGroupPicture(groupId: string): Promise<void> {
+    this.host.ensureReady();
+    await this.sock().removeProfilePicture(groupId);
   }
 
   async setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void> {

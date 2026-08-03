@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rmyndharis.openwa.ClientConfig;
 import com.rmyndharis.openwa.OpenWAClient;
 import com.rmyndharis.openwa.http.HttpMethod;
+import com.rmyndharis.openwa.model.SetGroupPictureRequest;
 import com.rmyndharis.openwa.model.CreateGroupRequest;
 import com.rmyndharis.openwa.model.GroupSettings;
 import com.rmyndharis.openwa.model.ListGroupsQuery;
@@ -176,5 +177,20 @@ class GroupsResourceTest {
         client.groups.revokeInviteCode("s", "g@g.us");
         assertEquals("http://h/api/sessions/s/groups/g@g.us/invite-code/revoke", tx.lastRequest().url());
         assertEquals(HttpMethod.POST, tx.lastRequest().method());
+    }
+
+    @Test
+    void pictureGetSetDelete() {
+        tx.respond(200, "{\"url\":\"https://x/p.jpg\"}");
+        client.groups.getPicture("s", "120363@g.us");
+        assertEquals("http://h/api/sessions/s/groups/120363@g.us/picture", tx.lastRequest().url());
+
+        tx.respond(200, "{\"success\":true}");
+        client.groups.setPicture("s", "120363@g.us", SetGroupPictureRequest.builder().url("https://x/n.jpg").build());
+        assertEquals(HttpMethod.PUT, tx.lastRequest().method());
+
+        tx.respond(200, "{\"success\":true}");
+        client.groups.deletePicture("s", "120363@g.us");
+        assertEquals(HttpMethod.DELETE, tx.lastRequest().method());
     }
 }

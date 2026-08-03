@@ -744,6 +744,41 @@ describe('WhatsAppWebJsAdapter channel-JID guard (#554 — wwebjs Channel lacks 
     });
   });
 
+  describe('group picture', () => {
+    const groupChat = (over: Record<string, unknown> = {}) => ({
+      getChatById: jest.fn().mockResolvedValue({ isGroup: true, ...over }),
+    });
+
+    it('uses GroupChat.setPicture, not the own-account Client.setProfilePicture', async () => {
+      const setPicture = jest.fn().mockResolvedValue(true);
+      const setProfilePicture = jest.fn();
+      await readyAdapter({ ...groupChat({ setPicture }), setProfilePicture }).setGroupPicture('g@g.us', {
+        mimetype: 'image/png',
+        data: 'QUJD',
+      });
+      expect(setPicture).toHaveBeenCalled();
+      expect(setProfilePicture).not.toHaveBeenCalled();
+    });
+
+    it('treats a false setPicture as a refusal (admin rights required)', async () => {
+      const setPicture = jest.fn().mockResolvedValue(false);
+      await expect(
+        readyAdapter(groupChat({ setPicture })).setGroupPicture('g@g.us', { mimetype: 'image/png', data: 'QUJD' }),
+      ).rejects.toBeInstanceOf(EngineRefusedError);
+    });
+
+    it('deletes via GroupChat.deletePicture and maps false to a refusal', async () => {
+      const deletePicture = jest.fn().mockResolvedValue(true);
+      await readyAdapter(groupChat({ deletePicture })).deleteGroupPicture('g@g.us');
+      expect(deletePicture).toHaveBeenCalled();
+
+      const refused = jest.fn().mockResolvedValue(false);
+      await expect(
+        readyAdapter(groupChat({ deletePicture: refused })).deleteGroupPicture('g@g.us'),
+      ).rejects.toBeInstanceOf(EngineRefusedError);
+    });
+  });
+
   describe('addressbook contacts', () => {
     it('passes a bare PHONE NUMBER, not the JID — wwjs addresses the entry by number', async () => {
       const saveOrEditAddressbookContact = jest.fn().mockResolvedValue(undefined);

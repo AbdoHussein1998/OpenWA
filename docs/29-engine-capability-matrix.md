@@ -168,8 +168,8 @@ These are hand-maintained and had drifted from the source before this pass; they
 from `engine-capability-matrix.ts` rather than adjusted by hand. Re-derive them the same way when
 adding a method, instead of incrementing the previous figure.
 
-- **88** interface methods, **176** adapter-cells (88 × 2 engines).
-- **159** supported cells; **17** not-available cells across **16** methods.
+- **90** interface methods, **180** adapter-cells (90 × 2 engines).
+- **163** supported cells; **17** not-available cells across **16** methods.
 - Of the 17 not-available cells: **2 adapter-gaps** (fixable) + **15 library-limitations** + **0 uncertain**.
 - **0 phantom-support rows** — every `not-available` row throws at the adapter boundary.
 

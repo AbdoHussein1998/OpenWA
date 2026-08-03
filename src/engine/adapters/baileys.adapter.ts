@@ -421,6 +421,14 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.groups.setGroupMemberAddMode(groupId, mode);
   }
 
+  async setGroupPicture(groupId: string, media: MediaInput): Promise<void> {
+    return this.groups.setGroupPicture(groupId, media);
+  }
+
+  async deleteGroupPicture(groupId: string): Promise<void> {
+    return this.groups.deleteGroupPicture(groupId);
+  }
+
   async setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
     return this.groups.setGroupEphemeral(groupId, durationSec);
   }

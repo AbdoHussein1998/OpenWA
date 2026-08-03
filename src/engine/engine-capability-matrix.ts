@@ -84,6 +84,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'wwjs Client.deleteAddressbookContact(phoneNumber) → void (index.d.ts:320; the parameter is misspelled `honeNumber` upstream, positional so harmless); baileys removeContact(jid) (Socket/chats.d.ts:67). wwjs addresses the entry by PHONE, baileys by JID — the adapter converts',
   },
+  deleteGroupPicture: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'wwjs GroupChat.deletePicture() → boolean (index.d.ts:2249; false → adapter throws EngineRefusedError); baileys removeProfilePicture(groupJid) (Socket/groups.d.ts:83) — the same call used for the own account, addressed at the group JID',
+  },
   deleteMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   deleteStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   demoteParticipants: {
@@ -287,6 +293,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     baileys: { status: 'supported' },
     evidence:
       "wwjs GroupChat.setMessagesAdminsOnly(adminsOnly?) (index.d.ts:2210; sets groupMetadata.announce, GroupChat.js:513); baileys groupSettingUpdate(jid, 'announcement'|'not_announcement') (Socket/groups.d.ts:41)",
+  },
+  setGroupPicture: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'wwjs GroupChat.setPicture(MessageMedia) → boolean (index.d.ts:2247) — the GroupChat method, not Client.setProfilePicture which targets the own account; baileys updateProfilePicture(groupJid, WAMediaUpload) (Socket/groups.d.ts:79)',
   },
   setGroupSubject: {
     wwjs: { status: 'supported' },

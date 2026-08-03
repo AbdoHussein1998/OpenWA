@@ -561,6 +561,18 @@ class TestChatsAndHealth:
         assert backend.last_call.method == "DELETE"
         assert backend.last_call.url == "http://localhost:2785/api/sessions/s/chats/a@c.us/messages"
 
+    def test_groups_picture(self):
+        backend = MockBackend().on("GET", "/picture", body={"url": "https://x/p.jpg"})
+        backend.on("PUT", "/picture", body={"success": True})
+        backend.on("DELETE", "/picture", body={"success": True})
+        client = make_client(backend)
+        assert client.groups.get_picture("s", "g@g.us") == {"url": "https://x/p.jpg"}
+        client.groups.set_picture("s", "g@g.us", {"url": "https://x/new.jpg"})
+        assert backend.last_call.method == "PUT"
+        client.groups.delete_picture("s", "g@g.us")
+        assert backend.last_call.method == "DELETE"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/groups/g@g.us/picture"
+
     def test_contacts_addressbook(self):
         backend = MockBackend().on("PUT", "/contacts/", body={"success": True})
         backend.on("DELETE", "/contacts/", body={"success": True})

@@ -188,6 +188,14 @@ export interface PinMessageRequest {
   durationSeconds?: PinDurationSeconds;
 }
 
+export interface SetGroupPictureRequest {
+  /** Provide exactly one of `url` or `base64` (base64 wins when both are present). */
+  url?: string;
+  base64?: string;
+  /** Required when using `base64`. Must be an image type. */
+  mimetype?: string;
+}
+
 export interface UpsertContactRequest {
   /** The contact's first name. */
   firstName: string;
