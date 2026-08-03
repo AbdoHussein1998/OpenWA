@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The dashboard shows account restrictions on the session card**, in all 12 locales. The row is
+  deliberately not gated on status, unlike the error row beside it: a reachout timelock applies to a
+  session that is perfectly `ready`, and hiding it behind a failure status would make it invisible in
+  exactly the case an operator needs it. The visible label is the translated kind; the engine's raw
+  cause token and the expiry ride in the tooltip, since the token is searchable but not readable.
+
 - **Enforcement and account standing are now in the audit log**, not only in the process log. Four new
   `AuditAction` members: `session_restricted` / `session_restriction_lifted` when WhatsApp restricts
   an account or releases it, and `send_pacing_blocked` / `send_breaker_tripped` when pacing refuses a

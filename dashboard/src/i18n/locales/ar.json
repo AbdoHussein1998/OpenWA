@@ -326,7 +326,8 @@
       "phone": "الهاتف",
       "sessionId": "معرّف الجلسة",
       "lastActive": "آخر نشاط",
-      "error": "خطأ"
+      "error": "خطأ",
+      "restriction": "تقييد"
     },
     "forceKill": {
       "title": "إنهاء جلسة عالقة",
@@ -371,6 +372,12 @@
     "start": {
       "teardownPendingTitle": "بدء الجلسة",
       "teardownPending": "لا يزال تفكيك بيانات الاعتماد لهذه الجلسة قيد التسوية. انتظر لحظة وحاول مرة أخرى."
+    },
+    "restriction": {
+      "reachout_timelock": "المحادثات الجديدة محظورة",
+      "tos_block": "محظور من واتساب",
+      "proxy_block": "الاتصال محظور",
+      "until": "حتى {{date}}"
     }
   },
   "webhooks": {

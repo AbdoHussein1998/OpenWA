@@ -315,7 +315,8 @@
       "phone": "Telefone",
       "sessionId": "ID da sessão",
       "lastActive": "Última atividade",
-      "error": "Erro"
+      "error": "Erro",
+      "restriction": "Restrição"
     },
     "forceKill": {
       "title": "Forçar encerramento da sessão travada",
@@ -360,6 +361,12 @@
     "start": {
       "teardownPendingTitle": "Iniciando sessão",
       "teardownPending": "A remoção de credenciais desta sessão ainda está em andamento. Aguarde um momento e tente novamente."
+    },
+    "restriction": {
+      "reachout_timelock": "Novas conversas bloqueadas",
+      "tos_block": "Bloqueado pelo WhatsApp",
+      "proxy_block": "Conexão bloqueada",
+      "until": "até {{date}}"
     }
   },
   "webhooks": {
