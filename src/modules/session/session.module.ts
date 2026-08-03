@@ -11,11 +11,12 @@ import { SessionErrorStore } from './session-error-store.service';
 import { SessionController } from './session.controller';
 import { WebhookModule } from '../webhook/webhook.module';
 import { StatusStoreModule } from '../status-store/status-store.module';
+import { ChatMediaModule } from '../chat-media/chat-media.module';
 
 @Module({
-  // WebhookModule/StatusStoreModule do not import SessionModule back, so the dependency is
-  // one-directional — no forwardRef() needed.
-  imports: [TypeOrmModule.forFeature([Session, Message], 'data'), WebhookModule, StatusStoreModule],
+  // WebhookModule/StatusStoreModule/ChatMediaModule do not import SessionModule back, so the
+  // dependency is one-directional — no forwardRef() needed.
+  imports: [TypeOrmModule.forFeature([Session, Message], 'data'), WebhookModule, StatusStoreModule, ChatMediaModule],
   controllers: [SessionController],
   providers: [
     SessionService,

@@ -91,6 +91,7 @@ func TestRouting(t *testing.T) {
 
 		{"Status.List", func(c *Client) { c.Status.List(ctx, "s1") }, "GET", "/api/sessions/s1/status"},
 		{"Status.FromContact", func(c *Client) { c.Status.FromContact(ctx, "s1", "u1") }, "GET", "/api/sessions/s1/status/u1"},
+		{"Messages.Media", func(c *Client) { c.Messages.Media(ctx, "s1", "c1", "m1") }, "GET", "/api/sessions/s1/messages/c1/m1/media"},
 		{"Status.Media", func(c *Client) { c.Status.Media(ctx, "s1", "st1") }, "GET", "/api/sessions/s1/status/st1/media"},
 		{"Status.SendText", func(c *Client) { c.Status.SendText(ctx, "s1", SendTextStatusRequest{}) }, "POST", "/api/sessions/s1/status/send-text"},
 		{"Status.SendImage", func(c *Client) { c.Status.SendImage(ctx, "s1", SendImageStatusRequest{}) }, "POST", "/api/sessions/s1/status/send-image"},

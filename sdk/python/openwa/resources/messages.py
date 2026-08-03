@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from .._http import quote_segment
 from ..types import (
+    MessageMedia,
     BatchStatusResponse,
     BulkMessageResponse,
     ChatHistoryMessage,
@@ -106,6 +107,14 @@ class MessagesResource:
         return self._http.request(
             "GET", f"/api/sessions/{quote_segment(session_id)}/messages/{quote_segment(chat_id)}/{quote_segment(message_id)}/reactions"
         )
+
+    def media(self, session_id: str, chat_id: str, message_id: str) -> MessageMedia:
+        """Fetch a message's archived media bytes (404 when nothing is archived for it)."""
+        data, content_type = self._http.request_bytes(
+            "GET",
+            f"/api/sessions/{quote_segment(session_id)}/messages/{quote_segment(chat_id)}/{quote_segment(message_id)}/media",
+        )
+        return {"data": data, "contentType": content_type}
 
     def send_bulk(self, session_id: str, body: SendBulkRequest) -> BulkMessageResponse:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/messages/send-bulk", body=body)

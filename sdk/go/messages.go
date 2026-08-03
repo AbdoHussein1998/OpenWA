@@ -137,6 +137,18 @@ func (s *MessagesService) Reactions(ctx context.Context, sessionID, chatID, mess
 	return out, err
 }
 
+// Media fetches a message's archived media bytes. The server answers 404 when
+// nothing is archived for the message (archiving off when it arrived, no media,
+// over the archive cap, or cleared by retention).
+func (s *MessagesService) Media(ctx context.Context, sessionID, chatID, messageID string) (*MessageMedia, error) {
+	path := s.base(sessionID) + "/" + pathEscape(chatID) + "/" + pathEscape(messageID) + "/media"
+	data, contentType, err := s.client.doRaw(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &MessageMedia{Data: data, ContentType: contentType}, nil
+}
+
 // SendBulk queues a batch of messages.
 func (s *MessagesService) SendBulk(ctx context.Context, sessionID string, body SendBulkRequest) (*BulkMessageResponse, error) {
 	var out BulkMessageResponse

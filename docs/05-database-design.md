@@ -218,6 +218,8 @@ erDiagram
         json metadata
         varchar status
         timestamp created_at
+        varchar media_path
+        varchar media_mimetype
     }
 
     API_KEY {
@@ -410,7 +412,9 @@ CREATE TABLE messages (
     timestamp BIGINT,                     -- WhatsApp epoch seconds; read back as a JS number
     metadata JSONB,
     status VARCHAR NOT NULL DEFAULT 'sent',          -- pending | sent | delivered | read | failed
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    media_path VARCHAR,                   -- nullable; storage key of the archived media copy
+    media_mimetype VARCHAR                -- nullable; mimetype of that archived copy
 );
 
 -- Indexes (declared on the entity)

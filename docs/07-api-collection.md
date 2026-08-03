@@ -255,6 +255,16 @@ curl "$BASE/api/sessions/$SESSION_ID/messages/628123456789@c.us/true_62812345678
   -H "X-API-Key: $API_KEY"
 ```
 
+#### GET /api/sessions/:sessionId/messages/:chatId/:messageId/media
+
+Download a message's archived media. Requires `CHAT_MEDIA_ARCHIVE_ENABLED=true` to have been set
+when the message arrived; `404` otherwise.
+
+```bash
+curl "$BASE/api/sessions/$SESSION_ID/messages/628123456789@c.us/true_628123456789@c.us_3EB0ABCD/media" \
+  -H "X-API-Key: $API_KEY" -o media.bin
+```
+
 #### GET /api/sessions/:sessionId/messages/batch/:batchId
 
 Get the status and progress of a bulk batch.

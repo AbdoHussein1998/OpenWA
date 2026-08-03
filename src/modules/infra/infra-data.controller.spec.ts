@@ -589,6 +589,40 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
     expect(restored.author).toBe('628111@c.us');
   });
 
+  // Same drift, next column along. These two matter more than most: the archived media FILES ride
+  // along in the storage export, so restoring rows without their pointers leaves every file
+  // referenced by nothing — and the chat-media orphan sweep deletes exactly that after its grace
+  // window. The loss would surface hours after a restore that reported success.
+  it('restores the chat-media archive pointers on a backup→restore', async () => {
+    await seedSession('s1');
+    const msgRepo = ds.getRepository(Message);
+    await msgRepo.save(
+      msgRepo.create({
+        sessionId: 's1',
+        waMessageId: 'WA-M1',
+        chatId: '628111@c.us',
+        from: '628111@c.us',
+        to: 'me@c.us',
+        body: '',
+        type: 'image',
+        direction: MessageDirection.INCOMING,
+        status: MessageStatus.DELIVERED,
+        timestamp: 1700000000,
+        mediaPath: 'chat-media/s1/1f0c8f4e-0000-4000-8000-000000000000.png',
+        mediaMimetype: 'image/png',
+      }),
+    );
+
+    const dump = await controller.exportData();
+    await msgRepo.clear();
+    const res = await controller.importData({ tables: dump.tables });
+
+    expect(res.warnings).toEqual([]);
+    const restored = await msgRepo.findOneByOrFail({ waMessageId: 'WA-M1' });
+    expect(restored.mediaPath).toBe('chat-media/s1/1f0c8f4e-0000-4000-8000-000000000000.png');
+    expect(restored.mediaMimetype).toBe('image/png');
+  });
+
   // DELETE FROM sessions cascades to templates + baileys_stored_messages (both FK ON DELETE CASCADE),
   // so an import that never re-inserts them permanently wipes both on the documented backup flow.
   it('restores templates and baileys_stored_messages instead of cascade-wiping them', async () => {

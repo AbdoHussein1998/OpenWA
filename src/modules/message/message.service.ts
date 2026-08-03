@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Optional } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -20,6 +20,8 @@ import { parseWaId } from '../../engine/identity/wa-id';
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
+import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
+import { StorageService } from '../../common/storage/storage.service';
 
 export interface GetMessagesOptions {
   chatId?: string;
@@ -31,6 +33,19 @@ export interface GetMessagesOptions {
 
 /** Default cap on a rendered template's final text; overridable via TEMPLATE_RENDER_MAX_CHARS. */
 export const DEFAULT_TEMPLATE_RENDER_MAX_CHARS = 64 * 1024;
+
+/**
+ * Mimetypes an archived chat-media file may be served as. Everything else — documents, and notably
+ * `image/svg+xml`, which is scriptable despite the `image/` prefix — is served as inert
+ * octet-stream so the media endpoint cannot host active content on the API origin.
+ */
+const INERT_MEDIA_MIMETYPE =
+  /^(image\/(jpeg|png|gif|webp|bmp)|video\/(mp4|webm|quicktime|3gpp)|audio\/(mpeg|mp4|ogg|aac|wav|webm))(;|$)/;
+
+/** The declared mimetype when it is safe to echo back, else inert octet-stream. */
+function inertMimetype(mimetype: string): string {
+  return INERT_MEDIA_MIMETYPE.test(mimetype) ? mimetype : 'application/octet-stream';
+}
 
 /**
  * Outbound sends are executed directly against the WhatsApp engine, not via a BullMQ queue.
@@ -62,6 +77,12 @@ export class MessageService {
     private readonly lidMappingStore: LidMappingStoreService,
     @Optional()
     private readonly configService?: ConfigService,
+    // Optional so the existing standalone constructions keep working; absent means the archive
+    // read endpoint reports "nothing archived", which is also what a disabled archive reports.
+    @Optional()
+    private readonly chatMediaArchive?: ChatMediaArchiveService,
+    @Optional()
+    private readonly storageService?: StorageService,
   ) {}
 
   async sendText(sessionId: string, dto: SendTextMessageDto): Promise<MessageResponseDto> {
@@ -693,6 +714,36 @@ export class MessageService {
   async getMessageReactions(sessionId: string, chatId: string, messageId: string) {
     const engine = this.getEngine(sessionId);
     return engine.getMessageReactions(chatId, messageId);
+  }
+
+  /**
+   * Read a message's archived media back out of the file store.
+   *
+   * Unlike status media (only ever an image or video), chat media includes documents a sender chose
+   * the type of — so the declared mimetype is echoed back only when it is inert, and the caller
+   * serves the result as an attachment regardless. Both matter: an allow-list alone would still let
+   * `image/svg+xml` through as active content on the API origin.
+   */
+  async getChatMedia(
+    sessionId: string,
+    chatId: string,
+    messageId: string,
+  ): Promise<{ buffer: Buffer; mimetype: string }> {
+    const media = await this.chatMediaArchive?.getMedia(sessionId, chatId, messageId);
+    if (!media || !this.storageService) {
+      throw new NotFoundException('No archived media for this message');
+    }
+    try {
+      const buffer = await this.storageService.getFile(media.path);
+      return { buffer, mimetype: inertMimetype(media.mimetype) };
+    } catch (error) {
+      // The row outlived its file: the retention purge (or a concurrent delete) removed it between
+      // the DB read and this read. That's "gone", not a server fault — surface a 404.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new NotFoundException('No archived media for this message');
+      }
+      throw error;
+    }
   }
 
   /** Maximum messages a single getChatHistory call may request from the engine. */

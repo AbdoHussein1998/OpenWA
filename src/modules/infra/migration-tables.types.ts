@@ -51,6 +51,13 @@ export interface MessageRow {
   status: string;
   createdAt: string;
   /**
+   * Chat-media archive pointers (nullable; added after author — keep the import list in sync).
+   * Dropping these on import would leave the archived FILES restored but unreferenced, and the
+   * orphan sweep would then delete them after its grace window.
+   */
+  mediaPath: string | null;
+  mediaMimetype: string | null;
+  /**
    * Postgres-only STORED generated tsvector (FTS). Present in `SELECT *` rows read from a Postgres
    * source (and in backups made before it was stripped) but never a real payload column: export drops
    * it, and the import's explicit column list ignores it. Declared so both directions type-check.

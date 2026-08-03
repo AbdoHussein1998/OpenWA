@@ -105,8 +105,8 @@ export const TABLE_IMPORTERS: TableImporter[] = [
   defineTableImporter({
     key: 'messages',
     label: 'message',
-    sql: `INSERT INTO messages (id, "sessionId", "waMessageId", "chatId", "chatName", author, "from", "to", body, type, direction, "timestamp", metadata, status, "createdAt")
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+    sql: `INSERT INTO messages (id, "sessionId", "waMessageId", "chatId", "chatName", author, "from", "to", body, type, direction, "timestamp", metadata, status, "createdAt", "mediaPath", "mediaMimetype")
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     id: (msg: MessageRow) => msg.id,
     map: (msg: MessageRow) => [
       msg.id,
@@ -126,6 +126,11 @@ export const TABLE_IMPORTERS: TableImporter[] = [
       msg.metadata == null ? null : typeof msg.metadata === 'string' ? msg.metadata : JSON.stringify(msg.metadata),
       msg.status,
       msg.createdAt,
+      // Archives predating the chat-media columns restore to NULL, same as author above. Carrying
+      // them matters because the media FILES ride along in the storage export: restoring the rows
+      // without their pointers would turn every archived file into an orphan the sweep then reaps.
+      msg.mediaPath ?? null,
+      msg.mediaMimetype ?? null,
     ],
   }),
 

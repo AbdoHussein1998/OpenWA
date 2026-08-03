@@ -3,6 +3,7 @@ package com.rmyndharis.openwa.resources;
 import static com.rmyndharis.openwa.http.Http.encodeSegment;
 
 import com.rmyndharis.openwa.OpenWAClient;
+import com.rmyndharis.openwa.http.BinaryResponse;
 import com.rmyndharis.openwa.http.HttpMethod;
 import com.rmyndharis.openwa.model.BatchStatusResponse;
 import com.rmyndharis.openwa.model.BulkMessageResponse;
@@ -183,6 +184,22 @@ public final class MessagesResource {
             query,
             null,
             ChatHistoryMessage.class);
+    }
+
+    /**
+     * Fetch a message's archived media bytes (404 when nothing is archived for it).
+     */
+    public BinaryResponse media(String sessionId, String chatId, String messageId) {
+        return client.requestBytes(
+            HttpMethod.GET,
+            "/api/sessions/"
+                + encodeSegment(sessionId)
+                + "/messages/"
+                + encodeSegment(chatId)
+                + "/"
+                + encodeSegment(messageId)
+                + "/media",
+            null);
     }
 
     /** Get reactions for a specific message. */

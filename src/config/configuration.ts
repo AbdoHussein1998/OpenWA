@@ -364,6 +364,36 @@ export default () => ({
     })(),
   },
 
+  // Chat-media archiving (opt-in): a copy of each message's media in the file store, addressable
+  // after delivery. Independent of the inline base64 the message row already carries.
+  chatMedia: {
+    // Off by default: archiving doubles storage for media under the cap, since the inline copy stays.
+    archiveEnabled: process.env.CHAT_MEDIA_ARCHIVE_ENABLED === 'true',
+    // Per-file cap on archived chat media (default 25 MiB). Media above it is simply not archived —
+    // the message row and its inline copy are unaffected.
+    maxBytes: (() => {
+      const n = parseInt(process.env.CHAT_MEDIA_ARCHIVE_MAX_BYTES ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 25 * 1024 * 1024;
+    })(),
+    // How long an archived file is kept, in days. 0 (the default) means forever. Unlike statuses,
+    // chat messages have no WhatsApp-side expiry, so retention is purely an operator policy.
+    ttlDays: (() => {
+      const n = parseInt(process.env.CHAT_MEDIA_ARCHIVE_TTL_DAYS ?? '', 10);
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    })(),
+    // Cadence of the reconciliation sweep that reaps chat-media files no row references (default 1h).
+    orphanSweepIntervalMs: (() => {
+      const n = parseInt(process.env.CHAT_MEDIA_ORPHAN_SWEEP_INTERVAL_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60 * 60 * 1000;
+    })(),
+    // How long an unreferenced chat-media file must be observed by the sweep before deletion
+    // (default 1h), so a file mid-write is never reaped.
+    orphanGraceMs: (() => {
+      const n = parseInt(process.env.CHAT_MEDIA_ORPHAN_GRACE_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60 * 60 * 1000;
+    })(),
+  },
+
   // Message-template rendering
   template: {
     // Cap on the FINAL rendered text of a send-template request (header+body+footer joined, after
