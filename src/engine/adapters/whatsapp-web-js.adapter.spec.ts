@@ -5800,3 +5800,61 @@ describe('WhatsAppWebJsAdapter channel administration', () => {
     await expect(readyAdapter({ getChatById }).muteChannel(CHANNEL, true)).rejects.toBeInstanceOf(ChannelNotFoundError);
   });
 });
+
+// getInviteInfo is typed Promise<object> and forwards whatever WA Web returns, so there is no shape
+// to rely on. These pin that missing fields are OMITTED rather than defaulted into something a
+// caller would read as fact, and that a shapeless answer becomes a not-found.
+describe('WhatsAppWebJsAdapter group join-info', () => {
+  const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = client;
+    return adapter;
+  };
+
+  it('maps the full shape, taking the disclosed member count', async () => {
+    const getInviteInfo = jest.fn().mockResolvedValue({
+      id: { _serialized: '120363@g.us' },
+      subject: 'Team',
+      desc: 'Internal',
+      owner: { _serialized: '628111@c.us' },
+      creation: 1700000000,
+      size: 42,
+    });
+
+    await expect(readyAdapter({ getInviteInfo }).getGroupJoinInfo('ABC')).resolves.toEqual({
+      id: '120363@g.us',
+      name: 'Team',
+      description: 'Internal',
+      owner: '628111@c.us',
+      createdAt: 1700000000,
+      participantCount: 42,
+    });
+  });
+
+  // Absent fields must not become empty strings or zeroes: "created at the epoch" and "owned by
+  // nobody" are claims, and this engine never promised to report them.
+  it('omits everything the engine did not report', async () => {
+    const getInviteInfo = jest.fn().mockResolvedValue({ id: '120363@g.us', subject: 'Team' });
+
+    const info = await readyAdapter({ getInviteInfo }).getGroupJoinInfo('ABC');
+
+    expect(info).toEqual({ id: '120363@g.us', name: 'Team' });
+  });
+
+  it('falls back to a participants array when no count is disclosed', async () => {
+    const getInviteInfo = jest.fn().mockResolvedValue({ id: 'g@g.us', subject: 'T', participants: [{}, {}, {}] });
+
+    await expect(readyAdapter({ getInviteInfo }).getGroupJoinInfo('ABC')).resolves.toMatchObject({
+      participantCount: 3,
+    });
+  });
+
+  // No id means there is no group to describe — the invite was refused, which is a 404 rather than a
+  // half-populated success.
+  it.each([{}, null, { subject: 'Team' }])('reports %p as not-found', async raw => {
+    const getInviteInfo = jest.fn().mockResolvedValue(raw);
+
+    await expect(readyAdapter({ getInviteInfo }).getGroupJoinInfo('ABC')).rejects.toBeInstanceOf(GroupNotFoundError);
+  });
+});

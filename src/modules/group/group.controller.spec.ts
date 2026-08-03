@@ -81,3 +81,23 @@ describe('GroupController join + settings', () => {
     ).resolves.toEqual({ success: true, message, results });
   });
 });
+
+// Nest matches routes in DECLARATION order, so a literal segment declared after a parameter route on
+// the same path shape is unreachable — `GET /groups/join-info` would arrive at `GET /groups/:groupId`
+// with groupId='join-info' and be looked up as a group. Reading the decorators back off the class is
+// the only way to catch a reordering, since both routes keep working in isolation either way.
+describe('GroupController route ordering', () => {
+  it('declares the literal join-info route before the :groupId parameter route', () => {
+    const proto = GroupController.prototype as object;
+    const order = Object.getOwnPropertyNames(proto).filter(name => name === 'joinInfo' || name === 'findOne');
+
+    expect(order).toEqual(['joinInfo', 'findOne']);
+  });
+
+  it('keeps join-info a literal path, not a parameter', () => {
+    const handler = Object.getOwnPropertyDescriptor(GroupController.prototype, 'joinInfo')?.value as object;
+    const path: unknown = Reflect.getMetadata('path', handler);
+
+    expect(path).toBe('join-info');
+  });
+});

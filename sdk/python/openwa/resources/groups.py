@@ -9,6 +9,7 @@ from typing import Any, TYPE_CHECKING, TypedDict
 
 from .._http import quote_segment
 from ..types import (
+    GroupJoinInfo,
     SetGroupPictureRequest,
     CreateGroupRequest,
     GroupInfo,
@@ -106,6 +107,16 @@ class GroupsResource:
     def revoke_invite_code(self, session_id: str, group_id: str) -> InviteCodeResponse:
         return self._http.request(
             "POST", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/invite-code/revoke"
+        )
+
+    def join_info(self, session_id: str, code: str) -> GroupJoinInfo:
+        """Preview a group from its invite code, WITHOUT joining.
+
+        Read-only, so it is safe to call on a code from an untrusted source. There is no participant
+        list -- the account is not a member -- only a count, and only when WhatsApp discloses one.
+        """
+        return self._http.request(
+            "GET", f"/api/sessions/{quote_segment(session_id)}/groups/join-info", query={"code": code}
         )
 
     def join_group(self, session_id: str, body: JoinGroupRequest) -> JoinGroupResponse:

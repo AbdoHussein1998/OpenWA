@@ -7,6 +7,7 @@ import com.rmyndharis.openwa.http.HttpMethod;
 import com.rmyndharis.openwa.model.CreateGroupRequest;
 import com.rmyndharis.openwa.model.GroupDescriptionRequest;
 import com.rmyndharis.openwa.model.GroupInfo;
+import com.rmyndharis.openwa.model.GroupJoinInfo;
 import com.rmyndharis.openwa.model.GroupSettings;
 import com.rmyndharis.openwa.model.GroupSubjectRequest;
 import com.rmyndharis.openwa.model.GroupSummary;
@@ -103,6 +104,22 @@ public final class GroupsResource {
             null,
             new GroupSubjectRequest(subject),
             SuccessResult.class);
+    }
+
+    /**
+     * Preview a group from its invite code, WITHOUT joining. Read-only, so it is safe to call on a
+     * code from an untrusted source.
+     *
+     * <p>There is no participant list — the account is not a member — only a count, and only when
+     * WhatsApp discloses one.
+     */
+    public GroupJoinInfo joinInfo(String sessionId, String code) {
+        return client.request(
+            HttpMethod.GET,
+            "/api/sessions/" + encodeSegment(sessionId) + "/groups/join-info",
+            java.util.Map.of("code", code),
+            null,
+            GroupJoinInfo.class);
     }
 
     /** Join a group via an invite code. Returns the joined group id. */

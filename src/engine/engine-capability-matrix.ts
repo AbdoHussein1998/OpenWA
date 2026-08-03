@@ -135,6 +135,7 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   createChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   deleteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   muteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  getGroupJoinInfo: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getChannelById: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getChannelMessages: {
     wwjs: { status: 'supported' },

@@ -2591,6 +2591,41 @@ Revoke the current invite code and generate a new one.
 
 **Errors:** `400` session is not started · `401` missing/invalid `X-API-Key` · `403` key lacks OPERATOR role
 
+#### GET /api/sessions/:sessionId/groups/join-info
+
+Preview a group from its invite code, **without joining**. Supported on both engines.
+
+**Auth:** API key  ·  **Scope:** session-scoped
+
+Read-only — nothing about the account's membership changes, which is what makes it safe to call on a
+code from an untrusted source, and what makes it the natural step before `POST /groups/join`.
+
+**Query parameters**
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `code` | string | Yes | Group invite code — the part after the invite link |
+
+**Response** `200`
+
+```json
+{
+  "id": "120363012345678901@g.us",
+  "name": "Product team",
+  "description": "Internal coordination",
+  "owner": "628123456789@c.us",
+  "createdAt": 1700000000,
+  "participantCount": 42
+}
+```
+
+There is **no participant list** — the account is not a member — only `participantCount`, and only
+when WhatsApp discloses one. `id` and `name` are always present; every other field is **omitted**
+rather than zeroed when the engine did not report it, because `whatsapp-web.js` returns an untyped
+object with no guaranteed shape and a defaulted `createdAt: 0` would read as "created at the epoch".
+
+**Errors:** `400` no code supplied, or session not started · `401` · `404` no such invite — invalid, expired, or revoked
+
 #### POST /api/sessions/:sessionId/groups/join
 
 Join a group via an invite code (the part after `https://chat.whatsapp.com/`).

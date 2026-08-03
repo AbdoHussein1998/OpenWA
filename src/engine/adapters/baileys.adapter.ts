@@ -25,6 +25,7 @@ import {
   IncomingMessage,
   IWhatsAppEngine,
   Label,
+  GroupJoinInfo,
   LabelInput,
   LocationInput,
   MediaInput,
@@ -408,6 +409,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   async revokeGroupInviteCode(groupId: string): Promise<string> {
     return this.groups.revokeGroupInviteCode(groupId);
+  }
+
+  getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo> {
+    return this.groups.getGroupJoinInfo(inviteCode);
   }
 
   async joinGroupViaInviteCode(inviteCode: string): Promise<string> {

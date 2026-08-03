@@ -15,6 +15,18 @@ func (q *ListSessionsQuery) values() url.Values {
 	return v
 }
 
+// GroupJoinInfo is what an invite code discloses about a group before joining. Not GroupInfo: a
+// non-member has no participant list, only a count, and only when WhatsApp discloses one.
+type GroupJoinInfo struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+	Owner       *string `json:"owner,omitempty"`
+	// CreatedAt is Unix seconds.
+	CreatedAt        *int64 `json:"createdAt,omitempty"`
+	ParticipantCount *int   `json:"participantCount,omitempty"`
+}
+
 // CreateChannelRequest is the body for creating a channel.
 type CreateChannelRequest struct {
 	Name        string `json:"name"`

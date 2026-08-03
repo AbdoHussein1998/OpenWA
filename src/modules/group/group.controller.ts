@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
+import { Controller, Get, Post, Put, Delete, Param, Body, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiQuery } from '@nestjs/swagger';
 import { GroupService } from './group.service';
 import {
   CreateGroupDto,
@@ -21,6 +21,27 @@ import { ApiKeyRole } from '../auth/entities/api-key.entity';
 @Controller('sessions/:sessionId/groups')
 export class GroupController {
   constructor(private readonly groupService: GroupService) {}
+
+  // MUST stay above @Get(':groupId'): Nest matches in declaration order, and a literal segment
+  // declared after a parameter route is shadowed by it — `join-info` would arrive as a group id.
+  @Get('join-info')
+  @ApiOperation({
+    summary: 'Preview a group from its invite code, without joining',
+    description:
+      'Read-only: nothing about the account changes, which is what makes it safe to call on a code ' +
+      'from an untrusted source. Supported on both engines.\n\n' +
+      'There is no participant LIST — the account is not a member — only a count, and only when ' +
+      'WhatsApp discloses one. Fields the engine does not report are omitted rather than defaulted, ' +
+      'because whatsapp-web.js returns an untyped object with no guaranteed shape.',
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiQuery({ name: 'code', description: 'Group invite code (the part after the invite link)' })
+  @ApiResponse({ status: 200, description: 'What the invite discloses about the group' })
+  @ApiResponse({ status: 400, description: 'Session not started, or no code supplied' })
+  @ApiResponse({ status: 404, description: 'No such invite — invalid, expired or revoked' })
+  async joinInfo(@Param('sessionId') sessionId: string, @Query('code') code: string) {
+    return this.groupService.getGroupJoinInfo(sessionId, code);
+  }
 
   @Get(':groupId')
   @ApiOperation({ summary: 'Get detailed group info' })

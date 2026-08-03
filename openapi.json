@@ -3576,6 +3576,47 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/groups/join-info": {
+      "get": {
+        "description": "Read-only: nothing about the account changes, which is what makes it safe to call on a code from an untrusted source. Supported on both engines.\n\nThere is no participant LIST — the account is not a member — only a count, and only when WhatsApp discloses one. Fields the engine does not report are omitted rather than defaulted, because whatsapp-web.js returns an untyped object with no guaranteed shape.",
+        "operationId": "GroupController_joinInfo",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "required": true,
+            "in": "query",
+            "description": "Group invite code (the part after the invite link)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the invite discloses about the group"
+          },
+          "400": {
+            "description": "Session not started, or no code supplied"
+          },
+          "404": {
+            "description": "No such invite — invalid, expired or revoked"
+          }
+        },
+        "summary": "Preview a group from its invite code, without joining",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/groups/{groupId}": {
       "get": {
         "operationId": "GroupController_findOne",

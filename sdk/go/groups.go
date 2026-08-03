@@ -1,6 +1,9 @@
 package openwa
 
-import "context"
+import (
+	"context"
+	"net/url"
+)
 
 // GroupsService manages WhatsApp groups.
 // Backed by src/modules/group/group.controller.ts.
@@ -25,6 +28,17 @@ func (s *GroupsService) Get(ctx context.Context, sessionID, groupID string) (*Gr
 		return nil, err
 	}
 	return &out, nil
+}
+
+// JoinInfo previews a group from its invite code WITHOUT joining. Read-only, so it is safe to call
+// on a code from an untrusted source.
+//
+// There is no participant list — the account is not a member — only a count, and only when WhatsApp
+// discloses one. Fields the engine did not report are nil rather than zeroed.
+func (s *GroupsService) JoinInfo(ctx context.Context, sessionID, code string) (*GroupJoinInfo, error) {
+	var out GroupJoinInfo
+	err := s.client.do(ctx, "GET", s.base(sessionID)+"/join-info", url.Values{"code": {code}}, nil, &out)
+	return &out, err
 }
 
 // Create creates a group.
