@@ -7,6 +7,7 @@ import { SessionService } from './session.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { PresenceStore } from './presence-store.service';
 import { Session, SessionStatus } from './entities/session.entity';
 import { Message } from '../message/entities/message.entity';
 import { EngineFactory } from '../../engine/engine.factory';
@@ -98,6 +99,7 @@ describe('SessionService logout() name-scoped teardown fence', () => {
         SessionEngineLifecycle,
         SessionErrorStore,
         SessionRestrictionStore,
+        PresenceStore,
         { provide: getRepositoryToken(Session, 'data'), useValue: repository },
         { provide: getRepositoryToken(Message, 'data'), useValue: messageRepository },
         { provide: getDataSourceToken('data'), useValue: dataSource },

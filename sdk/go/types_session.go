@@ -15,6 +15,27 @@ func (q *ListSessionsQuery) values() url.Values {
 	return v
 }
 
+// ParticipantPresence is one participant's presence within a chat.
+type ParticipantPresence struct {
+	ID string `json:"id"`
+	// State is one of: available, unavailable, composing, recording, paused. "composing" and
+	// "recording" mean actively typing or recording; "paused" means they stopped.
+	State string `json:"state"`
+	// LastSeen is Unix SECONDS. Nil whenever the contact's privacy settings hide last-seen — the
+	// common case, not an error.
+	LastSeen *int64 `json:"lastSeen,omitempty"`
+}
+
+// ChatPresence is the last presence reported for a chat since it was subscribed.
+type ChatPresence struct {
+	ChatID       string                `json:"chatId"`
+	Participants []ParticipantPresence `json:"participants"`
+	// GroupOnlineCount is the online member count, groups only.
+	GroupOnlineCount *int `json:"groupOnlineCount,omitempty"`
+	// ObservedAt is when the gateway received the report — NOT a WhatsApp timestamp.
+	ObservedAt string `json:"observedAt"`
+}
+
 // AccountRestriction is a restriction WhatsApp has in force on a session's account.
 //
 // "reachout_timelock" leaves the session connected and existing chats working -- only starting new

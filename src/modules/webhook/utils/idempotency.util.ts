@@ -96,6 +96,13 @@ export function generateIdempotencyKey(event: string, data: Record<string, unkno
       // would dedupe exactly that.
       return `restr_${toStr(data.sessionId)}_${toStr(data.kind)}_${toStr(data.active)}${occurrence}`;
 
+    case 'presence.update':
+      // Keyed on the chat and salted per occurrence. Only genuine state CHANGES are dispatched, and
+      // a contact who types, stops, and types again produces the same payload each time — content
+      // hashing would collapse that back into one delivery and hide the very transitions the event
+      // exists to report.
+      return `pres_${toStr(data.sessionId)}_${toStr(data.chatId)}${occurrence}`;
+
     case 'group.join':
       // A membership change carries no unique id and repeats with identical content (the same user
       // leaves and rejoins the same group). Key on the affected participants and salt with

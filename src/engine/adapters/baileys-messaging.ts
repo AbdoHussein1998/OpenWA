@@ -130,6 +130,16 @@ export class BaileysMessaging {
   }
 
   /**
+   * Subscribe to a chat's presence. Unlike sendChatState this is NOT best-effort: the caller asked
+   * for a subscription, and silently swallowing a failure would leave them waiting for updates that
+   * can never arrive. A failure surfaces so the caller can retry or stop expecting them.
+   */
+  async subscribeToPresence(chatId: string): Promise<void> {
+    this.host.ensureReady();
+    await this.sock().presenceSubscribe(await this.toDeliverableJid(chatId));
+  }
+
+  /**
    * Send a native product card (#905). Baileys has no catalog-lookup-then-send helper, so the
    * adapter resolves the Product first; here it becomes a {product} message whose snapshot is
    * priced in thousandths (priceAmount1000) and whose image is handed to Baileys as a URL upload.

@@ -6,6 +6,8 @@ import {
   SessionResponseDto,
   QRCodeResponseDto,
   MarkChatReadDto,
+  SubscribePresenceDto,
+  ChatPresenceResponseDto,
   ArchiveChatDto,
   DeleteChatDto,
   SendChatStateDto,
@@ -343,6 +345,58 @@ export class SessionController {
   ): Promise<{ success: boolean }> {
     const success = await this.sessionService.sendSeen(id, dto.chatId);
     return { success };
+  }
+
+  @Post(':id/presence/subscribe')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Subscribe to a chat's presence",
+    description:
+      'Asks WhatsApp to start reporting who is online or typing in this chat. Updates arrive as the ' +
+      '`presence.update` webhook and socket event — there is no synchronous answer, because presence ' +
+      'cannot be queried from either engine, only received.\n\n' +
+      'The subscription belongs to the connection: it does **not** survive a restart or an automatic ' +
+      'reconnect, and must be re-issued. Subscribe per chat rather than to everything — WhatsApp emits ' +
+      'an update on every transition, so a broad subscription is a firehose.\n\n' +
+      'whatsapp-web.js cannot do this at all (it exposes no presence subscribe and emits no presence ' +
+      'event) and answers `501`.',
+  })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Subscribed; updates now arrive as presence.update events' })
+  @ApiResponse({ status: 400, description: 'Session not started' })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 501, description: 'The active engine cannot observe presence (whatsapp-web.js)' })
+  async subscribeToPresence(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubscribePresenceDto,
+  ): Promise<{ success: boolean }> {
+    await this.sessionService.subscribeToPresence(id, dto.chatId);
+    return { success: true };
+  }
+
+  @Get(':id/presence/:chatId')
+  @RequireRole(ApiKeyRole.VIEWER)
+  @ApiOperation({
+    summary: "Read a chat's last reported presence",
+    description:
+      'Serves the most recent report received since the chat was subscribed. Returns `null` when ' +
+      'nothing has been reported — either the chat was never subscribed, or nothing has changed ' +
+      'since. That is a normal state, not a missing resource, so it is `200` with a null body rather ' +
+      'than a `404`.\n\n' +
+      'Held in memory and never persisted: presence is short-lived, and answering "typing" from ' +
+      'before a restart would be worse than answering nothing.',
+  })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiParam({ name: 'chatId', description: 'Chat ID as subscribed' })
+  @ApiResponse({ status: 200, description: 'Last reported presence, or null', type: ChatPresenceResponseDto })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  async getPresence(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('chatId') chatId: string,
+  ): Promise<ChatPresenceResponseDto | null> {
+    const presence = await this.sessionService.getPresence(id, chatId);
+    return presence ? { ...presence, observedAt: new Date(presence.observedAt) } : null;
   }
 
   @Post(':id/chats/unread')

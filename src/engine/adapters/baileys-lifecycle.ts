@@ -82,6 +82,7 @@ export interface BaileysLifecycleHost {
   handleGroupParticipantsUpdate: BaileysEvents['handleGroupParticipantsUpdate'];
   handleGroupsUpdate: BaileysEvents['handleGroupsUpdate'];
   handleCallEvents: BaileysEvents['handleCallEvents'];
+  handlePresenceUpdate: BaileysEvents['handlePresenceUpdate'];
   captureHistoryMessages: BaileysHistory['captureHistoryMessages'];
   /** Backfill names the initial sync skipped (runs on connection 'open'). */
   hydrateNames: BaileysHistory['hydrateNames'];
@@ -223,6 +224,7 @@ export class BaileysLifecycle {
         previous.ev.removeAllListeners('group-participants.update');
         previous.ev.removeAllListeners('groups.update');
         previous.ev.removeAllListeners('call');
+        previous.ev.removeAllListeners('presence.update');
         void previous.end(undefined);
       } catch {
         // end() may already have run from Baileys' own close handler — a safe no-op.
@@ -321,6 +323,7 @@ export class BaileysLifecycle {
     // 'chats.phoneNumberShare' event, whose { lid, jid } payload this shape directly replaces).
     sock.ev.on('lid-mapping.update', ({ lid, pn }) => this.host.addLidMappings([{ lid, pn }]));
     sock.ev.on('call', calls => this.host.handleCallEvents(calls));
+    sock.ev.on('presence.update', update => this.host.handlePresenceUpdate(update));
   }
 
   private handleConnectionUpdate(update: {

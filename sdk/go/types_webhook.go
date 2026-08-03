@@ -22,6 +22,7 @@ const (
 	EventSessionDisconnected  WebhookEvent = "session.disconnected"
 	EventSessionReconnectLoop WebhookEvent = "session.reconnect_loop"
 	EventSessionRestriction   WebhookEvent = "session.restriction"
+	EventPresenceUpdate       WebhookEvent = "presence.update"
 	EventGroupJoin            WebhookEvent = "group.join"
 	EventGroupLeave           WebhookEvent = "group.leave"
 	EventGroupUpdate          WebhookEvent = "group.update"

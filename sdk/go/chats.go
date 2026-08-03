@@ -17,6 +17,29 @@ func (s *ChatsService) List(ctx context.Context, sessionID string, query *ListCh
 	return out, err
 }
 
+// SubscribePresence asks WhatsApp to start reporting a chat's presence; updates then arrive as
+// presence.update webhook/socket events. Presence cannot be fetched from either engine, only
+// received.
+//
+// The subscription belongs to the connection and does NOT survive a restart or an automatic
+// reconnect, so re-issue it when the session comes back. Subscribe per chat: WhatsApp emits an
+// update on every transition, so a broad subscription is a firehose. whatsapp-web.js answers 501.
+func (s *ChatsService) SubscribePresence(ctx context.Context, sessionID string, body MarkChatRequest) (*SuccessResult, error) {
+	var out SuccessResult
+	err := s.client.do(ctx, "POST", "/api/sessions/"+pathEscape(sessionID)+"/presence/subscribe", nil, body, &out)
+	return &out, err
+}
+
+// GetPresence returns the last presence reported for a chat, or nil when none has been — the chat
+// was never subscribed, or nothing has changed since. Held in memory, so a restart clears it.
+func (s *ChatsService) GetPresence(ctx context.Context, sessionID, chatID string) (*ChatPresence, error) {
+	var out *ChatPresence
+	err := s.client.do(
+		ctx, "GET", "/api/sessions/"+pathEscape(sessionID)+"/presence/"+pathEscape(chatID), nil, nil, &out,
+	)
+	return out, err
+}
+
 // MarkRead marks a chat as read.
 func (s *ChatsService) MarkRead(ctx context.Context, sessionID string, body MarkChatRequest) (*SuccessResult, error) {
 	return s.post(ctx, sessionID, "/read", body)

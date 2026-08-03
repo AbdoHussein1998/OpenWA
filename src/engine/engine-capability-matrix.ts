@@ -255,6 +255,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
       'baileys AnyRegularMessageContent {product: WASendableProduct} (Types/Message.d.ts:203) — adapter resolves the product via getCatalog then sends the snapshot with businessOwnerJid=self (adapters/baileys-messaging.ts; #905); wwjs no Client.sendProduct — Product/Order are inbound-only parsers',
   },
   sendSeen: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  subscribeToPresence: {
+    wwjs: { status: 'not-available', rootCause: 'library-limitation' },
+    baileys: { status: 'supported' },
+    evidence:
+      "baileys presenceSubscribe(toJid) (Socket/chats.d.ts:39) + the 'presence.update' event carrying a per-participant PresenceData map (Types/Events.d.ts:50-55, Types/Chat.d.ts:20-24); whatsapp-web.js 1.34.7 has only sendPresenceAvailable/sendPresenceUnavailable (index.d.ts:230,233), which publish the ACCOUNT's own presence — it exposes no subscribe and emits no presence event",
+  },
   sendStickerMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   sendTextMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   sendVideoMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },

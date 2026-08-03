@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Presence: see who is online or typing.** `POST /api/sessions/:id/presence/subscribe` starts
+  WhatsApp reporting a chat's presence; `GET /api/sessions/:id/presence/:chatId` serves the latest
+  report; changes arrive as the new `presence.update` webhook **and** socket event. Exposed in all
+  five SDKs and as two MCP tools.
+
+  Baileys only. whatsapp-web.js exposes `sendPresenceAvailable`/`sendPresenceUnavailable`, which
+  publish the account's *own* presence, and emits no presence event at all — so it answers `501`
+  rather than pretending. That refusal is declared inline on the adapter so the engine parity gate
+  can actually verify it, unlike the delegated refusals it cannot see.
+
+  Two properties are documented rather than papered over. The subscription belongs to the
+  **connection**: it does not survive a restart or an automatic reconnect and must be re-issued,
+  because silently replaying subscriptions would report presence the account never asked for. And
+  presence is **push-only** — it cannot be queried from either library — which is why `GET` serves a
+  remembered report and answers `null`, not `404`, when nothing has been reported yet.
+
+  Only genuine state *changes* are dispatched. WhatsApp repeats itself freely, and one watched chat
+  with an active typist would otherwise bury every other event a consumer subscribes to; `lastSeen`
+  and the group online count drifting on their own do not count as changes. The last report is held
+  in memory and cleared when the session restarts, since presence from before a restart is worse than
+  no answer at all.
+
 - **Group participant adds are paced too.** `POST .../groups/:groupId/participants` and
   `POST .../groups` reached WhatsApp with no gate of any kind — no moderation hook, no pacing, no
   persisted record — while being the most ban-associated action the product performs: they put the

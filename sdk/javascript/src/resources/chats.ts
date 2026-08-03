@@ -15,6 +15,7 @@ import type {
   ChatSummary,
   DeleteChatRequest,
   MarkChatRequest,
+  ChatPresence,
   SendChatStateRequest,
   SuccessResult,
 } from '../types.js';
@@ -33,6 +34,33 @@ export class ChatsResource {
       method: 'GET',
       path: `/api/sessions/${encodeSegment(sessionId)}/chats`,
       query,
+    });
+  }
+
+  /**
+   * Subscribe to a chat's presence. Updates then arrive as `presence.update` webhook/socket events —
+   * presence cannot be fetched from either engine, only received.
+   *
+   * The subscription belongs to the connection and does NOT survive a restart or an automatic
+   * reconnect, so re-issue it when the session comes back. Subscribe per chat: WhatsApp emits an
+   * update on every transition, so a broad subscription is a firehose. whatsapp-web.js answers 501.
+   */
+  subscribePresence(sessionId: string, body: MarkChatRequest): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'POST',
+      path: `/api/sessions/${encodeSegment(sessionId)}/presence/subscribe`,
+      body,
+    });
+  }
+
+  /**
+   * The last presence reported for a chat, or `null` when none has been — the chat was never
+   * subscribed, or nothing has changed since. Held in memory, so a restart clears it.
+   */
+  getPresence(sessionId: string, chatId: string): Promise<ChatPresence | null> {
+    return this.client.request<ChatPresence | null>({
+      method: 'GET',
+      path: `/api/sessions/${encodeSegment(sessionId)}/presence/${encodeSegment(chatId)}`,
     });
   }
 

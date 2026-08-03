@@ -80,6 +80,25 @@ export interface AccountRestriction {
   expiresAt?: string | null;
 }
 
+/** One participant's presence within a chat. */
+export interface ParticipantPresence {
+  id: string;
+  /** `composing`/`recording` mean actively typing or recording; `paused` means they stopped. */
+  state: 'available' | 'unavailable' | 'composing' | 'recording' | 'paused';
+  /** Unix SECONDS. Absent whenever the contact's privacy settings hide last-seen — the common case. */
+  lastSeen?: number;
+}
+
+/** The last presence reported for a chat since it was subscribed. */
+export interface ChatPresence {
+  chatId: string;
+  participants: ParticipantPresence[];
+  /** Online member count, groups only. */
+  groupOnlineCount?: number;
+  /** When the gateway received the report — NOT a WhatsApp timestamp. */
+  observedAt: string;
+}
+
 export interface CreateSessionRequest {
   /** Alphanumeric + hyphens, 3–50 chars. */
   name: string;
@@ -604,6 +623,7 @@ export type WebhookEvent =
   | 'session.disconnected'
   | 'session.reconnect_loop'
   | 'session.restriction'
+  | 'presence.update'
   | 'group.join'
   | 'group.leave'
   | 'group.update'

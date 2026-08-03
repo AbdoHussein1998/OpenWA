@@ -11,6 +11,7 @@ import { EngineFactory } from '../../engine/engine.factory';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { PresenceStore } from './presence-store.service';
 import { type createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
 import { SessionLifecycleFences } from './session-lifecycle-fences';
@@ -45,6 +46,7 @@ export interface SessionEngineControlsHost {
   engines: EngineRegistry;
   sessionErrors: SessionErrorStore;
   sessionRestrictions: SessionRestrictionStore;
+  presence: PresenceStore;
   hookManager: HookManager;
   configService?: ConfigService;
   logger: ReturnType<typeof createLogger>;
@@ -82,6 +84,7 @@ export class SessionEngineControls {
   private readonly engines: EngineRegistry;
   private readonly sessionErrors: SessionErrorStore;
   private readonly sessionRestrictions: SessionRestrictionStore;
+  private readonly presence: PresenceStore;
   private readonly hookManager: HookManager;
   private readonly configService?: ConfigService;
   private readonly logger: ReturnType<typeof createLogger>;
@@ -98,6 +101,7 @@ export class SessionEngineControls {
     this.engines = host.engines;
     this.sessionErrors = host.sessionErrors;
     this.sessionRestrictions = host.sessionRestrictions;
+    this.presence = host.presence;
     this.hookManager = host.hookManager;
     this.configService = host.configService;
     this.logger = host.logger;
@@ -514,6 +518,9 @@ export class SessionEngineControls {
         // Same unbounded-growth argument for the restriction entry, and the gauge it feeds must not
         // keep counting an account whose session no longer exists.
         this.sessionRestrictions.clear(id);
+        // Presence is per-connection state that the deleted session can never receive again, and it
+        // is keyed by an id that will never be read.
+        this.presence.clear(id);
         // The stuck-auth recovery budget is keyed by id; a committed delete frees it (and a recreated
         // session under the same name gets a fresh UUID + fresh budget). Left only on a committed
         // delete so a failed/409 delete — the session still exists — keeps the budget intact.

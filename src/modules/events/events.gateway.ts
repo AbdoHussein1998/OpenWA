@@ -540,6 +540,15 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   }
 
   /**
+   * Emit a presence update. Socket-subscribable as well as webhook-delivered because presence is the
+   * one event whose whole value is being live — a webhook round-trip to render a typing indicator
+   * has usually expired by the time it arrives. Only actual changes reach here (see the wiring).
+   */
+  emitPresenceUpdate(sessionId: string, data: Record<string, unknown>) {
+    this.emitToRooms(sessionId, 'presence.update', data);
+  }
+
+  /**
    * Emit QR code update for a session
    */
   emitQRCode(sessionId: string, qrCode: string) {

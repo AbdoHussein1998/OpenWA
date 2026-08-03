@@ -659,6 +659,77 @@ Request an 8-char pairing code to link via phone number (alternative to QR).
 
 **Errors:** `400` validation, or session not started, or already authenticated · `401` · `403` · `404` not found
 
+#### POST /api/sessions/:id/presence/subscribe
+
+Ask WhatsApp to start reporting who is online or typing in a chat.
+
+**Auth:** API key (OPERATOR)  ·  **Scope:** session-scoped  ·  **Engines:** Baileys only
+
+There is no synchronous answer: presence cannot be *fetched* from either engine, only received.
+Updates arrive as the `presence.update` webhook and socket event; the latest is readable at
+`GET /api/sessions/:id/presence/:chatId`.
+
+Two properties to design around:
+
+- **The subscription belongs to the connection.** It does not survive a restart or an automatic
+  reconnect, and must be re-issued. The gateway does not silently replay subscriptions, because a
+  replay would report a presence the account never actually asked for.
+- **Subscribe per chat, not to everything.** WhatsApp emits an update on every transition — each time
+  someone starts and stops typing — so a broad subscription is a firehose. Only genuine state
+  *changes* are dispatched onward, which bounds the event volume but not the socket traffic.
+
+**Path parameters**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `id` | string | Session UUID |
+
+**Request body** — `SubscribePresenceDto`
+
+| Field | Type | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `chatId` | string | Yes | `@IsString`; `@IsNotEmpty`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Engine-native JID, e.g. `1234567890@c.us` (wwebjs) or `1234@s.whatsapp.net` (Baileys) |
+
+**Response** `200`
+
+```json
+{ "success": true }
+```
+
+**Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `501` the active engine cannot observe presence (whatsapp-web.js exposes only `sendPresenceAvailable`/`sendPresenceUnavailable`, which publish the account's *own* presence, and emits no presence event)
+
+#### GET /api/sessions/:id/presence/:chatId
+
+The last presence reported for a chat.
+
+**Auth:** API key (VIEWER)  ·  **Scope:** session-scoped
+
+**Response** `200`
+
+```json
+{
+  "chatId": "1234567890@c.us",
+  "participants": [{ "id": "1234567890@c.us", "state": "composing", "lastSeen": 1786000000 }],
+  "observedAt": "2026-08-03T12:00:00.000Z"
+}
+```
+
+`state` is one of `available` / `unavailable` / `composing` / `recording` / `paused` — the middle two
+mean actively typing or recording *in this chat*, `paused` means they stopped without sending.
+`lastSeen` is epoch **seconds** and is absent whenever the contact's privacy settings hide last-seen,
+which is the default for most accounts and is not an error. `groupOnlineCount` appears for groups
+when WhatsApp reports it. A 1:1 chat still returns a `participants` array, holding the one contact.
+
+`observedAt` is when **this gateway** received the report, not a WhatsApp timestamp. Presence is
+short-lived, so an old `observedAt` means the state is stale rather than steady.
+
+The body is `null` when nothing has been reported — the chat was never subscribed, or nothing has
+changed since. That is a normal state rather than a missing resource, so it is `200` with a null
+body, not a `404`. Presence is held in memory and never persisted: answering "typing" from before a
+restart would be worse than answering nothing.
+
+**Errors:** `401` · `403` · `404` session not found
+
 #### POST /api/sessions/:id/chats/read
 
 Mark a chat as read/seen.
@@ -3556,7 +3627,7 @@ Webhooks are configured per session and managed under `/api/sessions/:sessionId/
 
 Two fields — `secret` and `headers` — are **write-only**: they are accepted on create/update but are **never** returned in any response (the response DTO has no `@Expose` for them, so `fromEntity` drops them). The `secret` is used to compute the `X-OpenWA-Signature: sha256=<hex>` HMAC-SHA256 header on deliveries.
 
-The `events` array accepts these members plus the `*` wildcard: `message.received`, `message.sent`, `message.ack`, `message.failed`, `message.revoked`, `message.reaction`, `message.edited`, `session.status`, `session.qr`, `session.authenticated`, `session.disconnected`, `session.reconnect_loop`, `session.restriction`, `group.join`, `group.leave`, `group.update`, `call.received`, `status.received`. All of them are actively dispatched by the engines.
+The `events` array accepts these members plus the `*` wildcard: `message.received`, `message.sent`, `message.ack`, `message.failed`, `message.revoked`, `message.reaction`, `message.edited`, `session.status`, `session.qr`, `session.authenticated`, `session.disconnected`, `session.reconnect_loop`, `session.restriction`, `presence.update`, `group.join`, `group.leave`, `group.update`, `call.received`, `status.received`. All of them are actively dispatched by the engines.
 
 #### GET /api/sessions/:sessionId/webhooks
 
@@ -5501,6 +5572,7 @@ These are the events OpenWA actually emits. A webhook is registered with an `eve
 | `session.authenticated` | The session pairs and becomes ready | `{ sessionId, phone, pushName }` |
 | `session.disconnected` | The session disconnects on the engine or WhatsApp side (drop, conflict, or a phone-initiated unlink). Not fired for API-initiated stop/logout/delete — those are acknowledged by the API response and the `session.status` transition | `{ sessionId, reason }` |
 | `session.reconnect_loop` | Every 5th consecutive reconnect attempt is scheduled (attempt 5, 10, 15, …) — the session is failing to come back up | `{ sessionId, attempts, nextDelayMs }` |
+| `presence.update` | A subscribed chat's presence changed — someone came online, started typing, or stopped. Only actual CHANGES are dispatched: WhatsApp repeats itself freely, and every repeat would otherwise be a delivery | `{ sessionId, chatId, participants: [{ id, state, lastSeen? }], groupOnlineCount? }` — `state` is `available`/`unavailable`/`composing`/`recording`/`paused`; `lastSeen` is epoch **seconds** and absent when the contact hides it. Requires `POST .../presence/subscribe` first, and Baileys — whatsapp-web.js cannot observe presence |
 | `session.restriction` | WhatsApp places a restriction on the account, or lifts one. Deduped: an unchanged restriction is not re-announced, and a lift is only sent when one was in force | `{ sessionId, active, kind, code, expiresAt }` — `active` is `false` for a lift and `kind`/`code` then describe the restriction that ended; `expiresAt` is an ISO timestamp or `null`. See `restriction` on the session response for the `kind` values |
 | `session.status` | The session status transitions | `{ sessionId, status }` where `status` is one of `created` / `initializing` / `qr_ready` / `authenticating` / `ready` / `disconnected` / `action_required` / `failed` |
 | `group.join` | Participant(s) are added to or join a group this session is in | `{ groupId, actorId?, participantIds, timestamp }` — `actorId` is the admin/inviter when known |

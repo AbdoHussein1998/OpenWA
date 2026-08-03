@@ -19,6 +19,7 @@ import { SessionLidResolver } from './session-lid-resolver.service';
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { PresenceStore, type ChatPresence } from './presence-store.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { paginate, ListOptions, resolveListWindow } from '../../common/utils/paginate';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
@@ -72,6 +73,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     private readonly watchdog: SessionLivenessWatchdog,
     private readonly sessionErrors: SessionErrorStore,
     private readonly sessionRestrictions: SessionRestrictionStore,
+    private readonly presence: PresenceStore,
     private readonly hookManager: HookManager,
     private readonly engineLifecycle: SessionEngineLifecycle,
     @Optional()
@@ -338,6 +340,36 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // response is the N newest chats (what clients show first) rather than an arbitrary slice.
     const chats = [...(await engine.getChats())].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     return paginate(chats, opts.limit, opts.offset);
+  }
+
+  /**
+   * Ask WhatsApp to start reporting a chat's presence. Updates arrive as `presence.update` events;
+   * there is no synchronous answer to give here, because presence cannot be queried from either
+   * library — only received.
+   *
+   * The subscription belongs to the connection, so it does not survive a restart or an automatic
+   * reconnect and has to be re-issued. That is the engine's contract, not a gateway choice, and the
+   * API documents it rather than pretending otherwise by silently replaying subscriptions.
+   */
+  async subscribeToPresence(id: string, chatId: string): Promise<void> {
+    await this.findOne(id);
+    const engine = this.engines.get(id);
+
+    if (!engine) {
+      throw new BadRequestException('Session is not started');
+    }
+
+    return engine.subscribeToPresence(chatId);
+  }
+
+  /**
+   * The last presence WhatsApp reported for a chat, or null when none has been — either because the
+   * chat was never subscribed, or because nothing has changed since the subscription was made.
+   * Deliberately not an error: "nothing reported yet" is a normal state, not a missing resource.
+   */
+  async getPresence(id: string, chatId: string): Promise<ChatPresence | null> {
+    await this.findOne(id);
+    return this.presence.get(id, chatId);
   }
 
   async sendSeen(id: string, chatId: string): Promise<boolean> {

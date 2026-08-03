@@ -154,8 +154,9 @@ These are honestly out of reach of a clean adapter wiring because the installed 
 - `sendCatalog` — no catalog-share message type in `AnyMessageContent` (only single `{product}`).
 - `votePoll` — no vote-SEND helper at all; the library only decrypts INCOMING votes (`decryptPollVote`). Sending one means hand-building a `proto.Message.PollUpdateMessage` with HMAC-SHA256 vote encryption keyed by the poll creation's `messageSecret`. Supported on whatsapp-web.js.
 
-**wwjs (6 cells):**
+**wwjs (7 cells):**
 
+- `subscribeToPresence` — no way to observe another party's presence. `WAWebPresenceChatAction` offers only `sendPresenceAvailable` / `sendPresenceUnavailable` (`index.d.ts:230,233`), which publish the ACCOUNT's own presence, and the library emits no presence event at all. Baileys: `presenceSubscribe` + the `presence.update` event. Reaching it would mean injecting page-level subscriptions against undocumented WA Web modules.
 - `getCatalog` / `getProducts` / `getProduct` — no catalog API at all (`index.d.ts` 0 hits; `Product` is inbound-only).
 - `sendProduct` — no outbound product content type.
 - `sendCatalog` — no outbound catalog content type.
@@ -169,14 +170,19 @@ These are hand-maintained and had drifted from the source before this pass; they
 from `engine-capability-matrix.ts` rather than adjusted by hand. Re-derive them the same way when
 adding a method, instead of incrementing the previous figure.
 
-- **91** interface methods, **182** adapter-cells (91 × 2 engines).
-- **164** supported cells; **18** not-available cells across **17** methods.
-- Of the 18 not-available cells: **2 adapter-gaps** (fixable) + **16 library-limitations** + **0 uncertain**.
+- **92** interface methods, **184** adapter-cells (92 × 2 engines).
+- **165** supported cells; **19** not-available cells across **18** methods.
+- Of the 19 not-available cells: **2 adapter-gaps** (fixable) + **17 library-limitations** + **0 uncertain**.
 - **0 phantom-support rows** — every `not-available` row throws at the adapter boundary.
 
   Note that the drift gate does **not** verify that for whatsapp-web.js. `engine-parity.spec.ts`
   detects a throw with `Class.prototype.method.toString()`, and the wwjs adapter's methods are thin
   forwarders whose throws live in delegate modules (`wwebjs-catalog.ts` and friends), so the scan
   sees no throwing method on that adapter at all — its `supported ⇒ does not throw` invariant is
-  vacuously true. Baileys is unaffected: its unavailable methods call `this.unsupported(...)` inline
-  on the adapter. Until that is addressed, the wwjs column is guarded by review, not by the gate.
+  vacuously true for those. Baileys is unaffected: its unavailable methods call `this.unsupported(...)`
+  inline on the adapter. Until the delegated ones are addressed, most of the wwjs column is guarded by
+  review rather than by the gate.
+
+  New wwjs `not-available` methods should therefore throw **inline on the adapter class**, the way
+  `subscribeToPresence` does, so the scan can see them — a delegate keeps the code tidy at the cost of
+  the only automated check this column has.

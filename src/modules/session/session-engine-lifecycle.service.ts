@@ -10,6 +10,7 @@ import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { PresenceStore } from './presence-store.service';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { resolveEngineInitTimeoutMs } from '../../engine/engine-init-timeout';
@@ -213,6 +214,7 @@ export class SessionEngineLifecycle {
     private readonly messages: MessageProjector,
     private readonly sessionErrors: SessionErrorStore,
     private readonly sessionRestrictions: SessionRestrictionStore,
+    private readonly presence: PresenceStore,
     private readonly eventsGateway: EventsGateway,
     private readonly webhookService: WebhookService,
     private readonly hookManager: HookManager,
@@ -284,6 +286,7 @@ export class SessionEngineLifecycle {
       messages: this.messages,
       sessionErrors: this.sessionErrors,
       sessionRestrictions: this.sessionRestrictions,
+      presence: this.presence,
       auditService: this.auditService,
       webhookService: this.webhookService,
       eventsGateway: this.eventsGateway,
@@ -301,6 +304,7 @@ export class SessionEngineLifecycle {
       engines: this.engineRegistry,
       sessionErrors: this.sessionErrors,
       sessionRestrictions: this.sessionRestrictions,
+      presence: this.presence,
       hookManager: this.hookManager,
       configService: this.configService,
       logger: this.logger,
@@ -435,6 +439,9 @@ export class SessionEngineLifecycle {
       proxyType: session.proxyType || undefined,
     });
     this.engines.set(id, engine);
+    // Presence subscriptions live on the socket, so a fresh engine has none — whatever the previous
+    // connection last reported is now unverifiable and would be served as if it were current.
+    this.presence.clear(id);
     // Clear any prior failure reason before a fresh start. A recorded account restriction is
     // deliberately NOT cleared here: it describes the account, not this attempt, so a restart does
     // not resolve it — and clearing it per attempt would make it flicker off and on through a

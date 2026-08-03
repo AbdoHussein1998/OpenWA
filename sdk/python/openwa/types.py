@@ -30,7 +30,7 @@ BulkMessageType = Literal["text", "image", "video", "audio", "document"]
 WebhookEvent = Literal[
     "message.received", "message.sent", "message.ack", "message.failed", "message.revoked",
     "message.reaction", "message.edited", "session.status", "session.qr", "session.authenticated",
-    "session.disconnected", "session.reconnect_loop", "session.restriction",
+    "session.disconnected", "session.reconnect_loop", "session.restriction", "presence.update",
     "group.join", "group.leave", "group.update", "call.received", "status.received",
     "*",
 ]
@@ -39,6 +39,27 @@ WebhookEvent = Literal[
 class SuccessResult(TypedDict, total=False):
     success: bool
     message: str
+
+
+class ParticipantPresence(TypedDict, total=False):
+    """One participant's presence within a chat."""
+
+    id: str
+    # 'composing'/'recording' mean actively typing or recording; 'paused' means they stopped.
+    state: Literal["available", "unavailable", "composing", "recording", "paused"]
+    # Unix SECONDS. Absent whenever the contact's privacy settings hide last-seen -- the common case.
+    lastSeen: int
+
+
+class ChatPresence(TypedDict, total=False):
+    """The last presence reported for a chat since it was subscribed."""
+
+    chatId: str
+    participants: list[ParticipantPresence]
+    # Online member count, groups only.
+    groupOnlineCount: int
+    # When the gateway received the report -- NOT a WhatsApp timestamp.
+    observedAt: str
 
 
 # ── Session ───────────────────────────────────────────────────────

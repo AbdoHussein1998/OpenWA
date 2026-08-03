@@ -868,6 +868,96 @@
         ]
       }
     },
+    "/api/sessions/{id}/presence/subscribe": {
+      "post": {
+        "description": "Asks WhatsApp to start reporting who is online or typing in this chat. Updates arrive as the `presence.update` webhook and socket event — there is no synchronous answer, because presence cannot be queried from either engine, only received.\n\nThe subscription belongs to the connection: it does **not** survive a restart or an automatic reconnect, and must be re-issued. Subscribe per chat rather than to everything — WhatsApp emits an update on every transition, so a broad subscription is a firehose.\n\nwhatsapp-web.js cannot do this at all (it exposes no presence subscribe and emits no presence event) and answers `501`.",
+        "operationId": "SessionController_subscribeToPresence",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscribePresenceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Subscribed; updates now arrive as presence.update events"
+          },
+          "400": {
+            "description": "Session not started"
+          },
+          "404": {
+            "description": "Session not found"
+          },
+          "501": {
+            "description": "The active engine cannot observe presence (whatsapp-web.js)"
+          }
+        },
+        "summary": "Subscribe to a chat's presence",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/sessions/{id}/presence/{chatId}": {
+      "get": {
+        "description": "Serves the most recent report received since the chat was subscribed. Returns `null` when nothing has been reported — either the chat was never subscribed, or nothing has changed since. That is a normal state, not a missing resource, so it is `200` with a null body rather than a `404`.\n\nHeld in memory and never persisted: presence is short-lived, and answering \"typing\" from before a restart would be worse than answering nothing.",
+        "operationId": "SessionController_getPresence",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chatId",
+            "required": true,
+            "in": "path",
+            "description": "Chat ID as subscribed",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Last reported presence, or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatPresenceResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found"
+          }
+        },
+        "summary": "Read a chat's last reported presence",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/sessions/{id}/chats/unread": {
       "post": {
         "operationId": "SessionController_markChatUnread",
@@ -7003,6 +7093,81 @@
           "chatId"
         ]
       },
+      "SubscribePresenceDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string",
+            "description": "Chat ID in the active engine's native format (e.g. 1234567890@c.us on whatsapp-web.js)",
+            "example": "1234567890@c.us"
+          }
+        },
+        "required": [
+          "chatId"
+        ]
+      },
+      "ParticipantPresenceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Participant id. In a 1:1 chat this is the chat itself.",
+            "example": "1234567890@c.us"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable",
+              "composing",
+              "recording",
+              "paused"
+            ],
+            "description": "`composing` and `recording` mean actively typing or recording in this chat; `paused` means they stopped without sending. `available`/`unavailable` describe reachability.",
+            "example": "composing"
+          },
+          "lastSeen": {
+            "type": "number",
+            "description": "Unix SECONDS the contact was last seen. Absent whenever the contact's privacy settings hide last-seen — the common case, and not an error.",
+            "example": 1786000000
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ]
+      },
+      "ChatPresenceResponseDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string",
+            "example": "1234567890@c.us"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParticipantPresenceDto"
+            }
+          },
+          "groupOnlineCount": {
+            "type": "number",
+            "description": "Online member count, groups only.",
+            "example": 3
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this gateway received the report — NOT a WhatsApp timestamp. Presence is short-lived, so an old `observedAt` means the state is stale rather than steady.",
+            "example": "2026-08-03T12:00:00Z"
+          }
+        },
+        "required": [
+          "chatId",
+          "participants",
+          "observedAt"
+        ]
+      },
       "ArchiveChatDto": {
         "type": "object",
         "properties": {
@@ -7091,6 +7256,7 @@
                 "session.disconnected",
                 "session.reconnect_loop",
                 "session.restriction",
+                "presence.update",
                 "group.join",
                 "group.leave",
                 "group.update",
@@ -7238,6 +7404,7 @@
                 "session.disconnected",
                 "session.reconnect_loop",
                 "session.restriction",
+                "presence.update",
                 "group.join",
                 "group.leave",
                 "group.update",

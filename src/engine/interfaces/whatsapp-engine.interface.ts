@@ -535,6 +535,35 @@ export interface AccountRestriction {
   expiresAt?: number;
 }
 
+/**
+ * Neutral presence states, matching what WhatsApp itself distinguishes: whether the contact is
+ * reachable, and whether they are actively typing or recording in the chat being watched.
+ */
+export type PresenceState = 'available' | 'unavailable' | 'composing' | 'recording' | 'paused';
+
+/** One participant's presence within a chat. */
+export interface ParticipantPresence {
+  /** Neutral participant id. In a 1:1 chat this is the chat's own id. */
+  id: string;
+  state: PresenceState;
+  /**
+   * Unix SECONDS the contact was last seen, when WhatsApp discloses it. Absent for contacts whose
+   * privacy settings hide last-seen — which is the common case, not an error.
+   */
+  lastSeen?: number;
+}
+
+/**
+ * Presence in one chat. A group reports every participant WhatsApp chose to tell us about, so this
+ * is a list rather than a single state even for a 1:1 chat, where it holds exactly one entry.
+ */
+export interface PresenceUpdateEvent {
+  chatId: string;
+  participants: ParticipantPresence[];
+  /** How many group members are online, when the engine reports it (groups only). */
+  groupOnlineCount?: number;
+}
+
 export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
   onReady?: (phone: string, pushName: string) => void;
@@ -593,6 +622,12 @@ export interface EngineEventCallbacks {
    * Consumers decide what a restriction is worth.
    */
   onAccountRestriction?: (restriction: AccountRestriction | null) => void;
+  /**
+   * Fired when WhatsApp reports presence for a chat this session subscribed to. Push-only and
+   * unsolicited after the subscription: there is no way to ask for a contact's presence on demand,
+   * which is why consumers keep the last reported state rather than querying for it.
+   */
+  onPresenceUpdate?: (event: PresenceUpdateEvent) => void;
   /**
    * Fired on a terminal initialization/authentication failure (e.g. Chromium
    * could not launch, or WhatsApp rejected the stored credentials). The engine
@@ -879,4 +914,16 @@ export interface IWhatsAppEngine {
    * Engine-agnostic and best-effort: engines without a presence concept should no-op.
    */
   sendChatState(chatId: string, state: ChatState): Promise<void>;
+  /**
+   * Ask WhatsApp to start reporting a chat's presence, delivered through `onPresenceUpdate`.
+   *
+   * Deliberately per chat rather than a blanket subscribe-all: WhatsApp emits a presence update on
+   * every transition — each time someone starts and stops typing — so subscribing to everything
+   * turns an idle account into a firehose. The subscription lasts for the life of the connection and
+   * has to be re-established after a reconnect.
+   *
+   * There is no matching read: presence cannot be queried, only received, which is why the gateway
+   * serves the last reported state rather than fetching it.
+   */
+  subscribeToPresence(chatId: string): Promise<void>;
 }
