@@ -720,6 +720,17 @@ export interface IWhatsAppEngine {
    */
   starMessage(chatId: string, messageId: string, star: boolean): Promise<void>;
   /**
+   * Cast a vote on a poll. `options` are the option TEXTS, not ids: whatsapp-web.js matches by name
+   * (`Message.js:1027-1031`), and no engine surfaces a stable per-option id through this interface,
+   * so a caller has nothing else to name an option by. Pass every option that should end up
+   * selected — the list replaces the current selection rather than adding to it, and an empty array
+   * clears the vote.
+   *
+   * A poll whose options include duplicate texts will select ALL matching options; WhatsApp permits
+   * duplicates, and the name is the only handle available.
+   */
+  votePoll(chatId: string, pollMessageId: string, options: string[]): Promise<void>;
+  /**
    * Pin a message in its chat for a bounded window. WhatsApp only recognises three durations —
    * 86400 (24h), 604800 (7d), 2592000 (30d) — so `durationSeconds` must be one of those; it is
    * required rather than defaulted here so neither adapter has to invent a value. In a group only

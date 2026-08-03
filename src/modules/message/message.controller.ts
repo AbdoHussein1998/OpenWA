@@ -17,6 +17,7 @@ import {
   EditMessageDto,
   PinMessageDto,
   StarMessageDto,
+  VotePollDto,
   UnpinMessageDto,
 } from './dto/message-actions.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
@@ -405,6 +406,19 @@ export class MessageController {
   ): Promise<{ success: boolean }> {
     await this.messageService.deleteMessage(sessionId, dto);
     return { success: true };
+  }
+
+  @Post('vote-poll')
+  @HttpCode(HttpStatus.OK)
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Cast a vote on a poll' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Vote cast' })
+  @ApiResponse({ status: 400, description: 'Session not active, or the target message is not a poll' })
+  @ApiResponse({ status: 404, description: 'Poll not found in the chat’s recent history' })
+  @ApiResponse({ status: 501, description: 'Not supported on the Baileys engine' })
+  async votePoll(@Param('sessionId') sessionId: string, @Body() dto: VotePollDto): Promise<{ success: boolean }> {
+    return this.messageService.votePoll(sessionId, dto);
   }
 
   // ========== Pin / Unpin ==========

@@ -215,6 +215,13 @@ describe('StatusResource — nested media bodies', () => {
     expect(t.lastCall!.body).toEqual({ video: { url: 'http://vid' }, recipients: ['a@c.us'] });
   });
 
+  it('votePoll posts the option texts', async () => {
+    const t = new MockTransport().on('POST', /\/messages\/vote-poll$/, { body: { success: true } });
+    await client(t).messages.votePoll('s', { chatId: 'c1', pollMessageId: 'p1', options: ['Pizza'] });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/messages/vote-poll');
+    expect(t.lastCall!.body).toEqual({ chatId: 'c1', pollMessageId: 'p1', options: ['Pizza'] });
+  });
+
   it('star posts the boolean through', async () => {
     const t = new MockTransport().on('POST', /\/messages\/star$/, { body: { success: true } });
     await client(t).messages.star('s', { chatId: 'c1', messageId: 'm1', star: false });

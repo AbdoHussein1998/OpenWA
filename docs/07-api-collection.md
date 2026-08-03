@@ -274,6 +274,16 @@ curl "$BASE/api/sessions/$SESSION_ID/messages/628123456789@c.us/true_62812345678
   -H "X-API-Key: $API_KEY"
 ```
 
+#### POST /api/sessions/:sessionId/messages/vote-poll
+
+Vote on a poll (whatsapp-web.js only).
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/vote-poll" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"628123456789@c.us","pollMessageId":"true_628123456789@c.us_3EB0ABCD","options":["Pizza"]}'
+```
+
 #### POST /api/sessions/:sessionId/messages/pin
 
 Pin a message for 24h (default), 7d or 30d.

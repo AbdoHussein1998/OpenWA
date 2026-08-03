@@ -31,6 +31,7 @@ import type {
   SendMediaRequest,
   StarMessageRequest,
   UnpinMessageRequest,
+  VotePollRequest,
   SendPollRequest,
   SendTemplateRequest,
   SendTextRequest,
@@ -189,6 +190,18 @@ export class MessagesResource {
     return this.client.request<SuccessResult>({
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/messages/pin`,
+      body,
+    });
+  }
+
+  /**
+   * Cast a vote on a poll. Not supported on the Baileys engine (501).
+   * `options` are the option texts, not ids.
+   */
+  votePoll(sessionId: string, body: VotePollRequest): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'POST',
+      path: `/api/sessions/${encodeSegment(sessionId)}/messages/vote-poll`,
       body,
     });
   }

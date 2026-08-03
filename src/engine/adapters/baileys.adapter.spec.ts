@@ -2530,6 +2530,13 @@ describe('BaileysAdapter store-backed ops', () => {
     );
   });
 
+  it('votePoll is an honest 501 — Baileys has no vote-send helper, only decryptPollVote', async () => {
+    const adapter = await ready();
+    await expect(adapter.votePoll('628111@s.whatsapp.net', 'P1', ['Pizza'])).rejects.toBeInstanceOf(
+      EngineNotSupportedError,
+    );
+  });
+
   it('pinMessage pins IN CHAT via the stored key, with the requested window', async () => {
     fakeStore.getMessage.mockResolvedValue(stored);
     const adapter = await ready();

@@ -511,6 +511,13 @@ export class BaileysAdapter implements IWhatsAppEngine {
   getMessageReactions(_chatId: string, _messageId: string): Promise<MessageReaction[]> {
     return this.unsupported('getMessageReactions');
   }
+
+  // No vote-send helper exists in Baileys — only decryptPollVote for RECEIVING. Sending one needs a
+  // hand-built proto.Message.PollUpdateMessage with HMAC-SHA256 vote encryption keyed by the poll
+  // creation's messageSecret.
+  votePoll(_chatId: string, _pollMessageId: string, _options: string[]): Promise<void> {
+    return this.unsupported('votePoll');
+  }
   getChatHistory(
     _chatId: string,
     _limit?: number,

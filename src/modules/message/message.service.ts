@@ -818,6 +818,16 @@ export class MessageService {
     return { success: true };
   }
 
+  /**
+   * Cast a vote on a poll. Not supported on the Baileys engine, which surfaces as a 501 from the
+   * adapter. `options` are option texts — see the engine interface for why there are no ids.
+   */
+  async votePoll(sessionId: string, dto: { chatId: string; pollMessageId: string; options: string[] }) {
+    const engine = this.getEngine(sessionId);
+    await engine.votePoll(dto.chatId, dto.pollMessageId, dto.options);
+    return { success: true };
+  }
+
   async deleteMessage(
     sessionId: string,
     dto: { chatId: string; messageId: string; forEveryone?: boolean },

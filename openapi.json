@@ -2226,6 +2226,50 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/messages/vote-poll": {
+      "post": {
+        "operationId": "MessageController_votePoll",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VotePollDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Vote cast"
+          },
+          "400": {
+            "description": "Session not active, or the target message is not a poll"
+          },
+          "404": {
+            "description": "Poll not found in the chat’s recent history"
+          },
+          "501": {
+            "description": "Not supported on the Baileys engine"
+          }
+        },
+        "summary": "Cast a vote on a poll",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/messages/pin": {
       "post": {
         "operationId": "MessageController_pinMessage",
@@ -7537,6 +7581,31 @@
         "required": [
           "chatId",
           "messageId"
+        ]
+      },
+      "VotePollDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string"
+          },
+          "pollMessageId": {
+            "type": "string",
+            "description": "The poll creation message to vote on."
+          },
+          "options": {
+            "description": "The option TEXTS to select, exactly as they appear on the poll. Replaces the current selection; an empty array clears the vote.",
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "chatId",
+          "pollMessageId",
+          "options"
         ]
       },
       "PinMessageDto": {
