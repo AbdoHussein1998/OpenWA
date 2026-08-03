@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, Query, Res, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, Query, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { MessageService } from './message.service';
@@ -347,6 +347,38 @@ export class MessageController {
     @Param('messageId') messageId: string,
   ) {
     return this.messageService.getMessageReactions(sessionId, chatId, messageId);
+  }
+
+  // Three path segments, so it never collides with `:chatId/history` (two) regardless of
+  // declaration order — Nest/Express match on segment count first.
+  @Get(':chatId/:messageId/media')
+  @ApiOperation({ summary: 'Download a message’s archived media' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'chatId', description: 'Chat ID containing the message' })
+  @ApiParam({ name: 'messageId', description: 'WhatsApp message ID whose media to download' })
+  @ApiResponse({ status: 200, description: 'The archived media bytes, served as an attachment.' })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Nothing archived for this message — archiving was off when it arrived, the message carries no ' +
+      'media, the media was above the archive cap, or retention has since cleared it.',
+  })
+  async getChatMedia(
+    @Param('sessionId') sessionId: string,
+    @Param('chatId') chatId: string,
+    @Param('messageId') messageId: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, mimetype } = await this.messageService.getChatMedia(sessionId, chatId, messageId);
+    // attachment + nosniff together: the mimetype is already reduced to an inert set, and forcing a
+    // download means even a mistake there cannot render as active content on the API origin. The
+    // dashboard renders chat media from the inline copy, so nothing depends on inline display here.
+    res.set({
+      'Content-Type': mimetype,
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'attachment',
+    });
+    return new StreamableFile(buffer);
   }
 
   // ========== Delete Message ==========

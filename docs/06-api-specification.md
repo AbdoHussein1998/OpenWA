@@ -926,6 +926,40 @@ Returns a bare array of `MessageReaction`:
 
 **Errors:** `400` session not active · `401` missing/invalid API key · `500` engine error
 
+#### GET /api/sessions/:sessionId/messages/:chatId/:messageId/media
+
+Download a message's **archived** media bytes.
+
+This is the read side of chat-media archiving, which is **opt-in and off by default**
+(`CHAT_MEDIA_ARCHIVE_ENABLED`). When enabled, each inbound message's media is written to whatever
+backs `StorageService` (local disk or S3) in addition to the inline base64 copy the message row
+already carries, so it stays retrievable after delivery. With archiving off, this route answers
+`404` for every message.
+
+**Auth:** API key
+
+**Path parameters**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| sessionId | string | Session ID |
+| chatId | string | Chat ID containing the message |
+| messageId | string | WhatsApp message ID whose media to download |
+
+**Response** `200` — the raw media bytes as the response body, served as an **attachment**
+(`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`). `Content-Type` is the stored
+mimetype when it is in a conservative inert set (common image/video/audio types) and
+`application/octet-stream` otherwise — a document, or an `image/svg+xml`, is never served as active
+content on the API origin.
+
+**Errors:** `401` missing/invalid API key, or key not scoped to this session · `404`
+`No archived media for this message` — archiving was off when the message arrived, the message
+carries no media, the media was above `CHAT_MEDIA_ARCHIVE_MAX_BYTES`, or
+`CHAT_MEDIA_ARCHIVE_TTL_DAYS` retention has since cleared the file
+
+Note: this is a three-path-segment route, so it never collides with the two-segment
+`GET /messages/:chatId/history` regardless of declaration order.
+
 #### GET /api/sessions/:sessionId/messages/batch/:batchId
 
 Get the processing status and progress of a bulk batch.

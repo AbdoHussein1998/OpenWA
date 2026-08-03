@@ -215,6 +215,17 @@ describe('StatusResource — nested media bodies', () => {
     expect(t.lastCall!.body).toEqual({ video: { url: 'http://vid' }, recipients: ['a@c.us'] });
   });
 
+  it('message media fetches the archived bytes with their content type', async () => {
+    const t = new MockTransport().on('GET', /\/messages\/c1\/m1\/media$/, {
+      text: 'PNG_BYTES',
+      contentType: 'image/png',
+    });
+    const res = await client(t).messages.media('s', 'c1', 'm1');
+    expect(t.lastCall!.method).toBe('GET');
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/messages/c1/m1/media');
+    expect(res.contentType).toBe('image/png');
+  });
+
   it('media fetches the stored status bytes with their content type', async () => {
     const t = new MockTransport().on('GET', /\/status\/w1\/media$/, { text: 'PNG_BYTES', contentType: 'image/png' });
     const res = await client(t).status.media('s', 'w1');

@@ -630,6 +630,13 @@ class StatusMedia(TypedDict):
     contentType: str | None
 
 
+class MessageMedia(TypedDict):
+    """A message's archived media file: raw bytes plus the served content type."""
+
+    data: bytes
+    contentType: str | None
+
+
 class SendTextStatusRequest(TypedDict, total=False):
     # text always required; recipients required on the Baileys engine only.
     text: str

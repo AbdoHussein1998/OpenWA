@@ -1427,4 +1427,61 @@ describe('MessageService', () => {
       expect(repository.delete).not.toHaveBeenCalled();
     });
   });
+  // ── archived chat media (read path) ───────────────────────────────
+
+  describe('getChatMedia', () => {
+    const archived = (mimetype: string) => ({
+      getMedia: jest.fn().mockResolvedValue({ path: 'chat-media/sess-1/abc.bin', mimetype }),
+    });
+    const storage = (buffer = Buffer.from('BYTES')) => ({ getFile: jest.fn().mockResolvedValue(buffer) });
+
+    const build = (archive: unknown, store: unknown): MessageService =>
+      new MessageService(
+        repository as Repository<Message>,
+        sessionService as unknown as SessionService,
+        engines,
+        messageProjector as unknown as MessageProjector,
+        hookManager as HookManager,
+        templateService as unknown as TemplateService,
+        lidMappingStore as unknown as LidMappingStoreService,
+        undefined,
+        archive as never,
+        store as never,
+      );
+
+    it('serves an inert image type unchanged', async () => {
+      const svc = build(archived('image/jpeg'), storage());
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).resolves.toEqual({
+        buffer: Buffer.from('BYTES'),
+        mimetype: 'image/jpeg',
+      });
+    });
+
+    it.each([
+      ['image/svg+xml', 'scriptable despite the image/ prefix'],
+      ['text/html', 'a document a sender chose the type of'],
+      ['application/pdf', 'renderable by the browser plugin'],
+      ['application/javascript', 'outright active content'],
+    ])('downgrades %s to octet-stream (%s)', async mimetype => {
+      const svc = build(archived(mimetype), storage());
+      const { mimetype: served } = await svc.getChatMedia('sess-1', 'c@c.us', 'wa-1');
+      expect(served).toBe('application/octet-stream');
+    });
+
+    it('404s when nothing is archived for the message', async () => {
+      const svc = build({ getMedia: jest.fn().mockResolvedValue(null) }, storage());
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('404s when the row outlived its file', async () => {
+      const enoent = Object.assign(new Error('missing'), { code: 'ENOENT' });
+      const svc = build(archived('image/png'), { getFile: jest.fn().mockRejectedValue(enoent) });
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('does not swallow a genuine storage fault as a 404', async () => {
+      const svc = build(archived('image/png'), { getFile: jest.fn().mockRejectedValue(new Error('S3 500')) });
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).rejects.toThrow('S3 500');
+    });
+  });
 });

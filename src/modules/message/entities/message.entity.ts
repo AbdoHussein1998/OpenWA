@@ -88,6 +88,20 @@ export class Message {
   @Column({ type: jsonColumnType(), nullable: true })
   metadata: Record<string, unknown>;
 
+  /**
+   * Storage key of this message's archived media, or null when nothing was archived — which is the
+   * case for every row while `CHAT_MEDIA_ARCHIVE_ENABLED` is off (the default), for non-media
+   * messages, and for media above the archive cap. Independent of the inline base64 copy in
+   * `metadata.media`, which is unaffected by archiving.
+   */
+  @Column({ nullable: true })
+  mediaPath?: string;
+
+  /** Mimetype of the archived media, so the read endpoint can serve a Content-Type without
+   *  depending on the inline copy. Null whenever `mediaPath` is. */
+  @Column({ nullable: true })
+  mediaMimetype?: string;
+
   @Column({
     type: 'varchar',
     default: MessageStatus.SENT,

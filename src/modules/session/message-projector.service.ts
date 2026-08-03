@@ -14,6 +14,7 @@ import { persistHistoryMessages } from './message-history-projector';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { StatusStoreService } from '../status-store/status-store.service';
+import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
 import { buildIncomingStatus } from '../status-store/incoming-status';
 import type { StatusUpdate } from '../status-store/entities/status-update.entity';
 import {
@@ -100,6 +101,10 @@ export class MessageProjector {
     private readonly lidResolver: SessionLidResolver,
     @Optional()
     private readonly configService?: ConfigService,
+    // Optional so the projector can still be constructed standalone (specs, and any wiring that
+    // predates the archive). Absent simply means inbound media is not archived.
+    @Optional()
+    private readonly chatMediaArchive?: ChatMediaArchiveService,
   ) {
     this.mutationProjector = new MessageMutationProjector(
       this.messageRepository,
@@ -315,6 +320,11 @@ export class MessageProjector {
           { sessionId: id, source: 'SessionService' },
         )
         .catch(() => undefined);
+
+      // Fire-and-forget for the same reason as the hook above: the receive path must not wait on
+      // storage. Gated on `persisted` because the archive updates the row by id, and on a failed
+      // insert there is no row to point at the file. A no-op unless archiving is enabled.
+      void this.chatMediaArchive?.archive(dbMessage).catch(() => undefined);
     }
 
     // Dispatch to webhooks with potentially modified message

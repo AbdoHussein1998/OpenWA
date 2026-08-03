@@ -1,10 +1,12 @@
 package com.rmyndharis.openwa.resources;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.rmyndharis.openwa.ClientConfig;
 import com.rmyndharis.openwa.OpenWAClient;
+import com.rmyndharis.openwa.http.BinaryResponse;
 import com.rmyndharis.openwa.http.HttpMethod;
 import com.rmyndharis.openwa.model.BulkMessageContent;
 import com.rmyndharis.openwa.model.BulkMessageItem;
@@ -25,7 +27,9 @@ import com.rmyndharis.openwa.model.SendPollRequest;
 import com.rmyndharis.openwa.model.SendTemplateRequest;
 import com.rmyndharis.openwa.model.SendTextRequest;
 import com.rmyndharis.openwa.support.MockTransport;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class MessagesResourceTest {
@@ -260,5 +264,18 @@ class MessagesResourceTest {
         client.messages.cancelBatch("s", "b1");
         assertEquals("http://h/api/sessions/s/messages/batch/b1/cancel", tx.lastRequest().url());
         assertEquals(HttpMethod.POST, tx.lastRequest().method());
+    }
+
+    @Test
+    void mediaReturnsArchivedBytes() {
+        tx.respondRaw(
+            200,
+            "PNG_BYTES".getBytes(StandardCharsets.UTF_8),
+            Map.of("content-type", List.of("image/png")));
+        BinaryResponse media = client.messages.media("s", "c1", "m1");
+        assertEquals("http://h/api/sessions/s/messages/c1/m1/media", tx.lastRequest().url());
+        assertEquals(HttpMethod.GET, tx.lastRequest().method());
+        assertArrayEquals("PNG_BYTES".getBytes(StandardCharsets.UTF_8), media.data());
+        assertEquals("image/png", media.contentType());
     }
 }

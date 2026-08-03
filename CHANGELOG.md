@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Chat media can now be archived to the file store and fetched back after delivery, via
+  `GET /api/sessions/:sessionId/messages/:chatId/:messageId/media`.** Media has always been
+  persisted as base64 inline on the message row, which makes it part of every row read and ties its
+  lifetime to the row; there was no way to keep the file itself, put it on S3, or age it out on its
+  own schedule. With `CHAT_MEDIA_ARCHIVE_ENABLED=true` each inbound message's media is additionally
+  written through `StorageService` — local disk or S3, whichever is configured — and the row records
+  where it went (`mediaPath`, `mediaMimetype`; a data-connection migration adds both).
+
+  Opt-in and off by default, because the inline copy is deliberately **kept**: the dashboard renders
+  from it and removing it would change the message response shape. Archiving therefore roughly
+  doubles storage for media under `CHAT_MEDIA_ARCHIVE_MAX_BYTES` (25 MiB default), which is the
+  trade for being able to retrieve, relocate, and expire the file independently.
+  `CHAT_MEDIA_ARCHIVE_TTL_DAYS` (0 = forever) expires the archived **file** and clears the row's
+  pointers; the message row itself is never deleted by retention. An hourly reconciliation sweep
+  reaps archive files no row references, scoped to the `chat-media/` prefix so it can never touch
+  status media sharing the same bucket. Writing is fire-and-forget off the receive path — a storage
+  outage delays nothing and drops no messages. The download is served as an attachment with a
+  conservative inert `Content-Type`, so an archived document (or an `image/svg+xml`) cannot render
+  as active content on the API origin. Available in all five SDKs as `messages.media(...)`.
+
+  With the flag off, behaviour is unchanged except that message responses carry two additional
+  always-null fields, and no sweeps are scheduled.
+
 ### Fixed
 
 - **A crash mid-enqueue can no longer deliver a webhook twice.** The webhook producer passed a job

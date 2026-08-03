@@ -7,11 +7,12 @@ import { PendingMessageReaperService } from './pending-message-reaper.service';
 import { MessageController } from './message.controller';
 import { SessionModule } from '../session/session.module';
 import { TemplateModule } from '../template/template.module';
+import { ChatMediaModule } from '../chat-media/chat-media.module';
 import { Message } from './entities/message.entity';
 import { MessageBatch } from './entities/message-batch.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Message, MessageBatch], 'data'), SessionModule, TemplateModule],
+  imports: [TypeOrmModule.forFeature([Message, MessageBatch], 'data'), SessionModule, TemplateModule, ChatMediaModule],
   controllers: [MessageController],
   providers: [MessageService, BulkMessageService, MessageTypeBackfillService, PendingMessageReaperService],
   exports: [MessageService, BulkMessageService],

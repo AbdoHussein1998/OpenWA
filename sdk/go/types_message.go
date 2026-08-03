@@ -319,3 +319,10 @@ type BatchStatusResponse struct {
 	StartedAt   string               `json:"startedAt,omitempty"`
 	CompletedAt string               `json:"completedAt,omitempty"`
 }
+
+// MessageMedia is a message's archived media: the raw bytes plus the served
+// content type. Non-JSON on the wire, like StatusMedia.
+type MessageMedia struct {
+	Data        []byte
+	ContentType string
+}

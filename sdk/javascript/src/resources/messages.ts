@@ -7,6 +7,7 @@
  */
 
 import { encodeSegment } from '../http.js';
+import type { BinaryResponse } from '../http.js';
 import type { OpenWAClient } from '../client.js';
 import type {
   BatchStatusResponse,
@@ -174,6 +175,17 @@ export class MessagesResource {
     return this.client.request<ReactionRecord[]>({
       method: 'GET',
       path: `/api/sessions/${encodeSegment(sessionId)}/messages/${encodeSegment(chatId)}/${encodeSegment(messageId)}/reactions`,
+    });
+  }
+
+  /**
+   * Fetch a message's archived media bytes. Requires chat-media archiving to have been enabled on
+   * the gateway when the message arrived; 404 otherwise.
+   */
+  media(sessionId: string, chatId: string, messageId: string): Promise<BinaryResponse> {
+    return this.client.requestBytes({
+      method: 'GET',
+      path: `/api/sessions/${encodeSegment(sessionId)}/messages/${encodeSegment(chatId)}/${encodeSegment(messageId)}/media`,
     });
   }
 

@@ -10,6 +10,7 @@ import { EventsGateway } from '../events/events.gateway';
 import { WebhookService } from '../webhook/webhook.service';
 import { HookManager } from '../../core/hooks';
 import { StatusStoreService } from '../status-store/status-store.service';
+import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
 import { SessionLidResolver } from './session-lid-resolver.service';
 import type { IncomingMessage, IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 
@@ -211,6 +212,7 @@ describe('MessageProjector (inbound projection)', () => {
   let hookManager: { execute: jest.Mock };
   let statusStore: { ingest: jest.Mock };
   let lidResolver: { resolveSenderPhone: jest.Mock };
+  let chatMediaArchive: { archive: jest.Mock };
 
   const SESSION_ID = 'session-1';
 
@@ -250,6 +252,7 @@ describe('MessageProjector (inbound projection)', () => {
     hookManager = { execute: jest.fn((_event: string, data: unknown) => Promise.resolve({ continue: true, data })) };
     statusStore = { ingest: jest.fn().mockResolvedValue({ row: {}, created: false }) };
     lidResolver = { resolveSenderPhone: jest.fn().mockResolvedValue(null) };
+    chatMediaArchive = { archive: jest.fn().mockResolvedValue(null) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -265,6 +268,7 @@ describe('MessageProjector (inbound projection)', () => {
         { provide: StatusStoreService, useValue: statusStore },
         { provide: SessionLidResolver, useValue: lidResolver },
         { provide: ConfigService, useValue: { get: jest.fn() } },
+        { provide: ChatMediaArchiveService, useValue: chatMediaArchive },
       ],
     }).compile();
 
@@ -348,6 +352,48 @@ describe('MessageProjector (inbound projection)', () => {
 
       expect(statusStore.ingest).toHaveBeenCalledTimes(1);
       expect(messageRepository.insert).not.toHaveBeenCalled();
+    });
+
+    describe('chat-media archiving', () => {
+      it('hands the persisted row to the archive', async () => {
+        const engine = makeEngine();
+        engines.set(SESSION_ID, engine);
+
+        projector.handleInboundMessage(SESSION_ID, engine, makeIncoming());
+        await new Promise(resolve => setImmediate(resolve));
+
+        // The row, not the engine message: the archive updates by row id, which only the
+        // persisted entity carries.
+        expect(chatMediaArchive.archive).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: SESSION_ID, chatId: '15550001111@c.us' }),
+        );
+      });
+
+      it('does not archive when the insert never landed', async () => {
+        const engine = makeEngine();
+        engines.set(SESSION_ID, engine);
+        // A transient non-unique failure: the row has no id, so there is nothing to point at a file.
+        messageRepository.insert.mockRejectedValueOnce(new Error('SQLITE_BUSY'));
+
+        projector.handleInboundMessage(SESSION_ID, engine, makeIncoming());
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(chatMediaArchive.archive).not.toHaveBeenCalled();
+        // Fail-open is unchanged: a real message is still dispatched on a transient DB fault.
+        expect(webhookService.dispatch).toHaveBeenCalledWith(SESSION_ID, 'message.received', expect.anything());
+      });
+
+      it('keeps delivering when archiving rejects — storage must never break the receive path', async () => {
+        const engine = makeEngine();
+        engines.set(SESSION_ID, engine);
+        chatMediaArchive.archive.mockRejectedValueOnce(new Error('bucket unreachable'));
+
+        projector.handleInboundMessage(SESSION_ID, engine, makeIncoming());
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(webhookService.dispatch).toHaveBeenCalledWith(SESSION_ID, 'message.received', expect.anything());
+        expect(eventsGateway.emitMessage).toHaveBeenCalledWith(SESSION_ID, expect.anything());
+      });
     });
   });
 });

@@ -2061,6 +2061,52 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/messages/{chatId}/{messageId}/media": {
+      "get": {
+        "operationId": "MessageController_getChatMedia",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chatId",
+            "required": true,
+            "in": "path",
+            "description": "Chat ID containing the message",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "required": true,
+            "in": "path",
+            "description": "WhatsApp message ID whose media to download",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The archived media bytes, served as an attachment."
+          },
+          "404": {
+            "description": "Nothing archived for this message — archiving was off when it arrived, the message carries no media, the media was above the archive cap, or retention has since cleared it."
+          }
+        },
+        "summary": "Download a message’s archived media",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/messages/delete": {
       "post": {
         "operationId": "MessageController_deleteMessage",

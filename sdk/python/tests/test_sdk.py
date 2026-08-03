@@ -497,6 +497,14 @@ class TestStatus:
         client.status.send_video("s", {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]})
         assert backend.calls[-1].body == {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]}
 
+    def test_message_media_fetches_archived_bytes(self):
+        backend = MockBackend()
+        backend.fallback = lambda _: httpx.Response(200, content=b"PNG_BYTES", headers={"content-type": "image/png"})
+        res = make_client(backend).messages.media("s", "c1", "m1")
+        assert backend.last_call.method == "GET"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/c1/m1/media"
+        assert res == {"data": b"PNG_BYTES", "contentType": "image/png"}
+
     def test_media_fetches_stored_status_bytes(self):
         backend = MockBackend()
         backend.fallback = lambda _: httpx.Response(200, content=b"PNG_BYTES", headers={"content-type": "image/png"})
