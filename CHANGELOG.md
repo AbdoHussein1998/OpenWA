@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Enforcement and account standing are now in the audit log**, not only in the process log. Four new
+  `AuditAction` members: `session_restricted` / `session_restriction_lifted` when WhatsApp restricts
+  an account or releases it, and `send_pacing_blocked` / `send_breaker_tripped` when pacing refuses a
+  send or the failure breaker opens.
+
+  These are the durable record. Both features keep their live state in memory — correctly, since both
+  re-establish themselves within one connection — which means without these rows there was no way to
+  answer "when was this account restricted, and for how long" after a restart.
+
+  `send_pacing_blocked` is sampled to at most one row per session per minute, carrying the count it
+  stood in for, on the same reasoning as the websocket limiter's `rate_limit_exceeded`: a session that
+  hits its daily cap goes on being refused for the rest of the day, and a row per refused request
+  would make enforcing the limit a flood of its own. A breaker trip is rare and never sampled.
+  Repeat reports of an unchanged restriction are not re-audited either.
+
 - **Opt-in send pacing, to keep a young or struggling account from sending its way into a ban:**
   `SEND_PACING_ENABLED=false` by default, so nothing changes until you turn it on. When enabled, two
   rules can refuse an outbound send:

@@ -2,6 +2,8 @@ import { SessionStatus } from './entities/session.entity';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { EventsGateway } from '../events/events.gateway';
 import { WebhookService } from '../webhook/webhook.service';
 import { HookManager } from '../../core/hooks';
@@ -46,6 +48,8 @@ export interface SessionEngineWiringHost {
   messages: MessageProjector;
   sessionErrors: SessionErrorStore;
   sessionRestrictions: SessionRestrictionStore;
+  /** @Global AuditService; absent only in the standalone constructions specs build. */
+  auditService?: AuditService;
   webhookService: WebhookService;
   eventsGateway: EventsGateway;
   hookManager: HookManager;
@@ -241,6 +245,18 @@ export class SessionEngineEventWiring {
           kind: restriction.kind,
           code: restriction.code,
           expiresAt: restriction.expiresAt ? new Date(restriction.expiresAt).toISOString() : null,
+        });
+        // Audited, unlike the engine-level connect/disconnect transitions next door: this is rare,
+        // it is not reconnect noise, and the store that serves it to the API is in memory — so this
+        // row is the only durable record of when the account was restricted.
+        void host.auditService?.logWarn(AuditAction.SESSION_RESTRICTED, {
+          sessionId: id,
+          metadata: {
+            kind: restriction.kind,
+            code: restriction.code,
+            expiresAt: restriction.expiresAt ? new Date(restriction.expiresAt).toISOString() : null,
+          },
+          errorMessage: `WhatsApp restricted this account: ${restriction.kind} (${restriction.code})`,
         });
       },
       onError: (reason: string): void => {
