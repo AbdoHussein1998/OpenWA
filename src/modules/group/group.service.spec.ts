@@ -6,11 +6,11 @@ import { EngineNotSupportedError } from '../../common/errors/engine-not-supporte
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { SendPacingService } from '../message/send-pacing.service';
 
-describe('GroupService', () => {
-  /** Pacing is off by default; its own spec covers the governor, so here it must simply not refuse. */
-  const inertPacing = (): SendPacingService =>
-    ({ assertReachoutAllowed: jest.fn().mockResolvedValue(undefined) }) as unknown as SendPacingService;
+/** Pacing is off by default; its own spec covers the governor, so here it must simply not refuse. */
+const inertPacing = (): SendPacingService =>
+  ({ assertReachoutAllowed: jest.fn().mockResolvedValue(undefined) }) as unknown as SendPacingService;
 
+describe('GroupService', () => {
   const makeService = (engine: Partial<IWhatsAppEngine> | undefined, pacing: SendPacingService = inertPacing()) => {
     const engines = new EngineRegistry();
     if (engine) engines.set('s1', engine as IWhatsAppEngine);
@@ -212,5 +212,38 @@ describe('GroupService', () => {
       ).rejects.toBeInstanceOf(EngineRefusedError);
       expect(engine.setGroupMessagesAdminsOnly).not.toHaveBeenCalled();
     });
+  });
+});
+
+// A preview must never look like membership: it reports a count, never a participant list, and it
+// changes nothing about the account.
+describe('GroupService join-info preview', () => {
+  const makeService = (engine: Partial<IWhatsAppEngine>) => {
+    const engines = new EngineRegistry();
+    engines.set('s1', engine as IWhatsAppEngine);
+    return new GroupService(engines, inertPacing());
+  };
+
+  it('delegates the trimmed code to the engine', async () => {
+    const getGroupJoinInfo = jest.fn().mockResolvedValue({ id: 'g@g.us', name: 'Team' });
+
+    await makeService({ getGroupJoinInfo }).getGroupJoinInfo('s1', '  ABC123  ');
+
+    expect(getGroupJoinInfo).toHaveBeenCalledWith('ABC123');
+  });
+
+  // An empty code would otherwise reach the engine and come back as a confusing not-found rather
+  // than the client error it plainly is.
+  it.each(['', '   ', undefined])('rejects a missing code (%p) before reaching the engine', code => {
+    const getGroupJoinInfo = jest.fn();
+
+    expect(() => makeService({ getGroupJoinInfo }).getGroupJoinInfo('s1', code as string)).toThrow(BadRequestException);
+    expect(getGroupJoinInfo).not.toHaveBeenCalled();
+  });
+
+  it('throws 400 when the session is not started', () => {
+    expect(() => new GroupService(new EngineRegistry(), inertPacing()).getGroupJoinInfo('s1', 'ABC')).toThrow(
+      BadRequestException,
+    );
   });
 });

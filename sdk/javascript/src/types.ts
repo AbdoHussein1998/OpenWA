@@ -125,6 +125,20 @@ export interface MuteChannelRequest {
   mute: boolean;
 }
 
+/**
+ * What an invite code discloses about a group before joining. Not `GroupInfo`: a non-member has no
+ * participant list, only a count, and only when WhatsApp discloses one.
+ */
+export interface GroupJoinInfo {
+  id: string;
+  name: string;
+  description?: string;
+  owner?: string;
+  /** Unix seconds. */
+  createdAt?: number;
+  participantCount?: number;
+}
+
 export interface CreateSessionRequest {
   /** Alphanumeric + hyphens, 3–50 chars. */
   name: string;

@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Preview a group before joining it:** `GET /api/sessions/:sessionId/groups/join-info?code=…`, in
+  all five SDKs. Supported on both engines. Read-only, so it is safe to call on a code from an
+  untrusted source — which is the point, since it is the step you want *before* `POST /groups/join`.
+
+  The response is its own shape rather than the usual group info: a non-member has no participant
+  list, only a count, and only when WhatsApp discloses one. Reusing the member-facing shape would
+  have forced an empty participant array that reads as "this group has no members".
+
+  Only `id` and `name` are guaranteed. Everything else is omitted when the engine did not report it,
+  never defaulted — `whatsapp-web.js` returns an untyped object with no contract, and a
+  `createdAt: 0` would claim the group was created at the epoch. A response carrying no group id at
+  all is a refused invite, so it surfaces as `404` rather than a half-populated success.
+
 - **Call outcomes: `call.accepted`, `call.rejected`, `call.missed`** — webhook and socket events for
   what happened to a ringing call, correlated to the preceding `call.received` by `callId`. Modelled
   in the JavaScript, Python, Go and Java SDKs.

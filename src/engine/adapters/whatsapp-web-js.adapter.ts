@@ -41,6 +41,7 @@ import {
   ChatState,
   LabelInput,
   GroupEvent,
+  GroupJoinInfo,
   IncomingCallEvent,
   AccountRestriction,
 } from '../interfaces/whatsapp-engine.interface';
@@ -1580,6 +1581,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   }
 
   // Join Group via Invite Code
+  getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo> {
+    return this.groups.getGroupJoinInfo(inviteCode);
+  }
+
   joinGroupViaInviteCode(inviteCode: string): Promise<string> {
     return this.groups.joinGroupViaInviteCode(inviteCode);
   }

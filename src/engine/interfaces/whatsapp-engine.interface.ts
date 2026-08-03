@@ -241,6 +241,24 @@ export interface GroupInfo {
   linkedParentJID?: string | null;
 }
 
+/**
+ * What an invite code discloses about a group BEFORE joining it.
+ *
+ * Deliberately not `GroupInfo`: that carries a participant list, and a non-member has no such list —
+ * WhatsApp discloses at most a count. Reusing it would force an empty array that reads as "this
+ * group has no members", which is a different and wrong claim.
+ */
+export interface GroupJoinInfo {
+  id: string;
+  name: string;
+  description?: string;
+  owner?: string;
+  /** Unix seconds the group was created, when the engine reports it. */
+  createdAt?: number;
+  /** How many members, when disclosed. There is no list to give — you are not in the group yet. */
+  participantCount?: number;
+}
+
 export interface ContactCard {
   name: string;
   number: string;
@@ -818,6 +836,11 @@ export interface IWhatsAppEngine {
    * Resolves with the joined group's neutral id (`<id>@g.us`).
    */
   joinGroupViaInviteCode(inviteCode: string): Promise<string>;
+  /**
+   * What an invite code discloses about a group, without joining it. Read-only: nothing about the
+   * account's membership changes, which is what makes it safe to call on an untrusted code.
+   */
+  getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo>;
   /** Set the "only admins can send messages" group setting (WhatsApp announce). */
   setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
   /** Set the "only admins can edit group info" group setting (WhatsApp locked/restrict). */

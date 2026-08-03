@@ -87,6 +87,22 @@ class MuteChannelRequest(TypedDict):
     mute: bool
 
 
+class GroupJoinInfo(TypedDict, total=False):
+    """What an invite code discloses about a group before joining.
+
+    Not GroupInfo: a non-member has no participant list, only a count, and only when WhatsApp
+    discloses one.
+    """
+
+    id: str
+    name: str
+    description: str
+    owner: str
+    # Unix seconds.
+    createdAt: int
+    participantCount: int
+
+
 # ── Session ───────────────────────────────────────────────────────
 
 

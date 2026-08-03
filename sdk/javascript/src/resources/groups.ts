@@ -10,6 +10,7 @@ import type { OpenWAClient } from '../client.js';
 import type {
   CreateGroupRequest,
   GroupInfo,
+  GroupJoinInfo,
   GroupSettingsResponse,
   GroupSummary,
   InviteCodeResponse,
@@ -51,6 +52,21 @@ export class GroupsResource {
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/groups`,
       body,
+    });
+  }
+
+  /**
+   * Preview a group from its invite code, WITHOUT joining. Read-only, so it is safe to call on a
+   * code from an untrusted source.
+   *
+   * There is no participant list — the account is not a member — only a count, and only when
+   * WhatsApp discloses one. Fields the engine did not report are absent rather than zeroed.
+   */
+  joinInfo(sessionId: string, code: string): Promise<GroupJoinInfo> {
+    return this.client.request<GroupJoinInfo>({
+      method: 'GET',
+      path: `/api/sessions/${encodeSegment(sessionId)}/groups/join-info`,
+      query: { code },
     });
   }
 

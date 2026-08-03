@@ -90,6 +90,18 @@ export class GroupService {
     return this.getEngine(sessionId).revokeGroupInviteCode(groupId);
   }
 
+  /**
+   * Preview a group from an invite code. The code is required rather than optional-with-a-default:
+   * an empty one would reach the engine and come back as a confusing not-found instead of the
+   * client error it is.
+   */
+  getGroupJoinInfo(sessionId: string, inviteCode: string) {
+    if (!inviteCode?.trim()) {
+      throw new BadRequestException('An invite code is required');
+    }
+    return this.getEngine(sessionId).getGroupJoinInfo(inviteCode.trim());
+  }
+
   joinGroupViaInviteCode(sessionId: string, inviteCode: string) {
     return this.getEngine(sessionId).joinGroupViaInviteCode(inviteCode);
   }

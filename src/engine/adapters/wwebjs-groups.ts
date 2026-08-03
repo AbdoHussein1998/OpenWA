@@ -2,6 +2,7 @@ import { type Client } from 'whatsapp-web.js';
 import {
   Group,
   GroupInfo,
+  GroupJoinInfo,
   GroupMemberAddMode,
   MediaInput,
   GroupParticipant,
@@ -325,6 +326,46 @@ export class WwebjsGroups {
     const newCode = await (chat as unknown as GroupChat).revokeInvite();
     this.host.logger.log(`Revoked invite code for group ${groupId}, new code generated`);
     return String(newCode);
+  }
+
+  /**
+   * Preview a group from its invite code.
+   *
+   * `Client.getInviteInfo` is typed `Promise<object>` and forwards whatever WA Web's
+   * `queryGroupInvite` returns, so there is no contract to rely on — every field is read
+   * defensively and omitted when absent rather than defaulted into something that reads as fact.
+   * The one thing that IS required is an id: without it there is no group to describe, which means
+   * the invite was refused (invalid, expired or revoked) rather than that a field is missing.
+   */
+  async getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo> {
+    this.host.ensureReady();
+    const raw = (await this.client().getInviteInfo(inviteCode)) as {
+      id?: { _serialized?: string } | string;
+      subject?: string;
+      desc?: string;
+      owner?: { _serialized?: string } | string;
+      creation?: number;
+      size?: number;
+      participants?: unknown[];
+    } | null;
+
+    const id = typeof raw?.id === 'string' ? raw.id : raw?.id?._serialized;
+    if (!id) {
+      throw new GroupNotFoundError(inviteCode);
+    }
+    const owner = typeof raw?.owner === 'string' ? raw.owner : raw?.owner?._serialized;
+    // `size` is the disclosed count; a participants array is used only as a fallback for builds that
+    // send one instead. Neither is synthesised when both are missing.
+    const count = typeof raw?.size === 'number' ? raw.size : raw?.participants?.length;
+
+    return {
+      id,
+      name: String(raw?.subject ?? ''),
+      ...(raw?.desc ? { description: String(raw.desc) } : {}),
+      ...(owner ? { owner } : {}),
+      ...(typeof raw?.creation === 'number' ? { createdAt: raw.creation } : {}),
+      ...(typeof count === 'number' ? { participantCount: count } : {}),
+    };
   }
 
   async joinGroupViaInviteCode(inviteCode: string): Promise<string> {
