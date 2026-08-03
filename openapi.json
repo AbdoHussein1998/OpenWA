@@ -2145,6 +2145,94 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/messages/pin": {
+      "post": {
+        "operationId": "MessageController_pinMessage",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinMessageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Message pinned"
+          },
+          "400": {
+            "description": "Session not active, or durationSeconds is not one of 86400 / 604800 / 2592000"
+          },
+          "403": {
+            "description": "The engine refused the pin — in a group only admins may pin"
+          },
+          "404": {
+            "description": "Message not found in the chat"
+          }
+        },
+        "summary": "Pin a message in its chat",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/messages/unpin": {
+      "post": {
+        "operationId": "MessageController_unpinMessage",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnpinMessageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Message unpinned"
+          },
+          "400": {
+            "description": "Session not active"
+          },
+          "403": {
+            "description": "The engine refused the unpin — in a group only admins may unpin"
+          },
+          "404": {
+            "description": "Message not found in the chat"
+          }
+        },
+        "summary": "Remove a message’s pin",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/messages/edit": {
       "post": {
         "operationId": "MessageController_edit",
@@ -7107,6 +7195,46 @@
           "forEveryone": {
             "type": "boolean",
             "description": "Delete for everyone (default true)"
+          }
+        },
+        "required": [
+          "chatId",
+          "messageId"
+        ]
+      },
+      "PinMessageDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string"
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "durationSeconds": {
+            "type": "number",
+            "description": "Pin duration in seconds: 86400 (24h), 604800 (7d) or 2592000 (30d). Defaults to 24h.",
+            "enum": [
+              86400,
+              604800,
+              2592000
+            ],
+            "default": 86400
+          }
+        },
+        "required": [
+          "chatId",
+          "messageId"
+        ]
+      },
+      "UnpinMessageDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string"
+          },
+          "messageId": {
+            "type": "string"
           }
         },
         "required": [

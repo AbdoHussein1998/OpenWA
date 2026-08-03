@@ -1433,6 +1433,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   }
 
   // Delete Message
+  pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {
+    return this.messaging.pinMessage(chatId, messageId, durationSeconds);
+  }
+
+  unpinMessage(chatId: string, messageId: string): Promise<void> {
+    return this.messaging.unpinMessage(chatId, messageId);
+  }
+
   deleteMessage(chatId: string, messageId: string, forEveryone: boolean = true): Promise<void> {
     return this.messaging.deleteMessage(chatId, messageId, forEveryone);
   }

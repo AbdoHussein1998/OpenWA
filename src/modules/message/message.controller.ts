@@ -15,6 +15,8 @@ import {
   ReactMessageDto,
   DeleteMessageDto,
   EditMessageDto,
+  PinMessageDto,
+  UnpinMessageDto,
 } from './dto/message-actions.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
@@ -402,6 +404,40 @@ export class MessageController {
   ): Promise<{ success: boolean }> {
     await this.messageService.deleteMessage(sessionId, dto);
     return { success: true };
+  }
+
+  // ========== Pin / Unpin ==========
+
+  @Post('pin')
+  @HttpCode(HttpStatus.OK)
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Pin a message in its chat' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Message pinned' })
+  @ApiResponse({
+    status: 400,
+    description: 'Session not active, or durationSeconds is not one of 86400 / 604800 / 2592000',
+  })
+  @ApiResponse({ status: 403, description: 'The engine refused the pin — in a group only admins may pin' })
+  @ApiResponse({ status: 404, description: 'Message not found in the chat' })
+  async pinMessage(@Param('sessionId') sessionId: string, @Body() dto: PinMessageDto): Promise<{ success: boolean }> {
+    return this.messageService.pinMessage(sessionId, dto);
+  }
+
+  @Post('unpin')
+  @HttpCode(HttpStatus.OK)
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Remove a message’s pin' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Message unpinned' })
+  @ApiResponse({ status: 400, description: 'Session not active' })
+  @ApiResponse({ status: 403, description: 'The engine refused the unpin — in a group only admins may unpin' })
+  @ApiResponse({ status: 404, description: 'Message not found in the chat' })
+  async unpinMessage(
+    @Param('sessionId') sessionId: string,
+    @Body() dto: UnpinMessageDto,
+  ): Promise<{ success: boolean }> {
+    return this.messageService.unpinMessage(sessionId, dto);
   }
 
   // ========== Edit Message ==========

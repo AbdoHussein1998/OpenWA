@@ -178,6 +178,21 @@ export interface DeleteMessageRequest {
   forEveryone?: boolean;
 }
 
+/** Pin windows WhatsApp recognises, in seconds: 24h, 7d, 30d. */
+export type PinDurationSeconds = 86400 | 604800 | 2592000;
+
+export interface PinMessageRequest {
+  chatId: Jid;
+  messageId: string;
+  /** Defaults to 86400 (24h) server-side. */
+  durationSeconds?: PinDurationSeconds;
+}
+
+export interface UnpinMessageRequest {
+  chatId: Jid;
+  messageId: string;
+}
+
 export interface EditMessageRequest {
   chatId: Jid;
   messageId: string;

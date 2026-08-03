@@ -695,6 +695,15 @@ export interface IWhatsAppEngine {
    */
   editMessage(chatId: string, messageId: string, body: string): Promise<MessageResult>;
   /**
+   * Pin a message in its chat for a bounded window. WhatsApp only recognises three durations —
+   * 86400 (24h), 604800 (7d), 2592000 (30d) — so `durationSeconds` must be one of those; it is
+   * required rather than defaulted here so neither adapter has to invent a value. In a group only
+   * admins may pin; the engines surface their own refusal.
+   */
+  pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void>;
+  /** Remove a message's pin. Unpinning takes no duration — an existing pin's window is irrelevant. */
+  unpinMessage(chatId: string, messageId: string): Promise<void>;
+  /**
    * Read a chat's recent messages, newest first. When `includeMedia` downloads blobs, an optional
    * `mediaMaxBytes` tightens the declared-size pre-gate below the global MEDIA_DOWNLOAD_MAX_BYTES —
    * the status seed uses it to skip downloads the store would discard as over-cap anyway.

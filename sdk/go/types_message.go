@@ -326,3 +326,17 @@ type MessageMedia struct {
 	Data        []byte
 	ContentType string
 }
+
+// PinMessageRequest pins a message in its chat. DurationSeconds must be 86400
+// (24h), 604800 (7d) or 2592000 (30d); omit it to take the server default of 24h.
+type PinMessageRequest struct {
+	ChatID          string `json:"chatId"`
+	MessageID       string `json:"messageId"`
+	DurationSeconds int    `json:"durationSeconds,omitempty"`
+}
+
+// UnpinMessageRequest removes a message's pin.
+type UnpinMessageRequest struct {
+	ChatID    string `json:"chatId"`
+	MessageID string `json:"messageId"`
+}

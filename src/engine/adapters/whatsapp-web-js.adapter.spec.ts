@@ -3532,6 +3532,65 @@ describe('editMessage', () => {
   });
 });
 
+describe('pinMessage / unpinMessage', () => {
+  const ready = (client: unknown): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = client;
+    return adapter;
+  };
+  const chatWith = (messages: unknown[]) => ({
+    getChatById: jest.fn().mockResolvedValue({ fetchMessages: jest.fn().mockResolvedValue(messages) }),
+  });
+
+  it('pins a message found by _serialized id, passing the duration through', async () => {
+    const pin = jest.fn().mockResolvedValue(true);
+    const adapter = ready(chatWith([{ id: { _serialized: 'M1', id: 'RAW1' }, pin }]));
+    await adapter.pinMessage('628@c.us', 'M1', 604800);
+    expect(pin).toHaveBeenCalledWith(604800);
+  });
+
+  it('also matches the bare id.id fallback (like deleteMessage)', async () => {
+    const pin = jest.fn().mockResolvedValue(true);
+    const adapter = ready(chatWith([{ id: { _serialized: 'true_628@c.us_RAW1', id: 'RAW1' }, pin }]));
+    await adapter.pinMessage('628@c.us', 'RAW1', 86400);
+    expect(pin).toHaveBeenCalledWith(86400);
+  });
+
+  it('treats a false pin result as a refusal (EngineRefusedError, 403), not a phantom success', async () => {
+    // The page-side helper returns false for every refusal — non-admin, unresolvable message, or a
+    // duration WhatsApp will not accept — so a truthiness check is the ONLY signal there is.
+    const pin = jest.fn().mockResolvedValue(false);
+    const adapter = ready(chatWith([{ id: { _serialized: 'M1' }, pin }]));
+    const err = await adapter.pinMessage('628@c.us', 'M1', 86400).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EngineRefusedError);
+    expect((err as Error).message).toMatch(/was rejected/);
+  });
+
+  it('throws MessageNotFoundError when the message is outside the fetch window', async () => {
+    const adapter = ready(chatWith([]));
+    await expect(adapter.pinMessage('628@c.us', 'GONE', 86400)).rejects.toBeInstanceOf(MessageNotFoundError);
+  });
+
+  it('throws MessageNotFoundError when the chat id itself is unknown (getChatById resolves undefined)', async () => {
+    const adapter = ready({ getChatById: jest.fn().mockResolvedValue(undefined) });
+    await expect(adapter.pinMessage('nobody@c.us', 'M1', 86400)).rejects.toBeInstanceOf(MessageNotFoundError);
+  });
+
+  it('unpins without passing any duration', async () => {
+    const unpin = jest.fn().mockResolvedValue(true);
+    const adapter = ready(chatWith([{ id: { _serialized: 'M1' }, unpin }]));
+    await adapter.unpinMessage('628@c.us', 'M1');
+    expect(unpin).toHaveBeenCalledWith();
+  });
+
+  it('treats a false unpin result as a refusal too', async () => {
+    const unpin = jest.fn().mockResolvedValue(false);
+    const adapter = ready(chatWith([{ id: { _serialized: 'M1' }, unpin }]));
+    await expect(adapter.unpinMessage('628@c.us', 'M1')).rejects.toBeInstanceOf(EngineRefusedError);
+  });
+});
+
 describe('LID mapping persistence to LidMappingStore (#583 R3)', () => {
   const readyWithStore = (client: unknown, lidMappingStore: unknown): WhatsAppWebJsAdapter => {
     const adapter = new WhatsAppWebJsAdapter({

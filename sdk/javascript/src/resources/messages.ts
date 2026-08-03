@@ -20,6 +20,7 @@ import type {
   MessageHistoryQuery,
   MessageListResponse,
   MessageResponse,
+  PinMessageRequest,
   ReactionRecord,
   ReactMessageRequest,
   ReplyMessageRequest,
@@ -28,6 +29,7 @@ import type {
   SendLocationRequest,
   SendAudioRequest,
   SendMediaRequest,
+  UnpinMessageRequest,
   SendPollRequest,
   SendTemplateRequest,
   SendTextRequest,
@@ -175,6 +177,27 @@ export class MessagesResource {
     return this.client.request<ReactionRecord[]>({
       method: 'GET',
       path: `/api/sessions/${encodeSegment(sessionId)}/messages/${encodeSegment(chatId)}/${encodeSegment(messageId)}/reactions`,
+    });
+  }
+
+  /**
+   * Pin a message in its chat. `durationSeconds` must be 86400 (24h), 604800 (7d) or 2592000
+   * (30d); it defaults to 24h server-side. In a group only admins may pin.
+   */
+  pin(sessionId: string, body: PinMessageRequest): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'POST',
+      path: `/api/sessions/${encodeSegment(sessionId)}/messages/pin`,
+      body,
+    });
+  }
+
+  /** Remove a message's pin. */
+  unpin(sessionId: string, body: UnpinMessageRequest): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'POST',
+      path: `/api/sessions/${encodeSegment(sessionId)}/messages/unpin`,
+      body,
     });
   }
 
