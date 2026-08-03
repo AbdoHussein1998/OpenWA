@@ -315,7 +315,8 @@
       "phone": "电话",
       "sessionId": "会话 ID",
       "lastActive": "上次活跃",
-      "error": "错误"
+      "error": "错误",
+      "restriction": "限制"
     },
     "forceKill": {
       "title": "终止卡死的会话",
@@ -360,6 +361,12 @@
     "start": {
       "teardownPendingTitle": "会话启动中",
       "teardownPending": "此会话的凭据拆除仍在处理中。请稍候再试。"
+    },
+    "restriction": {
+      "reachout_timelock": "新会话被阻止",
+      "tos_block": "被 WhatsApp 封禁",
+      "proxy_block": "连接被阻止",
+      "until": "至 {{date}}"
     }
   },
   "webhooks": {

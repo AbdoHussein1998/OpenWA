@@ -49,6 +49,27 @@ export interface Session {
   /** Human-readable reason carried while the status is 'failed' (terminal failure) or
    * 'action_required' (operator must intervene, e.g. acknowledge an onboarding modal). */
   lastError?: string | null;
+  /**
+   * A limit WhatsApp itself has placed on the account, or null when there is none. Distinct from
+   * `lastError`, which describes a fault on the gateway's side of the link. Optional only because a
+   * dashboard can be served by a gateway that predates the field.
+   */
+  restriction?: AccountRestriction | null;
+}
+
+/**
+ * A restriction WhatsApp has in force on a session's account.
+ *
+ * `reachout_timelock` leaves the session connected and existing chats working — only starting new
+ * conversations is blocked — which is why it can appear on a perfectly `ready` session. `tos_block`
+ * and `proxy_block` refuse the connection itself and so cannot.
+ */
+export interface AccountRestriction {
+  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block';
+  /** The engine's own token for the cause, verbatim (`TOS_BLOCK`, `BIZ_QUALITY`, …). */
+  code: string;
+  /** ISO timestamp when enforcement ends, when WhatsApp states one. */
+  expiresAt?: string | null;
 }
 
 export interface SessionStats {

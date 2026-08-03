@@ -322,7 +322,8 @@
       "phone": "טלפון",
       "sessionId": "מזהה Session",
       "lastActive": "פעילות אחרונה",
-      "error": "שגיאה"
+      "error": "שגיאה",
+      "restriction": "הגבלה"
     },
     "forceKill": {
       "title": "סגירת סשן תקוע",
@@ -367,6 +368,12 @@
     "start": {
       "teardownPendingTitle": "הפעלת סשן",
       "teardownPending": "פירוק אישורים לסשן זה עדיין מתבצע. המתן רגע ונסה שוב."
+    },
+    "restriction": {
+      "reachout_timelock": "צ׳אטים חדשים חסומים",
+      "tos_block": "נחסם על ידי WhatsApp",
+      "proxy_block": "החיבור חסום",
+      "until": "עד {{date}}"
     }
   },
   "webhooks": {

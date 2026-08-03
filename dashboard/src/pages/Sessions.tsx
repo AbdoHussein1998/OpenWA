@@ -15,7 +15,7 @@ import {
   Skull,
   Unlink,
 } from 'lucide-react';
-import { sessionApi, type Session } from '../services/api';
+import { sessionApi, type Session, type AccountRestriction } from '../services/api';
 import { queryKeys } from '../hooks/queries';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import {
@@ -30,12 +30,26 @@ import { canCreateSession, filterSessions, isValidPairingPhone, sessionNameIssue
 import { useToast } from '../hooks/useToast';
 import { useRole } from '../hooks/useRole';
 import { useSessionPairing } from '../hooks/useSessionPairing';
+import type { TFunction } from 'i18next';
 import { useSessionFeed } from '../hooks/useSessionFeed';
 import { useSessionCreateForm } from '../hooks/useSessionCreateForm';
 import { PageHeader } from '../components/PageHeader';
 import { CustomSelect } from '../components/CustomSelect';
 import { Modal } from '../components/Modal';
 import './Sessions.css';
+
+/**
+ * The hover title for a restriction: the engine's own cause token, plus when enforcement ends if
+ * WhatsApp said. The visible label stays the translated kind — `code` is a raw upstream token
+ * (`TOS_BLOCK`, `BIZ_QUALITY`) that is searchable but not readable, so it belongs in the tooltip.
+ */
+function restrictionTitle(restriction: AccountRestriction, t: TFunction): string {
+  const parts = [t(`sessions.restriction.${restriction.kind}`), restriction.code];
+  if (restriction.expiresAt) {
+    parts.push(t('sessions.restriction.until', { date: new Date(restriction.expiresAt).toLocaleString() }));
+  }
+  return parts.join(' · ');
+}
 
 export function Sessions() {
   const { t } = useTranslation();
@@ -743,6 +757,17 @@ export function Sessions() {
                       <span className="info-label">{t('sessions.card.error')}</span>
                       <span className="info-value error-text" title={session.lastError}>
                         {session.lastError}
+                      </span>
+                    </div>
+                  ) : null}
+                  {/* Not gated on status, unlike the error above: a reachout timelock applies to a
+                      session that is perfectly `ready`, and hiding it behind a status would make it
+                      invisible exactly when the operator needs it. */}
+                  {session.restriction ? (
+                    <div className="info-row session-restriction">
+                      <span className="info-label">{t('sessions.card.restriction')}</span>
+                      <span className="info-value restriction-text" title={restrictionTitle(session.restriction, t)}>
+                        {t(`sessions.restriction.${session.restriction.kind}`)}
                       </span>
                     </div>
                   ) : null}

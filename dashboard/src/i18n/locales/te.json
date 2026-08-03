@@ -315,7 +315,8 @@
       "phone": "ఫోన్",
       "sessionId": "సెషన్ ID",
       "lastActive": "చివరిసారి యాక్టివ్",
-      "error": "లోపం"
+      "error": "లోపం",
+      "restriction": "ఆంక్ష"
     },
     "forceKill": {
       "title": "నిలిచిపోయిన సెషన్‌ను ఆపండి",
@@ -360,6 +361,12 @@
     "start": {
       "teardownPendingTitle": "సెషన్ ప్రారంభం",
       "teardownPending": "ఈ సెషన్ యొక్క ఆధారాల విచ్ఛిన్నం ఇంకా స్థిరపడుతోంది. కొద్దిసేపు ఆగి మళ్లీ ప్రయత్నించండి."
+    },
+    "restriction": {
+      "reachout_timelock": "కొత్త చాట్‌లు నిరోధించబడ్డాయి",
+      "tos_block": "WhatsApp ద్వారా నిరోధించబడింది",
+      "proxy_block": "కనెక్షన్ నిరోధించబడింది",
+      "until": "{{date}} వరకు"
     }
   },
   "webhooks": {
