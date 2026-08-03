@@ -10,6 +10,8 @@ import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { resolveEngineInitTimeoutMs } from '../../engine/engine-init-timeout';
 import { StatusStoreService } from '../status-store/status-store.service';
 import { IWhatsAppEngine, AccountRestriction } from '../../engine/interfaces/whatsapp-engine.interface';
@@ -222,6 +224,10 @@ export class SessionEngineLifecycle {
     // service degrades to today's behaviour if it is ever constructed without the (global) LoggerModule.
     @Optional()
     private readonly shutdownService?: ShutdownService,
+    // @Optional so the existing spec constructions keep working. AuditModule is @Global, so a
+    // running gateway always has it.
+    @Optional()
+    private readonly auditService?: AuditService,
   ) {
     // The fence Maps are handed over BY REFERENCE: they stay lifecycle fields (specs poke them
     // through the lifecycle), while the fence logic operates on the same instances.
@@ -278,6 +284,7 @@ export class SessionEngineLifecycle {
       messages: this.messages,
       sessionErrors: this.sessionErrors,
       sessionRestrictions: this.sessionRestrictions,
+      auditService: this.auditService,
       webhookService: this.webhookService,
       eventsGateway: this.eventsGateway,
       hookManager: this.hookManager,
@@ -637,6 +644,10 @@ export class SessionEngineLifecycle {
       kind: lifted.kind,
       code: lifted.code,
       expiresAt: null,
+    });
+    void this.auditService?.logInfo(AuditAction.SESSION_RESTRICTION_LIFTED, {
+      sessionId: id,
+      metadata: { kind: lifted.kind, code: lifted.code },
     });
   }
 

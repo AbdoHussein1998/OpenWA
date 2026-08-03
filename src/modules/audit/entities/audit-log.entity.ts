@@ -26,10 +26,23 @@ export enum AuditAction {
   SESSION_QR_GENERATED = 'session_qr_generated',
   SESSION_CONNECTED = 'session_connected',
   SESSION_DISCONNECTED = 'session_disconnected',
+  // WhatsApp's own judgement of the account, not our connection to it. Unlike the two above these
+  // ARE audited: they are rare, they are not reconnect noise, and the in-memory store that serves
+  // them to the API does not survive a restart — so the audit log is the only durable record of when
+  // an account was restricted and for how long.
+  SESSION_RESTRICTED = 'session_restricted',
+  SESSION_RESTRICTION_LIFTED = 'session_restriction_lifted',
 
   // Message events
   MESSAGE_SENT = 'message_sent',
   MESSAGE_FAILED = 'message_failed',
+  // Send-pacing enforcement. SEND_PACING_BLOCKED is sampled per session (at most one row per
+  // session per minute, carrying the suppressed count) on the RATE_LIMIT_EXCEEDED precedent: a
+  // session that hits its daily cap keeps being refused for the rest of the day, and one row per
+  // refused send would make enforcing the limit an audit flood of its own. A breaker trip is rare
+  // and alert-worthy, so it is never sampled.
+  SEND_PACING_BLOCKED = 'send_pacing_blocked',
+  SEND_BREAKER_TRIPPED = 'send_breaker_tripped',
 
   // Webhook events
   WEBHOOK_CREATED = 'webhook_created',

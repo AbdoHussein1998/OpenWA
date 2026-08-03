@@ -21,6 +21,7 @@ interface Harness {
   service: SendPacingService;
   count: jest.Mock;
   findOne: jest.Mock;
+  audit: { logWarn: jest.Mock; logInfo: jest.Mock };
 }
 
 const build = (
@@ -34,13 +35,19 @@ const build = (
     get: (key: string) =>
       key === 'sendPacing' ? { ...computeSendPacingConfig({}), enabled: true, ...config } : undefined,
   } as unknown as ConfigService;
+  const audit = { logWarn: jest.fn().mockResolvedValue(null), logInfo: jest.fn().mockResolvedValue(null) };
   const service = new SendPacingService(
     { count } as unknown as Repository<Message>,
     { findOne } as unknown as Repository<Session>,
     configService,
+    audit as unknown as ConstructorParameters<typeof SendPacingService>[3],
   );
-  return { service, count, findOne };
+  return { service, count, findOne, audit };
 };
+
+/** The (action, context) pair of one audit call, typed so assertions do not fall back to `any`. */
+const auditCall = (mock: jest.Mock, index = 0): [string, { sessionId?: string; metadata?: Record<string, unknown> }] =>
+  mock.mock.calls[index] as [string, { sessionId?: string; metadata?: Record<string, unknown> }];
 
 /** Assert the throw is the pacing 429 and hand back its body for further checks. */
 const expectPacingRefusal = async (promise: Promise<unknown>): Promise<Record<string, unknown>> => {
@@ -363,5 +370,76 @@ describe('send paths consult the governor', () => {
     expect(pacing.assertSendAllowed).toHaveBeenCalledWith('s1');
     expect(hookManager.execute).not.toHaveBeenCalledWith('message:sending', expect.anything(), expect.anything());
     expect(engine.sendTextMessage).not.toHaveBeenCalled();
+  });
+});
+
+// The store that serves pacing state to the API is in memory, so the audit log is the durable
+// record of enforcement. It has to stay accurate without becoming a flood of its own: a session that
+// hits its daily cap goes on being refused for the rest of the day.
+describe('SendPacingService audit trail', () => {
+  beforeEach(() => resetSendPacingRefusals());
+
+  it('records a breaker trip without sampling — it is rare and alert-worthy', () => {
+    const { service, audit } = build({ breakerThreshold: 2 });
+
+    service.recordSendFailure('s1');
+    service.recordSendFailure('s1');
+
+    const [action, context] = auditCall(audit.logWarn);
+    expect(action).toBe('send_breaker_tripped');
+    expect(context.sessionId).toBe('s1');
+    expect(context.metadata).toMatchObject({ consecutiveFailures: 2 });
+  });
+
+  it('records a trip once per episode, not once per subsequent failure', () => {
+    const { service, audit } = build({ breakerThreshold: 1 });
+
+    service.recordSendFailure('s1');
+    service.recordSendFailure('s1');
+    service.recordSendFailure('s1');
+
+    expect(audit.logWarn).toHaveBeenCalledTimes(1);
+  });
+
+  it('records a refusal with the rule that caused it', async () => {
+    const { service, audit } = build({ warmupSchedule: [1] }, 5);
+
+    await expectPacingRefusal(service.assertSendAllowed('s1'));
+
+    const [action, context] = auditCall(audit.logWarn);
+    expect(action).toBe('send_pacing_blocked');
+    expect(context.sessionId).toBe('s1');
+    expect(context.metadata).toMatchObject({ rule: 'daily_cap', suppressed: 0 });
+  });
+
+  // The sampling is the load-bearing part: without it, one capped session generates an audit row per
+  // rejected request for the rest of the UTC day.
+  it('samples repeat refusals to one row per window, carrying the suppressed count', async () => {
+    const { service, audit } = build({ warmupSchedule: [1] }, 5);
+
+    for (let i = 0; i < 5; i++) await expectPacingRefusal(service.assertSendAllowed('s1'));
+
+    expect(audit.logWarn).toHaveBeenCalledTimes(1);
+
+    // Past the window the next refusal is written, and it reports the four it stood in for.
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(Date.now() + 61_000);
+      await expectPacingRefusal(service.assertSendAllowed('s1'));
+    } finally {
+      jest.useRealTimers();
+    }
+
+    expect(audit.logWarn).toHaveBeenCalledTimes(2);
+    expect(auditCall(audit.logWarn, 1)[1].metadata).toMatchObject({ suppressed: 4 });
+  });
+
+  // Sampling is per session: one noisy account must not hide another's enforcement from the trail.
+  it('samples per session', async () => {
+    const a = build({ warmupSchedule: [1] }, 5);
+    await expectPacingRefusal(a.service.assertSendAllowed('s1'));
+    await expectPacingRefusal(a.service.assertSendAllowed('s2'));
+
+    expect(a.audit.logWarn).toHaveBeenCalledTimes(2);
   });
 });

@@ -510,8 +510,10 @@ CREATE INDEX "IDX_audit_logs_createdAt" ON audit_logs(created_at);
 `api_key_updated`, `api_key_used`, `api_key_revoked`, `api_key_deleted`, `api_key_auth_failed`), session
 lifecycle (`session_created`, `session_started`, `session_stopped`, `session_force_killed`,
 `session_logged_out`, `session_deleted`, `session_qr_generated`, `session_connected`,
-`session_disconnected`), messages
-(`message_sent`, `message_failed`), webhooks (`webhook_created`, `webhook_deleted`,
+`session_disconnected`), WhatsApp-imposed account restrictions (`session_restricted`,
+`session_restriction_lifted`), messages
+(`message_sent`, `message_failed`), send-pacing enforcement (`send_pacing_blocked`, sampled to at
+most one row per session per minute; `send_breaker_tripped`, never sampled), webhooks (`webhook_created`, `webhook_deleted`,
 `webhook_triggered`, `webhook_failed`), rate-limit enforcement (`rate_limit_exceeded`, sampled to at
 most one row per subject+kind per minute), the queue dashboard (`queue_board_mutated`), integration
 plugin instances (`integration_instance_created`, `integration_instance_updated`,

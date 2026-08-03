@@ -49,6 +49,11 @@ import {
   getSessionReconnectAttemptsTotal,
   getSessionReconnectLoopAlertsTotal,
 } from '../../common/metrics/session-reconnect-metrics';
+import { AuditService } from '../audit/audit.service';
+
+/** The (action, context) pair of one audit call, typed so assertions do not fall back to `any`. */
+const auditCall = (mock: jest.Mock, index = 0): [string, { sessionId?: string; metadata?: Record<string, unknown> }] =>
+  mock.mock.calls[index] as [string, { sessionId?: string; metadata?: Record<string, unknown> }];
 
 function createMockSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -83,6 +88,7 @@ describe('SessionService', () => {
   let configService: jest.Mocked<Partial<ConfigService>>;
   let lidMappingStore: jest.Mocked<Partial<LidMappingStoreService>>;
   let statusStore: jest.Mocked<Partial<StatusStoreService>>;
+  let auditService: { logWarn: jest.Mock; logInfo: jest.Mock };
   let mockEngine: Record<string, jest.Mock>;
 
   beforeEach(async () => {
@@ -173,6 +179,8 @@ describe('SessionService', () => {
       dispatch: jest.fn().mockResolvedValue(undefined),
     };
 
+    auditService = { logWarn: jest.fn().mockResolvedValue(null), logInfo: jest.fn().mockResolvedValue(null) };
+
     hookManager = {
       execute: jest.fn().mockResolvedValue({ continue: true, data: {} }),
     };
@@ -198,6 +206,7 @@ describe('SessionService', () => {
         SessionEngineLifecycle,
         SessionErrorStore,
         SessionRestrictionStore,
+        { provide: AuditService, useValue: auditService },
         {
           provide: getRepositoryToken(Session, 'data'),
           useValue: repository,
@@ -2039,6 +2048,37 @@ describe('SessionService', () => {
       const calls = mockEngine.initialize.mock.calls as [EngineEventCallbacks][];
       return calls[0][0];
     };
+
+    // The store that serves this to the API is in memory, so the audit row is the only durable
+    // record of when the account was restricted — which is exactly the question asked afterwards.
+    it('writes a durable audit record when a restriction is detected, and when it ends', async () => {
+      const callbacks = await startAndCapture();
+
+      callbacks.onAccountRestriction?.(timelock);
+      const [restrictedAction, restrictedContext] = auditCall(auditService.logWarn);
+      expect(restrictedAction).toBe('session_restricted');
+      expect(restrictedContext.sessionId).toBe('sess-uuid-1');
+      expect(restrictedContext.metadata).toMatchObject({ kind: 'reachout_timelock', code: 'BIZ_QUALITY' });
+
+      callbacks.onAccountRestriction?.(null);
+      const [liftedAction, liftedContext] = auditCall(auditService.logInfo);
+      expect(liftedAction).toBe('session_restriction_lifted');
+      expect(liftedContext.sessionId).toBe('sess-uuid-1');
+      expect(liftedContext.metadata).toMatchObject({ kind: 'reachout_timelock' });
+    });
+
+    // Repeat reports are the normal case on both engines, and an audit row per reconnect attempt
+    // would bury the one that matters.
+    it('does not re-audit an unchanged restriction', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onAccountRestriction?.(timelock);
+      auditService.logWarn.mockClear();
+
+      callbacks.onAccountRestriction?.(timelock);
+      callbacks.onAccountRestriction?.(timelock);
+
+      expect(auditService.logWarn).not.toHaveBeenCalled();
+    });
 
     it('announces a newly-detected restriction to webhook subscribers', async () => {
       const callbacks = await startAndCapture();

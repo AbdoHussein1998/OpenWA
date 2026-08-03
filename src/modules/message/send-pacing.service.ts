@@ -7,6 +7,8 @@ import { Session } from '../session/entities/session.entity';
 import { resolveSendPacingConfig, type SendPacingConfig } from './send-pacing.config';
 import { incrementSendPacingRefusals, type SendPacingRefusalReason } from '../../common/metrics/send-pacing-metrics';
 import { createLogger } from '../../common/services/logger.service';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 
 /** Body code on a pacing refusal. The throttler's own 429 carries no `code`, which is what tells the two apart. */
 export const SEND_PACING_LIMITED = 'SEND_PACING_LIMITED';
@@ -17,6 +19,22 @@ interface BreakerState {
   /** Epoch ms the breaker opened, or null while it is closed. */
   openedAt: number | null;
 }
+
+/** Refusals suppressed since the last audited one, per session. */
+interface RefusalSample {
+  count: number;
+  since: number;
+}
+
+/**
+ * At most one `SEND_PACING_BLOCKED` row per session per window. A session that hits its daily cap
+ * goes on being refused for the rest of the day, so one row per refused send would turn enforcing
+ * the limit into an audit flood of its own — the same problem, and the same answer, as the
+ * websocket rate limiter's `RATE_LIMIT_EXCEEDED` sampling.
+ */
+const REFUSAL_AUDIT_WINDOW_MS = 60_000;
+/** Bound on the sampling map, so a churn of session ids cannot grow it without limit. */
+const MAX_REFUSAL_KEYS = 1000;
 
 /**
  * Refuses outbound sends that a young or misbehaving session should not be making.
@@ -44,6 +62,7 @@ interface BreakerState {
 export class SendPacingService {
   private readonly logger = createLogger('SendPacingService');
   private readonly breakers = new Map<string, BreakerState>();
+  private readonly refusalSamples = new Map<string, RefusalSample>();
 
   constructor(
     @InjectRepository(Message, 'data')
@@ -52,6 +71,10 @@ export class SendPacingService {
     private readonly sessionRepository: Repository<Session>,
     @Optional()
     private readonly configService?: ConfigService,
+    // @Optional so the standalone constructions in specs keep working. AuditModule is @Global, so in
+    // a running gateway it is always present; absent means the console log is the only record.
+    @Optional()
+    private readonly auditService?: AuditService,
   ) {}
 
   /**
@@ -88,6 +111,12 @@ export class SendPacingService {
         consecutiveFailures: breaker.consecutiveFailures,
         cooldownMs: config.breakerCooldownMs,
         action: 'send_breaker_tripped',
+      });
+      // Never sampled: a trip is rare and is the event an operator most wants to find afterwards.
+      void this.auditService?.logWarn(AuditAction.SEND_BREAKER_TRIPPED, {
+        sessionId,
+        metadata: { consecutiveFailures: breaker.consecutiveFailures, cooldownMs: config.breakerCooldownMs },
+        errorMessage: `Send breaker tripped after ${breaker.consecutiveFailures} consecutive send failures`,
       });
     }
   }
@@ -158,6 +187,40 @@ export class SendPacingService {
     });
   }
 
+  /**
+   * Write one audit row per session per window, folding the refusals suppressed in between into the
+   * next row's `suppressed` metadata — so the trail stays accurate without one write per refused
+   * send. Modelled on the websocket limiter's own sampling, which exists for the same reason.
+   */
+  private auditRefusal(
+    sessionId: string,
+    rule: SendPacingRefusalReason,
+    retryAfterSeconds: number,
+    message: string,
+  ): void {
+    const now = Date.now();
+    const prior = this.refusalSamples.get(sessionId);
+    if (prior && now - prior.since < REFUSAL_AUDIT_WINDOW_MS) {
+      prior.count += 1;
+      return;
+    }
+    const suppressed = prior?.count ?? 0;
+    // Re-insert rather than mutate, so the map stays in insertion order and the eviction below
+    // really does drop the least recently audited session.
+    this.refusalSamples.delete(sessionId);
+    this.refusalSamples.set(sessionId, { count: 0, since: now });
+    while (this.refusalSamples.size > MAX_REFUSAL_KEYS) {
+      const oldest = this.refusalSamples.keys().next().value;
+      if (oldest === undefined) break;
+      this.refusalSamples.delete(oldest);
+    }
+    void this.auditService?.logWarn(AuditAction.SEND_PACING_BLOCKED, {
+      sessionId,
+      metadata: { rule, retryAfterSeconds, suppressed },
+      errorMessage: message,
+    });
+  }
+
   private refuse(
     reason: SendPacingRefusalReason,
     sessionId: string,
@@ -172,6 +235,7 @@ export class SendPacingService {
       retryAfterSeconds,
       action: 'send_paced',
     });
+    this.auditRefusal(sessionId, reason, retryAfterSeconds, detail.reason);
     // 429 with a body `code`, which is what distinguishes this from the global throttler's own 429 —
     // a client that retries blindly on 429 would otherwise treat a day-long cap like a one-second
     // rate limit. `retryAfterSeconds` says how long the refusal actually lasts.
