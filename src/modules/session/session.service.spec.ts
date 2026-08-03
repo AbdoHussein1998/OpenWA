@@ -163,6 +163,9 @@ describe('SessionService', () => {
       emitSessionAuthenticated: jest.fn(),
       emitSessionDisconnected: jest.fn(),
       emitPresenceUpdate: jest.fn(),
+      emitCallAccepted: jest.fn(),
+      emitCallRejected: jest.fn(),
+      emitCallMissed: jest.fn(),
       emitMessage: jest.fn(),
       emitMessageSent: jest.fn(),
       emitMessageAck: jest.fn(),
@@ -2277,6 +2280,53 @@ describe('SessionService', () => {
       await startAndCapture();
 
       await expect(service.getPresence('sess-uuid-1', 'silent@c.us')).resolves.toBeNull();
+    });
+  });
+
+  // Three events rather than one carrying an outcome field, so a consumer that only cares about
+  // missed calls can subscribe to exactly that.
+  describe('engine call outcomes', () => {
+    const outcomeEvent = (outcome: 'accepted' | 'rejected' | 'missed') => ({
+      callId: 'CALL-1',
+      from: '628111@c.us',
+      outcome,
+      isVideo: false,
+      isGroup: false,
+      timestamp: 1700000000,
+    });
+
+    const startAndCapture = async (): Promise<EngineEventCallbacks> => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      await service.start('sess-uuid-1');
+      const calls = mockEngine.initialize.mock.calls as [EngineEventCallbacks][];
+      return calls[0][0];
+    };
+
+    it.each([
+      ['accepted', 'call.accepted', 'emitCallAccepted'],
+      ['rejected', 'call.rejected', 'emitCallRejected'],
+      ['missed', 'call.missed', 'emitCallMissed'],
+    ])('publishes %s on its own event name', async (outcome, eventName, emitter) => {
+      const callbacks = await startAndCapture();
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onCallOutcome?.(outcomeEvent(outcome as 'accepted'));
+
+      const payload = { sessionId: 'sess-uuid-1', ...outcomeEvent(outcome as 'accepted') };
+      expect(webhookService.dispatch).toHaveBeenCalledWith('sess-uuid-1', eventName, payload);
+      expect(eventsGateway[emitter as 'emitCallAccepted']).toHaveBeenCalledWith('sess-uuid-1', payload);
+    });
+
+    // An outcome must never be published as a fresh ring — that is the bug the adapter split guards,
+    // and this pins the host half of it.
+    it('never publishes an outcome as call.received', async () => {
+      const callbacks = await startAndCapture();
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onCallOutcome?.(outcomeEvent('rejected'));
+
+      expect(webhookService.dispatch).not.toHaveBeenCalledWith('sess-uuid-1', 'call.received', expect.anything());
     });
   });
 

@@ -4476,3 +4476,127 @@ describe('BaileysAdapter channel administration', () => {
     expect(fakeSock.newsletterUnmute).toHaveBeenCalledWith(CHANNEL);
   });
 });
+
+// The load-bearing risk here is an ended call re-entering the incoming-call path: a decline would
+// then be published as a fresh ring and, with auto-reject on, answered as one.
+describe('BaileysAdapter call outcomes', () => {
+  const CALL_ID = 'CALL-1';
+  const CALLER = '628111@s.whatsapp.net';
+
+  beforeEach(() => {
+    fakeSock.user = undefined;
+    fakeSock.resetEmitter();
+    jest.clearAllMocks();
+  });
+
+  /** Drive a ring first: an outcome for a call this session never saw is deliberately dropped. */
+  const ringing = async (callbacks: Record<string, jest.Mock>) => {
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks(callbacks));
+    fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+    fakeSock.fire('connection.update', { connection: 'open' });
+    fakeSock.fire('call', [
+      {
+        id: CALL_ID,
+        from: CALLER,
+        chatId: CALLER,
+        status: 'offer',
+        offline: false,
+        date: new Date(1700000000000),
+        isVideo: true,
+      },
+    ]);
+    callbacks.onCall?.mockClear();
+    return adapter;
+  };
+
+  it.each([
+    ['accept', 'accepted'],
+    ['reject', 'rejected'],
+    ['timeout', 'missed'],
+  ])('publishes %s as the %s outcome, and never as a new ring', async (status, outcome) => {
+    const onCall = jest.fn();
+    const onCallOutcome = jest.fn();
+    await ringing({ onCall, onCallOutcome });
+
+    fakeSock.fire('call', [
+      {
+        id: CALL_ID,
+        from: CALLER,
+        chatId: CALLER,
+        status,
+        offline: false,
+        date: new Date(1700000060000),
+        isVideo: true,
+      },
+    ]);
+
+    expect(onCallOutcome).toHaveBeenCalledWith({
+      callId: CALL_ID,
+      from: '628111@c.us',
+      outcome,
+      isVideo: true,
+      isGroup: false,
+      timestamp: 1700000060,
+    });
+    // The whole point: an ended call must not look like an incoming one.
+    expect(onCall).not.toHaveBeenCalled();
+  });
+
+  // ringing/preaccept/transport/relaylatency are transport chatter, and `terminate` cannot be told
+  // apart from a hang-up after answering — publishing either would be noise or a wrong claim.
+  it.each(['ringing', 'preaccept', 'transport', 'relaylatency', 'terminate'])(
+    'publishes nothing for %s',
+    async status => {
+      const onCall = jest.fn();
+      const onCallOutcome = jest.fn();
+      await ringing({ onCall, onCallOutcome });
+
+      fakeSock.fire('call', [{ id: CALL_ID, from: CALLER, chatId: CALLER, status, offline: false, date: new Date() }]);
+
+      expect(onCallOutcome).not.toHaveBeenCalled();
+      expect(onCall).not.toHaveBeenCalled();
+    },
+  );
+
+  // WhatsApp replays signalling for calls that ended while the session was disconnected. Announcing
+  // those would report last week's declined call as if it had just happened.
+  it('drops an offline-replayed outcome', async () => {
+    const onCallOutcome = jest.fn();
+    await ringing({ onCall: jest.fn(), onCallOutcome });
+
+    fakeSock.fire('call', [
+      { id: CALL_ID, from: CALLER, chatId: CALLER, status: 'reject', offline: true, date: new Date() },
+    ]);
+
+    expect(onCallOutcome).not.toHaveBeenCalled();
+  });
+
+  // An outcome for a call this session never saw ring belongs to another device's conversation or
+  // predates the connection, and carries no caller identity worth publishing.
+  it('drops an outcome for a call that never rang here', async () => {
+    const onCallOutcome = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onCall: jest.fn(), onCallOutcome }));
+    fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+    fakeSock.fire('connection.update', { connection: 'open' });
+
+    fakeSock.fire('call', [
+      { id: 'UNKNOWN', from: CALLER, chatId: CALLER, status: 'reject', offline: false, date: new Date() },
+    ]);
+
+    expect(onCallOutcome).not.toHaveBeenCalled();
+  });
+
+  // The call is over, so the handle rejectCall would act on must go with it — otherwise a late
+  // reject would be attempted against a dead call instead of reporting not-found.
+  it('drops the live-call handle, so a later reject reports not-found', async () => {
+    const adapter = await ringing({ onCall: jest.fn(), onCallOutcome: jest.fn() });
+
+    fakeSock.fire('call', [
+      { id: CALL_ID, from: CALLER, chatId: CALLER, status: 'accept', offline: false, date: new Date() },
+    ]);
+
+    await expect(adapter.rejectCall(CALL_ID)).rejects.toThrow(/CALL-1/);
+  });
+});

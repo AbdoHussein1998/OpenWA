@@ -583,6 +583,35 @@ export interface PresenceUpdateEvent {
   groupOnlineCount?: number;
 }
 
+/**
+ * How a ringing call ended.
+ *
+ * `terminate` is deliberately NOT mapped to an outcome. WhatsApp uses it both for a caller hanging
+ * up before the call was answered and for either side ending an answered one, and the event carries
+ * nothing that separates the two — reporting it as either would be wrong half the time. Telling
+ * those apart needs call-duration tracking, which is its own piece of work.
+ */
+export type CallOutcome = 'accepted' | 'rejected' | 'missed';
+
+/**
+ * A call that was ringing has ended.
+ *
+ * The engines report the outcome but not WHO caused it: an accept can come from any of the account's
+ * linked devices, and a reject can equally be the account declining or WhatsApp giving up. So this
+ * says what happened to the call, never who did it.
+ */
+export interface CallOutcomeEvent {
+  /** The same id the matching `onCall` offer carried. */
+  callId: string;
+  /** Neutral caller id. */
+  from: string;
+  outcome: CallOutcome;
+  isVideo: boolean;
+  isGroup: boolean;
+  /** Unix seconds the outcome was reported (engine timestamp). */
+  timestamp: number;
+}
+
 export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
   onReady?: (phone: string, pushName: string) => void;
@@ -647,6 +676,12 @@ export interface EngineEventCallbacks {
    * which is why consumers keep the last reported state rather than querying for it.
    */
   onPresenceUpdate?: (event: PresenceUpdateEvent) => void;
+  /**
+   * Fired when a call that was ringing ends — answered, declined, or never picked up. Distinct from
+   * `onCall`, which announces the ring itself: an outcome must never re-enter that path, or a call
+   * being declined would look like a fresh incoming call and (with auto-reject on) be answered.
+   */
+  onCallOutcome?: (event: CallOutcomeEvent) => void;
   /**
    * Fired on a terminal initialization/authentication failure (e.g. Chromium
    * could not launch, or WhatsApp rejected the stored credentials). The engine

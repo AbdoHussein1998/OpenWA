@@ -7,6 +7,7 @@ import {
   IncomingCallEvent,
   ParticipantPresence,
   PresenceState,
+  CallOutcome,
   IncomingMessage,
   ReactionEvent,
   RevokedMessage,
@@ -41,6 +42,17 @@ import { createSilentLogger } from './baileys-logger';
  * `rejectCall` as a thin forwarder (it is a public IWhatsAppEngine method), injecting this
  * narrow host surface via closures so the delegate never touches lifecycle state directly.
  */
+/**
+ * The call statuses that mean something to a consumer. Everything else Baileys emits — `ringing`,
+ * `preaccept`, `transport`, `relaylatency` — is transport chatter, and `terminate` is ambiguous
+ * (see reportCallOutcome), so neither is mapped.
+ */
+const CALL_OUTCOMES: Readonly<Partial<Record<string, CallOutcome>>> = {
+  accept: 'accepted',
+  reject: 'rejected',
+  timeout: 'missed',
+};
+
 /** The slice of Baileys' PresenceData this adapter reads. */
 interface RawPresence {
   lastKnownPresence?: PresenceState;
@@ -101,6 +113,8 @@ export interface BaileysEventsHost {
   getOnCall(): EngineEventCallbacks['onCall'];
   /** The currently-registered onPresenceUpdate callback, if any (assigned at initialize()). */
   getOnPresenceUpdate(): EngineEventCallbacks['onPresenceUpdate'];
+  /** The currently-registered onCallOutcome callback, if any (assigned at initialize()). */
+  getOnCallOutcome(): EngineEventCallbacks['onCallOutcome'];
 }
 
 export class BaileysEvents {
@@ -408,7 +422,14 @@ export class BaileysEvents {
    */
   handleCallEvents(calls: WACallEvent[]): void {
     for (const call of Array.isArray(calls) ? calls : []) {
-      if (!call || call.status !== 'offer' || !call.id || !call.from) {
+      if (!call || !call.id || !call.from) {
+        continue;
+      }
+      // An ended call takes its own path and returns. It must never fall through to the offer
+      // handling below: a declined call arriving there would be published as a fresh incoming call
+      // and, with auto-reject enabled, answered as one.
+      if (call.status !== 'offer') {
+        this.reportCallOutcome(call);
         continue;
       }
       // Baileys replays offers for calls missed while disconnected with offline: true
@@ -451,6 +472,48 @@ export class BaileysEvents {
       };
       this.host.getOnCall()?.(payload);
     }
+  }
+
+  /**
+   * Publish the end of a ringing call.
+   *
+   * Only the three statuses that mean something to a consumer are mapped. WhatsApp also sends
+   * `ringing`, `preaccept`, `transport` and `relaylatency` — transport-level chatter with no
+   * user-visible meaning — and `terminate`, which covers both a caller hanging up before the call
+   * was answered and either side ending an answered one, with nothing in the event to tell them
+   * apart. Publishing `terminate` as an outcome would therefore be wrong roughly half the time.
+   *
+   * The cached live-call handle is dropped here rather than left to expire: the call is over, and a
+   * `rejectCall` arriving afterwards should report not-found instead of acting on a dead call.
+   */
+  private reportCallOutcome(call: WACallEvent): void {
+    const outcome = CALL_OUTCOMES[call.status];
+    if (!outcome) return;
+
+    const live = this.liveCalls.get(call.id);
+    this.liveCalls.delete(call.id);
+
+    // Offline replay is the same hazard as on the offer path: WhatsApp resends the signalling for
+    // calls that ended while this session was disconnected, and announcing those as fresh outcomes
+    // would report last week's declined call as if it just happened.
+    if (call.offline) return;
+
+    // An outcome for a call this session never saw ring is not actionable — it belongs to another
+    // device's conversation, or predates the connection — and would arrive with no caller identity
+    // beyond the raw jid. Dropping it keeps the event stream to calls the consumer already knows.
+    if (!live) return;
+
+    this.host.getOnCallOutcome()?.({
+      callId: call.id,
+      from: this.host.toNeutralJid(call.callerPn ?? call.from),
+      outcome,
+      isVideo: call.isVideo === true,
+      isGroup: call.isGroup === true,
+      timestamp:
+        call.date instanceof Date && !Number.isNaN(call.date.getTime())
+          ? Math.floor(call.date.getTime() / 1000)
+          : Math.floor(Date.now() / 1000),
+    });
   }
 
   /**

@@ -90,6 +90,7 @@ Start workflows when WhatsApp events occur.
 | `session.reconnect_loop` | Every 5th consecutive reconnect attempt | Stuck-session alerting |
 | `session.restriction` | WhatsApp restricted the account, or lifted it | Pausing outreach while an account is limited |
 | `presence.update` | A watched chat's online/typing state changed | Live agent hand-off, presence-aware routing |
+| `call.accepted` / `call.rejected` / `call.missed` | A ringing call ended | Missed-call follow-up, call logging |
 | `group.join`           | Participant(s) joined a group          | Welcome messages        |
 | `group.leave`          | Participant(s) left a group            | Churn tracking          |
 | `group.update`         | Group subject/description/settings changed | Group administration |

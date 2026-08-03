@@ -36,6 +36,12 @@ public enum WebhookEvent {
     SESSION_RESTRICTION,
     @SerializedName("presence.update")
     PRESENCE_UPDATE,
+    @SerializedName("call.accepted")
+    CALL_ACCEPTED,
+    @SerializedName("call.rejected")
+    CALL_REJECTED,
+    @SerializedName("call.missed")
+    CALL_MISSED,
     @SerializedName("group.join")
     GROUP_JOIN,
     @SerializedName("group.leave")
