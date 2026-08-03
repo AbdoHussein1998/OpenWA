@@ -132,6 +132,9 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'baileys getCollections(jid) (Socket/business.d.ts:11) → first collection synthesized into Catalog metadata at BaileysCatalog (adapters/baileys-catalog.ts; #905); wwjs index.d.ts has NO Client.getCatalog (0 hits) — adapter throws EngineNotSupportedError',
   },
+  createChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  deleteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  muteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getChannelById: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getChannelMessages: {
     wwjs: { status: 'supported' },

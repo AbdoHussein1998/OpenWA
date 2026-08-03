@@ -72,6 +72,20 @@ class UpsertLabelRequest(TypedDict, total=False):
     color: int
 
 
+class CreateChannelRequest(TypedDict, total=False):
+    """Body for creating a channel."""
+
+    name: str
+    description: str
+
+
+class MuteChannelRequest(TypedDict):
+    """Body for muting or unmuting a channel."""
+
+    # True mutes, False unmutes. The subscription is unaffected either way.
+    mute: bool
+
+
 # ── Session ───────────────────────────────────────────────────────
 
 

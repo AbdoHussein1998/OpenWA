@@ -38,6 +38,22 @@ export class BaileysChannels {
     return this.toChannel(meta);
   }
 
+  async createChannel(name: string, description?: string): Promise<Channel> {
+    this.host.ensureReady();
+    const meta = await this.sock().newsletterCreate(name, description);
+    return this.toChannel(meta);
+  }
+
+  async deleteChannel(channelId: string): Promise<void> {
+    this.host.ensureReady();
+    await this.sock().newsletterDelete(channelId);
+  }
+
+  async muteChannel(channelId: string, mute: boolean): Promise<void> {
+    this.host.ensureReady();
+    await (mute ? this.sock().newsletterMute(channelId) : this.sock().newsletterUnmute(channelId));
+  }
+
   async unsubscribeFromChannel(channelId: string): Promise<void> {
     this.host.ensureReady();
     await this.sock().newsletterUnfollow(channelId);

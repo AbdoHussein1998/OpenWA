@@ -15,6 +15,18 @@ func (q *ListSessionsQuery) values() url.Values {
 	return v
 }
 
+// CreateChannelRequest is the body for creating a channel.
+type CreateChannelRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// MuteChannelRequest is the body for muting or unmuting a channel. The subscription is unaffected
+// either way.
+type MuteChannelRequest struct {
+	Mute bool `json:"mute"`
+}
+
 // UpsertLabelRequest is a label create-or-update body. The id travels in the path, because WhatsApp
 // keys the write on it.
 type UpsertLabelRequest struct {

@@ -892,6 +892,15 @@ export interface IWhatsAppEngine {
    * through a single app-state write, and which one happens depends on whether the id already
    * exists. Only fields that are set are changed.
    */
+  /**
+   * Create a channel and return it. The account becomes its owner, which is what makes deleting it
+   * possible later — neither engine can delete a channel it does not own.
+   */
+  createChannel(name: string, description?: string): Promise<Channel>;
+  /** Delete a channel this account owns. Irreversible, and its subscribers lose it. */
+  deleteChannel(channelId: string): Promise<void>;
+  /** Mute or unmute a channel's notifications for this account. Does not affect subscription. */
+  muteChannel(channelId: string, mute: boolean): Promise<void>;
   upsertLabel(label: LabelInput): Promise<void>;
   /** Delete a label. It disappears from every chat it was on. */
   deleteLabel(labelId: string): Promise<void>;

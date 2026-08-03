@@ -4778,6 +4778,46 @@
         "tags": [
           "channels"
         ]
+      },
+      "post": {
+        "description": "The account becomes the channel owner, which is what makes deleting it possible later — neither engine can delete a channel it does not own.",
+        "operationId": "ChannelController_create",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChannelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created channel"
+          },
+          "400": {
+            "description": "Session not started, or validation failed"
+          },
+          "422": {
+            "description": "The engine refused — channel creation may be disabled for this account"
+          }
+        },
+        "summary": "Create a channel",
+        "tags": [
+          "channels"
+        ]
       }
     },
     "/api/sessions/{sessionId}/channels/{channelId}": {
@@ -4887,6 +4927,98 @@
           }
         },
         "summary": "Get messages from a channel",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/channels/{channelId}/delete": {
+      "post": {
+        "description": "Irreversible, and every subscriber loses the channel. Deliberately NOT `DELETE /channels/:channelId` — that route unsubscribes, and the two must not be reachable by the same request with a slip of the wrist. Only the owner can delete.",
+        "operationId": "ChannelController_remove",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "description": "Channel ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel deleted"
+          },
+          "400": {
+            "description": "Session not started"
+          },
+          "422": {
+            "description": "The engine refused — not found, or this account does not own it"
+          }
+        },
+        "summary": "Delete a channel this account owns",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/channels/{channelId}/mute": {
+      "post": {
+        "description": "Silences the channel's notifications for this account. The subscription is untouched.",
+        "operationId": "ChannelController_mute",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "description": "Channel ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MuteChannelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Channel muted or unmuted"
+          },
+          "400": {
+            "description": "Session not started, or validation failed"
+          },
+          "422": {
+            "description": "The engine refused"
+          }
+        },
+        "summary": "Mute or unmute a channel",
         "tags": [
           "channels"
         ]
@@ -8680,6 +8812,38 @@
             "maximum": 19
           }
         }
+      },
+      "CreateChannelDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Channel name",
+            "example": "Product updates",
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "description": "Channel description",
+            "example": "Release notes and downtime notices"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "MuteChannelDto": {
+        "type": "object",
+        "properties": {
+          "mute": {
+            "type": "boolean",
+            "description": "True to mute the channel, false to unmute it. Subscription is unaffected either way.",
+            "example": true
+          }
+        },
+        "required": [
+          "mute"
+        ]
       },
       "SendTextStatusDto": {
         "type": "object",

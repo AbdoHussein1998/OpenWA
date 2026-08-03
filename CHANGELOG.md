@@ -24,6 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Channel administration: create, delete, mute.** `POST /api/sessions/:sessionId/channels`,
+  `POST .../channels/:channelId/delete` and `POST .../channels/:channelId/mute`, in all five SDKs.
+
+  Supported on **both** engines — whatsapp-web.js has `createChannel`/`deleteChannel` and mute on the
+  Channel model, and Baileys has the matching newsletter calls. (The enhancement notes this was
+  planned against expected `501`s on whatsapp-web.js; checking the library showed otherwise, so both
+  engines are wired.)
+
+  Deletion is `POST .../delete`, not `DELETE .../channels/:channelId` — that route already exists and
+  means *unsubscribe*. Leaving a channel and destroying it for every subscriber are very different
+  acts, and one mistyped verb should not be able to turn the first into the second.
+
+  Two whatsapp-web.js failure modes are translated rather than passed on: `createChannel` signals
+  failure by **returning an error string** instead of throwing, which would otherwise have been
+  mapped into a channel object full of undefineds and reported as success; and `deleteChannel` and
+  the mute calls return `false` rather than raising. All three now surface as a refusal.
+
 - **Labels can now be created, renamed, recoloured and deleted** — `PUT` and
   `DELETE /api/sessions/:sessionId/labels/:labelId` — and **listed by chat**:
   `GET /api/sessions/:sessionId/labels/:labelId/chats`. All five SDKs gain the matching methods.

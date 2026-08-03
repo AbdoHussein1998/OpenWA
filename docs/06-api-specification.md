@@ -3174,6 +3174,63 @@ Bare array. `timestamp` is an epoch number (seconds).
 
 **Errors:** `400` `Session is not started` · `401` missing/invalid API key
 
+#### POST /api/sessions/:sessionId/channels
+
+Create a channel. Supported on **both** engines.
+
+**Auth:** API key (OPERATOR)  ·  **Scope:** session-scoped
+
+The account becomes the channel's owner, which is what makes deleting it possible later — neither
+engine can delete a channel it does not own.
+
+**Request body** — `CreateChannelDto`
+
+| Field | Type | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `name` | string | Yes | 1–100 chars | Channel name |
+| `description` | string | No | ≤ 2048 chars | Channel description |
+
+**Response** `201` — the created `Channel`, including its `inviteCode` (the code, not the full
+`https://whatsapp.com/channel/…` link — the code is what `POST /channels/subscribe` takes).
+
+**Errors:** `400` validation, or session not started · `401` · `403` · `422` the engine refused — on whatsapp-web.js this includes channel creation being disabled for the account
+
+#### POST /api/sessions/:sessionId/channels/:channelId/delete
+
+Delete a channel this account owns. Supported on **both** engines.
+
+**Auth:** API key (OPERATOR)  ·  **Scope:** session-scoped
+
+Irreversible, and every subscriber loses the channel.
+
+> **Why not `DELETE /channels/:channelId`?** That route already exists and means *unsubscribe*.
+> Leaving a channel and destroying it are very different acts, and they must not be reachable by the
+> same request with one wrong verb — so deletion takes an explicit path, matching the
+> `POST .../messages/delete` and `POST .../chats/delete` convention used elsewhere.
+
+**Response** `200` — `{ "success": true }`
+
+**Errors:** `400` session not started · `401` · `403` · `422` the engine refused — not found, or this account does not own it
+
+#### POST /api/sessions/:sessionId/channels/:channelId/mute
+
+Mute or unmute a channel. Supported on **both** engines.
+
+**Auth:** API key (OPERATOR)  ·  **Scope:** session-scoped
+
+Silences the channel's notifications for this account. The subscription is untouched — this is not a
+soft unsubscribe.
+
+**Request body** — `MuteChannelDto`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `mute` | boolean | Yes | `true` mutes, `false` unmutes |
+
+**Response** `200` — `{ "success": true }`
+
+**Errors:** `400` validation, or session not started · `401` · `403` · `422` the engine refused
+
 #### POST /api/sessions/:sessionId/channels/subscribe
 
 Subscribe to a channel using its invite code.

@@ -598,6 +598,18 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.sock?.user?.id ?? 'status@broadcast';
   }
 
+  createChannel(name: string, description?: string): Promise<Channel> {
+    return this.channels.createChannel(name, description);
+  }
+
+  deleteChannel(channelId: string): Promise<void> {
+    return this.channels.deleteChannel(channelId);
+  }
+
+  muteChannel(channelId: string, mute: boolean): Promise<void> {
+    return this.channels.muteChannel(channelId, mute);
+  }
+
   getSubscribedChannels(): Promise<Channel[]> {
     return this.unsupported('getSubscribedChannels');
   }
