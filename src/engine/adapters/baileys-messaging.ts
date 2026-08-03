@@ -77,11 +77,24 @@ export class BaileysMessaging {
     return this.host.getSocket();
   }
 
-  async sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult> {
+  async sendTextMessage(
+    chatId: string,
+    text: string,
+    mentions?: string[],
+    sendOptions?: { linkPreview?: boolean },
+  ): Promise<MessageResult> {
     this.host.ensureReady();
     const jid = await this.toDeliverableJid(chatId);
     const options = this.withEphemeral(jid);
-    const content = { text, ...this.withMentions(mentions) };
+    // `linkPreview: null` is Baileys' explicit "no preview": with the key absent it instead calls the
+    // configured generator (Utils/messages.js:279-281). Suppressing therefore also skips that call —
+    // which today fails anyway, since the generator dynamically imports an optional package this
+    // project does not install, and the failure is swallowed with a warn on every URL-bearing send.
+    const content = {
+      text,
+      ...this.withMentions(mentions),
+      ...(sendOptions?.linkPreview === false ? { linkPreview: null } : {}),
+    };
     const sent = options
       ? await this.sock().sendMessage(jid, content, options)
       : await this.sock().sendMessage(jid, content);

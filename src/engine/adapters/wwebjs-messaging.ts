@@ -266,12 +266,28 @@ export class WwebjsMessaging {
     }
   }
 
-  async sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult> {
+  async sendTextMessage(
+    chatId: string,
+    text: string,
+    mentions?: string[],
+    options?: { linkPreview?: boolean },
+  ): Promise<MessageResult> {
     this.host.ensureReady();
     // wwebjs accepts neutral `<phone>@c.us` WIDs directly as mentionedJidList, so no de-normalization
     // is needed. Omit the options object entirely when none are given to keep today's send behavior.
+    //
+    // Only an explicit `false` is forwarded. whatsapp-web.js reads the flag as
+    // `linkPreview === false ? undefined : true` (Client.js:1458), so passing `true` is identical to
+    // passing nothing — sending it anyway would add an options object to every plain send for no
+    // change in behaviour.
+    const sendOptions: { mentions?: string[]; linkPreview?: boolean } = {};
+    if (mentions?.length) sendOptions.mentions = mentions;
+    if (options?.linkPreview === false) sendOptions.linkPreview = false;
+
     const msg = await this.sendResolved(chatId, to =>
-      mentions?.length ? this.client().sendMessage(to, text, { mentions }) : this.client().sendMessage(to, text),
+      Object.keys(sendOptions).length
+        ? this.client().sendMessage(to, text, sendOptions)
+        : this.client().sendMessage(to, text),
     );
     return toMessageResult(msg);
   }

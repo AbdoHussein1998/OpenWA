@@ -80,9 +80,20 @@ export function messageTools(message: MessageService): ToolDescriptor[] {
         sessionId,
         chatId: z.string().describe('Chat JID (e.g. 628123456789@c.us or groupId@g.us)'),
         text: z.string().min(1).max(4096).describe('Text message content'),
+        linkPreview: z
+          .boolean()
+          .optional()
+          .describe(
+            'Set false to suppress the URL preview. Guaranteed only in that direction — leaving it ' +
+              'unset means the engine default, and the engines differ.',
+          ),
       }),
-      handler: (input: { sessionId: string; chatId: string; text: string }) =>
-        message.sendText(input.sessionId, { chatId: input.chatId, text: input.text }),
+      handler: (input: { sessionId: string; chatId: string; text: string; linkPreview?: boolean }) =>
+        message.sendText(input.sessionId, {
+          chatId: input.chatId,
+          text: input.text,
+          ...(input.linkPreview === undefined ? {} : { linkPreview: input.linkPreview }),
+        }),
     },
     {
       name: 'MessageSendImage',

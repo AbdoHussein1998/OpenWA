@@ -125,10 +125,18 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      // Keep the 2-arg call shape for plain sends; only pass mentions when the caller supplied any.
-      result = finalDto.mentions?.length
-        ? await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions)
-        : await engine.sendTextMessage(finalDto.chatId, finalDto.text);
+      // The call is widened ONLY as far as the caller actually asked. A send with neither mentions
+      // nor a preview choice keeps its two-argument shape, and one with mentions alone keeps its
+      // three — trailing `undefined`s would be harmless to the engines but would rewrite the call
+      // shape of every existing send for no behavioural gain.
+      const { linkPreview } = finalDto;
+      if (linkPreview !== undefined) {
+        result = await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions, { linkPreview });
+      } else if (finalDto.mentions?.length) {
+        result = await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions);
+      } else {
+        result = await engine.sendTextMessage(finalDto.chatId, finalDto.text);
+      }
     } catch (error) {
       // The SEND itself failed — mark FAILED + fire message:failed (a post-send persistence fault is
       // handled separately by persistSentState and must NOT land here).

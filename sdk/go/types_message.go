@@ -15,6 +15,10 @@ type SendTextRequest struct {
 	// Mentions lists WIDs to @mention (e.g. ["62811@c.us"]). The text must
 	// also contain the @<number> token.
 	Mentions []string `json:"mentions,omitempty"`
+	// LinkPreview set to false suppresses the URL preview. Guaranteed only in that direction: nil
+	// means the engine default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a
+	// preview, Baileys builds none unless its optional generator is installed.
+	LinkPreview *bool `json:"linkPreview,omitempty"`
 }
 
 // SendMediaRequest sends image/video/document/sticker media. Provide exactly

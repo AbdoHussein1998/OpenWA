@@ -1301,10 +1301,32 @@ Send a plain text message.
 | chatId | string | Yes | non-empty | `phone@c.us` or `groupId@g.us` |
 | text | string | Yes | non-empty, max 4096 | Message text |
 | mentions | string[] | No | array of WIDs | WIDs to @mention (e.g. `["62811@c.us"]`). See **Mentions** below |
+| linkPreview | boolean | No | — | `false` suppresses the URL preview. See **Link previews** below |
 
 ```json
 { "chatId": "628123456789@c.us", "text": "Hello from OpenWA!" }
 ```
+
+```json
+{ "chatId": "628123456789@c.us", "text": "see https://example.com", "linkPreview": false }
+```
+
+**Link previews.** `linkPreview` is guaranteed **only in its suppressing direction**. Sending `false`
+stops the preview on both engines. Leaving it unset means "whatever the engine does by default", and
+the two engines genuinely differ:
+
+| | whatsapp-web.js | Baileys |
+| --- | --- | --- |
+| `linkPreview: false` | no preview | no preview |
+| unset / `true` | asks WhatsApp Web to build a preview in-page | **no preview** — its generator is an optional package this gateway does not install |
+
+So `true` does not force a preview onto Baileys; it only declines to suppress one. Sending `false` on
+Baileys additionally skips a generator call that currently fails and is swallowed with a warning on
+every message containing a URL.
+
+> whatsapp-web.js's own documentation notes the flag "has no effect on multi-device accounts". Its
+> code does act on the flag, but that caveat is upstream's and is repeated here rather than
+> contradicted — if a preview still appears on a multi-device account despite `false`, that is why.
 
 ```json
 { "chatId": "120363000000000000@g.us", "text": "Hello @62811", "mentions": ["62811@c.us"] }

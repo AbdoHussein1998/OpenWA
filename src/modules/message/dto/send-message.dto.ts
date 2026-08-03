@@ -45,6 +45,21 @@ export class SendTextMessageDto {
   @IsString({ each: true })
   @MaxLength(64, { each: true })
   mentions?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Set `false` to suppress the URL preview. Guaranteed only in that direction: leaving it unset ' +
+      'means whatever the engine does by default, and the engines differ — whatsapp-web.js asks ' +
+      'WhatsApp Web to build a preview, while Baileys builds none unless its optional preview ' +
+      'generator is installed. Sending `true` therefore does not force a preview on Baileys.',
+    example: false,
+  })
+  // Implicit conversion turns EVERY non-empty string into true, so an unguarded `false` sent as a
+  // string would request a preview instead of suppressing one — the opposite of what was asked.
+  @ToStrictBoolean()
+  @IsOptional()
+  @IsBoolean()
+  linkPreview?: boolean;
 }
 
 export class SendMediaMessageDto {

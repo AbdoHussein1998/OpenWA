@@ -4600,3 +4600,53 @@ describe('BaileysAdapter call outcomes', () => {
     await expect(adapter.rejectCall(CALL_ID)).rejects.toThrow(/CALL-1/);
   });
 });
+
+// `linkPreview: null` is Baileys' explicit "no preview". With the key absent it instead calls the
+// configured generator, which in this project dynamically imports a package that is not installed —
+// so suppressing also spares a failing import and a warn log on every URL-bearing send.
+describe('BaileysAdapter link preview', () => {
+  beforeEach(() => {
+    fakeSock.user = undefined;
+    fakeSock.resetEmitter();
+    jest.clearAllMocks();
+  });
+
+  const readyAdapter = async () => {
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({}));
+    fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+    fakeSock.fire('connection.update', { connection: 'open' });
+    fakeSock.sendMessage.mockResolvedValue({ key: { id: 'M1' }, messageTimestamp: 1 });
+    return adapter;
+  };
+
+  const sentContent = (): Record<string, unknown> =>
+    (fakeSock.sendMessage.mock.calls[0] as [string, Record<string, unknown>])[1];
+
+  it('sends the explicit null that suppresses the preview', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.sendTextMessage('628111@c.us', 'see https://example.com', undefined, { linkPreview: false });
+
+    expect(sentContent().linkPreview).toBeNull();
+  });
+
+  // The key must be ABSENT, not undefined-valued: Baileys branches on `typeof urlInfo === 'undefined'`
+  // to decide whether to generate, so either is equivalent — but leaving it out keeps the content
+  // object identical to what a plain send has always produced.
+  it('leaves the key out entirely when the preview is allowed', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.sendTextMessage('628111@c.us', 'see https://example.com', undefined, { linkPreview: true });
+
+    expect(sentContent()).not.toHaveProperty('linkPreview');
+  });
+
+  it('leaves the key out for a plain send', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.sendTextMessage('628111@c.us', 'hi');
+
+    expect(sentContent()).not.toHaveProperty('linkPreview');
+  });
+});
