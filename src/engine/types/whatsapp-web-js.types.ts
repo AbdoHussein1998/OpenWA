@@ -34,6 +34,13 @@ export interface GroupMetadataRaw {
   restrict?: boolean;
   /** Disappearing-messages timer in seconds, when WA Web reports one on the group model. */
   ephemeralDuration?: number;
+  /**
+   * Who may add participants. Typed loosely on purpose: whatsapp-web.js declares this `boolean`
+   * (index.d.ts:890, documented as "true = only admins") but actually writes WhatsApp's raw strings
+   * `'admin_add'`/`'all_member_add'` (GroupChat.js:476), and the WA Web model it is read from uses
+   * the strings too. Accepting both keeps the adapter honest about what can arrive.
+   */
+  memberAddMode?: string | boolean;
 }
 
 /**
@@ -73,6 +80,8 @@ export interface GroupChat extends Omit<Chat, 'isReadOnly' | 'getLabels'> {
   setMessagesAdminsOnly(adminsOnly?: boolean): Promise<boolean>;
   /** Resolves false when the account lacks admin rights (does not throw). */
   setInfoAdminsOnly(adminsOnly?: boolean): Promise<boolean>;
+  /** Only admins may add participants when true (index.d.ts:2205). */
+  setAddMembersAdminsOnly(adminsOnly?: boolean): Promise<boolean>;
 }
 
 /**

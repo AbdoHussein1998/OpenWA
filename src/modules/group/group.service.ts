@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { EngineRegistry } from '../../engine/engine-registry.service';
-import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
+import { GroupMemberAddMode, IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { paginate, ListOptions } from '../../common/utils/paginate';
 
 /**
@@ -77,13 +77,14 @@ export class GroupService {
     return this.getEngine(sessionId).joinGroupViaInviteCode(inviteCode);
   }
 
-  /** Read the group's announce/locked/ephemeral settings; 404s (via getGroupInfo) when unknown. */
+  /** Read the group's announce/locked/ephemeral/member-add settings; 404s (via getGroupInfo) when unknown. */
   async getGroupSettings(sessionId: string, groupId: string) {
     const group = await this.getGroupInfo(sessionId, groupId);
     return {
       announce: group.announce,
       locked: group.locked,
       ...(group.ephemeralSeconds !== undefined ? { ephemeralSeconds: group.ephemeralSeconds } : {}),
+      ...(group.memberAddMode !== undefined ? { memberAddMode: group.memberAddMode } : {}),
     };
   }
 
@@ -104,16 +105,28 @@ export class GroupService {
   async updateGroupSettings(
     sessionId: string,
     groupId: string,
-    settings: { announce?: boolean; locked?: boolean; ephemeralSeconds?: number },
+    settings: { announce?: boolean; locked?: boolean; ephemeralSeconds?: number; memberAddMode?: GroupMemberAddMode },
   ) {
-    const { announce, locked, ephemeralSeconds } = settings;
-    if (announce === undefined && locked === undefined && ephemeralSeconds === undefined) {
-      throw new BadRequestException('At least one of announce, locked, ephemeralSeconds must be provided');
+    const { announce, locked, ephemeralSeconds, memberAddMode } = settings;
+    if (
+      announce === undefined &&
+      locked === undefined &&
+      ephemeralSeconds === undefined &&
+      memberAddMode === undefined
+    ) {
+      throw new BadRequestException(
+        'At least one of announce, locked, ephemeralSeconds, memberAddMode must be provided',
+      );
     }
     const engine = this.getEngine(sessionId);
     const steps: Array<[field: string, apply: () => Promise<unknown>]> = [];
     if (ephemeralSeconds !== undefined) {
       steps.push(['ephemeralSeconds', () => engine.setGroupEphemeral(groupId, ephemeralSeconds)]);
+    }
+    // After ephemeralSeconds, per the ordering rule above: this field is supported on both engines,
+    // so it carries no deterministic refusal and must not displace the one field that does.
+    if (memberAddMode !== undefined) {
+      steps.push(['memberAddMode', () => engine.setGroupMemberAddMode(groupId, memberAddMode)]);
     }
     if (announce !== undefined) {
       steps.push(['announce', () => engine.setGroupMessagesAdminsOnly(groupId, announce)]);

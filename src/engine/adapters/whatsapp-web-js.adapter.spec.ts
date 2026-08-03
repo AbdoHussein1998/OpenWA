@@ -744,6 +744,31 @@ describe('WhatsAppWebJsAdapter channel-JID guard (#554 — wwebjs Channel lacks 
     });
   });
 
+  describe('setGroupMemberAddMode', () => {
+    const groupChat = (over: Record<string, unknown> = {}) => ({
+      getChatById: jest.fn().mockResolvedValue({ isGroup: true, ...over }),
+    });
+
+    it("maps 'admins' to adminsOnly=true — the wwjs setter is inverted relative to our vocabulary", async () => {
+      const setAddMembersAdminsOnly = jest.fn().mockResolvedValue(true);
+      await readyAdapter(groupChat({ setAddMembersAdminsOnly })).setGroupMemberAddMode('g@g.us', 'admins');
+      expect(setAddMembersAdminsOnly).toHaveBeenCalledWith(true);
+    });
+
+    it("maps 'all' to adminsOnly=false", async () => {
+      const setAddMembersAdminsOnly = jest.fn().mockResolvedValue(true);
+      await readyAdapter(groupChat({ setAddMembersAdminsOnly })).setGroupMemberAddMode('g@g.us', 'all');
+      expect(setAddMembersAdminsOnly).toHaveBeenCalledWith(false);
+    });
+
+    it('treats a false result as a refusal (admin rights required), not a silent no-op', async () => {
+      const setAddMembersAdminsOnly = jest.fn().mockResolvedValue(false);
+      await expect(
+        readyAdapter(groupChat({ setAddMembersAdminsOnly })).setGroupMemberAddMode('g@g.us', 'admins'),
+      ).rejects.toBeInstanceOf(EngineRefusedError);
+    });
+  });
+
   describe('clearChatMessages', () => {
     it('clears via Chat.clearMessages and returns its result', async () => {
       const clearMessages = jest.fn().mockResolvedValue(true);

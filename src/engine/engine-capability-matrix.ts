@@ -270,6 +270,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       "wwjs GroupChat.setInfoAdminsOnly(adminsOnly?) (index.d.ts:2216; sets groupMetadata.restrict, GroupChat.js:544); baileys groupSettingUpdate(jid, 'locked'|'unlocked') (Socket/groups.d.ts:41)",
   },
+  setGroupMemberAddMode: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      "wwjs GroupChat.setAddMembersAdminsOnly(adminsOnly?) → boolean (index.d.ts:2205; false → adapter throws EngineRefusedError); baileys groupMemberAddMode(jid,'admin_add'|'all_member_add') (Socket/groups.d.ts:42). NOT a groupSettingUpdate option on either engine. Read side disagrees between engines and with wwjs's own types: baileys GroupMetadata.memberAddMode is a boolean where true = all_member_add (Socket/groups.js:304), while wwjs stores WhatsApp's raw strings (GroupChat.js:476) despite index.d.ts:890 declaring a boolean with the OPPOSITE sense — both are normalised to 'all'|'admins' at the adapter",
+  },
   setGroupMessagesAdminsOnly: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },

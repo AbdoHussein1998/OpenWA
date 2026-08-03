@@ -21,6 +21,7 @@ import {
   Contact,
   Group,
   GroupInfo,
+  GroupMemberAddMode,
   ParticipantOperationResult,
   LocationInput,
   PollInput,
@@ -1506,6 +1507,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   // Set "only admins can edit group info" (locked/restrict)
   setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
     return this.groups.setGroupInfoAdminsOnly(groupId, adminsOnly);
+  }
+
+  setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void> {
+    return this.groups.setGroupMemberAddMode(groupId, mode);
   }
 
   setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {

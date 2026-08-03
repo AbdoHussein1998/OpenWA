@@ -152,6 +152,30 @@ describe('GroupService', () => {
       expect(engine.setGroupInfoAdminsOnly).not.toHaveBeenCalled();
     });
 
+    it('keeps memberAddMode BEHIND ephemeralSeconds, so the deterministic 501 still fails first', async () => {
+      // memberAddMode is supported on both engines and therefore has no deterministic refusal.
+      // Ordering it ahead of ephemeralSeconds would reintroduce exactly the half-applied patch the
+      // rule above exists to prevent: the mode would land, then the ephemeral call would 501.
+      const engine = {
+        setGroupMemberAddMode: jest.fn().mockResolvedValue(undefined),
+        setGroupMessagesAdminsOnly: jest.fn().mockResolvedValue(undefined),
+        setGroupInfoAdminsOnly: jest.fn().mockResolvedValue(undefined),
+        setGroupEphemeral: jest.fn().mockRejectedValue(new EngineNotSupportedError('setGroupEphemeral')),
+      };
+      const svc = makeService(engine);
+      await expect(
+        svc.updateGroupSettings('s1', 'g1', { memberAddMode: 'admins', ephemeralSeconds: 86400 }),
+      ).rejects.toBeInstanceOf(EngineNotSupportedError);
+      expect(engine.setGroupMemberAddMode).not.toHaveBeenCalled();
+    });
+
+    it('applies memberAddMode when it is the only field in the patch', async () => {
+      const engine = { setGroupMemberAddMode: jest.fn().mockResolvedValue(undefined) };
+      const svc = makeService(engine);
+      await svc.updateGroupSettings('s1', 'g1', { memberAddMode: 'all' });
+      expect(engine.setGroupMemberAddMode).toHaveBeenCalledWith('g1', 'all');
+    });
+
     it('names the failed field AND the applied ones when a patch partially applies', async () => {
       // ephemeralSeconds applied, then announce failed: the client must learn the group is now in a
       // mixed state (and which subset took effect), not receive a bare engine error.

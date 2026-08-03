@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`memberAddMode` on group settings — who may add participants.** `PUT /groups/:groupId/settings`
+  accepts `memberAddMode: "all" | "admins"`, `GET .../settings` reports it, and `GroupInfo` carries
+  it. Supported on both engines. Exposed on the `GroupSettings` shape in all five SDKs.
+
+  The two engines encode this incompatibly, and the API deliberately hides that: Baileys uses a
+  boolean where **true means everyone may add**, while whatsapp-web.js stores WhatsApp's own
+  `all_member_add`/`admin_add` strings — and types the field as a boolean with the **opposite**
+  meaning to Baileys'. Reading it as a plain boolean would silently invert the setting on one engine
+  or the other, so both encodings are decoded explicitly and anything unrecognised is reported as
+  unknown rather than guessed.
+
+  Within a settings patch, `memberAddMode` is applied *after* `ephemeralSeconds`. That ordering is
+  load-bearing: `ephemeralSeconds` is the only field with a deterministic per-engine refusal
+  (whatsapp-web.js always `501`s it), so it must fail before anything else has been applied.
+
 - **A chat's messages can be cleared without deleting the chat:**
   `DELETE /api/sessions/:id/chats/:chatId/messages`. Available in all five SDKs as
   `chats.clearMessages`. Like `chats/archive`, `success: false` is a defined outcome — an unknown

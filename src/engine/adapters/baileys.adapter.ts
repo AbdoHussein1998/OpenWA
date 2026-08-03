@@ -21,6 +21,7 @@ import {
   EngineStatus,
   Group,
   GroupInfo,
+  GroupMemberAddMode,
   IncomingMessage,
   IWhatsAppEngine,
   Label,
@@ -414,6 +415,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   async setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
     return this.groups.setGroupInfoAdminsOnly(groupId, adminsOnly);
+  }
+
+  async setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void> {
+    return this.groups.setGroupMemberAddMode(groupId, mode);
   }
 
   async setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {

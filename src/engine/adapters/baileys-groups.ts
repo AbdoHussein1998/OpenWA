@@ -1,5 +1,10 @@
 import type { WASocket } from '@whiskeysockets/baileys';
-import { Group, GroupInfo, ParticipantOperationResult } from '../interfaces/whatsapp-engine.interface';
+import {
+  Group,
+  GroupInfo,
+  GroupMemberAddMode,
+  ParticipantOperationResult,
+} from '../interfaces/whatsapp-engine.interface';
 import { mapBaileysGroup, mapBaileysGroupInfo } from './baileys-group-mapper';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
@@ -200,6 +205,12 @@ export class BaileysGroups {
   async setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
     this.host.ensureReady();
     await this.sock().groupSettingUpdate(groupId, adminsOnly ? 'locked' : 'unlocked');
+  }
+
+  async setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void> {
+    this.host.ensureReady();
+    // A dedicated socket call, not a groupSettingUpdate option.
+    await this.sock().groupMemberAddMode(groupId, mode === 'admins' ? 'admin_add' : 'all_member_add');
   }
 
   async setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
