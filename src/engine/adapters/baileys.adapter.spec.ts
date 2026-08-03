@@ -55,6 +55,7 @@ class FakeSock extends EventEmitter {
   public readMessages = jest.fn().mockResolvedValue(undefined);
   public chatModify = jest.fn().mockResolvedValue(undefined);
   public addChatLabel = jest.fn().mockResolvedValue(undefined);
+  public addLabel = jest.fn().mockResolvedValue(undefined);
   public removeChatLabel = jest.fn().mockResolvedValue(undefined);
   public newsletterMetadata = jest.fn();
   public getCatalog = jest.fn();
@@ -4356,5 +4357,62 @@ describe('BaileysAdapter presence', () => {
     fakeSock.fire('presence.update', { id: '12036@g.us' });
 
     expect(onPresenceUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// Create, update and delete are ONE upstream write (a `label_edit` app-state patch keyed on the
+// label id), so what distinguishes them is the body — and getting that body wrong silently edits the
+// wrong thing rather than failing.
+describe('BaileysAdapter label editing', () => {
+  beforeEach(() => {
+    fakeSock.user = undefined;
+    fakeSock.resetEmitter();
+    jest.clearAllMocks();
+  });
+
+  const readyAdapter = async () => {
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({}));
+    fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+    fakeSock.fire('connection.update', { connection: 'open' });
+    return adapter;
+  };
+
+  it('writes name and colour under the caller-chosen id', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.upsertLabel({ id: 'l1', name: 'VIP', color: 3 });
+
+    expect(fakeSock.addLabel).toHaveBeenCalledWith('628999:12@s.whatsapp.net', {
+      id: 'l1',
+      name: 'VIP',
+      color: 3,
+    });
+  });
+
+  // Colour 0 is a real WhatsApp colour, not "unset" — a falsy check here would make it unsettable.
+  it('treats colour 0 as a colour', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.upsertLabel({ id: 'l1', color: 0 });
+
+    const [, body] = fakeSock.addLabel.mock.calls[0] as [string, { color?: number }];
+    expect(body.color).toBe(0);
+  });
+
+  it('deletes through the same write, with the tombstone flag', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.deleteLabel('l1');
+
+    expect(fakeSock.addLabel).toHaveBeenCalledWith('628999:12@s.whatsapp.net', { id: 'l1', deleted: true });
+  });
+
+  // Baileys has label writes but no label query of any kind, so listing a label's chats is refused
+  // rather than faked from a partial cache.
+  it('refuses to list chats by label, with the method named', async () => {
+    const adapter = await readyAdapter();
+
+    await expect(adapter.getChatsByLabel('l1')).rejects.toThrow(/getChatsByLabel/);
   });
 });

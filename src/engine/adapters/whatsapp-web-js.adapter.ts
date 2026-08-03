@@ -39,6 +39,7 @@ import {
   PaginatedProducts,
   ChatSummary,
   ChatState,
+  LabelInput,
   GroupEvent,
   IncomingCallEvent,
   AccountRestriction,
@@ -637,6 +638,28 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
    * off the prototype, so a throw hidden behind a delegate call is invisible to it and the
    * `not-available` matrix row would go unverified; inline, the gate checks it.
    */
+  getChatsByLabel(labelId: string): Promise<ChatSummary[]> {
+    return this.labels.getChatsByLabel(labelId);
+  }
+
+  /**
+   * whatsapp-web.js 1.34.7 can read labels and assign them, but cannot create, rename, recolour or
+   * delete one — `index.d.ts` exposes getLabels / getLabelById / getChatLabels / getChatsByLabelId /
+   * addOrRemoveLabels and nothing that edits the label itself.
+   *
+   * Inline rather than delegated so the parity gate, which reads bodies off the prototype, can
+   * verify the matrix row (see docs/29).
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
+  async upsertLabel(_label: LabelInput): Promise<void> {
+    throw new EngineNotSupportedError('upsertLabel');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
+  async deleteLabel(_labelId: string): Promise<void> {
+    throw new EngineNotSupportedError('deleteLabel');
+  }
+
   // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
   async subscribeToPresence(_chatId: string): Promise<void> {
     throw new EngineNotSupportedError('subscribeToPresence');

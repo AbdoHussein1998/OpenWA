@@ -15,6 +15,17 @@ func (q *ListSessionsQuery) values() url.Values {
 	return v
 }
 
+// UpsertLabelRequest is a label create-or-update body. The id travels in the path, because WhatsApp
+// keys the write on it.
+type UpsertLabelRequest struct {
+	// Name is left alone when nil.
+	Name *string `json:"name,omitempty"`
+	// Color is WhatsApp's colour INDEX (0-19), NOT a hex value — it does not round-trip with the
+	// HexColor labels are read back with, because neither engine exposes the mapping. Nil leaves the
+	// current colour alone.
+	Color *int `json:"color,omitempty"`
+}
+
 // ParticipantPresence is one participant's presence within a chat.
 type ParticipantPresence struct {
 	ID string `json:"id"`

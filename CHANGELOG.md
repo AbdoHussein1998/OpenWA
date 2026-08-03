@@ -24,6 +24,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Labels can now be created, renamed, recoloured and deleted** — `PUT` and
+  `DELETE /api/sessions/:sessionId/labels/:labelId` — and **listed by chat**:
+  `GET /api/sessions/:sessionId/labels/:labelId/chats`. All five SDKs gain the matching methods.
+
+  The two engines split down the middle and neither covers both halves, so this is honest about
+  which is which rather than pretending at parity. whatsapp-web.js can read labels and assign them
+  but cannot edit one — `index.d.ts` has no create/rename/delete of any kind — so the edits answer
+  `501` there. Baileys is the mirror image: it has the writes and no label query whatsoever, so
+  listing a label's chats answers `501` on it. Assigning a label to a chat is the only part that
+  works everywhere.
+
+  **Creating a label means choosing its id**, which is why the route is `PUT /labels/:labelId` and not
+  `POST /labels`. WhatsApp carries one write keyed on the label id, so create and update are the same
+  operation and there is no server-assigned id to return — reusing an existing id rewrites that
+  label rather than failing, because the protocol has no create-only form. Saying so is better than
+  a `POST` that implies a guarantee nothing can keep.
+
+  `color` is WhatsApp's colour **index** (0–19), not the `hexColor` the read routes return. The two
+  deliberately do not round-trip: neither engine exposes the mapping, so translating between them
+  would be guesswork that silently sets the wrong colour.
+
 - **Presence: see who is online or typing.** `POST /api/sessions/:id/presence/subscribe` starts
   WhatsApp reporting a chat's presence; `GET /api/sessions/:id/presence/:chatId` serves the latest
   report; changes arrive as the new `presence.update` webhook **and** socket event. Exposed in all

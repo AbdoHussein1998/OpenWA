@@ -25,6 +25,7 @@ import {
   IncomingMessage,
   IWhatsAppEngine,
   Label,
+  LabelInput,
   LocationInput,
   MediaInput,
   MessageReaction,
@@ -519,6 +520,14 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.unsupported('getMessageReactions');
   }
 
+  // Baileys exposes label WRITES only — chats.d.ts:69-73 has addLabel/addChatLabel/removeChatLabel
+  // and no query of any kind, and Types/Label.d.ts is types-only. Listing the chats on a label would
+  // mean maintaining an app-state cache fed by the label-association sync events, which is a
+  // separate piece of work from this one and is tracked as such.
+  getChatsByLabel(_labelId: string): Promise<ChatSummary[]> {
+    return this.unsupported('getChatsByLabel');
+  }
+
   // No vote-send helper exists in Baileys — only decryptPollVote for RECEIVING. Sending one needs a
   // hand-built proto.Message.PollUpdateMessage with HMAC-SHA256 vote encryption keyed by the poll
   // creation's messageSecret.
@@ -554,6 +563,41 @@ export class BaileysAdapter implements IWhatsAppEngine {
     this.ensureReady();
     await this.sock!.removeChatLabel(chatId, labelId);
   }
+  /**
+   * Create or update a label.
+   *
+   * WhatsApp models this as ONE app-state write — a `label_edit` patch indexed by the label id — so
+   * create and update are the same operation, distinguished only by whether the id already exists.
+   * That is why the id is caller-supplied rather than returned.
+   *
+   * The `jid` Baileys asks for is unused on this patch: `chatModifyToPatch` builds the index from
+   * `['label_edit', id]` and never reads it (Utils/chat-utils.js:579-593). The account's own jid is
+   * passed because the call demands one, not because it addresses anything.
+   */
+  async upsertLabel(label: LabelInput): Promise<void> {
+    this.ensureReady();
+    // Unset fields are passed through as undefined rather than stripped: the protobuf encoder skips
+    // a field that is `!= null` false, exactly as it skips a missing one (WAProto/index.js,
+    // LabelEditAction.encode), so an omitted name really does leave the stored name alone. Colour 0
+    // is a real WhatsApp colour and survives that check — which is why it must never be tested for
+    // truthiness on the way here.
+    await this.sock!.addLabel(this.ownJidForAppState(), { id: label.id, name: label.name, color: label.color });
+  }
+
+  /** Delete a label. The same `label_edit` write, with the tombstone flag set. */
+  async deleteLabel(labelId: string): Promise<void> {
+    this.ensureReady();
+    await this.sock!.addLabel(this.ownJidForAppState(), { id: labelId, deleted: true });
+  }
+
+  /**
+   * A jid for the label-edit app-state write, which needs one but never uses it. The account's own
+   * id is the honest choice — the write is about this account, not about a conversation.
+   */
+  private ownJidForAppState(): string {
+    return this.sock?.user?.id ?? 'status@broadcast';
+  }
+
   getSubscribedChannels(): Promise<Channel[]> {
     return this.unsupported('getSubscribedChannels');
   }

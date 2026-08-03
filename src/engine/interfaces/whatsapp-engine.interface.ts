@@ -280,6 +280,25 @@ export interface Label {
   hexColor: string;
 }
 
+/**
+ * A label to create or update. Keyed on a CALLER-SUPPLIED id, because that is exactly what the
+ * underlying operation is: WhatsApp's app-state carries one `label_edit` write indexed by label id,
+ * and whether it creates or updates depends only on whether that id already exists. There is no
+ * server-assigned id to hand back, so inventing one here would be inventing a contract the protocol
+ * does not have — and could silently overwrite an existing label.
+ */
+export interface LabelInput {
+  id: string;
+  name?: string;
+  /**
+   * WhatsApp's colour INDEX (0-19), not a hex value. Deliberately not the `hexColor` the read path
+   * returns: neither library exposes the index-to-hex mapping — whatsapp-web.js passes hex straight
+   * through from the WA Web store and Baileys only ever speaks in indices — so a translation table
+   * here would be guesswork that silently sets the wrong colour.
+   */
+  color?: number;
+}
+
 // Phase 3: Status/Stories
 export interface Status {
   id: string;
@@ -868,6 +887,16 @@ export interface IWhatsAppEngine {
   getLabelById(labelId: string): Promise<Label | null>;
   getChatLabels(chatId: string): Promise<Label[]>;
   addLabelToChat(chatId: string, labelId: string): Promise<void>;
+  /**
+   * Create or update a label, keyed on `label.id`. One operation, not two: the engines express both
+   * through a single app-state write, and which one happens depends on whether the id already
+   * exists. Only fields that are set are changed.
+   */
+  upsertLabel(label: LabelInput): Promise<void>;
+  /** Delete a label. It disappears from every chat it was on. */
+  deleteLabel(labelId: string): Promise<void>;
+  /** Every chat carrying a label. */
+  getChatsByLabel(labelId: string): Promise<ChatSummary[]>;
   removeLabelFromChat(chatId: string, labelId: string): Promise<void>;
 
   // Channels/Newsletter (Phase 3)

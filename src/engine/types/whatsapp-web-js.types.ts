@@ -107,10 +107,16 @@ export interface MessageWithReactions extends Omit<Message, 'hasReaction' | 'get
  */
 export interface BusinessClient extends Omit<
   Client,
-  'subscribeToChannel' | 'unsubscribeFromChannel' | 'getLabels' | 'getLabelById' | 'getChannels'
+  'subscribeToChannel' | 'unsubscribeFromChannel' | 'getLabels' | 'getLabelById' | 'getChannels' | 'getChatsByLabelId'
 > {
   getLabels(): Promise<Array<{ id: string; name: string; hexColor: string }>>;
   getLabelById(id: string): Promise<{ id: string; name: string; hexColor: string } | null>;
+  /** Chats carrying a label. whatsapp-web.js has the read but exposes no label create/update/delete. */
+  getChatsByLabelId(
+    labelId: string,
+  ): Promise<
+    Array<{ id?: { _serialized?: string }; name?: string; isGroup?: boolean; unreadCount?: number; timestamp?: number }>
+  >;
   getChannels(): Promise<WwjsChannelData[]>;
   /** Takes a channel ID (`…@newsletter`), NOT an invite code; resolves true only on success. */
   subscribeToChannel(channelId: string): Promise<boolean>;

@@ -1,7 +1,7 @@
 import { type Client } from 'whatsapp-web.js';
-import { Label } from '../interfaces/whatsapp-engine.interface';
+import { Label, ChatSummary } from '../interfaces/whatsapp-engine.interface';
 import { GroupChat, BusinessClient } from '../types/whatsapp-web-js.types';
-import { isChannelJid } from '../identity/wa-id';
+import { isChannelJid, chatKind } from '../identity/wa-id';
 import { ChatLabelsUnsupportedError } from '../../common/errors/chat-labels-unsupported.error';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
@@ -30,6 +30,30 @@ export class WwebjsLabels {
       name: String(label.name),
       hexColor: String(label.hexColor),
     }));
+  }
+
+  /**
+   * Every chat carrying a label. Mapped to the neutral ChatSummary here rather than returned raw,
+   * for the same reason getChats does it: no whatsapp-web.js type may cross the engine boundary.
+   * Entries without a serialized id are skipped rather than failing the whole request.
+   */
+  async getChatsByLabel(labelId: string): Promise<ChatSummary[]> {
+    this.host.ensureReady();
+    const chats = await (this.client() as unknown as BusinessClient).getChatsByLabelId(labelId);
+    const summaries: ChatSummary[] = [];
+    for (const chat of chats ?? []) {
+      const id = chat.id?._serialized;
+      if (!id) continue;
+      summaries.push({
+        id,
+        name: chat.name || id,
+        isGroup: Boolean(chat.isGroup),
+        kind: chatKind(id),
+        unreadCount: chat.unreadCount || 0,
+        timestamp: chat.timestamp || 0,
+      });
+    }
+    return summaries;
   }
 
   async getLabelById(labelId: string): Promise<Label | null> {

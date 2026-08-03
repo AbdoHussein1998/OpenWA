@@ -144,7 +144,9 @@ _✅ #17 `getProduct` — wired on Baileys (#905); see §Catalog / Products / Or
 
 These are honestly out of reach of a clean adapter wiring because the installed library exposes no first-class symbol. Listed so operators can plan around them rather than file unactionable bugs.
 
-**baileys (10 cells):**
+**baileys (11 cells):**
+
+- `getChatsByLabel` — label WRITES only (`Socket/chats.d.ts:69-73`: `addLabel`, `addChatLabel`, `removeChatLabel`); there is no label query of any kind and `Types/Label.d.ts` is types-only. Listing a label's chats needs an app-state cache fed by the label-association sync events, which is its own piece of work. whatsapp-web.js: `Client.getChatsByLabelId`.
 
 - `getSubscribedChannels` — no enumerate-newsletters query; all 19 newsletter members of `Socket/newsletter.d.ts` address a single newsletter (by jid, by invite key, or by creating one). Needs a raw WMex/app-state hack.
 - `getLabels` / `getLabelById` / `getChatLabels` — no label read symbol; only writes (`Types/Label.d.ts` is types-only). Workaround: capture labels from the `messaging-history.set` app-state event into an in-memory cache (relay hack, no on-demand refresh).
@@ -154,7 +156,9 @@ These are honestly out of reach of a clean adapter wiring because the installed 
 - `sendCatalog` — no catalog-share message type in `AnyMessageContent` (only single `{product}`).
 - `votePoll` — no vote-SEND helper at all; the library only decrypts INCOMING votes (`decryptPollVote`). Sending one means hand-building a `proto.Message.PollUpdateMessage` with HMAC-SHA256 vote encryption keyed by the poll creation's `messageSecret`. Supported on whatsapp-web.js.
 
-**wwjs (7 cells):**
+**wwjs (9 cells):**
+
+- `upsertLabel` / `deleteLabel` — whatsapp-web.js 1.34.7 can READ labels and assign them, but cannot edit one: `index.d.ts:129-154` exposes `getLabels`, `getLabelById`, `getChatLabels`, `getChatsByLabelId` and `addOrRemoveLabels`, and nothing that creates, renames, recolours or deletes a label. Baileys: one `addLabel` write covering all four.
 
 - `subscribeToPresence` — no way to observe another party's presence. `WAWebPresenceChatAction` offers only `sendPresenceAvailable` / `sendPresenceUnavailable` (`index.d.ts:230,233`), which publish the ACCOUNT's own presence, and the library emits no presence event at all. Baileys: `presenceSubscribe` + the `presence.update` event. Reaching it would mean injecting page-level subscriptions against undocumented WA Web modules.
 - `getCatalog` / `getProducts` / `getProduct` — no catalog API at all (`index.d.ts` 0 hits; `Product` is inbound-only).
@@ -170,9 +174,9 @@ These are hand-maintained and had drifted from the source before this pass; they
 from `engine-capability-matrix.ts` rather than adjusted by hand. Re-derive them the same way when
 adding a method, instead of incrementing the previous figure.
 
-- **92** interface methods, **184** adapter-cells (92 × 2 engines).
-- **165** supported cells; **19** not-available cells across **18** methods.
-- Of the 19 not-available cells: **2 adapter-gaps** (fixable) + **17 library-limitations** + **0 uncertain**.
+- **95** interface methods, **190** adapter-cells (95 × 2 engines).
+- **168** supported cells; **22** not-available cells across **21** methods.
+- Of the 22 not-available cells: **2 adapter-gaps** (fixable) + **20 library-limitations** + **0 uncertain**.
 - **0 phantom-support rows** — every `not-available` row throws at the adapter boundary.
 
   Note that the drift gate does **not** verify that for whatsapp-web.js. `engine-parity.spec.ts`
