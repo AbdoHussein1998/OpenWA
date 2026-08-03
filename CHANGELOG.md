@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Send pacing now bounds cold reachouts separately** (`SEND_PACING_COLD_DAILY_CAP`). A send counts
+  as a cold reachout when the account has no history with that chat **in either direction**; a reply
+  to someone who wrote first is never counted and never refused by this rule, and status posts, which
+  address no chat, are exempt.
+
+  This is the rule that matches what WhatsApp actually punishes — its own reachout timelock exists
+  precisely for accounts that start conversations with strangers — so it ramps far more tightly than
+  the overall daily allowance and is checked after it. Refusals carry the same `429` +
+  `SEND_PACING_LIMITED`, distinguished in the metric and audit trail by `rule: cold_daily_cap`.
+
 - **The dashboard shows account restrictions on the session card**, in all 12 locales. The row is
   deliberately not gated on status, unlike the error row beside it: a reachout timelock applies to a
   session that is perfectly `ready`, and hiding it behind a failure status would make it invisible in

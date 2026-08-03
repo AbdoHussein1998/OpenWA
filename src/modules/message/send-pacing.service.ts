@@ -83,12 +83,13 @@ export class SendPacingService {
    * When the feature is off this returns before doing anything at all — no query, no map lookup — so
    * a deployment that has not opted in behaves exactly as it did before the governor existed.
    */
-  async assertSendAllowed(sessionId: string): Promise<void> {
+  async assertSendAllowed(sessionId: string, chatId?: string): Promise<void> {
     const config = resolveSendPacingConfig(this.configService);
     if (!config.enabled) return;
 
     this.assertBreakerClosed(sessionId, config);
     await this.assertUnderDailyCap(sessionId, config);
+    await this.assertUnderColdCap(sessionId, chatId, config);
   }
 
   /**
@@ -134,9 +135,9 @@ export class SendPacingService {
   }
 
   /** The allowance for a session this many whole days old, saturating at the schedule's last entry. */
-  private allowanceForAge(config: SendPacingConfig, ageDays: number): number {
-    const index = Math.min(Math.max(ageDays, 0), config.warmupSchedule.length - 1);
-    return config.warmupSchedule[index];
+  private allowanceForAge(schedule: number[], ageDays: number): number {
+    const index = Math.min(Math.max(ageDays, 0), schedule.length - 1);
+    return schedule[index];
   }
 
   private breakerFor(sessionId: string): BreakerState {
@@ -173,7 +174,7 @@ export class SendPacingService {
     // Age from createdAt, NOT connectedAt: connectedAt is overwritten on every connect, so a session
     // that reconnects would look one day old forever and never leave the first rung of the ramp.
     const ageDays = Math.floor((dayStart.getTime() - startOfUtcDay(session.createdAt).getTime()) / DAY_MS);
-    const allowance = this.allowanceForAge(config, ageDays);
+    const allowance = this.allowanceForAge(config.warmupSchedule, ageDays);
 
     const sentToday = await this.messageRepository.count({
       where: { sessionId, direction: MessageDirection.OUTGOING, createdAt: MoreThanOrEqual(dayStart) },
@@ -219,6 +220,70 @@ export class SendPacingService {
       metadata: { rule, retryAfterSeconds, suppressed },
       errorMessage: message,
     });
+  }
+
+  /**
+   * Refuse a cold reachout once the day's allowance for them is spent.
+   *
+   * "Cold" means this account has no history with the chat in EITHER direction: answering someone
+   * who wrote to you first is not a reachout, and counting it as one would throttle exactly the
+   * traffic WhatsApp wants to see. A chat with no `chatId` (a status post) is not addressed to
+   * anyone, so the rule does not apply to it.
+   *
+   * The cheap probe runs first and settles most sends in one indexed lookup; the aggregate that
+   * counts the day's cold reachouts only runs when this send is itself cold.
+   */
+  private async assertUnderColdCap(
+    sessionId: string,
+    chatId: string | undefined,
+    config: SendPacingConfig,
+  ): Promise<void> {
+    if (!chatId || config.coldSchedule.length === 0) return;
+
+    // Any row at all, either direction, any time: one message from them, or one from us last month,
+    // and this is an existing relationship rather than a reachout. The send being checked has not
+    // persisted its own row yet — the gate runs before saveOutgoingMessage — so this cannot see it.
+    const hasHistory = await this.messageRepository.exists({ where: { sessionId, chatId } });
+    if (hasHistory) return;
+
+    const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
+    if (!session) return;
+
+    const dayStart = startOfUtcDay(new Date());
+    const ageDays = Math.floor((dayStart.getTime() - startOfUtcDay(session.createdAt).getTime()) / DAY_MS);
+    const allowance = this.allowanceForAge(config.coldSchedule, ageDays);
+    const coldToday = await this.countColdReachoutsToday(sessionId, dayStart);
+    if (coldToday < allowance) return;
+
+    this.refuse('cold_daily_cap', sessionId, secondsUntilNextUtcDay(), {
+      reason: `Daily allowance of ${allowance} new conversation(s) reached for a session ${ageDays} day(s) old`,
+      allowance,
+      coldToday,
+    });
+  }
+
+  /**
+   * Distinct chats this session started today: it sent to them today, and nothing in the chat
+   * predates today. Expressed as a NOT EXISTS rather than a `MIN(createdAt)` group-by so it stays on
+   * the `(sessionId, createdAt)` and `chatId` indexes instead of grouping the whole table.
+   */
+  private countColdReachoutsToday(sessionId: string, dayStart: Date): Promise<number> {
+    return (
+      this.messageRepository
+        .createQueryBuilder('m')
+        .select('COUNT(DISTINCT m.chatId)', 'count')
+        .where('m.sessionId = :sessionId', { sessionId })
+        .andWhere('m.direction = :direction', { direction: MessageDirection.OUTGOING })
+        .andWhere('m.createdAt >= :dayStart', { dayStart })
+        // Identifiers are quoted because the columns really are camelCase (`"chatId"`, not `chat_id`)
+        // — there is no snake_case naming strategy on this connection. Unquoted, Postgres would fold
+        // them to lowercase and the query would fail at runtime on the very first cold send.
+        .andWhere(
+          'NOT EXISTS (SELECT 1 FROM "messages" p WHERE p."sessionId" = :sessionId AND p."chatId" = m."chatId" AND p."createdAt" < :dayStart)',
+        )
+        .getRawOne<{ count: string | number }>()
+        .then(row => Number(row?.count ?? 0))
+    );
   }
 
   private refuse(

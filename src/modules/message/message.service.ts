@@ -155,7 +155,9 @@ export class MessageService {
     // not going to be sent. The consequence is deliberate and documented in the hook contract: a
     // paced-out send fires no `message:sending`, so a plugin cannot observe it. Refusals are a 429
     // carrying `code: SEND_PACING_LIMITED`; a plugin veto stays a 400.
-    await this.pacing.assertSendAllowed(sessionId);
+    // Every gated sender's DTO carries `chatId` except `edit`, which addresses a message rather than
+    // a chat — and editing is never a reachout, so having no chatId there is exactly right.
+    await this.pacing.assertSendAllowed(sessionId, (input as { chatId?: string }).chatId);
     return applySendingGate(this.hookManager, sessionId, type, input, 'MessageService');
   }
 

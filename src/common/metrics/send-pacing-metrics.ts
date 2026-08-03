@@ -6,7 +6,7 @@
  * series. Kept in process rather than derived from a table because no row is written for a send that
  * never happened, and because a retention prune would read as a counter reset.
  */
-export type SendPacingRefusalReason = 'daily_cap' | 'breaker_open';
+export type SendPacingRefusalReason = 'daily_cap' | 'cold_daily_cap' | 'breaker_open';
 
 const refusals = new Map<SendPacingRefusalReason, number>();
 

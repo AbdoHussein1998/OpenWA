@@ -21,6 +21,7 @@ interface Harness {
   service: SendPacingService;
   count: jest.Mock;
   findOne: jest.Mock;
+  exists: jest.Mock;
   audit: { logWarn: jest.Mock; logInfo: jest.Mock };
 }
 
@@ -28,21 +29,31 @@ const build = (
   config: Partial<SendPacingConfig> = {},
   sentToday = 0,
   session: Session | null = sessionAged(0),
+  chat: { hasHistory?: boolean; coldToday?: number } = {},
 ): Harness => {
   const count = jest.fn().mockResolvedValue(sentToday);
   const findOne = jest.fn().mockResolvedValue(session);
+  // Default to a chat with history: most tests are about the overall cap, and a warm chat keeps the
+  // cold rule out of their way.
+  const exists = jest.fn().mockResolvedValue(chat.hasHistory ?? true);
+  const createQueryBuilder = jest.fn(() => {
+    const qb: Record<string, unknown> = {};
+    for (const method of ['select', 'where', 'andWhere']) qb[method] = jest.fn(() => qb);
+    qb.getRawOne = jest.fn().mockResolvedValue({ count: chat.coldToday ?? 0 });
+    return qb;
+  });
   const configService = {
     get: (key: string) =>
       key === 'sendPacing' ? { ...computeSendPacingConfig({}), enabled: true, ...config } : undefined,
   } as unknown as ConfigService;
   const audit = { logWarn: jest.fn().mockResolvedValue(null), logInfo: jest.fn().mockResolvedValue(null) };
   const service = new SendPacingService(
-    { count } as unknown as Repository<Message>,
+    { count, exists, createQueryBuilder } as unknown as Repository<Message>,
     { findOne } as unknown as Repository<Session>,
     configService,
     audit as unknown as ConstructorParameters<typeof SendPacingService>[3],
   );
-  return { service, count, findOne, audit };
+  return { service, count, findOne, audit, exists };
 };
 
 /** The (action, context) pair of one audit call, typed so assertions do not fall back to `any`. */
@@ -295,7 +306,9 @@ describe('send paths consult the governor', () => {
 
     await expect(service.sendText('s1', { chatId: 'c@c.us', text: 'hi' })).rejects.toBeInstanceOf(HttpException);
 
-    expect(pacing.assertSendAllowed).toHaveBeenCalledWith('s1');
+    // The recipient must reach the governor too: without it the cold-reachout rule has nothing to
+    // classify and silently degrades to the overall cap.
+    expect(pacing.assertSendAllowed).toHaveBeenCalledWith('s1', 'c@c.us');
     // The ordering decision, pinned: a paced-out send is never offered to plugins, so no
     // `message:sending` fires and nothing is persisted or sent.
     expect(hookManager.execute).not.toHaveBeenCalled();
@@ -367,7 +380,7 @@ describe('send paths consult the governor', () => {
 
     await (service as unknown as { processBatch: (id: string) => Promise<void> }).processBatch('b1');
 
-    expect(pacing.assertSendAllowed).toHaveBeenCalledWith('s1');
+    expect(pacing.assertSendAllowed).toHaveBeenCalledWith('s1', 'c@c.us');
     expect(hookManager.execute).not.toHaveBeenCalledWith('message:sending', expect.anything(), expect.anything());
     expect(engine.sendTextMessage).not.toHaveBeenCalled();
   });
@@ -441,5 +454,93 @@ describe('SendPacingService audit trail', () => {
     await expectPacingRefusal(a.service.assertSendAllowed('s2'));
 
     expect(a.audit.logWarn).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Starting conversations with strangers is the behaviour WhatsApp actually punishes — its own
+// reachout timelock exists for exactly this — so cold reachouts get their own, far tighter budget
+// than replies do.
+describe('SendPacingService cold-reachout cap', () => {
+  beforeEach(() => resetSendPacingRefusals());
+
+  const cold = (over: Partial<SendPacingConfig> = {}): Partial<SendPacingConfig> => ({
+    warmupSchedule: [1000],
+    coldSchedule: [3],
+    ...over,
+  });
+
+  // The distinction the whole rule rests on: replying to someone who wrote to you first is not a
+  // reachout, and throttling it would suppress exactly the traffic WhatsApp wants to see.
+  it('does not count a chat this account already has history with', async () => {
+    const { service, exists } = build(cold(), 0, sessionAged(0), { hasHistory: true, coldToday: 99 });
+
+    await expect(service.assertSendAllowed('s1', 'known@c.us')).resolves.toBeUndefined();
+
+    expect(exists).toHaveBeenCalledWith({ where: { sessionId: 's1', chatId: 'known@c.us' } });
+  });
+
+  it("allows a cold reachout while the day's allowance remains", async () => {
+    const { service } = build(cold(), 0, sessionAged(0), { hasHistory: false, coldToday: 2 });
+
+    await expect(service.assertSendAllowed('s1', 'stranger@c.us')).resolves.toBeUndefined();
+  });
+
+  it('refuses the cold reachout that would exceed the allowance', async () => {
+    const { service } = build(cold(), 0, sessionAged(0), { hasHistory: false, coldToday: 3 });
+
+    const body = await expectPacingRefusal(service.assertSendAllowed('s1', 'stranger@c.us'));
+
+    expect(body.code).toBe(SEND_PACING_LIMITED);
+    expect(body.message).toContain('new conversation');
+  });
+
+  // The cold budget ramps with account age on the same principle as the overall one.
+  it('grows the cold allowance with the session age', async () => {
+    const young = build(cold({ coldSchedule: [3, 30] }), 0, sessionAged(0), { hasHistory: false, coldToday: 5 });
+    await expectPacingRefusal(young.service.assertSendAllowed('s1', 'stranger@c.us'));
+
+    const older = build(cold({ coldSchedule: [3, 30] }), 0, sessionAged(1), { hasHistory: false, coldToday: 5 });
+    await expect(older.service.assertSendAllowed('s1', 'stranger@c.us')).resolves.toBeUndefined();
+  });
+
+  // A status post addresses no one in particular, so it is not a reachout and must never consume the
+  // budget meant for first contacts.
+  it('does not apply to a send with no recipient, and does not probe for one', async () => {
+    const { service, exists } = build(cold(), 0, sessionAged(0), { hasHistory: false, coldToday: 999 });
+
+    await expect(service.assertSendAllowed('s1')).resolves.toBeUndefined();
+
+    expect(exists).not.toHaveBeenCalled();
+  });
+
+  it('is disabled by an empty cold schedule, without probing the chat', async () => {
+    const { service, exists } = build(cold({ coldSchedule: [] }), 0, sessionAged(0), {
+      hasHistory: false,
+      coldToday: 999,
+    });
+
+    await expect(service.assertSendAllowed('s1', 'stranger@c.us')).resolves.toBeUndefined();
+
+    expect(exists).not.toHaveBeenCalled();
+  });
+
+  // The overall cap is the cheaper check and bounds everything, so it must settle first — a session
+  // over its total budget should not also pay for the cold probe.
+  it('lets the overall cap refuse first, without probing the chat', async () => {
+    const { service, exists } = build(cold({ warmupSchedule: [1] }), 5, sessionAged(0), { hasHistory: false });
+
+    const body = await expectPacingRefusal(service.assertSendAllowed('s1', 'stranger@c.us'));
+
+    expect(body.message).toContain('Daily send allowance');
+    expect(exists).not.toHaveBeenCalled();
+  });
+
+  it('counts the refusal under its own rule', async () => {
+    const { service, audit } = build(cold(), 0, sessionAged(0), { hasHistory: false, coldToday: 3 });
+
+    await expectPacingRefusal(service.assertSendAllowed('s1', 'stranger@c.us'));
+
+    expect(getSendPacingRefusals().get('cold_daily_cap')).toBe(1);
+    expect(auditCall(audit.logWarn)[1].metadata).toMatchObject({ rule: 'cold_daily_cap' });
   });
 });

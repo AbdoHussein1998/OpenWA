@@ -1177,6 +1177,7 @@ When enabled, two rules can refuse a send:
 | Rule | What it means |
 |---|---|
 | Warm-up daily cap | The session has used its allowance for the current **UTC** day. The allowance grows with the session's age (`SEND_PACING_WARMUP_SCHEDULE`), because a brand-new WhatsApp account that immediately sends at volume is the pattern that gets numbers banned. The count comes from the messages table, so it survives restarts. |
+| Cold-reachout cap | The session has used its allowance of **new conversations** for the UTC day (`SEND_PACING_COLD_DAILY_CAP`). A send is a cold reachout when the account has no history with that chat in **either** direction — replying to someone who wrote to you first is never counted, and never refused by this rule. Status posts address no chat and are exempt. |
 | Failure breaker | Consecutive send failures reached `SEND_PACING_BREAKER_THRESHOLD`, which usually means WhatsApp has already started refusing this account. Sends resume after `SEND_PACING_BREAKER_COOLDOWN_MS`, or immediately after any send succeeds. |
 
 A refusal is `429` with a body carrying **`code: "SEND_PACING_LIMITED"`** and `retryAfterSeconds`:
@@ -1185,7 +1186,7 @@ A refusal is `429` with a body carrying **`code: "SEND_PACING_LIMITED"`** and `r
 {
   "statusCode": 429,
   "error": "Too Many Requests",
-  "message": "Daily send allowance of 20 reached for a session 0 day(s) old",
+  "message": "Daily allowance of 5 new conversation(s) reached for a session 0 day(s) old",
   "code": "SEND_PACING_LIMITED",
   "retryAfterSeconds": 34521
 }

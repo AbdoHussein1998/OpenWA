@@ -46,7 +46,7 @@ export class CatalogService {
    * change, but worth knowing when reading the counts.
    */
   async sendProduct(sessionId: string, chatId: string, productId: string, body?: string): Promise<MessageResult> {
-    await this.pacing.assertSendAllowed(sessionId);
+    await this.pacing.assertSendAllowed(sessionId, chatId);
     const engine = this.engines.require(
       sessionId,
       () => new NotFoundException(`Session ${sessionId} not found or not connected`),
@@ -60,7 +60,7 @@ export class CatalogService {
    * gains support does not silently open an unpaced send path.
    */
   async sendCatalog(sessionId: string, chatId: string, body?: string): Promise<MessageResult> {
-    await this.pacing.assertSendAllowed(sessionId);
+    await this.pacing.assertSendAllowed(sessionId, chatId);
     const engine = this.engines.require(
       sessionId,
       () => new NotFoundException(`Session ${sessionId} not found or not connected`),
