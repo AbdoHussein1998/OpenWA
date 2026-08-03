@@ -68,6 +68,20 @@ export class WwebjsChats {
     }
   }
 
+  async clearChatMessages(chatId: string): Promise<boolean> {
+    this.host.ensureReady();
+    try {
+      // An unknown chat needs no special case: getChatById resolves undefined for one, and the
+      // resulting TypeError lands in the catch below as the same `false` the injected helper
+      // returns for a chat it cannot find. Same shape as sendSeen/archiveChat above.
+      const chat = await this.client().getChatById(chatId);
+      return await chat.clearMessages();
+    } catch (error) {
+      this.host.logger.error(`Error clearing messages in chat ${chatId}`, String(error));
+      return false;
+    }
+  }
+
   async archiveChat(chatId: string, archive: boolean): Promise<boolean> {
     this.host.ensureReady();
     try {

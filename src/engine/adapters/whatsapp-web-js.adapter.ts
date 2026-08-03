@@ -1577,6 +1577,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.chats.archiveChat(chatId, archive);
   }
 
+  clearChatMessages(chatId: string): Promise<boolean> {
+    return this.chats.clearChatMessages(chatId);
+  }
+
   markUnread(chatId: string): Promise<boolean> {
     return this.chats.markUnread(chatId);
   }

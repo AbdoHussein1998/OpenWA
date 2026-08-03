@@ -712,6 +712,31 @@ Returns HTTP `200`, matching the OpenAPI contract.
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found
 
+#### DELETE /api/sessions/:id/chats/:chatId/messages
+
+Delete every message in a chat, keeping the chat itself in the list.
+
+**Auth:** API key (OPERATOR)  ·  **Scope:** session-scoped
+
+**Path parameters**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `id` | string | Session UUID |
+| `chatId` | string | Engine-native JID, e.g. `1234567890-123@g.us`. URL-encode it if your client does not. |
+
+**Response** `200`
+
+```json
+{ "success": true }
+```
+
+> **`success: false` is a real outcome**, as with `chats/archive`: an unknown chat on
+> whatsapp-web.js, or on Baileys a chat with no known history — the clear is an app-state
+> modification keyed to the chat's last message.
+
+**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found
+
 #### POST /api/sessions/:id/chats/archive
 
 Archive or unarchive a chat.

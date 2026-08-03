@@ -38,6 +38,18 @@ func (s *ChatsService) Archive(ctx context.Context, sessionID string, body Archi
 	return s.post(ctx, sessionID, "/archive", body)
 }
 
+// ClearMessages deletes every message in a chat, keeping the chat itself. A
+// false Success means the engine declined — an unknown chat, or on Baileys a
+// chat with no known history.
+func (s *ChatsService) ClearMessages(ctx context.Context, sessionID, chatID string) (*SuccessResult, error) {
+	var out SuccessResult
+	path := s.base(sessionID) + "/" + pathEscape(chatID) + "/messages"
+	if err := s.client.do(ctx, "DELETE", path, nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // SendState sends a typing/recording/paused state.
 func (s *ChatsService) SendState(ctx context.Context, sessionID string, body SendChatStateRequest) (*SuccessResult, error) {
 	return s.post(ctx, sessionID, "/typing", body)

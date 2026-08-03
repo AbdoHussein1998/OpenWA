@@ -44,6 +44,12 @@ class ChatsResource:
         """Archive or unarchive a chat. success=False means the engine declined."""
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/chats/archive", body=body)
 
+    def clear_messages(self, session_id: str, chat_id: str) -> SuccessResult:
+        """Delete every message in a chat, keeping the chat. success=False means the engine declined."""
+        return self._http.request(
+            "DELETE", f"/api/sessions/{quote_segment(session_id)}/chats/{quote_segment(chat_id)}/messages"
+        )
+
     def delete(self, session_id: str, body: DeleteChatRequest) -> SuccessResult:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/chats/delete", body=body)
 

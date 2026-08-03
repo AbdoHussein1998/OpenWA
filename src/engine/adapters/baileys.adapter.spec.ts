@@ -3714,6 +3714,28 @@ describe('BaileysAdapter sendSeen + markUnread + deleteChat', () => {
     expect(fakeSock.chatModify).not.toHaveBeenCalled();
   });
 
+  it('clearChatMessages clears via chatModify with the last message', async () => {
+    const adapter = await readyWithMessage();
+    expect(await adapter.clearChatMessages('628111@s.whatsapp.net')).toBe(true);
+    expect(fakeSock.chatModify).toHaveBeenCalledWith(
+      {
+        clear: true,
+        lastMessages: [
+          { key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'M1' }, messageTimestamp: 1700000020 },
+        ],
+      },
+      '628111@s.whatsapp.net',
+    );
+  });
+
+  it('clearChatMessages returns false for a chat with no known history', async () => {
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    fakeSock.fire('connection.update', { connection: 'open' });
+    expect(await adapter.clearChatMessages('628999@s.whatsapp.net')).toBe(false);
+    expect(fakeSock.chatModify).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])('archiveChat(%s) modifies the chat with the last message', async archive => {
     const adapter = await readyWithMessage();
     const ok = await adapter.archiveChat('628111@s.whatsapp.net', archive);

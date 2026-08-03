@@ -70,6 +70,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   },
   blockContact: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   checkNumberExists: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  clearChatMessages: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'wwjs Chat.clearMessages() → boolean (index.d.ts:1896); the injected sendClearChat returns false for an unknown chat (Injected/Utils.js:1192-1199); baileys chatModify({clear:true,lastMessages}, jid) (Types/Chat.d.ts:75-78) — same last-message requirement as archiveChat, so a chat with no known history resolves false',
+  },
   createGroup: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   deleteChat: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   deleteMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },

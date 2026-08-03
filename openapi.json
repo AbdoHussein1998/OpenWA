@@ -905,6 +905,46 @@
         ]
       }
     },
+    "/api/sessions/{id}/chats/{chatId}/messages": {
+      "delete": {
+        "operationId": "SessionController_clearChatMessages",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chatId",
+            "required": true,
+            "in": "path",
+            "description": "Chat JID, e.g. 1234567890-123@g.us (URL-encode the '@')",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns `{ success }`. `false` means the engine declined to act — an unknown chat, or on the Baileys engine a chat with no known history, since the change is keyed to its last message."
+          },
+          "400": {
+            "description": "Session not ready"
+          },
+          "404": {
+            "description": "Session not found"
+          }
+        },
+        "summary": "Delete every message in a chat, keeping the chat itself",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/sessions/{id}/chats/archive": {
       "post": {
         "operationId": "SessionController_archiveChat",

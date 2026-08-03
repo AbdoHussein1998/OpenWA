@@ -272,6 +272,15 @@ describe('ChatsResource — exact paths', () => {
   });
 });
 
+describe('ChatsResource.clearMessages', () => {
+  it('DELETEs the chat messages sub-resource', async () => {
+    const t = new MockTransport().on('DELETE', /\/chats\/.+\/messages$/, { body: { success: true } });
+    await client(t).chats.clearMessages('s', 'a@c.us');
+    expect(t.lastCall!.method).toBe('DELETE');
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/chats/a@c.us/messages');
+  });
+});
+
 describe('ChatsResource.archive', () => {
   it('posts chatId and the archive flag', async () => {
     const t = new MockTransport().on('POST', /\/chats\/archive$/, { body: { success: true } });

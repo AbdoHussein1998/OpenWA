@@ -787,6 +787,12 @@ export interface IWhatsAppEngine {
    */
   archiveChat(chatId: string, archive: boolean): Promise<boolean>;
   /**
+   * Delete every message in a chat while keeping the chat itself in the list. Resolves false when
+   * the engine cannot act — an unknown chat on whatsapp-web.js, or (as with archiveChat) a chat
+   * with no known history on Baileys, whose clear is keyed to the last message.
+   */
+  clearChatMessages(chatId: string): Promise<boolean>;
+  /**
    * Send a typing/recording presence indicator to a chat, or clear it (`paused`).
    * Engine-agnostic and best-effort: engines without a presence concept should no-op.
    */
