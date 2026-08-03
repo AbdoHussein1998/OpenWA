@@ -188,6 +188,13 @@ export interface PinMessageRequest {
   durationSeconds?: PinDurationSeconds;
 }
 
+export interface StarMessageRequest {
+  chatId: Jid;
+  messageId: string;
+  /** true to star, false to remove the star. */
+  star: boolean;
+}
+
 export interface UnpinMessageRequest {
   chatId: Jid;
   messageId: string;

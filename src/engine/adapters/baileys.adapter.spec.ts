@@ -2505,6 +2505,28 @@ describe('BaileysAdapter store-backed ops', () => {
     });
   });
 
+  it("starMessage carries the stored key's fromMe, not just the id", async () => {
+    fakeStore.getMessage.mockResolvedValue(stored);
+    const adapter = await ready();
+    await adapter.starMessage('628111@s.whatsapp.net', 'TARGET', true);
+    // The same id addresses a different message depending on direction, so dropping fromMe would
+    // star the wrong side of the conversation.
+    expect(fakeSock.chatModify).toHaveBeenCalledWith(
+      { star: { messages: [{ id: stored.key.id, fromMe: stored.key.fromMe ?? false }], star: true } },
+      '628111@s.whatsapp.net',
+    );
+  });
+
+  it('starMessage passes star:false through for an unstar', async () => {
+    fakeStore.getMessage.mockResolvedValue(stored);
+    const adapter = await ready();
+    await adapter.starMessage('628111@s.whatsapp.net', 'TARGET', false);
+    expect(fakeSock.chatModify).toHaveBeenCalledWith(
+      { star: { messages: [{ id: stored.key.id, fromMe: stored.key.fromMe ?? false }], star: false } },
+      '628111@s.whatsapp.net',
+    );
+  });
+
   it('pinMessage pins IN CHAT via the stored key, with the requested window', async () => {
     fakeStore.getMessage.mockResolvedValue(stored);
     const adapter = await ready();

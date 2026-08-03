@@ -33,6 +33,7 @@ function createMockEngine() {
     getMessageReactions: jest.fn().mockResolvedValue([]),
     deleteMessage: jest.fn().mockResolvedValue(undefined),
     pinMessage: jest.fn().mockResolvedValue(undefined),
+    starMessage: jest.fn().mockResolvedValue(undefined),
     unpinMessage: jest.fn().mockResolvedValue(undefined),
     editMessage: jest.fn().mockResolvedValue(mockEngineResult),
     getChatHistory: jest.fn().mockResolvedValue([]),
@@ -1451,6 +1452,13 @@ describe('MessageService', () => {
       (repository.update as jest.Mock).mockClear();
       await service.pinMessage('sess-1', { chatId: '621@c.us', messageId: 'M1' });
       expect(repository.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('starMessage', () => {
+    it.each([true, false])('passes star=%s straight through to the engine', async star => {
+      await service.starMessage('sess-1', { chatId: '621@c.us', messageId: 'M1', star });
+      expect(mockEngine.starMessage).toHaveBeenCalledWith('621@c.us', 'M1', star);
     });
   });
 

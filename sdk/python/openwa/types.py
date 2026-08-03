@@ -638,6 +638,14 @@ class PinMessageRequest(TypedDict, total=False):
     durationSeconds: int
 
 
+class StarMessageRequest(TypedDict):
+    """Star or unstar a message. Best-effort on whatsapp-web.js."""
+
+    chatId: str
+    messageId: str
+    star: bool
+
+
 class UnpinMessageRequest(TypedDict):
     chatId: str
     messageId: str

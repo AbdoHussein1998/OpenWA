@@ -695,6 +695,11 @@ export interface IWhatsAppEngine {
    */
   editMessage(chatId: string, messageId: string, body: string): Promise<MessageResult>;
   /**
+   * Star (bookmark) a message, or remove its star. Starring is a private, account-local marker —
+   * it is not visible to the other party and has no group-admin restriction.
+   */
+  starMessage(chatId: string, messageId: string, star: boolean): Promise<void>;
+  /**
    * Pin a message in its chat for a bounded window. WhatsApp only recognises three durations —
    * 86400 (24h), 604800 (7d), 2592000 (30d) — so `durationSeconds` must be one of those; it is
    * required rather than defaulted here so neither adapter has to invent a value. In a group only

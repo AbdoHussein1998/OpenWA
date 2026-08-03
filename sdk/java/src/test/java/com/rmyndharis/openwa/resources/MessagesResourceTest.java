@@ -27,6 +27,7 @@ import com.rmyndharis.openwa.model.SendAudioRequest;
 import com.rmyndharis.openwa.model.SendPollRequest;
 import com.rmyndharis.openwa.model.SendTemplateRequest;
 import com.rmyndharis.openwa.model.SendTextRequest;
+import com.rmyndharis.openwa.model.StarMessageRequest;
 import com.rmyndharis.openwa.model.UnpinMessageRequest;
 import com.rmyndharis.openwa.support.MockTransport;
 import java.nio.charset.StandardCharsets;
@@ -291,6 +292,14 @@ class MessagesResourceTest {
         tx.respond(200, "{\"success\":true}");
         client.messages.unpin("s", UnpinMessageRequest.builder().chatId("c1").messageId("m1").build());
         assertEquals("http://h/api/sessions/s/messages/unpin", tx.lastRequest().url());
+        assertEquals(HttpMethod.POST, tx.lastRequest().method());
+    }
+
+    @Test
+    void starPostsToItsRoute() {
+        tx.respond(200, "{\"success\":true}");
+        client.messages.star("s", StarMessageRequest.builder().chatId("c1").messageId("m1").star(false).build());
+        assertEquals("http://h/api/sessions/s/messages/star", tx.lastRequest().url());
         assertEquals(HttpMethod.POST, tx.lastRequest().method());
     }
 }

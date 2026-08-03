@@ -409,6 +409,17 @@ export class BaileysMessaging {
     return found;
   }
 
+  async starMessage(chatId: string, messageId: string, star: boolean): Promise<void> {
+    this.host.ensureReady();
+    const target = await this.requireStored(messageId);
+    // fromMe is load-bearing: the same message id addresses a different message depending on
+    // direction, so omitting it would star the wrong side of the conversation.
+    await this.sock().chatModify(
+      { star: { messages: [{ id: target.key.id!, fromMe: target.key.fromMe ?? false }], star } },
+      chatId,
+    );
+  }
+
   /**
    * Pin/unpin a message IN THE CHAT. Deliberately not `chatModify({pin})` — that pins the chat
    * itself in the chat list, a different feature that happens to share the word.

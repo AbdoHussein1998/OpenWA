@@ -92,6 +92,7 @@ func TestRouting(t *testing.T) {
 		{"Status.List", func(c *Client) { c.Status.List(ctx, "s1") }, "GET", "/api/sessions/s1/status"},
 		{"Status.FromContact", func(c *Client) { c.Status.FromContact(ctx, "s1", "u1") }, "GET", "/api/sessions/s1/status/u1"},
 		{"Messages.Pin", func(c *Client) { c.Messages.Pin(ctx, "s1", PinMessageRequest{}) }, "POST", "/api/sessions/s1/messages/pin"},
+		{"Messages.Star", func(c *Client) { c.Messages.Star(ctx, "s1", StarMessageRequest{}) }, "POST", "/api/sessions/s1/messages/star"},
 		{"Messages.Unpin", func(c *Client) { c.Messages.Unpin(ctx, "s1", UnpinMessageRequest{}) }, "POST", "/api/sessions/s1/messages/unpin"},
 		{"Messages.Media", func(c *Client) { c.Messages.Media(ctx, "s1", "c1", "m1") }, "GET", "/api/sessions/s1/messages/c1/m1/media"},
 		{"Status.Media", func(c *Client) { c.Status.Media(ctx, "s1", "st1") }, "GET", "/api/sessions/s1/status/st1/media"},

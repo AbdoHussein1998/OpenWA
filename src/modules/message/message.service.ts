@@ -804,6 +804,20 @@ export class MessageService {
     return { success: true };
   }
 
+  /**
+   * Star or unstar a message. Like a pin, this is WhatsApp-owned state and is not mirrored locally
+   * — but unlike a pin it is private to the account and never expires.
+   *
+   * Best-effort on whatsapp-web.js: its star/unstar resolve void and silently do nothing when
+   * WhatsApp declines the message, so a 200 here means the instruction was delivered, not that the
+   * star is definitely set.
+   */
+  async starMessage(sessionId: string, dto: { chatId: string; messageId: string; star: boolean }) {
+    const engine = this.getEngine(sessionId);
+    await engine.starMessage(dto.chatId, dto.messageId, dto.star);
+    return { success: true };
+  }
+
   async deleteMessage(
     sessionId: string,
     dto: { chatId: string; messageId: string; forEveryone?: boolean },

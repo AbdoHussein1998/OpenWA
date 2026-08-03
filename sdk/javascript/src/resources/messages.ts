@@ -29,6 +29,7 @@ import type {
   SendLocationRequest,
   SendAudioRequest,
   SendMediaRequest,
+  StarMessageRequest,
   UnpinMessageRequest,
   SendPollRequest,
   SendTemplateRequest,
@@ -188,6 +189,18 @@ export class MessagesResource {
     return this.client.request<SuccessResult>({
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/messages/pin`,
+      body,
+    });
+  }
+
+  /**
+   * Star or unstar a message. Best-effort on whatsapp-web.js: it silently ignores a message it
+   * will not star, so a resolved call is not proof the star is set.
+   */
+  star(sessionId: string, body: StarMessageRequest): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'POST',
+      path: `/api/sessions/${encodeSegment(sessionId)}/messages/star`,
       body,
     });
   }

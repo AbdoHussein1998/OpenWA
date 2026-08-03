@@ -497,6 +497,12 @@ class TestStatus:
         client.status.send_video("s", {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]})
         assert backend.calls[-1].body == {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]}
 
+    def test_star_posts_the_boolean_through(self):
+        backend = MockBackend().on("POST", "/messages/star", body={"success": True})
+        make_client(backend).messages.star("s", {"chatId": "c1", "messageId": "m1", "star": False})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/star"
+        assert backend.last_call.body == {"chatId": "c1", "messageId": "m1", "star": False}
+
     def test_pin_and_unpin_post_to_their_routes(self):
         backend = MockBackend().on("POST", "/messages/pin", body={"success": True})
         backend.on("POST", "/messages/unpin", body={"success": True})

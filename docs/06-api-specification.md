@@ -947,6 +947,30 @@ Pin a message in its chat for a bounded window.
 > On whatsapp-web.js the message must be within the 100-message fetch window for the chat, the same
 > limit that applies to react/delete/edit. On Baileys it must be in the adapter's message store.
 
+#### POST /api/sessions/:sessionId/messages/star
+
+Star (bookmark) a message, or remove its star. Starring is private to the account — the other party
+never sees it — and unlike pinning it has no group-admin restriction and never expires.
+
+**Auth:** API key (OPERATOR)
+
+**Body**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| chatId | string | yes | Chat containing the message |
+| messageId | string | yes | Message to star or unstar |
+| star | boolean | yes | `true` to star, `false` to remove the star |
+
+**Response** `200` — `{ "success": true }`
+
+> **Best-effort on whatsapp-web.js.** Its `star()`/`unstar()` resolve with no value and silently do
+> nothing when WhatsApp declines the message, so a `200` means the instruction was delivered, not
+> that the star is definitely set. There is no signal at the engine boundary to distinguish the two.
+> Baileys applies the change through an app-state modification and is exact.
+
+**Errors:** `400` session not active · `401` missing/invalid API key · `404` message not found in the chat
+
 #### POST /api/sessions/:sessionId/messages/unpin
 
 Remove a message's pin. Takes no duration.

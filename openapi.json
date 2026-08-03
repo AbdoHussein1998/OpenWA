@@ -2233,6 +2233,47 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/messages/star": {
+      "post": {
+        "operationId": "MessageController_starMessage",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StarMessageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Instruction delivered. On whatsapp-web.js the engine silently ignores a message it will not star, so this does not guarantee the star is set."
+          },
+          "400": {
+            "description": "Session not active"
+          },
+          "404": {
+            "description": "Message not found in the chat"
+          }
+        },
+        "summary": "Star or unstar a message",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/messages/edit": {
       "post": {
         "operationId": "MessageController_edit",
@@ -7240,6 +7281,26 @@
         "required": [
           "chatId",
           "messageId"
+        ]
+      },
+      "StarMessageDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string"
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "star": {
+            "type": "boolean",
+            "description": "true to star, false to remove the star."
+          }
+        },
+        "required": [
+          "chatId",
+          "messageId",
+          "star"
         ]
       },
       "EditMessageDto": {

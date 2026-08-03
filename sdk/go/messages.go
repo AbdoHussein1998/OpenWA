@@ -146,6 +146,15 @@ func (s *MessagesService) Pin(ctx context.Context, sessionID string, body PinMes
 	return &out, nil
 }
 
+// Star stars or unstars a message.
+func (s *MessagesService) Star(ctx context.Context, sessionID string, body StarMessageRequest) (*SuccessResult, error) {
+	var out SuccessResult
+	if err := s.client.do(ctx, "POST", s.base(sessionID)+"/star", nil, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Unpin removes a message's pin.
 func (s *MessagesService) Unpin(ctx context.Context, sessionID string, body UnpinMessageRequest) (*SuccessResult, error) {
 	var out SuccessResult

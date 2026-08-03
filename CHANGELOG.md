@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Messages can be starred and unstarred:** `POST /api/sessions/:sessionId/messages/star` with
+  `{ chatId, messageId, star }`. Starring is private to the account, has no group-admin
+  restriction, and never expires. Available in all five SDKs as `messages.star`.
+
+  Best-effort on whatsapp-web.js: its `star()`/`unstar()` resolve with no value and silently do
+  nothing when WhatsApp declines the message, so a `200` means the instruction was delivered rather
+  than that the star is definitely set — there is no signal at the engine boundary to tell the two
+  apart. Baileys applies it through an app-state modification and is exact.
+
 - **Messages can be pinned and unpinned, on both engines:** `POST /api/sessions/:sessionId/messages/pin`
   and `.../messages/unpin`. `durationSeconds` is `86400` (24h, the default), `604800` (7d) or
   `2592000` (30d) — WhatsApp recognises no others, so anything else is a `400` here rather than a

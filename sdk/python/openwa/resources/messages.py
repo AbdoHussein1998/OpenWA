@@ -12,6 +12,7 @@ from .._http import quote_segment
 from ..types import (
     MessageMedia,
     PinMessageRequest,
+    StarMessageRequest,
     UnpinMessageRequest,
     BatchStatusResponse,
     BulkMessageResponse,
@@ -113,6 +114,10 @@ class MessagesResource:
     def pin(self, session_id: str, body: PinMessageRequest) -> SuccessResult:
         """Pin a message. ``durationSeconds`` must be 86400, 604800 or 2592000; defaults to 24h."""
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/messages/pin", body=body)
+
+    def star(self, session_id: str, body: StarMessageRequest) -> SuccessResult:
+        """Star or unstar a message. Best-effort on whatsapp-web.js."""
+        return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/messages/star", body=body)
 
     def unpin(self, session_id: str, body: UnpinMessageRequest) -> SuccessResult:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/messages/unpin", body=body)

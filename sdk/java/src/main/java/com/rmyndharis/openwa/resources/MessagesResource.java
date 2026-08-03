@@ -27,6 +27,7 @@ import com.rmyndharis.openwa.model.SendAudioRequest;
 import com.rmyndharis.openwa.model.SendPollRequest;
 import com.rmyndharis.openwa.model.SendTemplateRequest;
 import com.rmyndharis.openwa.model.SendTextRequest;
+import com.rmyndharis.openwa.model.StarMessageRequest;
 import com.rmyndharis.openwa.model.SuccessResult;
 import com.rmyndharis.openwa.model.UnpinMessageRequest;
 import java.util.List;
@@ -166,6 +167,19 @@ public final class MessagesResource {
         return client.request(
             HttpMethod.POST,
             "/api/sessions/" + encodeSegment(sessionId) + "/messages/pin",
+            null,
+            body,
+            SuccessResult.class);
+    }
+
+    /**
+     * Star or unstar a message. Best-effort on whatsapp-web.js, which silently ignores a message it
+     * will not star.
+     */
+    public SuccessResult star(String sessionId, StarMessageRequest body) {
+        return client.request(
+            HttpMethod.POST,
+            "/api/sessions/" + encodeSegment(sessionId) + "/messages/star",
             null,
             body,
             SuccessResult.class);
