@@ -169,6 +169,14 @@ services:
       - S3_SECRET_KEY=${S3_SECRET_KEY:-}
       - S3_REGION=${S3_REGION:-}
       - S3_BUCKET=${S3_BUCKET:-}
+      # Chat-media archiving (opt-in). Forwarded explicitly: this file has no env_file, so a
+      # variable absent from this list simply never reaches the container and the feature stays off
+      # no matter what the operator's .env says.
+      - CHAT_MEDIA_ARCHIVE_ENABLED=${CHAT_MEDIA_ARCHIVE_ENABLED:-}
+      - CHAT_MEDIA_ARCHIVE_MAX_BYTES=${CHAT_MEDIA_ARCHIVE_MAX_BYTES:-}
+      - CHAT_MEDIA_ARCHIVE_TTL_DAYS=${CHAT_MEDIA_ARCHIVE_TTL_DAYS:-}
+      - CHAT_MEDIA_ORPHAN_SWEEP_INTERVAL_MS=${CHAT_MEDIA_ORPHAN_SWEEP_INTERVAL_MS:-}
+      - CHAT_MEDIA_ORPHAN_GRACE_MS=${CHAT_MEDIA_ORPHAN_GRACE_MS:-}
       # Redis. Blank-forwarded (see Database note) so a dashboard enable/disable applies; a real host
       # value pins.
       - REDIS_ENABLED=${REDIS_ENABLED:-}

@@ -1946,7 +1946,11 @@ contact record — it does not block, delete, or otherwise touch the chat.
 > addressbook. Both engines are called with their sync-to-device flag off, so behaviour matches
 > across engines rather than depending on which one is running.
 
-**Errors:** `400` session not active or invalid request · `401` missing/invalid API key · `403` key lacks OPERATOR role
+> **A privacy id (`…@lid`) is refused with `400`.** The addressbook is keyed by phone number, and a
+> lid's digits are not one — whatsapp-web.js takes a bare number here, so an unguarded lid would be
+> stored as if it were a real phone. Pass a phone-based contact id instead.
+
+**Errors:** `400` session not active, invalid request, or a `@lid` contact id · `401` missing/invalid API key · `403` key lacks OPERATOR role
 
 #### DELETE /api/sessions/:sessionId/contacts/:contactId
 
@@ -1956,7 +1960,7 @@ Remove a contact from the account's addressbook. Does not block the contact or d
 
 **Response** `200` — `{ "success": true, "message": "Contact deleted" }`
 
-**Errors:** `400` session not active · `401` missing/invalid API key · `403` key lacks OPERATOR role
+**Errors:** `400` session not active, or a `@lid` contact id (same reason as the `PUT` above) · `401` missing/invalid API key · `403` key lacks OPERATOR role
 
 #### POST /api/sessions/:sessionId/contacts/:contactId/block
 

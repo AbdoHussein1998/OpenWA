@@ -51,6 +51,22 @@ function inertMimetype(mimetype: string): string {
 }
 
 /**
+ * True when a storage read failed because the object is simply not there.
+ *
+ * Both backends must be covered, and they report it differently: the local backend raises a POSIX
+ * `ENOENT` (a `.code`), while S3 raises `NoSuchKey`/`NotFound`, which carries a `.name` and no
+ * `.code` at all — `getS3File` rethrows that original error when the local read-through also misses
+ * (storage.service.ts:448-459). Checking only `.code` therefore turned a missing S3 object into a
+ * 500 on the one backend where retention and bucket lifecycle rules make it most likely.
+ */
+function isMissingObjectError(error: unknown): boolean {
+  const e = error as { code?: string; name?: string; $metadata?: { httpStatusCode?: number } };
+  return (
+    e?.code === 'ENOENT' || e?.name === 'NoSuchKey' || e?.name === 'NotFound' || e?.$metadata?.httpStatusCode === 404
+  );
+}
+
+/**
  * Outbound sends are executed directly against the WhatsApp engine, not via a BullMQ queue.
  *
  * The engine is single-threaded per session (a Puppeteer page for the whatsapp-web.js adapter, a
@@ -742,7 +758,7 @@ export class MessageService {
     } catch (error) {
       // The row outlived its file: the retention purge (or a concurrent delete) removed it between
       // the DB read and this read. That's "gone", not a server fault — surface a 404.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (isMissingObjectError(error)) {
         throw new NotFoundException('No archived media for this message');
       }
       throw error;

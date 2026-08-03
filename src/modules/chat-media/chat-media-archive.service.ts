@@ -1,7 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { IsNull, LessThan, Not, Repository } from 'typeorm';
+import { In, IsNull, LessThan, Not, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { Message } from '../message/entities/message.entity';
 import { StorageService } from '../../common/storage/storage.service';
@@ -18,6 +18,14 @@ const DEFAULT_ORPHAN_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_ORPHAN_GRACE_MS = 60 * 60 * 1000;
 /** How often the retention purge sweeps archived files past their TTL. */
 const PURGE_INTERVAL_MS = 15 * 60 * 1000;
+/** Rows cleared per purge statement. Keeps the id list far below the drivers' bind-parameter
+ *  ceilings (SQLite 32766, Postgres 65535) and bounds how much work one failure can undo. */
+const PURGE_BATCH_SIZE = 500;
+/** Cap on batches per run, so one tick cannot monopolise the process draining a huge backlog;
+ *  whatever is left is picked up by the next scheduled run. */
+const PURGE_MAX_BATCHES_PER_RUN = 200;
+/** Archive keys reconciled per orphan-sweep query — bounds peak memory independently of store size. */
+const SWEEP_CHUNK_SIZE = 500;
 
 /** Subtypes whose registered mimetype name differs from the conventional file extension. */
 const MIME_SUBTYPE_EXT_OVERRIDES: Record<string, string> = { jpeg: 'jpg', quicktime: 'mov' };
@@ -179,15 +187,26 @@ export class ChatMediaArchiveService implements OnModuleInit, OnModuleDestroy {
     if (ttlDays <= 0) return 0; // 0 = keep forever
 
     const cutoff = new Date(now - ttlDays * 24 * 60 * 60 * 1000);
-    const expired = await this.repository.find({
-      where: { mediaPath: Not(IsNull()), createdAt: LessThan(cutoff) },
-      select: { id: true, mediaPath: true },
-    });
-    if (expired.length === 0) return 0;
+    let cleared = 0;
 
-    const clearableIds: string[] = [];
-    await Promise.all(
-      expired.map(async row => {
+    // Batched, not one pass. The archive's default TTL is 0 (keep forever), so the first run after
+    // an operator sets a retention can face an arbitrarily large backlog — unlike the status store,
+    // whose 24h TTL bounds every batch by construction. Unbatched that backlog broke three ways at
+    // once: tens of thousands of concurrent deletes, and a single `UPDATE ... WHERE id IN (...)`
+    // past the driver's bind-parameter ceiling (SQLite 32766, Postgres 65535) that throws AFTER the
+    // files are already gone — leaving rows pointing at deleted files, and every later tick
+    // repeating the same failure. Draining in bounded batches keeps each statement small and makes
+    // partial progress durable.
+    for (let batch = 0; batch < PURGE_MAX_BATCHES_PER_RUN; batch++) {
+      const expired = await this.repository.find({
+        where: { mediaPath: Not(IsNull()), createdAt: LessThan(cutoff) },
+        select: { id: true, mediaPath: true },
+        take: PURGE_BATCH_SIZE,
+      });
+      if (expired.length === 0) break;
+
+      const clearableIds: string[] = [];
+      for (const row of expired) {
         try {
           await this.storageService.deleteFile(row.mediaPath!);
           clearableIds.push(row.id);
@@ -196,16 +215,24 @@ export class ChatMediaArchiveService implements OnModuleInit, OnModuleDestroy {
             error: String(err),
           });
         }
-      }),
-    );
+      }
 
-    if (clearableIds.length === 0) return 0;
-    // update([]) would build an empty-criteria statement; the guard above makes that unreachable.
-    await this.repository.update(clearableIds, {
-      mediaPath: null as unknown as undefined,
-      mediaMimetype: null as unknown as undefined,
-    });
-    return clearableIds.length;
+      // Every delete in the batch failed: the same rows would be re-selected forever, so stop
+      // rather than spin. The next scheduled run retries them.
+      if (clearableIds.length === 0) break;
+
+      await this.repository.update(clearableIds, {
+        mediaPath: null as unknown as undefined,
+        mediaMimetype: null as unknown as undefined,
+      });
+      cleared += clearableIds.length;
+
+      // A short batch means the backlog is drained; anything else costs an extra empty query.
+      if (expired.length < PURGE_BATCH_SIZE) break;
+    }
+
+    if (cleared > 0) this.logger.log(`Chat media retention purge cleared ${cleared} file(s)`);
+    return cleared;
   }
 
   /**
@@ -219,44 +246,53 @@ export class ChatMediaArchiveService implements OnModuleInit, OnModuleDestroy {
    */
   async sweepOrphanedMedia(now: number = Date.now()): Promise<number> {
     const graceMs = this.configService.get<number>('chatMedia.orphanGraceMs', DEFAULT_ORPHAN_GRACE_MS);
-    // Stream via iterateFiles: listFiles() truncates at STORAGE_LIST_MAX_FILES (a per-call DoS
-    // guard, not a completeness contract), which would strand every orphan past the cap.
-    const files: string[] = [];
-    for await (const file of this.storageService.iterateFiles(CHAT_MEDIA_PREFIX)) {
-      if (file.startsWith(CHAT_MEDIA_PREFIX)) files.push(file);
-    }
-    if (files.length === 0) {
-      this.orphanFirstSeenAt.clear();
-      return 0;
-    }
-
-    const rows = await this.repository.find({
-      where: { mediaPath: Not(IsNull()) },
-      select: { mediaPath: true },
-    });
-    const referenced = new Set(rows.map(row => row.mediaPath));
-
     let removed = 0;
-    const present = new Set(files);
-    for (const file of files) {
-      if (referenced.has(file)) {
-        this.orphanFirstSeenAt.delete(file);
-        continue;
+    // Keys still unreferenced at the end of THIS pass. Bounded by the orphan count (normally ~0),
+    // not by the size of the store, so it can safely drive the bookkeeping prune below.
+    const stillOrphaned = new Set<string>();
+
+    // Reconciled in chunks rather than as two whole-store sets. iterateFiles streams (listFiles
+    // truncates at STORAGE_LIST_MAX_FILES, which would strand every orphan past the cap), but
+    // collecting every key AND every archived row into memory would undo that: with the default
+    // TTL of 0 the archive grows without bound, so a mature gateway would spend an hourly spike
+    // holding millions of key strings. Each chunk asks the DB only which of ITS keys are
+    // referenced — an indexed lookup over a bounded id list.
+    let chunk: string[] = [];
+    const flush = async (): Promise<void> => {
+      if (chunk.length === 0) return;
+      const rows = await this.repository.find({ where: { mediaPath: In(chunk) }, select: { mediaPath: true } });
+      const referenced = new Set(rows.map(row => row.mediaPath));
+      for (const file of chunk) {
+        if (referenced.has(file)) {
+          this.orphanFirstSeenAt.delete(file);
+          continue;
+        }
+        stillOrphaned.add(file);
+        const firstSeenAt = this.orphanFirstSeenAt.get(file) ?? now;
+        this.orphanFirstSeenAt.set(file, firstSeenAt);
+        if (now - firstSeenAt < graceMs) continue;
+        try {
+          await this.storageService.deleteFile(file);
+          this.orphanFirstSeenAt.delete(file);
+          stillOrphaned.delete(file);
+          removed += 1;
+        } catch (err) {
+          this.logger.warn(`Failed to delete orphaned chat media ${file}`, { error: String(err) });
+        }
       }
-      const firstSeenAt = this.orphanFirstSeenAt.get(file) ?? now;
-      this.orphanFirstSeenAt.set(file, firstSeenAt);
-      if (now - firstSeenAt < graceMs) continue;
-      try {
-        await this.storageService.deleteFile(file);
-        this.orphanFirstSeenAt.delete(file);
-        removed += 1;
-      } catch (err) {
-        this.logger.warn(`Failed to delete orphaned chat media ${file}`, { error: String(err) });
-      }
+      chunk = [];
+    };
+
+    for await (const file of this.storageService.iterateFiles(CHAT_MEDIA_PREFIX)) {
+      if (!file.startsWith(CHAT_MEDIA_PREFIX)) continue;
+      chunk.push(file);
+      if (chunk.length >= SWEEP_CHUNK_SIZE) await flush();
     }
-    // Drop bookkeeping for files that are gone so the map can't grow unbounded.
+    await flush();
+    // Drop bookkeeping for anything not still orphaned this pass — the file is gone, or a row now
+    // references it. Keyed off the orphan set rather than a full listing so this stays bounded too.
     for (const key of [...this.orphanFirstSeenAt.keys()]) {
-      if (!present.has(key)) this.orphanFirstSeenAt.delete(key);
+      if (!stillOrphaned.has(key)) this.orphanFirstSeenAt.delete(key);
     }
     if (removed > 0) this.logger.log(`Chat media orphan sweep removed ${removed} file(s)`);
     return removed;

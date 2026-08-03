@@ -96,4 +96,28 @@ describe('ContactService', () => {
     expect(out).toEqual({ 'a@c.us': 'https://pps/1.jpg', 'b@c.us': null });
     expect(Date.now() - started).toBeLessThan(12_000);
   }, 15_000);
+
+  describe('addressbook writes reject a privacy id', () => {
+    // The lid's digits are NOT a phone number (see the note on
+    // MessageService.resolveJidCandidates). whatsapp-web.js takes a bare NUMBER for the
+    // addressbook, so an unguarded @lid would be stored as if it were a real phone —
+    // silently creating an entry for a number that does not exist.
+    it.each([
+      ['upsertContact', (svc: ContactService) => svc.upsertContact('s1', '159442138038327@lid', 'Ada')],
+      ['deleteContact', (svc: ContactService) => svc.deleteContact('s1', '159442138038327@lid')],
+    ])('%s refuses an @lid contact id with a 400', (_name, call) => {
+      const upsertContact = jest.fn();
+      const deleteContact = jest.fn();
+      const svc = makeService({ upsertContact, deleteContact });
+      expect(() => call(svc)).toThrow(BadRequestException);
+      expect(upsertContact).not.toHaveBeenCalled();
+      expect(deleteContact).not.toHaveBeenCalled();
+    });
+
+    it('still allows a normal phone-based contact id through to the engine', async () => {
+      const upsertContact = jest.fn().mockResolvedValue(undefined);
+      await makeService({ upsertContact }).upsertContact('s1', '628123@c.us', 'Ada', 'Lovelace');
+      expect(upsertContact).toHaveBeenCalledWith('628123@c.us', 'Ada', 'Lovelace');
+    });
+  });
 });

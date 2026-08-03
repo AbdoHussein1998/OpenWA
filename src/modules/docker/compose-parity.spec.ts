@@ -235,6 +235,21 @@ describe('DockerService managed specs ↔ docker-compose.yml parity', () => {
     expect(cfg.Env).toBeUndefined();
   });
 
+  it('forwards every CHAT_MEDIA_* variable the app reads to the api container', () => {
+    // docker-compose.yml has NO env_file — the `environment:` list is an explicit allow-list, so a
+    // variable missing from it never reaches the container and the feature it gates stays silently
+    // off however the operator's .env is written. Exactly how AUTO_START_SESSIONS was inert before
+    // v0.12.0. Derived from configuration.ts rather than hardcoded, so a new flag cannot be added
+    // to the app and forgotten here.
+    const configSrc = readFileSync(join(__dirname, '..', '..', 'config', 'configuration.ts'), 'utf8');
+    const read = [...new Set(configSrc.match(/CHAT_MEDIA_[A-Z_]+/g) ?? [])];
+    expect(read.length).toBeGreaterThan(0);
+
+    const api = (compose.services as Record<string, { environment?: string[] }>)['openwa-api'];
+    const forwarded = new Set((api.environment ?? []).map(line => line.split('=')[0]));
+    expect(read.filter(name => !forwarded.has(name))).toEqual([]);
+  });
+
   it('redis: sets the noeviction maxmemory policy BullMQ requires, on both launch paths', async () => {
     const cfg = await capture('redis');
     // The parity assertion above only proves the two launch paths AGREE — dropping the flag from

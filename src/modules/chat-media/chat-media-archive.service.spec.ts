@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Not, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 
 jest.mock('archiver', () => ({ default: jest.fn() }));
@@ -230,6 +230,59 @@ describe('ChatMediaArchiveService', () => {
     });
   });
 
+  describe('purgeExpired batching (backlog safety)', () => {
+    const backdate = (id: string, daysAgo: number): Promise<unknown> =>
+      repository.query('UPDATE messages SET createdAt = ? WHERE id = ?', [
+        new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString(),
+        id,
+      ]);
+
+    /** Seed `n` archived+expired rows without paying for real base64 writes. */
+    async function seedExpired(n: number): Promise<void> {
+      for (let i = 0; i < n; i++) {
+        const row = await saveRow(undefined, {
+          mediaPath: `${CHAT_MEDIA_PREFIX}sess-1/f${i}.png`,
+          mediaMimetype: 'image/png',
+        });
+        await storageService.putFile(`${CHAT_MEDIA_PREFIX}sess-1/f${i}.png`, PNG);
+        await backdate(row.id, 10);
+      }
+    }
+
+    it('drains a backlog spanning many batches, and never exceeds the batch size in one statement', async () => {
+      // The archive's default TTL is 0, so the first run after an operator sets a retention can
+      // face an unbounded backlog. Unbatched, the single UPDATE ... WHERE id IN (...) blows past
+      // the driver's bind-parameter ceiling AFTER the files are already deleted — the rows then
+      // point at missing files forever, and every later tick fails the same way.
+      await seedExpired(1250); // > 2 x PURGE_BATCH_SIZE (500)
+      const svc = enabled({ 'chatMedia.ttlDays': 7 });
+      const update = jest.spyOn(repository, 'update');
+
+      expect(await svc.purgeExpired(Date.now())).toBe(1250);
+
+      const biggest = Math.max(...update.mock.calls.map(c => (Array.isArray(c[0]) ? c[0].length : 1)));
+      expect(biggest).toBeLessThanOrEqual(500);
+      expect(update.mock.calls.length).toBeGreaterThan(1);
+      expect(await repository.count({ where: { mediaPath: Not(IsNull()) } })).toBe(0);
+      // The message rows themselves survive retention — only the archived blob expires.
+      expect(await repository.count()).toBe(1250);
+      update.mockRestore();
+    });
+
+    it('stops instead of spinning when every delete in a batch fails', async () => {
+      await seedExpired(3);
+      const del = jest.spyOn(storageService, 'deleteFile').mockRejectedValue(new Error('s3 down'));
+      const svc = enabled({ 'chatMedia.ttlDays': 7 });
+
+      expect(await svc.purgeExpired(Date.now())).toBe(0);
+
+      // One batch attempted, not an endless re-select of the same undeletable rows.
+      expect(del.mock.calls.length).toBe(3);
+      expect(await repository.count({ where: { mediaPath: Not(IsNull()) } })).toBe(3);
+      del.mockRestore();
+    });
+  });
+
   describe('sweepOrphanedMedia', () => {
     it('deletes an unreferenced file only after the grace window has passed', async () => {
       await storageService.putFile(`${CHAT_MEDIA_PREFIX}sess-1/orphan.png`, PNG);
@@ -253,6 +306,40 @@ describe('ChatMediaArchiveService', () => {
       expect(await svc.sweepOrphanedMedia(Date.now())).toBe(0);
       expect(await svc.sweepOrphanedMedia(Date.now() + 1_000_000)).toBe(0);
       expect(await storageService.getFile(key!)).toEqual(PNG);
+    });
+
+    it('reconciles in bounded chunks instead of loading the whole store into memory', async () => {
+      // With the default TTL of 0 the archive grows without bound, so materialising every key AND
+      // every archived row (as the first implementation did) turns the hourly sweep into a memory
+      // spike proportional to the store. Each query must see only its own chunk of keys.
+      for (let i = 0; i < 1200; i++) await storageService.putFile(`${CHAT_MEDIA_PREFIX}sess-1/o${i}.png`, PNG);
+      const find = jest.spyOn(repository, 'find');
+      const svc = enabled({ 'chatMedia.orphanGraceMs': 0 });
+
+      expect(await svc.sweepOrphanedMedia(Date.now())).toBe(1200);
+
+      expect(find.mock.calls.length).toBeGreaterThan(1);
+      for (const [opts] of find.mock.calls) {
+        const where = (opts as { where?: { mediaPath?: { _value?: unknown[] } } })?.where;
+        const ids = where?.mediaPath?._value;
+        // Every lookup is an IN over a bounded key list, never an unfiltered "all archived rows".
+        expect(Array.isArray(ids)).toBe(true);
+        expect((ids as unknown[]).length).toBeLessThanOrEqual(500);
+      }
+      find.mockRestore();
+    });
+
+    it('keeps referenced files across a chunk boundary', async () => {
+      // A referenced file must survive even when it lands in a different chunk from its row.
+      for (let i = 0; i < 600; i++) await storageService.putFile(`${CHAT_MEDIA_PREFIX}sess-1/p${i}.png`, PNG);
+      const row = await saveRow(undefined, {
+        mediaPath: `${CHAT_MEDIA_PREFIX}sess-1/p599.png`,
+        mediaMimetype: 'image/png',
+      });
+      const svc = enabled({ 'chatMedia.orphanGraceMs': 0 });
+
+      expect(await svc.sweepOrphanedMedia(Date.now())).toBe(599);
+      expect(await storageService.getFile((await repository.findOneByOrFail({ id: row.id })).mediaPath!)).toEqual(PNG);
     });
 
     it('never touches status media — the two sweeps share one bucket', async () => {

@@ -85,9 +85,22 @@ export class WwebjsChats {
   async archiveChat(chatId: string, archive: boolean): Promise<boolean> {
     this.host.ensureReady();
     try {
-      // Client.archiveChat/unarchiveChat, NOT Chat.archive() — the Chat method resolves void, so it
-      // gives nothing to report back; the client pair resolves the chat's new pin/archive state.
-      return archive ? await this.client().archiveChat(chatId) : await this.client().unarchiveChat(chatId);
+      // Client.archiveChat/unarchiveChat, NOT Chat.archive() — the Chat method resolves void.
+      //
+      // Their return value is deliberately DISCARDED. Despite looking like a success flag they
+      // resolve the chat's NEW ARCHIVE STATE, hard-coded: archiveChat always returns true and
+      // unarchiveChat always returns false (Client.js:2009-2031, "Changes and returns the archive
+      // state of the Chat"). Surfacing that as `success` reports every successful UNARCHIVE as
+      // success:false — which this API's contract defines as "the engine declined to act".
+      //
+      // whatsapp-web.js offers no refusal signal here at all, so the honest answer is "it did not
+      // throw": an unknown chat makes the page-side Cmd.archiveChat reject, which lands below.
+      if (archive) {
+        await this.client().archiveChat(chatId);
+      } else {
+        await this.client().unarchiveChat(chatId);
+      }
+      return true;
     } catch (error) {
       this.host.logger.error(`Error ${archive ? 'archiving' : 'unarchiving'} chat ${chatId}`, String(error));
       return false;

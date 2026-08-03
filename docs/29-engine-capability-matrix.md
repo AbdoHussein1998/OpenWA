@@ -144,7 +144,7 @@ _✅ #17 `getProduct` — wired on Baileys (#905); see §Catalog / Products / Or
 
 These are honestly out of reach of a clean adapter wiring because the installed library exposes no first-class symbol. Listed so operators can plan around them rather than file unactionable bugs.
 
-**baileys (9 cells):**
+**baileys (10 cells):**
 
 - `getSubscribedChannels` — no enumerate-newsletters query; all 19 newsletter members of `Socket/newsletter.d.ts` address a single newsletter (by jid, by invite key, or by creating one). Needs a raw WMex/app-state hack.
 - `getLabels` / `getLabelById` / `getChatLabels` — no label read symbol; only writes (`Types/Label.d.ts` is types-only). Workaround: capture labels from the `messaging-history.set` app-state event into an in-memory cache (relay hack, no on-demand refresh).
@@ -152,6 +152,7 @@ These are honestly out of reach of a clean adapter wiring because the installed 
 - `getMessageReactions` — no on-demand fetch; reactions only arrive via the `messages.reaction` event. Partial local path: persist each event into the `messageStore`, then read (no historical backfill).
 - `getContactStatus` / `getContactStatuses` — `fetchStatus` returns the _about_ text, not 24h stories; stories only surface as `status@broadcast` messages. The engine-level Baileys adapter methods remain unimplemented (`501`); however, the REST API reads are served from the `StatusStoreService` accumulator (see §Status — read above), so API-level parity is shipped.
 - `sendCatalog` — no catalog-share message type in `AnyMessageContent` (only single `{product}`).
+- `votePoll` — no vote-SEND helper at all; the library only decrypts INCOMING votes (`decryptPollVote`). Sending one means hand-building a `proto.Message.PollUpdateMessage` with HMAC-SHA256 vote encryption keyed by the poll creation's `messageSecret`. Supported on whatsapp-web.js.
 
 **wwjs (6 cells):**
 

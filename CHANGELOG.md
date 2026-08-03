@@ -39,7 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block the contact or touch the chat.
 
   The two engines address the entry differently — whatsapp-web.js by bare phone number, Baileys by
-  JID — so the adapters convert from the neutral contact id. Neither syncs through to the device
+  JID — so the adapters convert from the neutral contact id. A privacy id (`…@lid`) is refused with
+  a `400`: the addressbook is keyed by phone number and a lid's digits are not one, so an unguarded
+  lid would be stored as if it were a real phone. Neither syncs through to the device
   addressbook: both are called with their sync-to-device flag off, so the behaviour does not depend
   on which engine is running.
 
@@ -124,13 +126,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A crash mid-enqueue can no longer deliver a webhook twice.** The webhook producer passed a job
-  name but no job id, so BullMQ treated every `add()` as a new job: a process that died between the
-  enqueue and its bookkeeping could re-enqueue the same delivery on the next attempt, and nothing
-  downstream would notice — deduplication rested entirely on the receiver honouring
-  `X-OpenWA-Delivery-Id`. The job id is now that same delivery id, which gives BullMQ exactly-once
-  enqueue semantics and puts both dedupe boundaries on one identifier. The id is minted per webhook
-  per dispatch, so an event fanning out to several subscriptions still produces one job each.
+- **The webhook producer now enqueues idempotently.** It passed a job name but no job id, so BullMQ
+  treated every `add()` as a brand-new job. The job id is now the delivery id, matching the ingress
+  producer and putting BullMQ's dedupe boundary and the receiver's on one identifier. The id is
+  minted per webhook per dispatch, so an event fanning out to several subscriptions still produces
+  one job each.
+
+  Scoped honestly: this is hardening, not a fix for an observed duplicate. No path in the gateway
+  currently re-enqueues an existing delivery id — it is minted per dispatch and never persisted, and
+  BullMQ retries a failed job rather than re-adding it — so the deduplication cannot fire today. It
+  exists so that any future replay path (a redrive, a persisted outbox) cannot double-deliver by
+  construction. **Receivers must still honour `X-OpenWA-Delivery-Id`:** the one real at-least-once
+  window is unchanged, because when `add()` fails the producer falls back to delivering over HTTP
+  directly, and if that `add()` had in fact reached Redis both copies are sent — a job id cannot
+  dedupe a delivery that never went through the queue.
 - **The bundled Redis no longer risks silently dropping queued jobs.** BullMQ requires the
   `noeviction` maxmemory policy; both Redis launch paths — `docker-compose.yml` and the
   dashboard-orchestrated container — started `redis-server` with `--appendonly yes` alone, leaving
