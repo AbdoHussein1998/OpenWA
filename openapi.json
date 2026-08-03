@@ -905,6 +905,47 @@
         ]
       }
     },
+    "/api/sessions/{id}/chats/archive": {
+      "post": {
+        "operationId": "SessionController_archiveChat",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveChatDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns `{ success }`. `false` means the engine declined to act — on the Baileys engine a chat with no known history cannot be archived, since the change is keyed to its last message."
+          },
+          "400": {
+            "description": "Session not ready"
+          },
+          "404": {
+            "description": "Session not found"
+          }
+        },
+        "summary": "Archive or unarchive a chat",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/sessions/{id}/chats/delete": {
       "post": {
         "operationId": "SessionController_deleteChat",
@@ -6634,6 +6675,24 @@
         },
         "required": [
           "chatId"
+        ]
+      },
+      "ArchiveChatDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string",
+            "description": "Chat ID in the active engine's native format (e.g. 1234567890-123@g.us on whatsapp-web.js)",
+            "example": "1234567890-123@g.us"
+          },
+          "archive": {
+            "type": "boolean",
+            "description": "true to archive, false to unarchive."
+          }
+        },
+        "required": [
+          "chatId",
+          "archive"
         ]
       },
       "DeleteChatDto": {

@@ -4,6 +4,7 @@ import static com.rmyndharis.openwa.http.Http.encodeSegment;
 
 import com.rmyndharis.openwa.OpenWAClient;
 import com.rmyndharis.openwa.http.HttpMethod;
+import com.rmyndharis.openwa.model.ArchiveChatRequest;
 import com.rmyndharis.openwa.model.ChatSummary;
 import com.rmyndharis.openwa.model.DeleteChatRequest;
 import com.rmyndharis.openwa.model.ListChatsQuery;
@@ -47,6 +48,15 @@ public final class ChatsResource {
     public SuccessResult markUnread(String sessionId, MarkChatRequest body) {
         return client.request(
             HttpMethod.POST, "/api/sessions/" + encodeSegment(sessionId) + "/chats/unread", null, body, SuccessResult.class);
+    }
+
+    /**
+     * Archive or unarchive a chat. A false success means the engine declined — on Baileys a chat
+     * with no known history cannot be archived.
+     */
+    public SuccessResult archive(String sessionId, ArchiveChatRequest body) {
+        return client.request(
+            HttpMethod.POST, "/api/sessions/" + encodeSegment(sessionId) + "/chats/archive", null, body, SuccessResult.class);
     }
 
     /** Delete a chat from the chat list. */

@@ -744,6 +744,29 @@ describe('WhatsAppWebJsAdapter channel-JID guard (#554 — wwebjs Channel lacks 
     });
   });
 
+  describe('archiveChat', () => {
+    it('archives via Client.archiveChat, not Chat.archive (which resolves void)', async () => {
+      const archiveChat = jest.fn().mockResolvedValue(true);
+      const unarchiveChat = jest.fn().mockResolvedValue(true);
+      await expect(readyAdapter({ archiveChat, unarchiveChat }).archiveChat(USER, true)).resolves.toBe(true);
+      expect(archiveChat).toHaveBeenCalledWith(USER);
+      expect(unarchiveChat).not.toHaveBeenCalled();
+    });
+
+    it('unarchives via Client.unarchiveChat', async () => {
+      const archiveChat = jest.fn().mockResolvedValue(true);
+      const unarchiveChat = jest.fn().mockResolvedValue(false);
+      await expect(readyAdapter({ archiveChat, unarchiveChat }).archiveChat(USER, false)).resolves.toBe(false);
+      expect(unarchiveChat).toHaveBeenCalledWith(USER);
+      expect(archiveChat).not.toHaveBeenCalled();
+    });
+
+    it('reports false instead of throwing when the engine call fails', async () => {
+      const archiveChat = jest.fn().mockRejectedValue(new Error('Evaluation failed'));
+      await expect(readyAdapter({ archiveChat }).archiveChat(USER, true)).resolves.toBe(false);
+    });
+  });
+
   describe('getChatLabels', () => {
     it('returns [] on a newsletter JID instead of throwing (was an unguarded HTTP 500)', async () => {
       const getChatById = jest.fn();

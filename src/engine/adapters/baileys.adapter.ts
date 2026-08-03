@@ -476,6 +476,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.contacts.deleteChat(chatId);
   }
 
+  async archiveChat(chatId: string, archive: boolean): Promise<boolean> {
+    return this.contacts.archiveChat(chatId, archive);
+  }
+
   // ----- Gated: not supported by this minimal slice (no store) -----
   /* eslint-disable @typescript-eslint/no-unused-vars */
 

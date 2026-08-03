@@ -781,6 +781,12 @@ export interface IWhatsAppEngine {
   markUnread(chatId: string): Promise<boolean>;
   deleteChat(chatId: string): Promise<boolean>;
   /**
+   * Archive or unarchive a chat. Resolves false when the engine cannot act — on Baileys the
+   * archive is an app-state modification keyed to the chat's last message, so a chat with no known
+   * history cannot be archived at all. Same shape as deleteChat/markUnread, which share that limit.
+   */
+  archiveChat(chatId: string, archive: boolean): Promise<boolean>;
+  /**
    * Send a typing/recording presence indicator to a chat, or clear it (`paused`).
    * Engine-agnostic and best-effort: engines without a presence concept should no-op.
    */

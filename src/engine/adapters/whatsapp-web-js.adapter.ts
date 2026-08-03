@@ -1573,6 +1573,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.chats.sendSeen(chatId);
   }
 
+  archiveChat(chatId: string, archive: boolean): Promise<boolean> {
+    return this.chats.archiveChat(chatId, archive);
+  }
+
   markUnread(chatId: string): Promise<boolean> {
     return this.chats.markUnread(chatId);
   }

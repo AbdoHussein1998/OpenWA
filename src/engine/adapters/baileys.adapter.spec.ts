@@ -3713,6 +3713,31 @@ describe('BaileysAdapter sendSeen + markUnread + deleteChat', () => {
     expect(await adapter.deleteChat('628999@s.whatsapp.net')).toBe(false);
     expect(fakeSock.chatModify).not.toHaveBeenCalled();
   });
+
+  it.each([true, false])('archiveChat(%s) modifies the chat with the last message', async archive => {
+    const adapter = await readyWithMessage();
+    const ok = await adapter.archiveChat('628111@s.whatsapp.net', archive);
+    expect(ok).toBe(true);
+    expect(fakeSock.chatModify).toHaveBeenCalledWith(
+      {
+        archive,
+        lastMessages: [
+          { key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'M1' }, messageTimestamp: 1700000020 },
+        ],
+      },
+      '628111@s.whatsapp.net',
+    );
+  });
+
+  it('archiveChat returns false for a chat with no known history, rather than throwing', async () => {
+    // The app-state modification is keyed to the chat's last message; there is nothing to
+    // synthesize one from, so this is a defined outcome the endpoint reports as success:false.
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    fakeSock.fire('connection.update', { connection: 'open' });
+    expect(await adapter.archiveChat('628999@s.whatsapp.net', true)).toBe(false);
+    expect(fakeSock.chatModify).not.toHaveBeenCalled();
+  });
 });
 
 describe('BaileysAdapter status posting', () => {

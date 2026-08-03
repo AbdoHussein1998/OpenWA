@@ -122,6 +122,19 @@ export class BaileysContacts {
     return true;
   }
 
+  async archiveChat(chatId: string, archive: boolean): Promise<boolean> {
+    this.host.ensureReady();
+    const last = this.host.lastMessage(chatId);
+    if (!last) {
+      return false; // Baileys' archive toggle needs the last message; can't synthesize it
+    }
+    await this.sock().chatModify(
+      { archive, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
+      chatId,
+    );
+    return true;
+  }
+
   async deleteChat(chatId: string): Promise<boolean> {
     this.host.ensureReady();
     const last = this.host.lastMessage(chatId);

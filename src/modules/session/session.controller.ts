@@ -6,6 +6,7 @@ import {
   SessionResponseDto,
   QRCodeResponseDto,
   MarkChatReadDto,
+  ArchiveChatDto,
   DeleteChatDto,
   SendChatStateDto,
   RequestPairingCodeDto,
@@ -357,6 +358,27 @@ export class SessionController {
     @Body() dto: MarkChatReadDto,
   ): Promise<{ success: boolean }> {
     const success = await this.sessionService.markUnread(id, dto.chatId);
+    return { success };
+  }
+
+  @Post(':id/chats/archive')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Archive or unarchive a chat' })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Returns `{ success }`. `false` means the engine declined to act — on the Baileys engine a ' +
+      'chat with no known history cannot be archived, since the change is keyed to its last message.',
+  })
+  @ApiResponse({ status: 400, description: 'Session not ready' })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  async archiveChat(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ArchiveChatDto,
+  ): Promise<{ success: boolean }> {
+    const success = await this.sessionService.archiveChat(id, dto.chatId, dto.archive);
     return { success };
   }
 

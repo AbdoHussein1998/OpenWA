@@ -555,6 +555,12 @@ class TestChatsAndHealth:
         client.chats.send_state("s", {"chatId": "a@c.us", "state": "typing"})
         assert "/chats/typing" in backend.calls[-1].url
 
+    def test_chats_archive(self):
+        backend = MockBackend().on("POST", "/chats/archive", body={"success": True})
+        make_client(backend).chats.archive("s", {"chatId": "a@c.us", "archive": True})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/chats/archive"
+        assert backend.last_call.body == {"chatId": "a@c.us", "archive": True}
+
     def test_health_and_auth(self):
         backend = MockBackend()
         backend.on("GET", "/api/health", body={"status": "ok", "version": "0.7.2"})

@@ -638,6 +638,13 @@ class PinMessageRequest(TypedDict, total=False):
     durationSeconds: int
 
 
+class ArchiveChatRequest(TypedDict):
+    """Archive or unarchive a chat."""
+
+    chatId: str
+    archive: bool
+
+
 class StarMessageRequest(TypedDict):
     """Star or unstar a message. Best-effort on whatsapp-web.js."""
 

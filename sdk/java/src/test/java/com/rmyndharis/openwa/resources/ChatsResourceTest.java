@@ -7,6 +7,7 @@ import com.rmyndharis.openwa.ClientConfig;
 import com.rmyndharis.openwa.OpenWAClient;
 import com.rmyndharis.openwa.http.HttpMethod;
 import com.rmyndharis.openwa.model.ChatState;
+import com.rmyndharis.openwa.model.ArchiveChatRequest;
 import com.rmyndharis.openwa.model.DeleteChatRequest;
 import com.rmyndharis.openwa.model.ListChatsQuery;
 import com.rmyndharis.openwa.model.MarkChatRequest;
@@ -58,6 +59,15 @@ class ChatsResourceTest {
         assertEquals("http://h/api/sessions/s/chats/unread", tx.lastRequest().url());
         assertEquals(HttpMethod.POST, tx.lastRequest().method());
         assertTrue(tx.lastRequest().body().contains("628999@c.us"));
+    }
+
+    @Test
+    void archiveSendsBody() {
+        tx.respond(200, "{\"success\":true}");
+        client.chats.archive("s", ArchiveChatRequest.builder().chatId("628321@c.us").archive(true).build());
+        assertEquals("http://h/api/sessions/s/chats/archive", tx.lastRequest().url());
+        assertEquals(HttpMethod.POST, tx.lastRequest().method());
+        assertTrue(tx.lastRequest().body().contains("628321@c.us"));
     }
 
     @Test

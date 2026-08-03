@@ -193,6 +193,16 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/unre
   -d '{ "chatId": "1234567890@c.us" }'
 ```
 
+#### POST /api/sessions/:id/chats/archive
+
+Archive or unarchive a chat.
+
+```bash
+curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/archive" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"1234567890-123@g.us","archive":true}'
+```
+
 #### POST /api/sessions/:id/chats/delete
 
 Delete a chat from the chat list (OPERATOR).

@@ -272,6 +272,15 @@ describe('ChatsResource — exact paths', () => {
   });
 });
 
+describe('ChatsResource.archive', () => {
+  it('posts chatId and the archive flag', async () => {
+    const t = new MockTransport().on('POST', /\/chats\/archive$/, { body: { success: true } });
+    await client(t).chats.archive('s', { chatId: 'a@c.us', archive: true });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/chats/archive');
+    expect(t.lastCall!.body).toEqual({ chatId: 'a@c.us', archive: true });
+  });
+});
+
 describe('HealthResource + auth — exact paths', () => {
   it('health/live/ready and auth validate', async () => {
     const t = new MockTransport()

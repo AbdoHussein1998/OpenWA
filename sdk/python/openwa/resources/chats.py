@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 from .._http import quote_segment
 from ..types import (
+    ArchiveChatRequest,
     ChatSummary,
     DeleteChatRequest,
     MarkChatRequest,
@@ -38,6 +39,10 @@ class ChatsResource:
 
     def mark_unread(self, session_id: str, body: MarkChatRequest) -> SuccessResult:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/chats/unread", body=body)
+
+    def archive(self, session_id: str, body: ArchiveChatRequest) -> SuccessResult:
+        """Archive or unarchive a chat. success=False means the engine declined."""
+        return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/chats/archive", body=body)
 
     def delete(self, session_id: str, body: DeleteChatRequest) -> SuccessResult:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/chats/delete", body=body)

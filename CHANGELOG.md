@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Chats can be archived and unarchived:** `POST /api/sessions/:id/chats/archive` with
+  `{ chatId, archive }`, alongside the existing read/unread/delete chat operations. Available in all
+  five SDKs as `chats.archive`.
+
+  `success: false` is a real outcome rather than an error: on the Baileys engine the archive is an
+  app-state modification keyed to the chat's **last message**, so a chat with no known history
+  cannot be archived — the same limitation `chats/delete` and `chats/unread` already carry there.
+  whatsapp-web.js uses `Client.archiveChat`/`unarchiveChat`, which report the new state, rather than
+  `Chat.archive()`, which resolves nothing.
+
+  No webhook fires for your own archive: Baileys emits no event for a change the account itself made,
+  and whatsapp-web.js's `chat_archived` event is not wired. A `chat.archived` event covering
+  remote-device archives is left as follow-up work — it needs event wiring on both engines and is a
+  separate change from this endpoint.
+
 - **Messages can be starred and unstarred:** `POST /api/sessions/:sessionId/messages/star` with
   `{ chatId, messageId, star }`. Starring is private to the account, has no group-admin
   restriction, and never expires. Available in all five SDKs as `messages.star`.

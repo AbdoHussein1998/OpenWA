@@ -188,6 +188,12 @@ export interface PinMessageRequest {
   durationSeconds?: PinDurationSeconds;
 }
 
+export interface ArchiveChatRequest {
+  chatId: Jid;
+  /** true to archive, false to unarchive. */
+  archive: boolean;
+}
+
 export interface StarMessageRequest {
   chatId: Jid;
   messageId: string;
