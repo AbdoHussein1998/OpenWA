@@ -1419,6 +1419,52 @@ describe('WebhookService', () => {
       expect(JSON.stringify(jobData).length).toBeLessThan(2048);
     });
 
+    it('keys the queue job by the delivery id, so a retried enqueue cannot double-deliver', async () => {
+      const queueService = await buildQueueService((key: string, def?: unknown) => {
+        if (key === 'queue.enabled') return true;
+        if (key === 'webhook.retryDelay') return 5000;
+        return def;
+      });
+      (repository.find as jest.Mock).mockResolvedValue([createMockWebhook({ events: ['message.received'] })]);
+      (hookManager.execute as jest.Mock).mockResolvedValue({ continue: true, data: {} });
+
+      await queueService.dispatch('sess-1', 'message.received', {});
+
+      const [, jobData, opts] = (webhookQueue.add as jest.Mock).mock.calls[0] as [
+        string,
+        WebhookJobData,
+        { jobId?: string },
+      ];
+      // BullMQ's dedupe boundary and the receiver's must key off the SAME identifier, or a job
+      // that BullMQ accepts twice still looks like one delivery to the receiver (and vice versa).
+      expect(opts.jobId).toBe(jobData.headers['X-OpenWA-Delivery-Id']);
+      expect(opts.jobId).toBe(jobData.payload.deliveryId);
+    });
+
+    it('gives sibling webhooks distinct job ids, so one event fanning out is not collapsed into one job', async () => {
+      const queueService = await buildQueueService((key: string, def?: unknown) => {
+        if (key === 'queue.enabled') return true;
+        if (key === 'webhook.retryDelay') return 5000;
+        return def;
+      });
+      (repository.find as jest.Mock).mockResolvedValue([
+        createMockWebhook({ id: 'wh-uuid-1', events: ['message.received'] }),
+        createMockWebhook({ id: 'wh-uuid-2', events: ['message.received'], url: 'https://example.com/other' }),
+      ]);
+      (hookManager.execute as jest.Mock).mockResolvedValue({ continue: true, data: {} });
+
+      await queueService.dispatch('sess-1', 'message.received', {});
+
+      // Guards the invariant that makes jobId = deliveryId safe: deliveryId is minted per webhook
+      // per dispatch. Were it ever hoisted to per-event, BullMQ would silently drop every
+      // subscription after the first — a data-loss bug with no error anywhere.
+      expect(webhookQueue.add).toHaveBeenCalledTimes(2);
+      const jobIds = (webhookQueue.add as jest.Mock).mock.calls.map(
+        (call: [string, WebhookJobData, { jobId?: string }]) => call[2].jobId,
+      );
+      expect(new Set(jobIds).size).toBe(2);
+    });
+
     it('should add job to queue when queue is enabled', async () => {
       // Create a new service with queue enabled
       const queueModule: TestingModule = await Test.createTestingModule({

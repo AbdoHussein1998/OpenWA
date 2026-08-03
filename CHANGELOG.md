@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A crash mid-enqueue can no longer deliver a webhook twice.** The webhook producer passed a job
+  name but no job id, so BullMQ treated every `add()` as a new job: a process that died between the
+  enqueue and its bookkeeping could re-enqueue the same delivery on the next attempt, and nothing
+  downstream would notice — deduplication rested entirely on the receiver honouring
+  `X-OpenWA-Delivery-Id`. The job id is now that same delivery id, which gives BullMQ exactly-once
+  enqueue semantics and puts both dedupe boundaries on one identifier. The id is minted per webhook
+  per dispatch, so an event fanning out to several subscriptions still produces one job each.
+- **The bundled Redis no longer risks silently dropping queued jobs.** BullMQ requires the
+  `noeviction` maxmemory policy; both Redis launch paths — `docker-compose.yml` and the
+  dashboard-orchestrated container — started `redis-server` with `--appendonly yes` alone, leaving
+  the policy at whatever the image defaults to. Under any evicting policy Redis may discard queue
+  keys once `maxmemory` is reached, losing jobs with no error raised anywhere. Both paths (and the
+  scaling guide's compose sample) now pass `--maxmemory-policy noeviction`.
+
 - **A media storage root the app cannot write to is now caught at boot, with an error that says what
   to change.** The check ran on the wrong question: `StorageService` created the root only when it did
   not already exist, so a root that existed but belonged to another user sailed through startup and
