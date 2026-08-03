@@ -110,6 +110,7 @@ function makeHost(overrides: Partial<BaileysEventsHost> = {}): BaileysEventsHost
     getOnGroupEvent: () => undefined,
     getOnCall: () => undefined,
     getOnPresenceUpdate: () => undefined,
+    getOnCallOutcome: () => undefined,
     ...overrides,
   };
 }

@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Call outcomes: `call.accepted`, `call.rejected`, `call.missed`** — webhook and socket events for
+  what happened to a ringing call, correlated to the preceding `call.received` by `callId`. Modelled
+  in the JavaScript, Python, Go and Java SDKs.
+
+  **Baileys only.** whatsapp-web.js hooks the insert into WhatsApp Web's call collection and receives
+  no status at all, so it can announce a ring but never its outcome — there is nothing to wire.
+
+  Three events rather than one carrying an outcome field, so a consumer that only cares about missed
+  calls can subscribe to exactly that.
+
+  Two things are reported honestly rather than guessed. The engines say *what* happened but not *who*
+  did it — an accept can come from any of the account's linked devices — so nothing is attributed.
+  And WhatsApp's `terminate` is deliberately left unmapped: it covers both a caller hanging up before
+  the call was answered and either side ending an answered one, with nothing in the event to separate
+  them, so publishing it as an outcome would be wrong about half the time.
+
+  An outcome is only published for a call this session actually saw ring, and offline-replayed
+  signalling — WhatsApp resends the traffic for calls that ended while a session was disconnected —
+  is dropped, so a reconnect cannot announce last week's declined call as if it had just happened.
+  The cached call handle is released at the same time, so a `reject` arriving after the call ended
+  now reports not-found instead of acting on a dead call.
+
 - **Channel administration: create, delete, mute.** `POST /api/sessions/:sessionId/channels`,
   `POST .../channels/:channelId/delete` and `POST .../channels/:channelId/mute`, in all five SDKs.
 

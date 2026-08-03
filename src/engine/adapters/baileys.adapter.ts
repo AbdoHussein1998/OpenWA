@@ -133,6 +133,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getOnGroupEvent: () => this.callbacks.onGroupEvent,
       getOnCall: () => this.callbacks.onCall,
       getOnPresenceUpdate: () => this.callbacks.onPresenceUpdate,
+      getOnCallOutcome: () => this.callbacks.onCallOutcome,
     });
     this.groups = new BaileysGroups({
       ensureReady: () => this.ensureReady(),

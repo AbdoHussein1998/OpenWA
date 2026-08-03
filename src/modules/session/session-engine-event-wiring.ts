@@ -15,6 +15,7 @@ import {
   IncomingCallEvent,
   AccountRestriction,
   PresenceUpdateEvent,
+  CallOutcomeEvent,
 } from '../../engine/interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { SessionEngineLeafEvents } from './session-engine-leaf-events';
@@ -219,6 +220,28 @@ export class SessionEngineEventWiring {
         // onActionRequired, but persisting the reason here means it is available regardless.
         host.sessionErrors.set(id, reason);
         void host.hookManager.execute('session:error', { reason }, { sessionId: id, source: 'Engine' });
+      },
+      onCallOutcome: (event: CallOutcomeEvent): void => {
+        if (!host.isLiveEngine(id, engine)) return;
+        this.logger.log(`Call ${event.outcome}: ${event.callId}`, {
+          sessionId: id,
+          callId: event.callId,
+          outcome: event.outcome,
+          action: 'call_outcome',
+        });
+        const payload: Record<string, unknown> = { sessionId: id, ...event };
+        // One event per outcome rather than a single call.ended carrying a field: a consumer that
+        // only cares about missed calls should be able to subscribe to exactly that.
+        if (event.outcome === 'accepted') {
+          host.eventsGateway.emitCallAccepted(id, payload);
+          void host.webhookService.dispatch(id, 'call.accepted', payload);
+        } else if (event.outcome === 'rejected') {
+          host.eventsGateway.emitCallRejected(id, payload);
+          void host.webhookService.dispatch(id, 'call.rejected', payload);
+        } else {
+          host.eventsGateway.emitCallMissed(id, payload);
+          void host.webhookService.dispatch(id, 'call.missed', payload);
+        }
       },
       onPresenceUpdate: (event: PresenceUpdateEvent): void => {
         if (!host.isLiveEngine(id, engine)) return;

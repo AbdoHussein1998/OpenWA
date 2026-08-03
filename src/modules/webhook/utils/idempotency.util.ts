@@ -96,6 +96,13 @@ export function generateIdempotencyKey(event: string, data: Record<string, unkno
       // would dedupe exactly that.
       return `restr_${toStr(data.sessionId)}_${toStr(data.kind)}_${toStr(data.active)}${occurrence}`;
 
+    case 'call.accepted':
+    case 'call.rejected':
+    case 'call.missed':
+      // A call id is unique per call and each call ends exactly once, so (session, call, outcome)
+      // is already distinct — no occurrence salt, matching call.received's stable key.
+      return `call_${toStr(data.sessionId)}_${toStr(data.callId)}_${toStr(data.outcome)}`;
+
     case 'presence.update':
       // Keyed on the chat and salted per occurrence. Only genuine state CHANGES are dispatched, and
       // a contact who types, stops, and types again produces the same payload each time — content

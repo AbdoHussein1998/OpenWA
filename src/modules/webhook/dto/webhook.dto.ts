@@ -54,6 +54,9 @@ export const WEBHOOK_EVENTS = [
   'group.leave',
   'group.update',
   'call.received',
+  'call.accepted',
+  'call.rejected',
+  'call.missed',
   ...WEBHOOK_RESERVED_EVENTS,
 ] as const;
 

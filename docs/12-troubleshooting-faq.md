@@ -1102,6 +1102,9 @@ available_events:
   - session.reconnect_loop # Every 5th consecutive reconnect attempt (payload: sessionId, attempts, nextDelayMs)
   - session.restriction   # WhatsApp restricted the account, or lifted it (payload: sessionId, active, kind, code, expiresAt)
   - presence.update       # A subscribed chat's presence changed (payload: sessionId, chatId, participants, groupOnlineCount)
+  - call.accepted         # A ringing call was answered (Baileys only; payload: sessionId, callId, from, outcome, isVideo, isGroup, timestamp)
+  - call.rejected         # A ringing call was declined (Baileys only)
+  - call.missed           # A ringing call was never picked up (Baileys only)
 
   # Groups
   - group.join           # Participant(s) added/joined

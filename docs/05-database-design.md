@@ -400,7 +400,10 @@ CREATE TABLE webhooks (
   "group.join",
   "group.leave",
   "group.update",
-  "call.received"
+  "call.received",
+  "call.accepted",
+  "call.rejected",
+  "call.missed"
 ]
 ```
 
