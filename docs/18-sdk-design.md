@@ -33,7 +33,7 @@ All five SDKs expose the same fluent surface:
 | `contacts` | list, get, check, profilePicture, profilePictures, phone, block, unblock |
 | `groups` | list, get, create, joinGroup, add/remove/promote/demoteParticipants, setSubject, setDescription, getGroupSettings, updateGroupSettings, leave, inviteCode, revokeInviteCode |
 | `webhooks` | list, get, create, update, delete, test |
-| `chats` | list, markRead, markUnread, delete, sendState |
+| `chats` | list, markRead, markUnread, archive, delete, sendState |
 | `labels` | list, get, forChat, addToChat, removeFromChat *(WhatsApp Business)* |
 | `channels` | list, get, messages, subscribe, unsubscribe *(Newsletters)* |
 | `catalog` | info, products, product, sendProduct, sendCatalog *(WhatsApp Business)* |

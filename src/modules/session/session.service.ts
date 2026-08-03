@@ -356,6 +356,22 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     return engine.markUnread(chatId);
   }
 
+  /**
+   * Archive or unarchive a chat. Resolves false when the engine could not act — on Baileys a chat
+   * with no known history has no last message to key the app-state modification to. That is a
+   * defined outcome, not an error, so it is reported as `success: false` rather than a 500.
+   */
+  async archiveChat(id: string, chatId: string, archive: boolean): Promise<boolean> {
+    await this.findOne(id); // Verify session exists
+    const engine = this.engines.get(id);
+
+    if (!engine) {
+      throw new BadRequestException('Session is not started');
+    }
+
+    return engine.archiveChat(chatId, archive);
+  }
+
   async deleteChat(id: string, chatId: string): Promise<boolean> {
     await this.findOne(id); // Verify session exists
     const engine = this.engines.get(id);

@@ -712,6 +712,46 @@ Returns HTTP `200`, matching the OpenAPI contract.
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found
 
+#### POST /api/sessions/:id/chats/archive
+
+Archive or unarchive a chat.
+
+**Auth:** API key (OPERATOR)  ·  **Scope:** session-scoped
+
+**Path parameters**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `id` | string | Session UUID |
+
+**Request body** — `ArchiveChatDto`
+
+| Field | Type | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `chatId` | string | Yes | `@IsString`; `@IsNotEmpty`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Engine-native JID, e.g. `1234567890-123@g.us` |
+| `archive` | boolean | Yes | `@IsBoolean` (strict — the string `"false"` is rejected, not coerced to `true`) | `true` to archive, `false` to unarchive |
+
+```json
+{ "chatId": "1234567890-123@g.us", "archive": true }
+```
+
+**Response** `200`
+
+```json
+{ "success": true }
+```
+
+> **`success: false` is a real outcome here, not an error.** On the Baileys engine the archive is an
+> app-state modification keyed to the chat's **last message**, so a chat with no known history
+> cannot be archived at all — the same limitation `chats/delete` and `chats/unread` already carry on
+> that engine. Rather than fail with a 500, the endpoint reports `success: false`.
+
+> **No `chat.archived` webhook fires for your own archive.** Baileys emits no event for a change the
+> account itself made (remote-device archives arrive later via chat-update diffing), and
+> whatsapp-web.js's `chat_archived` event is not wired. Treat the HTTP response as the outcome.
+
+**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found
+
 #### POST /api/sessions/:id/chats/delete
 
 Delete a chat from the chat list (e.g. a group you have left).

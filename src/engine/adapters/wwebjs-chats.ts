@@ -68,6 +68,18 @@ export class WwebjsChats {
     }
   }
 
+  async archiveChat(chatId: string, archive: boolean): Promise<boolean> {
+    this.host.ensureReady();
+    try {
+      // Client.archiveChat/unarchiveChat, NOT Chat.archive() — the Chat method resolves void, so it
+      // gives nothing to report back; the client pair resolves the chat's new pin/archive state.
+      return archive ? await this.client().archiveChat(chatId) : await this.client().unarchiveChat(chatId);
+    } catch (error) {
+      this.host.logger.error(`Error ${archive ? 'archiving' : 'unarchiving'} chat ${chatId}`, String(error));
+      return false;
+    }
+  }
+
   async markUnread(chatId: string): Promise<boolean> {
     this.host.ensureReady();
     if (isChannelJid(chatId)) {

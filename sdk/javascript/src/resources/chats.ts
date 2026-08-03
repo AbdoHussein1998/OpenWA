@@ -10,7 +10,14 @@
 
 import { encodeSegment } from '../http.js';
 import type { OpenWAClient } from '../client.js';
-import type { ChatSummary, DeleteChatRequest, MarkChatRequest, SendChatStateRequest, SuccessResult } from '../types.js';
+import type {
+  ArchiveChatRequest,
+  ChatSummary,
+  DeleteChatRequest,
+  MarkChatRequest,
+  SendChatStateRequest,
+  SuccessResult,
+} from '../types.js';
 
 export interface ListChatsQuery {
   limit?: number;
@@ -43,6 +50,18 @@ export class ChatsResource {
     return this.client.request<SuccessResult>({
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/chats/unread`,
+      body,
+    });
+  }
+
+  /**
+   * Archive or unarchive a chat. `success: false` means the engine declined — on Baileys a chat
+   * with no known history cannot be archived.
+   */
+  archive(sessionId: string, body: ArchiveChatRequest): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'POST',
+      path: `/api/sessions/${encodeSegment(sessionId)}/chats/archive`,
       body,
     });
   }

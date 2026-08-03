@@ -32,6 +32,12 @@ func (s *ChatsService) Delete(ctx context.Context, sessionID string, body Delete
 	return s.post(ctx, sessionID, "/delete", body)
 }
 
+// Archive archives or unarchives a chat. A false Success means the engine
+// declined — on Baileys a chat with no known history cannot be archived.
+func (s *ChatsService) Archive(ctx context.Context, sessionID string, body ArchiveChatRequest) (*SuccessResult, error) {
+	return s.post(ctx, sessionID, "/archive", body)
+}
+
 // SendState sends a typing/recording/paused state.
 func (s *ChatsService) SendState(ctx context.Context, sessionID string, body SendChatStateRequest) (*SuccessResult, error) {
 	return s.post(ctx, sessionID, "/typing", body)
