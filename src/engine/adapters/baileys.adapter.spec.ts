@@ -125,7 +125,6 @@ import { CallNotFoundError } from '../../common/errors/call-not-found.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
-import { BadRequestException } from '@nestjs/common';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
 
 const fakeStore = {
