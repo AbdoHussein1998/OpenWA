@@ -1521,6 +1521,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.groups.setGroupMemberAddMode(groupId, mode);
   }
 
+  setGroupPicture(groupId: string, media: MediaInput): Promise<void> {
+    return this.groups.setGroupPicture(groupId, media);
+  }
+
+  deleteGroupPicture(groupId: string): Promise<void> {
+    return this.groups.deleteGroupPicture(groupId);
+  }
+
   setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
     return this.groups.setGroupEphemeral(groupId, durationSec);
   }

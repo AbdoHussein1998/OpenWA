@@ -13,6 +13,7 @@ import type {
   GroupSettingsResponse,
   GroupSummary,
   InviteCodeResponse,
+  SetGroupPictureRequest,
   JoinGroupRequest,
   JoinGroupResponse,
   SuccessResult,
@@ -145,6 +146,31 @@ export class GroupsResource {
   }
 
   /** Get the group invite code and link. */
+  /** Get the group's picture URL (null when it has none). */
+  getPicture(sessionId: string, groupId: string): Promise<{ url: string | null }> {
+    return this.client.request<{ url: string | null }>({
+      method: 'GET',
+      path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/picture`,
+    });
+  }
+
+  /** Set the group's picture. Requires admin rights on the group. */
+  setPicture(sessionId: string, groupId: string, body: SetGroupPictureRequest): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'PUT',
+      path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/picture`,
+      body,
+    });
+  }
+
+  /** Remove the group's picture. Requires admin rights on the group. */
+  deletePicture(sessionId: string, groupId: string): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'DELETE',
+      path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/picture`,
+    });
+  }
+
   inviteCode(sessionId: string, groupId: string): Promise<InviteCodeResponse> {
     return this.client.request<InviteCodeResponse>({
       method: 'GET',

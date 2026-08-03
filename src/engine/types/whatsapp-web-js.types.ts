@@ -82,6 +82,10 @@ export interface GroupChat extends Omit<Chat, 'isReadOnly' | 'getLabels'> {
   setInfoAdminsOnly(adminsOnly?: boolean): Promise<boolean>;
   /** Only admins may add participants when true (index.d.ts:2205). */
   setAddMembersAdminsOnly(adminsOnly?: boolean): Promise<boolean>;
+  /** Resolves false when the account lacks admin rights (does not throw). */
+  setPicture(media: unknown): Promise<boolean>;
+  /** Resolves false when the account lacks admin rights (does not throw). */
+  deletePicture(): Promise<boolean>;
 }
 
 /**

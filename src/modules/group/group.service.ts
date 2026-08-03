@@ -1,6 +1,8 @@
 import { Injectable, BadRequestException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { EngineRegistry } from '../../engine/engine-registry.service';
-import { GroupMemberAddMode, IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
+import { GroupMemberAddMode, IWhatsAppEngine, MediaInput } from '../../engine/interfaces/whatsapp-engine.interface';
+import { assertBase64WithinMediaCap, stripBase64DataUri } from '../message/media-cap.util';
+import { SetGroupPictureDto } from './dto/group.dto';
 import { paginate, ListOptions } from '../../common/utils/paginate';
 
 /**
@@ -75,6 +77,32 @@ export class GroupService {
 
   joinGroupViaInviteCode(sessionId: string, inviteCode: string) {
     return this.getEngine(sessionId).joinGroupViaInviteCode(inviteCode);
+  }
+
+  /** Read the group's picture URL, or null when it has none. Groups reuse the profile-picture read. */
+  getGroupPicture(sessionId: string, groupId: string): Promise<string | null> {
+    return this.getEngine(sessionId).getProfilePicture(groupId);
+  }
+
+  setGroupPicture(sessionId: string, groupId: string, dto: SetGroupPictureDto): Promise<void> {
+    const base64 = stripBase64DataUri(dto.base64);
+    if (!dto.url && !base64) {
+      throw new BadRequestException('Either url or base64 must be provided');
+    }
+    if (base64 && !dto.mimetype) {
+      throw new BadRequestException('mimetype is required when using base64 data');
+    }
+    assertBase64WithinMediaCap(base64);
+    const media: MediaInput = {
+      mimetype: dto.mimetype || 'image/jpeg',
+      // base64 wins over url when both are present, mirroring setProfilePicture.
+      data: base64 || dto.url!,
+    };
+    return this.getEngine(sessionId).setGroupPicture(groupId, media);
+  }
+
+  deleteGroupPicture(sessionId: string, groupId: string): Promise<void> {
+    return this.getEngine(sessionId).deleteGroupPicture(groupId);
   }
 
   /** Read the group's announce/locked/ephemeral/member-add settings; 404s (via getGroupInfo) when unknown. */

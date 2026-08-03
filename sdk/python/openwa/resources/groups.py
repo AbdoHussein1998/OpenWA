@@ -5,10 +5,11 @@ Backed by ``src/modules/group/group.controller.ts``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict
+from typing import Any, TYPE_CHECKING, TypedDict
 
 from .._http import quote_segment
 from ..types import (
+    SetGroupPictureRequest,
     CreateGroupRequest,
     GroupInfo,
     GroupSettings,
@@ -78,6 +79,24 @@ class GroupsResource:
 
     def leave(self, session_id: str, group_id: str) -> SuccessResult:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/leave")
+
+    def get_picture(self, session_id: str, group_id: str) -> dict[str, Any]:
+        """Get the group's picture URL (None when it has none)."""
+        return self._http.request(
+            "GET", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/picture"
+        )
+
+    def set_picture(self, session_id: str, group_id: str, body: SetGroupPictureRequest) -> SuccessResult:
+        """Set the group's picture. Requires admin rights on the group."""
+        return self._http.request(
+            "PUT", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/picture", body=body
+        )
+
+    def delete_picture(self, session_id: str, group_id: str) -> SuccessResult:
+        """Remove the group's picture. Requires admin rights on the group."""
+        return self._http.request(
+            "DELETE", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/picture"
+        )
 
     def invite_code(self, session_id: str, group_id: str) -> InviteCodeResponse:
         return self._http.request(

@@ -3935,6 +3935,123 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/groups/{groupId}/picture": {
+      "get": {
+        "operationId": "GroupController_getPicture",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "description": "Group ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Picture URL, or null when the group has none"
+          }
+        },
+        "summary": "Get the group's picture URL",
+        "tags": [
+          "groups"
+        ]
+      },
+      "put": {
+        "operationId": "GroupController_setPicture",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "description": "Group ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetGroupPictureDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Group picture updated"
+          },
+          "400": {
+            "description": "Session not active, or neither url nor base64 supplied"
+          },
+          "403": {
+            "description": "The engine refused the change — admin rights required"
+          }
+        },
+        "summary": "Set the group's picture",
+        "tags": [
+          "groups"
+        ]
+      },
+      "delete": {
+        "operationId": "GroupController_deletePicture",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "description": "Group ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group picture removed"
+          },
+          "403": {
+            "description": "The engine refused the change — admin rights required"
+          }
+        },
+        "summary": "Remove the group's picture",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/groups/{groupId}/invite-code": {
       "get": {
         "operationId": "GroupController_getInviteCode",
@@ -8068,6 +8185,25 @@
         "required": [
           "description"
         ]
+      },
+      "SetGroupPictureDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Image URL (http/https)",
+            "example": "https://example.com/group.jpg"
+          },
+          "base64": {
+            "type": "string",
+            "description": "Base64 encoded image data"
+          },
+          "mimetype": {
+            "type": "string",
+            "description": "Image MIME type (required when using base64)",
+            "example": "image/jpeg"
+          }
+        }
       },
       "SetProfileNameDto": {
         "type": "object",

@@ -31,7 +31,7 @@ All five SDKs expose the same fluent surface:
 | `sessions` | list, get, create, delete, start, stop, logout, forceKill, getQrCode, requestPairingCode, stats |
 | `messages` | list, sendText, sendImage/Video/Audio/Document/Sticker, sendLocation, sendContact, sendTemplate, sendPoll, reply, forward, react, delete, editMessage, history, reactions, media, pin, unpin, star, sendBulk, batchStatus, cancelBatch |
 | `contacts` | list, get, check, profilePicture, profilePictures, phone, upsert, delete, block, unblock |
-| `groups` | list, get, create, joinGroup, add/remove/promote/demoteParticipants, setSubject, setDescription, getGroupSettings, updateGroupSettings, leave, inviteCode, revokeInviteCode |
+| `groups` | list, get, create, joinGroup, add/remove/promote/demoteParticipants, setSubject, setDescription, getGroupSettings, updateGroupSettings, leave, getPicture, setPicture, deletePicture, inviteCode, revokeInviteCode |
 | `webhooks` | list, get, create, update, delete, test |
 | `chats` | list, markRead, markUnread, archive, clearMessages, delete, sendState |
 | `labels` | list, get, forChat, addToChat, removeFromChat *(WhatsApp Business)* |

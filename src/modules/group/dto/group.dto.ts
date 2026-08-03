@@ -10,6 +10,9 @@ import {
   IsIn,
   IsInt,
   Min,
+  IsOptional,
+  IsUrl,
+  Matches,
   ValidateIf,
 } from 'class-validator';
 import { ToStrictBoolean, ToStrictNumber } from '../../../common/utils/strict-boolean';
@@ -96,6 +99,32 @@ export class JoinGroupDto {
  * ValidateIf (not @IsOptional) so an explicit `null` fails validation (400) instead of being applied
  * as a value; only `undefined` (absent) skips the field.
  */
+/**
+ * Group picture payload. Mirrors SetProfilePictureDto: provide exactly one of `url` or `base64`
+ * (base64 wins when both are present), and a `mimetype` when using base64.
+ */
+export class SetGroupPictureDto {
+  @ApiPropertyOptional({ description: 'Image URL (http/https)', example: 'https://example.com/group.jpg' })
+  @IsOptional()
+  @IsUrl()
+  @ValidateIf((o: SetGroupPictureDto) => !o.base64)
+  url?: string;
+
+  @ApiPropertyOptional({ description: 'Base64 encoded image data' })
+  @IsOptional()
+  @IsString()
+  @ValidateIf((o: SetGroupPictureDto) => !o.url)
+  base64?: string;
+
+  @ApiPropertyOptional({ description: 'Image MIME type (required when using base64)', example: 'image/jpeg' })
+  @IsOptional()
+  @IsString()
+  // A group picture is an image by definition — reject non-image mimetypes fast (400) rather than
+  // letting the engine accept an arbitrary payload.
+  @Matches(/^image\//)
+  mimetype?: string;
+}
+
 export class GroupSettingsDto {
   @ApiPropertyOptional({ description: 'Only admins can send messages (announce group)' })
   @ToStrictBoolean()

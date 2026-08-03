@@ -48,6 +48,7 @@ class FakeSock extends EventEmitter {
   public updateProfileName = jest.fn().mockResolvedValue(undefined);
   public updateProfileStatus = jest.fn().mockResolvedValue(undefined);
   public updateProfilePicture = jest.fn().mockResolvedValue(undefined);
+  public removeProfilePicture = jest.fn().mockResolvedValue(undefined);
   public updateBlockStatus = jest.fn().mockResolvedValue(undefined);
   public addOrEditContact = jest.fn().mockResolvedValue(undefined);
   public removeContact = jest.fn().mockResolvedValue(undefined);
@@ -3736,6 +3737,18 @@ describe('BaileysAdapter sendSeen + markUnread + deleteChat', () => {
     fakeSock.fire('connection.update', { connection: 'open' });
     expect(await adapter.clearChatMessages('628999@s.whatsapp.net')).toBe(false);
     expect(fakeSock.chatModify).not.toHaveBeenCalled();
+  });
+
+  it('setGroupPicture targets the GROUP jid, not the own account', async () => {
+    const adapter = await readyWithMessage();
+    await adapter.setGroupPicture('120363@g.us', { mimetype: 'image/png', data: 'QUJD' });
+    expect(fakeSock.updateProfilePicture).toHaveBeenCalledWith('120363@g.us', expect.any(Buffer));
+  });
+
+  it('deleteGroupPicture removes by the GROUP jid', async () => {
+    const adapter = await readyWithMessage();
+    await adapter.deleteGroupPicture('120363@g.us');
+    expect(fakeSock.removeProfilePicture).toHaveBeenCalledWith('120363@g.us');
   });
 
   it('upsertContact addresses the entry by JID and composes fullName', async () => {

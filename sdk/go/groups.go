@@ -133,6 +133,33 @@ func (s *GroupsService) Leave(ctx context.Context, sessionID, groupID string) (*
 	return &out, nil
 }
 
+// GetPicture returns the group's picture URL, empty when it has none.
+func (s *GroupsService) GetPicture(ctx context.Context, sessionID, groupID string) (*GroupPictureResponse, error) {
+	var out GroupPictureResponse
+	if err := s.client.do(ctx, "GET", s.base(sessionID)+"/"+pathEscape(groupID)+"/picture", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetPicture sets the group's picture. Requires admin rights on the group.
+func (s *GroupsService) SetPicture(ctx context.Context, sessionID, groupID string, body SetGroupPictureRequest) (*SuccessResult, error) {
+	var out SuccessResult
+	if err := s.client.do(ctx, "PUT", s.base(sessionID)+"/"+pathEscape(groupID)+"/picture", nil, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeletePicture removes the group's picture. Requires admin rights on the group.
+func (s *GroupsService) DeletePicture(ctx context.Context, sessionID, groupID string) (*SuccessResult, error) {
+	var out SuccessResult
+	if err := s.client.do(ctx, "DELETE", s.base(sessionID)+"/"+pathEscape(groupID)+"/picture", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // InviteCode returns the group invite code/link.
 func (s *GroupsService) InviteCode(ctx context.Context, sessionID, groupID string) (*InviteCodeResponse, error) {
 	var out InviteCodeResponse
