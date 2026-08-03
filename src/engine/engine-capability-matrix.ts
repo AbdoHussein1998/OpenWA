@@ -56,6 +56,24 @@ export interface MethodCapability {
 
 export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   addLabelToChat: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  upsertLabel: {
+    wwjs: { status: 'not-available', rootCause: 'library-limitation' },
+    baileys: { status: 'supported' },
+    evidence:
+      "baileys addLabel(jid, LabelActionBody{id,name?,color?,deleted?}) (Socket/chats.d.ts:69) emits one `label_edit` app-state patch indexed by ['label_edit', id] (Utils/chat-utils.js:579-593), so create and update are the same write; whatsapp-web.js 1.34.7 exposes getLabels/getLabelById/getChatLabels/getChatsByLabelId/addOrRemoveLabels (index.d.ts:129-154) and nothing that edits a label itself",
+  },
+  deleteLabel: {
+    wwjs: { status: 'not-available', rootCause: 'library-limitation' },
+    baileys: { status: 'supported' },
+    evidence:
+      'baileys the same addLabel write with deleted:true (LabelActionBody.deleted, Types/Label.d.ts:13-22 → labelEditAction.deleted, Utils/chat-utils.js:586); whatsapp-web.js has no label delete',
+  },
+  getChatsByLabel: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'not-available', rootCause: 'library-limitation' },
+    evidence:
+      "wwjs Client.getChatsByLabelId(labelId) (index.d.ts:153-154); baileys exposes label WRITES only (Socket/chats.d.ts:69-73 addLabel/addChatLabel/removeChatLabel) with no query at all — Types/Label.d.ts is types-only, so listing a label's chats needs an app-state cache fed by the label-association sync events",
+  },
   addParticipants: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },

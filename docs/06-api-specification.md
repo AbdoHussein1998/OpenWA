@@ -3240,7 +3240,22 @@ Note: this is the one route in the module that returns a literal `{ success: tru
 
 Labels are a WhatsApp Business feature: every label route lives under a session and reads/writes the chat-label assignments exposed by the engine. Status routes manage the session's status feed (stories) — reading visible statuses and posting/deleting your own. Read routes require a base API key; all writes require `OPERATOR`.
 
-**Label reads are whatsapp-web.js only.** `GET /labels`, `GET /labels/:labelId` and `GET /labels/chat/:chatId` throw `501` on the Baileys engine, which exposes no label query (the library only has the association *writes*). Adding/removing a chat label works on both engines.
+**The two engines split cleanly down the middle here, and neither covers both halves.**
+
+| | whatsapp-web.js | Baileys |
+|---|---|---|
+| Read labels (`GET /labels`, `/labels/:labelId`, `/labels/chat/:chatId`, `/labels/:labelId/chats`) | ✅ | `501` — exposes no label query at all |
+| Edit labels (`PUT`/`DELETE /labels/:labelId`) | `501` — can read and assign, but cannot edit one | ✅ |
+| Assign to a chat (`POST`/`DELETE /labels/chat/…`) | ✅ | ✅ |
+
+So a deployment can read labels or edit them, depending on the engine, but not both. Assignment is
+the only part that works everywhere. This is a library split, not a gateway one — see
+`docs/29-engine-capability-matrix.md` for the symbols behind each cell.
+
+**Creating a label means choosing its id.** WhatsApp carries a single write keyed on the label id, so
+create and update are the same operation and there is no server-assigned id to hand back — which is
+why the route is `PUT /labels/:labelId` rather than `POST /labels`. Reusing an existing id **rewrites
+that label** instead of failing, because the protocol has no create-only form.
 
 **Reads are store-backed, not engine-direct.** `GET /status` and `GET /status/:contactId` no longer call the engine — they read from an OpenWA-side store that ingests inbound status/story broadcasts as they arrive (plus a best-effort backfill of currently-active stories on session connect), with a 24h TTL matching WhatsApp's own story expiry. This makes reads **identical on both engines**: `whatsapp-web.js` (which had a native `getBroadcasts()`/`getBroadcastById()` path) and Baileys (which never had one — `fetchStatus` only returns the *about* text, not stories, so the raw engine methods still throw `501` if called directly, they're just no longer on the read path) now return the same shape from the same source. A status older than 24h, or received before the store existed, will not appear.
 
@@ -3291,6 +3306,64 @@ Get a single label by its ID.
 The engine resolves `Label | null`; a `null` is mapped to `404` in the service, so a `200` always carries a label.
 
 **Errors:** `400` session is not started · `401` missing/invalid API key · `404` `Label <labelId> not found` · `501` the Baileys engine does not implement label reads (whatsapp-web.js only)
+
+#### GET /api/sessions/:sessionId/labels/:labelId/chats
+
+Every chat carrying a label.
+
+**Auth:** API key  ·  **Scope:** session-scoped  ·  **Engines:** whatsapp-web.js only
+
+**Response** `200` — a bare array of `ChatSummary`, the same shape `GET /sessions/:id/chats` returns.
+
+**Errors:** `400` session not started · `401` · `404` session not found · `501` Baileys, which has no label query
+
+#### PUT /api/sessions/:sessionId/labels/:labelId
+
+Create or update a label.
+
+**Auth:** API key (OPERATOR)  ·  **Scope:** session-scoped  ·  **Engines:** Baileys only
+
+The label id is **yours to choose** and travels in the path. Whether this creates or updates depends
+only on whether that id already exists — reusing one rewrites that label rather than failing.
+Omitted fields are left as they are.
+
+**Request body** — `UpsertLabelDto`
+
+| Field | Type | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `name` | string | No | 1–100 chars | Omit to keep the current name |
+| `color` | number | No | integer 0–19 | WhatsApp's colour **index**, not a hex value |
+
+`color` deliberately does not round-trip with the `hexColor` the read routes return: neither engine
+exposes the index-to-hex mapping — whatsapp-web.js passes hex through from the WA Web store and
+Baileys only ever speaks in indices — so translating between them here would be guesswork that
+silently sets the wrong colour.
+
+```json
+{ "name": "VIP customer", "color": 3 }
+```
+
+**Response** `200`
+
+```json
+{ "success": true }
+```
+
+**Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `501` whatsapp-web.js, which cannot edit labels
+
+#### DELETE /api/sessions/:sessionId/labels/:labelId
+
+Delete a label. It disappears from every chat it was on.
+
+**Auth:** API key (OPERATOR)  ·  **Scope:** session-scoped  ·  **Engines:** Baileys only
+
+**Response** `200`
+
+```json
+{ "success": true }
+```
+
+**Errors:** `400` session not started · `401` · `403` · `404` session not found · `501` whatsapp-web.js, which cannot edit labels
 
 #### GET /api/sessions/:sessionId/labels/chat/:chatId
 

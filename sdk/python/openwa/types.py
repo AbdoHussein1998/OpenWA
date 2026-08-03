@@ -62,6 +62,16 @@ class ChatPresence(TypedDict, total=False):
     observedAt: str
 
 
+class UpsertLabelRequest(TypedDict, total=False):
+    """A label create-or-update body. The id travels in the path -- WhatsApp keys the write on it."""
+
+    # Leave out to keep the current name.
+    name: str
+    # WhatsApp's colour INDEX (0-19), NOT a hex value -- it does not round-trip with the hexColor
+    # labels are read back with, because neither engine exposes the mapping.
+    color: int
+
+
 # ── Session ───────────────────────────────────────────────────────
 
 

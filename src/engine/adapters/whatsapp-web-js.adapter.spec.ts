@@ -5682,3 +5682,24 @@ describe('WhatsAppWebJsAdapter presence', () => {
     expect(String(body)).toMatch(/EngineNotSupportedError/);
   });
 });
+
+// whatsapp-web.js can READ labels and assign them, but cannot edit one. The split is the whole
+// point of this pair of tests: the read it does have must work, and the writes it does not have must
+// be refused inline where the parity gate can verify the matrix row.
+describe('WhatsAppWebJsAdapter labels', () => {
+  const newAdapter = () =>
+    new WhatsAppWebJsAdapter({ sessionId: 'sess-1', sessionDataPath: './data/sessions', puppeteer: {} });
+
+  it.each([
+    ['upsertLabel', (a: WhatsAppWebJsAdapter) => a.upsertLabel({ id: 'l1', name: 'VIP' })],
+    ['deleteLabel', (a: WhatsAppWebJsAdapter) => a.deleteLabel('l1')],
+  ])('refuses %s, with the method named', async (name, call) => {
+    await expect(call(newAdapter())).rejects.toThrow(new RegExp(name));
+  });
+
+  it.each(['upsertLabel', 'deleteLabel'])('declares %s inline, where the parity gate can read it', name => {
+    const body = Object.getOwnPropertyDescriptor(WhatsAppWebJsAdapter.prototype, name)?.value as () => unknown;
+
+    expect(String(body)).toMatch(/EngineNotSupportedError/);
+  });
+});

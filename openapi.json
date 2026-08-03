@@ -4487,6 +4487,135 @@
         "tags": [
           "labels"
         ]
+      },
+      "put": {
+        "description": "Baileys only. `PUT` rather than `POST` because the label id is chosen by the caller: WhatsApp carries one `label_edit` write keyed on that id, so whether this creates or updates depends purely on whether the id already exists, and there is no server-assigned id to return.\n\n**Choose an unused id to create.** Reusing one silently rewrites that label rather than failing, because the protocol has no create-only form. Fields left out are left alone.\n\nwhatsapp-web.js can read and assign labels but cannot edit one, and answers `501`.",
+        "operationId": "LabelController_upsertLabel",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "labelId",
+            "required": true,
+            "in": "path",
+            "description": "Label ID — caller-chosen",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertLabelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Label created or updated"
+          },
+          "400": {
+            "description": "Session not started, or validation failed"
+          },
+          "501": {
+            "description": "The active engine cannot edit labels (whatsapp-web.js)"
+          }
+        },
+        "summary": "Create or update a label",
+        "tags": [
+          "labels"
+        ]
+      },
+      "delete": {
+        "description": "Baileys only. The label disappears from every chat it was on. whatsapp-web.js cannot edit labels and answers `501`.",
+        "operationId": "LabelController_deleteLabel",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "labelId",
+            "required": true,
+            "in": "path",
+            "description": "Label ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Label deleted"
+          },
+          "400": {
+            "description": "Session not started"
+          },
+          "501": {
+            "description": "The active engine cannot edit labels (whatsapp-web.js)"
+          }
+        },
+        "summary": "Delete a label",
+        "tags": [
+          "labels"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/labels/{labelId}/chats": {
+      "get": {
+        "description": "whatsapp-web.js only. Baileys exposes label writes but no label query of any kind, so it answers `501`.",
+        "operationId": "LabelController_getChatsByLabel",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "labelId",
+            "required": true,
+            "in": "path",
+            "description": "Label ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chats carrying the label"
+          },
+          "400": {
+            "description": "Session not started"
+          },
+          "501": {
+            "description": "The active engine cannot list chats by label (Baileys)"
+          }
+        },
+        "summary": "Get every chat carrying a label",
+        "tags": [
+          "labels"
+        ]
       }
     },
     "/api/sessions/{sessionId}/labels/chat/{chatId}": {
@@ -8530,6 +8659,25 @@
             "type": "string",
             "description": "Image MIME type (required when using base64)",
             "example": "image/jpeg"
+          }
+        }
+      },
+      "UpsertLabelDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Label name. Omit to leave the current name untouched.",
+            "example": "VIP customer",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "color": {
+            "type": "number",
+            "description": "WhatsApp's colour INDEX (0-19), not a hex value — the read path's `hexColor` cannot be translated back, because neither engine exposes the mapping. Omit to leave the colour alone.",
+            "example": 3,
+            "minimum": 0,
+            "maximum": 19
           }
         }
       },

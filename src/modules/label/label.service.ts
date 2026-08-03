@@ -31,6 +31,23 @@ export class LabelService {
     return this.getEngine(sessionId).getChatLabels(chatId);
   }
 
+  /**
+   * Create or update a label. One operation on purpose: WhatsApp carries a single `label_edit`
+   * write keyed by the label id, so whether this creates or updates depends only on whether that id
+   * already exists — which is also why the caller chooses the id rather than being handed one.
+   */
+  upsertLabel(sessionId: string, labelId: string, body: { name?: string; color?: number }) {
+    return this.getEngine(sessionId).upsertLabel({ id: labelId, ...body });
+  }
+
+  deleteLabel(sessionId: string, labelId: string) {
+    return this.getEngine(sessionId).deleteLabel(labelId);
+  }
+
+  getChatsByLabel(sessionId: string, labelId: string) {
+    return this.getEngine(sessionId).getChatsByLabel(labelId);
+  }
+
   addLabelToChat(sessionId: string, chatId: string, labelId: string) {
     return this.getEngine(sessionId).addLabelToChat(chatId, labelId);
   }
