@@ -48,3 +48,10 @@ func (q *ListContactsQuery) values() url.Values {
 	setInt(v, "offset", q.Offset)
 	return v
 }
+
+// UpsertContactRequest saves or edits an addressbook contact. LastName may be
+// empty for a single-name contact.
+type UpsertContactRequest struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName,omitempty"`
+}

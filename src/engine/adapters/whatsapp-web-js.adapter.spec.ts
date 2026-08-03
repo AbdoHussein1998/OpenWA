@@ -744,6 +744,26 @@ describe('WhatsAppWebJsAdapter channel-JID guard (#554 — wwebjs Channel lacks 
     });
   });
 
+  describe('addressbook contacts', () => {
+    it('passes a bare PHONE NUMBER, not the JID — wwjs addresses the entry by number', async () => {
+      const saveOrEditAddressbookContact = jest.fn().mockResolvedValue(undefined);
+      await readyAdapter({ saveOrEditAddressbookContact }).upsertContact('628123@c.us', 'Ada', 'Lovelace');
+      expect(saveOrEditAddressbookContact).toHaveBeenCalledWith('628123', 'Ada', 'Lovelace');
+    });
+
+    it("sends an empty last name rather than undefined, which would stringify to 'undefined'", async () => {
+      const saveOrEditAddressbookContact = jest.fn().mockResolvedValue(undefined);
+      await readyAdapter({ saveOrEditAddressbookContact }).upsertContact('628123@c.us', 'Ada');
+      expect(saveOrEditAddressbookContact).toHaveBeenCalledWith('628123', 'Ada', '');
+    });
+
+    it('deletes by phone number too', async () => {
+      const deleteAddressbookContact = jest.fn().mockResolvedValue(undefined);
+      await readyAdapter({ deleteAddressbookContact }).deleteContact('628123@c.us');
+      expect(deleteAddressbookContact).toHaveBeenCalledWith('628123');
+    });
+  });
+
   describe('setGroupMemberAddMode', () => {
     const groupChat = (over: Record<string, unknown> = {}) => ({
       getChatById: jest.fn().mockResolvedValue({ isGroup: true, ...over }),

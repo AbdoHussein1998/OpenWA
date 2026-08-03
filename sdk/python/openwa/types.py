@@ -643,6 +643,13 @@ class PinMessageRequest(TypedDict, total=False):
     durationSeconds: int
 
 
+class UpsertContactRequest(TypedDict, total=False):
+    """Save or edit an addressbook contact. lastName is optional."""
+
+    firstName: str
+    lastName: str
+
+
 class ArchiveChatRequest(TypedDict):
     """Archive or unarchive a chat."""
 

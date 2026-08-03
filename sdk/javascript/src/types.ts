@@ -188,6 +188,13 @@ export interface PinMessageRequest {
   durationSeconds?: PinDurationSeconds;
 }
 
+export interface UpsertContactRequest {
+  /** The contact's first name. */
+  firstName: string;
+  /** Omit for a single-name contact. */
+  lastName?: string;
+}
+
 export interface ArchiveChatRequest {
   chatId: Jid;
   /** true to archive, false to unarchive. */

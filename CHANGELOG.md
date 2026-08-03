@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Addressbook contacts can be saved, edited and removed:**
+  `PUT /api/sessions/:sessionId/contacts/:contactId` with `{ firstName, lastName? }`, and
+  `DELETE` on the same path. Supported on both engines and exposed in all five SDKs as
+  `contacts.upsert` / `contacts.delete`. This writes the WhatsApp contact record only — it does not
+  block the contact or touch the chat.
+
+  The two engines address the entry differently — whatsapp-web.js by bare phone number, Baileys by
+  JID — so the adapters convert from the neutral contact id. Neither syncs through to the device
+  addressbook: both are called with their sync-to-device flag off, so the behaviour does not depend
+  on which engine is running.
+
 - **`memberAddMode` on group settings — who may add participants.** `PUT /groups/:groupId/settings`
   accepts `memberAddMode: "all" | "admins"`, `GET .../settings` reports it, and `GroupInfo` carries
   it. Supported on both engines. Exposed on the `GroupSettings` shape in all five SDKs.

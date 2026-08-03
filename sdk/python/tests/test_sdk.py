@@ -561,6 +561,16 @@ class TestChatsAndHealth:
         assert backend.last_call.method == "DELETE"
         assert backend.last_call.url == "http://localhost:2785/api/sessions/s/chats/a@c.us/messages"
 
+    def test_contacts_addressbook(self):
+        backend = MockBackend().on("PUT", "/contacts/", body={"success": True})
+        backend.on("DELETE", "/contacts/", body={"success": True})
+        client = make_client(backend)
+        client.contacts.upsert("s", "a@c.us", {"firstName": "Ada"})
+        assert backend.last_call.method == "PUT"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/contacts/a@c.us"
+        client.contacts.delete("s", "a@c.us")
+        assert backend.last_call.method == "DELETE"
+
     def test_chats_archive(self):
         backend = MockBackend().on("POST", "/chats/archive", body={"success": True})
         make_client(backend).chats.archive("s", {"chatId": "a@c.us", "archive": True})

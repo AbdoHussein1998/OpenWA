@@ -1465,6 +1465,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.contacts.blockContact(contactId);
   }
 
+  upsertContact(contactId: string, firstName: string, lastName?: string): Promise<void> {
+    return this.contacts.upsertContact(contactId, firstName, lastName);
+  }
+
+  deleteContact(contactId: string): Promise<void> {
+    return this.contacts.deleteContact(contactId);
+  }
+
   // Unblock Contact
   unblockContact(contactId: string): Promise<void> {
     return this.contacts.unblockContact(contactId);
