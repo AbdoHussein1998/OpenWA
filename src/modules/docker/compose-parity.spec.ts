@@ -235,6 +235,15 @@ describe('DockerService managed specs ↔ docker-compose.yml parity', () => {
     expect(cfg.Env).toBeUndefined();
   });
 
+  it('redis: sets the noeviction maxmemory policy BullMQ requires, on both launch paths', async () => {
+    const cfg = await capture('redis');
+    // The parity assertion above only proves the two launch paths AGREE — dropping the flag from
+    // both would keep it green. BullMQ needs noeviction: under any other policy Redis may evict
+    // queue keys once maxmemory is reached, losing queued jobs with no error surfaced anywhere.
+    expect(compose.services.redis.command).toContain('--maxmemory-policy noeviction');
+    expect(cfg.Cmd).toEqual(expect.arrayContaining(['--maxmemory-policy', 'noeviction']));
+  });
+
   it('redis: publishes no host ports, like compose', async () => {
     const cfg = await capture('redis');
     expect(compose.services.redis.ports).toBeUndefined();

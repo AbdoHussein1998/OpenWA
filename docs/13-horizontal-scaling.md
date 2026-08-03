@@ -161,7 +161,7 @@ services:
     image: redis:7-alpine
     deploy:
       replicas: 1
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
     volumes:
       - redis-data:/data
     networks:
