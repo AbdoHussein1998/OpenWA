@@ -7,7 +7,7 @@ package com.rmyndharis.openwa.model;
  * settings that were set. Setting {@code ephemeralSeconds} returns HTTP 501 on the whatsapp-web.js
  * engine.
  */
-public record GroupSettings(Boolean announce, Boolean locked, Integer ephemeralSeconds) {
+public record GroupSettings(Boolean announce, Boolean locked, Integer ephemeralSeconds, String memberAddMode) {
     public static Builder builder() {
         return new Builder();
     }
@@ -16,6 +16,7 @@ public record GroupSettings(Boolean announce, Boolean locked, Integer ephemeralS
         private Boolean announce;
         private Boolean locked;
         private Integer ephemeralSeconds;
+        private String memberAddMode;
 
         /** Only admins can send messages. */
         public Builder announce(Boolean v) {
@@ -30,13 +31,19 @@ public record GroupSettings(Boolean announce, Boolean locked, Integer ephemeralS
         }
 
         /** Disappearing-message timer in seconds ({@code 0} disables). Not supported on the whatsapp-web.js engine. */
+        /** Who may add participants: "all" (any member) or "admins" (admins only). */
+        public Builder memberAddMode(String v) {
+            this.memberAddMode = v;
+            return this;
+        }
+
         public Builder ephemeralSeconds(Integer v) {
             this.ephemeralSeconds = v;
             return this;
         }
 
         public GroupSettings build() {
-            return new GroupSettings(announce, locked, ephemeralSeconds);
+            return new GroupSettings(announce, locked, ephemeralSeconds, memberAddMode);
         }
     }
 }

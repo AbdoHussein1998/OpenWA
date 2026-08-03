@@ -2399,11 +2399,16 @@ Read the group's admin-only settings and disappearing-message timer.
 
 **Response** `200`
 
-`announce` = only admins can send messages; `locked` = only admins can edit group info. `ephemeralSeconds` is present only when the engine reports a disappearing-message timer.
+`announce` = only admins can send messages; `locked` = only admins can edit group info. `ephemeralSeconds` and `memberAddMode` are each present only when the engine reports them.
 
 ```json
-{ "announce": false, "locked": false, "ephemeralSeconds": 604800 }
+{ "announce": false, "locked": false, "ephemeralSeconds": 604800, "memberAddMode": "all" }
 ```
+
+`memberAddMode` is `"all"` (any member may add participants) or `"admins"`. Both engines report and
+accept it, but they encode it differently underneath — Baileys as a boolean where `true` means
+*everyone*, whatsapp-web.js as WhatsApp's own `all_member_add`/`admin_add` strings (its typings claim
+a boolean with the opposite sense). The adapters normalise both to these two values.
 
 **Errors:** `400` session is not started · `401` missing/invalid `X-API-Key` · `404` group not found
 
@@ -2427,10 +2432,16 @@ Update group settings. Each present field maps to one engine call; absent fields
 | announce | boolean | No | boolean | Only admins can send messages |
 | locked | boolean | No | boolean | Only admins can edit group info |
 | ephemeralSeconds | integer | No | ≥ 0 | Disappearing-message timer in seconds (`0` disables). **Baileys only** — whatsapp-web.js returns `501` |
+| memberAddMode | string | No | `all` \| `admins` | Who may add participants. Supported on both engines |
 
 ```json
 { "announce": true, "ephemeralSeconds": 86400 }
 ```
+
+> **Ordering within a patch is deliberate.** `ephemeralSeconds` is applied first because it is the
+> only field with a deterministic per-engine refusal (whatsapp-web.js always `501`s it); applying
+> anything else first would leave a half-applied patch behind when that call throws. `memberAddMode`
+> is supported on both engines and is therefore applied after it.
 
 **Response** `200`
 
@@ -2438,7 +2449,7 @@ Update group settings. Each present field maps to one engine call; absent fields
 { "success": true, "message": "Group settings updated" }
 ```
 
-**Errors:** `400` session is not started / empty patch / unknown body field · `401` missing/invalid `X-API-Key` · `403` key lacks OPERATOR role · `501` `ephemeralSeconds` on the whatsapp-web.js engine (library limitation)
+**Errors:** `400` session is not started / empty patch / unknown body field · `401` missing/invalid `X-API-Key` · `403` key lacks OPERATOR role, or the account is not a group admin (`memberAddMode` on whatsapp-web.js) · `501` `ephemeralSeconds` on the whatsapp-web.js engine (library limitation)
 
 ### 6.4.5 Message Templates
 

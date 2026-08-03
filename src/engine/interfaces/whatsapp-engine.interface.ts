@@ -212,6 +212,14 @@ export interface ParticipantOperationResult {
   message?: string;
 }
 
+/**
+ * Who may add participants to a group. Neutral vocabulary: the engines disagree on how they encode
+ * this — Baileys uses a boolean where `true` means everyone, whatsapp-web.js carries WhatsApp's own
+ * `'all_member_add'`/`'admin_add'` strings (despite typing the field as a boolean with the opposite
+ * sense) — so adapters normalise to this on the way out and de-normalise on the way in.
+ */
+export type GroupMemberAddMode = 'all' | 'admins';
+
 export interface GroupInfo {
   id: string;
   name: string;
@@ -227,6 +235,8 @@ export interface GroupInfo {
   locked?: boolean;
   /** Disappearing-messages timer in seconds; 0 or undefined = off. */
   ephemeralSeconds?: number;
+  /** Who may add participants. Undefined when the engine did not report it. */
+  memberAddMode?: GroupMemberAddMode;
   /** JID of the parent community this group is linked to, or null if standalone. */
   linkedParentJID?: string | null;
 }
@@ -681,6 +691,8 @@ export interface IWhatsAppEngine {
   setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
   /** Set the "only admins can edit group info" group setting (WhatsApp locked/restrict). */
   setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
+  /** Set who may add participants to the group. */
+  setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void>;
   /**
    * Set the group's disappearing-messages timer in seconds; 0 disables it.
    * Known values: 86400 (24h), 604800 (7d), 7776000 (90d).

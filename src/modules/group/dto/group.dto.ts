@@ -7,11 +7,13 @@ import {
   IsNotEmpty,
   MaxLength,
   IsBoolean,
+  IsIn,
   IsInt,
   Min,
   ValidateIf,
 } from 'class-validator';
 import { ToStrictBoolean, ToStrictNumber } from '../../../common/utils/strict-boolean';
+import type { GroupMemberAddMode } from '../../../engine/interfaces/whatsapp-engine.interface';
 
 // Field caps shared with the agent-tool input schemas (src/core/agent-tools/tools/group.tools.ts)
 // so MCP and REST enforce the same limits on the equivalent operations.
@@ -117,4 +119,12 @@ export class GroupSettingsDto {
   @IsInt()
   @Min(0)
   ephemeralSeconds?: number;
+
+  @ApiPropertyOptional({
+    description: "Who may add participants: 'all' (any member) or 'admins' (admins only)",
+    enum: ['all', 'admins'],
+  })
+  @ValidateIf((o: GroupSettingsDto) => o.memberAddMode !== undefined)
+  @IsIn(['all', 'admins'])
+  memberAddMode?: GroupMemberAddMode;
 }

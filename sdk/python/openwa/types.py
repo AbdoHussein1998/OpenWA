@@ -480,10 +480,15 @@ class JoinGroupResponse(TypedDict, total=False):
 # (callers pass plain dicts); the backend validates (empty body -> 400).
 # `ephemeralSeconds` is the disappearing-messages timer (0 disables); the
 # whatsapp-web.js engine does not support it (request -> 501).
+GroupMemberAddMode = Literal["all", "admins"]
+
+
 class GroupSettings(TypedDict, total=False):
     announce: bool
     locked: bool
     ephemeralSeconds: int
+    # Who may add participants: "all" (any member) or "admins" (admins only).
+    memberAddMode: GroupMemberAddMode
 
 
 # ── Profile (own account) ─────────────────────────────────────────

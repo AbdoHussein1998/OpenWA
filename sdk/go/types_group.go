@@ -75,6 +75,8 @@ type GroupSettings struct {
 	Announce         *bool `json:"announce,omitempty"`
 	Locked           *bool `json:"locked,omitempty"`
 	EphemeralSeconds *int  `json:"ephemeralSeconds,omitempty"`
+	// MemberAddMode is "all" (any member may add participants) or "admins".
+	MemberAddMode *string `json:"memberAddMode,omitempty"`
 }
 
 // ListGroupsQuery paginates the group list.

@@ -2,6 +2,7 @@ import { type Client } from 'whatsapp-web.js';
 import {
   Group,
   GroupInfo,
+  GroupMemberAddMode,
   GroupParticipant,
   ParticipantOperationResult,
 } from '../interfaces/whatsapp-engine.interface';
@@ -38,6 +39,25 @@ export function extractLinkedParentJID(groupMetadata?: GroupMetadataRaw): string
  * methods as thin forwarders and injects the shared host surface (./wwebjs-host) via closures,
  * so the delegate never touches lifecycle state directly.
  */
+/**
+ * Normalise whatsapp-web.js's member-add-mode to the neutral vocabulary.
+ *
+ * Deliberately handles both encodings. The WA Web group model — and GroupChat.setAddMembersAdminsOnly
+ * when it writes back (GroupChat.js:476) — use WhatsApp's `'admin_add'`/`'all_member_add'` strings,
+ * but index.d.ts:890 declares the field `boolean` with `true` meaning "only admins", the OPPOSITE
+ * sense to Baileys' boolean. Reading it as a plain boolean would therefore be wrong on both engines
+ * for different reasons, so each shape is decoded explicitly and anything unrecognised is reported
+ * as unknown rather than guessed.
+ */
+export function normalizeWwebjsMemberAddMode(raw: string | boolean | undefined): GroupMemberAddMode | undefined {
+  if (raw === 'admin_add') return 'admins';
+  if (raw === 'all_member_add') return 'all';
+  // The documented (but not observed) boolean form: true = only admins may add.
+  if (raw === true) return 'admins';
+  if (raw === false) return 'all';
+  return undefined;
+}
+
 export class WwebjsGroups {
   constructor(private readonly host: WwebjsEngineHost) {}
 
@@ -104,6 +124,7 @@ export class WwebjsGroups {
         announce: groupChat.groupMetadata?.announce,
         locked: groupChat.groupMetadata?.restrict,
         ephemeralSeconds: groupChat.groupMetadata?.ephemeralDuration,
+        memberAddMode: normalizeWwebjsMemberAddMode(groupChat.groupMetadata?.memberAddMode),
         linkedParentJID: extractLinkedParentJID(groupChat.groupMetadata),
       };
     } catch (error) {
@@ -352,6 +373,19 @@ export class WwebjsGroups {
     if (!ok) {
       throw new EngineRefusedError(
         `Failed to update the messages-admins-only setting for group ${groupId} — admin rights required`,
+      );
+    }
+  }
+
+  // Set who may add participants. NOT a groupSettingUpdate option on either engine — wwjs has its
+  // own GroupChat setter, and it is inverted relative to our neutral vocabulary: adminsOnly=true
+  // means mode 'admins'.
+  async setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void> {
+    const groupChat = await this.requireGroupChat(groupId);
+    const ok = await groupChat.setAddMembersAdminsOnly(mode === 'admins');
+    if (!ok) {
+      throw new EngineRefusedError(
+        `Failed to update the member-add-mode setting for group ${groupId} — admin rights required`,
       );
     }
   }

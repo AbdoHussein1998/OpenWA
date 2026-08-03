@@ -497,6 +497,9 @@ export interface JoinGroupResponse {
 }
 
 /** Group settings as returned by `GET /sessions/:id/groups/:groupId/settings`. */
+/** Who may add participants to a group. */
+export type GroupMemberAddMode = 'all' | 'admins';
+
 export interface GroupSettingsResponse {
   /** Only admins can send messages (announce group). */
   announce?: boolean;
@@ -504,6 +507,8 @@ export interface GroupSettingsResponse {
   locked?: boolean;
   /** Disappearing-messages timer in seconds; 0 disables. Known values: 86400 (24h), 604800 (7d), 7776000 (90d). */
   ephemeralSeconds?: number;
+  /** Who may add participants: 'all' (any member) or 'admins' (admins only). */
+  memberAddMode?: GroupMemberAddMode;
 }
 
 /**
