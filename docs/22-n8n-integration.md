@@ -88,6 +88,7 @@ Start workflows when WhatsApp events occur.
 | `session.authenticated` | Session logged in (phone available) | Startup notifications     |
 | `session.disconnected`  | Session lost connection             | Alert monitoring          |
 | `session.reconnect_loop` | Every 5th consecutive reconnect attempt | Stuck-session alerting |
+| `session.restriction` | WhatsApp restricted the account, or lifted it | Pausing outreach while an account is limited |
 | `group.join`           | Participant(s) joined a group          | Welcome messages        |
 | `group.leave`          | Participant(s) left a group            | Churn tracking          |
 | `group.update`         | Group subject/description/settings changed | Group administration |

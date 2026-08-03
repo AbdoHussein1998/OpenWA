@@ -219,6 +219,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getOnError: () => this.callbacks.onError,
       getOnStateChanged: () => this.callbacks.onStateChanged,
       getOnCredentialTeardownStarted: () => this.callbacks.onCredentialTeardownStarted,
+      getOnAccountRestriction: () => this.callbacks.onAccountRestriction,
     });
   }
 

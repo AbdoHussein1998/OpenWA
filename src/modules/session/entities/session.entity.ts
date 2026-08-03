@@ -1,6 +1,7 @@
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { DateTransformer } from '../../../common/transformers/date.transformer';
 import { jsonColumnType, dateColumnType } from '../../../common/utils/column-types';
+import type { AccountRestriction } from '../../../engine/interfaces/whatsapp-engine.interface';
 
 export enum SessionStatus {
   CREATED = 'created',
@@ -63,4 +64,11 @@ export class Session {
    * is runtime state that resets when the engine re-initializes.
    */
   lastError?: string;
+
+  /**
+   * Transient (non-persisted) restriction WhatsApp currently has in force on this session's account,
+   * or null when there is none. Populated at read time from SessionRestrictionStore, which explains
+   * why it is runtime state rather than a column.
+   */
+  restriction?: AccountRestriction | null;
 }

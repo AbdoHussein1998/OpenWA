@@ -1,6 +1,7 @@
 import { SessionStatus } from './entities/session.entity';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
+import { SessionRestrictionStore } from './session-restriction-store.service';
 import { EventsGateway } from '../events/events.gateway';
 import { WebhookService } from '../webhook/webhook.service';
 import { HookManager } from '../../core/hooks';
@@ -9,6 +10,7 @@ import {
   EngineStatus,
   IWhatsAppEngine,
   IncomingCallEvent,
+  AccountRestriction,
 } from '../../engine/interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { SessionEngineLeafEvents } from './session-engine-leaf-events';
@@ -33,6 +35,8 @@ export interface SessionEngineWiringHost {
   cancelReconnect(id: string): void;
   evictAndForceDestroy(id: string, engine: IWhatsAppEngine): void;
   trackPendingCredentialTeardown(sessionName: string, raw: Promise<void>): void;
+  /** Announce a restriction that has ended; shared with the lifecycle's own READY path. */
+  reportRestrictionLifted(id: string, lifted: AccountRestriction): void;
   /**
    * SYNCHRONOUS atomic one-shot claim over the lifecycle's shared stuckAuthRecoveryUsed Set (bound
    * by reference through the closure): true exactly once per episode, and only while `engine` is
@@ -41,6 +45,7 @@ export interface SessionEngineWiringHost {
   claimStuckAuthRecovery(id: string, engine: IWhatsAppEngine): boolean;
   messages: MessageProjector;
   sessionErrors: SessionErrorStore;
+  sessionRestrictions: SessionRestrictionStore;
   webhookService: WebhookService;
   eventsGateway: EventsGateway;
   hookManager: HookManager;
@@ -207,6 +212,36 @@ export class SessionEngineEventWiring {
         // onActionRequired, but persisting the reason here means it is available regardless.
         host.sessionErrors.set(id, reason);
         void host.hookManager.execute('session:error', { reason }, { sessionId: id, source: 'Engine' });
+      },
+      onAccountRestriction: (restriction: AccountRestriction | null): void => {
+        if (!host.isLiveEngine(id, engine)) return;
+
+        // A lift is only news if we were holding a restriction; an engine that reports "no
+        // restriction" on every connect (the Baileys probe does exactly that) must stay quiet.
+        if (!restriction) {
+          const lifted = host.sessionRestrictions.clear(id);
+          if (lifted) host.reportRestrictionLifted(id, lifted);
+          return;
+        }
+
+        // Both engines repeat an unchanged restriction — whatsapp-web.js on every reconnect attempt,
+        // Baileys on every connect probe — so only a change reaches an operator.
+        if (!host.sessionRestrictions.set(id, restriction)) return;
+
+        this.logger.warn(`WhatsApp restricted this session's account: ${restriction.kind}`, {
+          sessionId: id,
+          kind: restriction.kind,
+          code: restriction.code,
+          expiresAt: restriction.expiresAt,
+          action: 'account_restricted',
+        });
+        void host.webhookService.dispatch(id, 'session.restriction', {
+          sessionId: id,
+          active: true,
+          kind: restriction.kind,
+          code: restriction.code,
+          expiresAt: restriction.expiresAt ? new Date(restriction.expiresAt).toISOString() : null,
+        });
       },
       onError: (reason: string): void => {
         if (!host.isLiveEngine(id, engine)) return;

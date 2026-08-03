@@ -30,7 +30,7 @@ BulkMessageType = Literal["text", "image", "video", "audio", "document"]
 WebhookEvent = Literal[
     "message.received", "message.sent", "message.ack", "message.failed", "message.revoked",
     "message.reaction", "message.edited", "session.status", "session.qr", "session.authenticated",
-    "session.disconnected", "session.reconnect_loop",
+    "session.disconnected", "session.reconnect_loop", "session.restriction",
     "group.join", "group.leave", "group.update", "call.received", "status.received",
     "*",
 ]
@@ -44,6 +44,21 @@ class SuccessResult(TypedDict, total=False):
 # ── Session ───────────────────────────────────────────────────────
 
 
+class AccountRestriction(TypedDict, total=False):
+    """A restriction WhatsApp has in force on a session's account.
+
+    'reachout_timelock' leaves the session connected and existing chats working -- only starting new
+    conversations is blocked -- whereas 'tos_block' and 'proxy_block' refuse the connection itself
+    and therefore cannot coexist with a 'ready' status.
+    """
+
+    kind: Literal["reachout_timelock", "tos_block", "proxy_block"]
+    # The engine's own token for the cause, verbatim (TOS_BLOCK, BIZ_QUALITY, ...).
+    code: str
+    # ISO timestamp when enforcement ends, when WhatsApp states one.
+    expiresAt: str | None
+
+
 class SessionResponse(TypedDict, total=False):
     id: str
     name: str
@@ -55,6 +70,9 @@ class SessionResponse(TypedDict, total=False):
     createdAt: str
     updatedAt: str
     lastError: str | None
+    # A limit WhatsApp itself has placed on the account, or None when there is none. Distinct from
+    # lastError, which describes a fault on the gateway's side.
+    restriction: AccountRestriction | None
     # Whether the gateway holds a live engine for this session -- the precondition stop/logout/
     # force-kill require and start refuses. Not derivable from status: 'disconnected' covers both a
     # session mid automatic-reconnect (engine present) and one stopped with no engine. Absent from a

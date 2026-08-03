@@ -48,6 +48,7 @@ export const WEBHOOK_EVENTS = [
   'session.authenticated',
   'session.disconnected',
   'session.reconnect_loop',
+  'session.restriction',
   'group.join',
   'group.leave',
   'group.update',

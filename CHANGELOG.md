@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **WhatsApp-imposed account restrictions are now surfaced, instead of being lost inside a generic
+  disconnect:** a new `restriction` field on every session response, a `session.restriction` webhook,
+  and an `openwa_sessions_restricted` Prometheus gauge. Modelled in the JavaScript, Python, Go and
+  Java SDKs. Nothing is opt-in and nothing changes an existing payload's meaning; the field is
+  additive and `null` when there is no restriction.
+
+  The two engines can observe genuinely different things, so the signal says which:
+
+  - `reachout_timelock` (Baileys) — the account stays connected and existing chats keep working;
+    WhatsApp blocks only the start of **new** conversations. Read from the library's typed
+    `reachoutTimeLock` state, which reports both the onset and the lift, and carries an `expiresAt`
+    when WhatsApp states one.
+  - `tos_block` / `proxy_block` (whatsapp-web.js) — a connection-level refusal, derived from the
+    `WAState` the library reports when it drops the link.
+
+  Only three of whatsapp-web.js's twelve states are treated as restrictions. An unlink, a takeover
+  by another device, a stale client version and a timeout all say nothing about the account's
+  standing, and reporting them would make the signal useless to act on.
+
+  Because WhatsApp only *pushes* a timelock when it changes, a gateway that starts while an account
+  is already restricted would never be told, so the Baileys engine asks outright once per
+  connection. Repeats are deduped: an unchanged restriction is not re-announced, and a lift is only
+  sent when one was actually in force.
+
+  Detection is observational. It never changes a session's status or its reconnect behaviour, so a
+  misread cannot take a working session out of service — and a `reachout_timelock` in particular
+  applies to a session that is still fully `ready`. The state is held in memory rather than
+  persisted, because both engines re-establish it within one connection.
+
 - **Polls can be voted on, on the whatsapp-web.js engine:**
   `POST /api/sessions/:sessionId/messages/vote-poll` with `{ chatId, pollMessageId, options }`.
   Exposed in all five SDKs as `messages.votePoll`. Baileys returns `501` — it has no vote-send

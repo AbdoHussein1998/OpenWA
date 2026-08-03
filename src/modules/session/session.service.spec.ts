@@ -1,4 +1,5 @@
 import { SessionErrorStore } from './session-error-store.service';
+import { SessionRestrictionStore } from './session-restriction-store.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
@@ -196,6 +197,7 @@ describe('SessionService', () => {
         SessionService,
         SessionEngineLifecycle,
         SessionErrorStore,
+        SessionRestrictionStore,
         {
           provide: getRepositoryToken(Session, 'data'),
           useValue: repository,
@@ -2020,6 +2022,146 @@ describe('SessionService', () => {
       const result = await service.findOne('sess-uuid-1');
 
       expect(result.lastError).toBe('onboarding modal needs a manual dismissal');
+    });
+  });
+
+  // A restriction is WhatsApp judging the account, not a fault on our side, so it has its own
+  // channel: a webhook, a field on the session, and a gauge — never a status change. Both engines
+  // repeat themselves (whatsapp-web.js on every reconnect attempt, the Baileys probe on every
+  // connect), so the dedupe is the load-bearing part of this wiring.
+  describe('engine account restriction', () => {
+    const timelock = { kind: 'reachout_timelock' as const, code: 'BIZ_QUALITY' };
+
+    const startAndCapture = async (): Promise<EngineEventCallbacks> => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      await service.start('sess-uuid-1');
+      const calls = mockEngine.initialize.mock.calls as [EngineEventCallbacks][];
+      return calls[0][0];
+    };
+
+    it('announces a newly-detected restriction to webhook subscribers', async () => {
+      const callbacks = await startAndCapture();
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onAccountRestriction?.({ ...timelock, expiresAt: Date.UTC(2026, 7, 4, 9) });
+
+      expect(webhookService.dispatch).toHaveBeenCalledWith('sess-uuid-1', 'session.restriction', {
+        sessionId: 'sess-uuid-1',
+        active: true,
+        kind: 'reachout_timelock',
+        code: 'BIZ_QUALITY',
+        expiresAt: '2026-08-04T09:00:00.000Z',
+      });
+    });
+
+    it('stays silent when the same restriction is reported again', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onAccountRestriction?.(timelock);
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onAccountRestriction?.(timelock);
+      callbacks.onAccountRestriction?.(timelock);
+
+      expect(webhookService.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('announces again when the cause changes', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onAccountRestriction?.(timelock);
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onAccountRestriction?.({ ...timelock, code: 'WEB_COMPANION_ONLY' });
+
+      expect(webhookService.dispatch).toHaveBeenCalledWith(
+        'sess-uuid-1',
+        'session.restriction',
+        expect.objectContaining({ active: true, code: 'WEB_COMPANION_ONLY' }),
+      );
+    });
+
+    it('announces a lift, carrying the cause that ended', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onAccountRestriction?.(timelock);
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onAccountRestriction?.(null);
+
+      expect(webhookService.dispatch).toHaveBeenCalledWith('sess-uuid-1', 'session.restriction', {
+        sessionId: 'sess-uuid-1',
+        active: false,
+        kind: 'reachout_timelock',
+        code: 'BIZ_QUALITY',
+        expiresAt: null,
+      });
+    });
+
+    // The Baileys probe reports "no restriction" on every single connect. Announcing a lift for a
+    // session that was never restricted would make the event meaningless.
+    it('stays silent when nothing was in force to lift', async () => {
+      const callbacks = await startAndCapture();
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onAccountRestriction?.(null);
+
+      expect(webhookService.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('surfaces the restriction on the session read model', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onAccountRestriction?.({ ...timelock, expiresAt: 1234 });
+
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ status: SessionStatus.READY }));
+      const result = await service.findOne('sess-uuid-1');
+
+      expect(result.restriction).toEqual({ ...timelock, expiresAt: 1234 });
+    });
+
+    // whatsapp-web.js never reports a block being lifted — it only stops refusing. Reaching READY is
+    // the proof, since a connection-level block is exactly what prevents it.
+    it('treats reaching READY as proof a connection-level block has ended', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onAccountRestriction?.({ kind: 'tos_block', code: 'TOS_BLOCK' });
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onReady?.('628123', 'Tester');
+
+      expect(webhookService.dispatch).toHaveBeenCalledWith('sess-uuid-1', 'session.restriction', {
+        sessionId: 'sess-uuid-1',
+        active: false,
+        kind: 'tos_block',
+        code: 'TOS_BLOCK',
+        expiresAt: null,
+      });
+    });
+
+    // …but a timelock leaves the account connected, so READY proves nothing about it. Clearing it
+    // here would drop a restriction that is still in force and still blocking new conversations.
+    it('keeps a reachout timelock across a READY, which does not disprove it', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onAccountRestriction?.(timelock);
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onReady?.('628123', 'Tester');
+
+      expect(webhookService.dispatch).not.toHaveBeenCalledWith(
+        'sess-uuid-1',
+        'session.restriction',
+        expect.objectContaining({ active: false }),
+      );
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ status: SessionStatus.READY }));
+      expect((await service.findOne('sess-uuid-1')).restriction).toEqual(timelock);
+    });
+
+    // Detection must not move the session's status: a timelocked account is still connected and
+    // still serving every existing chat, and a status change would take the session out of service.
+    it('does not touch the session status', async () => {
+      const callbacks = await startAndCapture();
+      (repository.update as jest.Mock).mockClear();
+
+      callbacks.onAccountRestriction?.(timelock);
+
+      expect(repository.update).not.toHaveBeenCalled();
     });
   });
 

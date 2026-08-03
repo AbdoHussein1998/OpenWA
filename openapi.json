@@ -6755,6 +6755,37 @@
           "name"
         ]
       },
+      "AccountRestrictionDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "reachout_timelock",
+              "tos_block",
+              "proxy_block"
+            ],
+            "description": "What WhatsApp is restricting. `reachout_timelock` leaves the session connected and existing chats working, blocking only the start of new conversations. `tos_block` and `proxy_block` are connection-level refusals — the session cannot stay linked while one is in force, so seeing either alongside a `ready` status is not possible.",
+            "example": "reachout_timelock"
+          },
+          "code": {
+            "type": "string",
+            "description": "The engine's own token for the cause, passed through verbatim so it can be searched for and so a value newer than this gateway is still surfaced rather than flattened.",
+            "example": "BIZ_QUALITY"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When enforcement ends, if the engine states it. Only reachout timelocks carry an expiry; absent means the engine gave no end time, not that the restriction is permanent.",
+            "example": "2026-08-04T09:00:00Z",
+            "nullable": true
+          }
+        },
+        "required": [
+          "kind",
+          "code"
+        ]
+      },
       "SessionResponseDto": {
         "type": "object",
         "properties": {
@@ -6817,6 +6848,16 @@
             "description": "Human-readable reason carried while the status is FAILED (a terminal engine failure) or ACTION_REQUIRED (the engine is running but something needs a human). Cleared on any other status.",
             "example": "Failed to launch the browser process: spawn /usr/bin/chromium ENOENT",
             "nullable": true
+          },
+          "restriction": {
+            "description": "A restriction WhatsApp itself has placed on this session's account, or null when there is none. Distinct from `lastError`, which describes a fault on our side of the link. Derived from live engine state, so it is never persisted: it is re-established on the next connect.",
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AccountRestrictionDto"
+              }
+            ]
           },
           "engineLoaded": {
             "type": "boolean",
@@ -7045,6 +7086,7 @@
                 "session.authenticated",
                 "session.disconnected",
                 "session.reconnect_loop",
+                "session.restriction",
                 "group.join",
                 "group.leave",
                 "group.update",
@@ -7191,6 +7233,7 @@
                 "session.authenticated",
                 "session.disconnected",
                 "session.reconnect_loop",
+                "session.restriction",
                 "group.join",
                 "group.leave",
                 "group.update",

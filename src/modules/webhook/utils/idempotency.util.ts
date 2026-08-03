@@ -88,6 +88,14 @@ export function generateIdempotencyKey(event: string, data: Record<string, unkno
       // always sends 'logged out'), which would otherwise collapse every disconnect onto one key.
       return `disc_${toStr(data.sessionId)}_${hashData({ reason: data.reason })}${occurrence}`;
 
+    case 'session.restriction':
+      // Keyed on what changed (`kind` is null when a restriction is lifted) and salted per
+      // occurrence: an account that is restricted, freed and restricted again for the same cause
+      // produces the same content twice, and the second one is genuine news that must not collapse
+      // onto the first. Without an explicit case the default branch hashes the whole payload, which
+      // would dedupe exactly that.
+      return `restr_${toStr(data.sessionId)}_${toStr(data.kind)}_${toStr(data.active)}${occurrence}`;
+
     case 'group.join':
       // A membership change carries no unique id and repeats with identical content (the same user
       // leaves and rejoins the same group). Key on the affected participants and salt with
