@@ -16,6 +16,16 @@ export interface SendPacingConfig {
    * immediately sends at volume is the classic ban pattern, so the allowance starts small and grows.
    */
   warmupSchedule: number[];
+  /**
+   * Daily allowance for **cold reachouts** — the first message to a chat this account has no history
+   * with in either direction. Same by-age shape as `warmupSchedule`, and a single number is a flat
+   * cap. Empty disables the rule.
+   *
+   * Separate from the overall cap because the two bound different risks. Answering people who
+   * already wrote to you is not what gets numbers banned; starting conversations with strangers is,
+   * and WhatsApp's own restriction for it (the reachout timelock) targets exactly that.
+   */
+  coldSchedule: number[];
   /** Consecutive send failures that trip the breaker. */
   breakerThreshold: number;
   /** How long the breaker stays open before it lets traffic through again. */
@@ -24,6 +34,8 @@ export interface SendPacingConfig {
 
 /** A cautious two-week ramp: ~1 message every 3 minutes on day one, ~2/minute by the second week. */
 const DEFAULT_WARMUP_SCHEDULE = [20, 40, 80, 160, 320, 640, 1000];
+/** Deliberately far below the overall ramp: a stranger costs more standing than a reply does. */
+const DEFAULT_COLD_SCHEDULE = [5, 10, 20, 40, 60, 80, 100];
 const DEFAULT_BREAKER_THRESHOLD = 5;
 const DEFAULT_BREAKER_COOLDOWN_MS = 15 * 60_000;
 
@@ -41,11 +53,14 @@ const MIN_BREAKER_COOLDOWN_MS = 1000;
  * silently different ramp than the operator wrote, and quietly sending more than intended is the one
  * failure this feature exists to prevent.
  */
-function parseSchedule(raw: string | undefined): number[] {
-  if (!raw?.trim()) return DEFAULT_WARMUP_SCHEDULE;
+function parseSchedule(raw: string | undefined, fallback: number[]): number[] {
+  // An explicit empty value is a deliberate "no rule", distinct from an unset one. Only the cold cap
+  // uses it; the overall cap has no off switch short of disabling pacing.
+  if (raw !== undefined && raw.trim() === '') return fallback === DEFAULT_COLD_SCHEDULE ? [] : fallback;
+  if (!raw) return fallback;
   const parts = raw.split(',').map(part => Number(part.trim()));
   if (parts.length === 0 || parts.some(n => !Number.isFinite(n) || n < MIN_DAILY_CAP || n > MAX_DAILY_CAP)) {
-    return DEFAULT_WARMUP_SCHEDULE;
+    return fallback;
   }
   return parts.map(n => Math.floor(n));
 }
@@ -60,7 +75,8 @@ function parsePositiveInt(raw: string | undefined, fallback: number, min: number
 export function computeSendPacingConfig(env: NodeJS.ProcessEnv = process.env): SendPacingConfig {
   return {
     enabled: env.SEND_PACING_ENABLED === 'true',
-    warmupSchedule: parseSchedule(env.SEND_PACING_WARMUP_SCHEDULE),
+    warmupSchedule: parseSchedule(env.SEND_PACING_WARMUP_SCHEDULE, DEFAULT_WARMUP_SCHEDULE),
+    coldSchedule: parseSchedule(env.SEND_PACING_COLD_DAILY_CAP, DEFAULT_COLD_SCHEDULE),
     breakerThreshold: parsePositiveInt(
       env.SEND_PACING_BREAKER_THRESHOLD,
       DEFAULT_BREAKER_THRESHOLD,

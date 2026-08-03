@@ -382,7 +382,7 @@ export class BulkMessageService implements OnApplicationBootstrap {
       // Pacing runs BEFORE the moderation gate, matching MessageService: a send policy forbids is not
       // offered to plugins at all. A refusal is a 429 that fails THIS item (honouring stopOnError),
       // not the batch — the allowance may free up, and a batch killed outright could not resume.
-      await this.pacing.assertSendAllowed(batch.sessionId);
+      await this.pacing.assertSendAllowed(batch.sessionId, msg.chatId);
 
       // Per-message moderation gate — the SAME message:sending hook single sends use, so a
       // compliance/moderation plugin sees bulk traffic too (bulk previously bypassed it entirely).
