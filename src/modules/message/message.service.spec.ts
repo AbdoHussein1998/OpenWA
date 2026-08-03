@@ -173,6 +173,33 @@ describe('MessageService', () => {
       expect(mockEngine.sendTextMessage).toHaveBeenCalledWith('120@g.us', 'hi @62811', ['62811@c.us']);
     });
 
+    // The parameter is only guaranteed in its suppressing direction, so what matters is that `false`
+    // reaches the engine and that everything else leaves the existing call shape alone.
+    it('threads a link-preview suppression through to the engine', async () => {
+      const input = { chatId: '628123456789@c.us', text: 'see https://example.com', linkPreview: false };
+      (hookManager.execute as jest.Mock).mockResolvedValueOnce({
+        continue: true,
+        data: { sessionId: 'sess-1', input, type: 'text' },
+      });
+
+      await service.sendText('sess-1', input);
+
+      expect(mockEngine.sendTextMessage).toHaveBeenCalledWith(
+        '628123456789@c.us',
+        'see https://example.com',
+        undefined,
+        { linkPreview: false },
+      );
+    });
+
+    // A send that asks for nothing must keep the exact call it made before this option existed —
+    // a trailing undefined would be harmless to the engines but would rewrite every existing send.
+    it('leaves the plain send shape untouched when no preview choice is made', async () => {
+      await service.sendText('sess-1', { chatId: '628123456789@c.us', text: 'hi' });
+
+      expect(mockEngine.sendTextMessage).toHaveBeenCalledWith('628123456789@c.us', 'hi');
+    });
+
     it('should save outgoing message as pending before sending, then update to sent', async () => {
       await service.sendText('sess-1', {
         chatId: '628123456789@c.us',

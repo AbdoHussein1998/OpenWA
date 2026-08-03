@@ -5858,3 +5858,42 @@ describe('WhatsAppWebJsAdapter group join-info', () => {
     await expect(readyAdapter({ getInviteInfo }).getGroupJoinInfo('ABC')).rejects.toBeInstanceOf(GroupNotFoundError);
   });
 });
+
+// whatsapp-web.js reads the flag as `linkPreview === false ? undefined : true` (Client.js:1458), so
+// only an explicit false is worth forwarding — and forwarding it is what actually suppresses.
+describe('WhatsAppWebJsAdapter link preview', () => {
+  const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = client;
+    return adapter;
+  };
+
+  const sentOptions = (sendMessage: jest.Mock): unknown => (sendMessage.mock.calls[0] as unknown[] | undefined)?.[2];
+
+  it('forwards an explicit suppression', async () => {
+    const sendMessage = jest.fn().mockResolvedValue({ id: { _serialized: 'M1' }, timestamp: 1 });
+
+    await readyAdapter({ sendMessage }).sendTextMessage('c@c.us', 'hi', undefined, { linkPreview: false });
+
+    expect(sentOptions(sendMessage)).toEqual({ linkPreview: false });
+  });
+
+  // Passing true is identical to passing nothing, so sending an options object would add one to
+  // every plain send for no change in behaviour.
+  it('sends no options object when the preview is merely allowed', async () => {
+    const sendMessage = jest.fn().mockResolvedValue({ id: { _serialized: 'M1' }, timestamp: 1 });
+
+    await readyAdapter({ sendMessage }).sendTextMessage('c@c.us', 'hi', undefined, { linkPreview: true });
+
+    expect(sentOptions(sendMessage)).toBeUndefined();
+  });
+
+  it('keeps mentions working alongside a suppression', async () => {
+    const sendMessage = jest.fn().mockResolvedValue({ id: { _serialized: 'M1' }, timestamp: 1 });
+
+    await readyAdapter({ sendMessage }).sendTextMessage('c@c.us', 'hi', ['628@c.us'], { linkPreview: false });
+
+    expect(sentOptions(sendMessage)).toEqual({ mentions: ['628@c.us'], linkPreview: false });
+  });
+});

@@ -773,7 +773,21 @@ export interface IWhatsAppEngine {
   getPushName(): string | null;
 
   // Messaging - Basic
-  sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult>;
+  /**
+   * Send text.
+   *
+   * `linkPreview: false` suppresses the URL preview on BOTH engines. Leaving it unset means "whatever
+   * the engine does by default", and the two differ: whatsapp-web.js asks WhatsApp Web to build a
+   * preview in-page, while Baileys builds none unless its optional preview generator is installed.
+   * The parameter is therefore only guaranteed in its suppressing direction, and is documented as
+   * such rather than pretending at symmetry.
+   */
+  sendTextMessage(
+    chatId: string,
+    text: string,
+    mentions?: string[],
+    options?: { linkPreview?: boolean },
+  ): Promise<MessageResult>;
   sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
   sendVideoMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
   sendAudioMessage(chatId: string, media: MediaInput): Promise<MessageResult>;

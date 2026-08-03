@@ -281,8 +281,13 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   // ----- Messaging -----
 
-  async sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult> {
-    return this.messaging.sendTextMessage(chatId, text, mentions);
+  async sendTextMessage(
+    chatId: string,
+    text: string,
+    mentions?: string[],
+    options?: { linkPreview?: boolean },
+  ): Promise<MessageResult> {
+    return this.messaging.sendTextMessage(chatId, text, mentions, options);
   }
 
   async checkNumberExists(number: string): Promise<boolean> {

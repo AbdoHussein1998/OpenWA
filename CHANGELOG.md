@@ -24,6 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`linkPreview` on `send-text`**, in all five SDKs and the MCP tool. Sending `false` suppresses the
+  URL preview on both engines.
+
+  It is documented as guaranteed **only in that direction**, because that is all the engines
+  actually agree on. Left unset it means "the engine default", and the defaults differ:
+  whatsapp-web.js asks WhatsApp Web to build a preview in-page, while Baileys builds none — its
+  preview generator is an optional package this project does not install. So `true` does not force a
+  preview onto Baileys; it only declines to suppress one, and saying otherwise would be a promise
+  nothing keeps.
+
+  A side effect worth knowing: Baileys wires that generator by default, so **every message
+  containing a URL currently attempts to load the missing package, fails, and logs a warning** before
+  sending without a preview. Passing `false` skips that path entirely.
+
+  Existing sends are byte-identical. A send with no preview choice keeps its exact previous call
+  shape rather than gaining a trailing `undefined`.
+
 - **Preview a group before joining it:** `GET /api/sessions/:sessionId/groups/join-info?code=…`, in
   all five SDKs. Supported on both engines. Read-only, so it is safe to call on a code from an
   untrusted source — which is the point, since it is the step you want *before* `POST /groups/join`.

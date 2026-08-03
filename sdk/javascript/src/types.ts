@@ -188,6 +188,12 @@ export interface SendTextRequest {
   text: string;
   /** WIDs to @mention (e.g. `["62811@c.us"]`). The text must also contain the `@<number>` token. */
   mentions?: string[];
+  /**
+   * Set `false` to suppress the URL preview. Guaranteed only in that direction: unset means the
+   * engine default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a preview,
+   * Baileys builds none unless its optional generator is installed.
+   */
+  linkPreview?: boolean;
 }
 
 export interface SendMediaRequest {

@@ -192,6 +192,10 @@ class SendTextRequest(TypedDict, total=False):
     text: str
     # WIDs to @mention (e.g. ["62811@c.us"]). The text must also contain the @<number> token.
     mentions: list[str]
+    # Set False to suppress the URL preview. Guaranteed only in that direction: unset means the
+    # engine default, and the engines differ -- whatsapp-web.js asks WhatsApp Web to build a preview,
+    # Baileys builds none unless its optional generator is installed.
+    linkPreview: bool
 
 
 class SendMediaRequest(TypedDict, total=False):

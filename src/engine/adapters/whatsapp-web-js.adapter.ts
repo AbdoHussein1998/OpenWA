@@ -1336,8 +1336,13 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.pushName;
   }
 
-  sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult> {
-    return this.messaging.sendTextMessage(chatId, text, mentions);
+  sendTextMessage(
+    chatId: string,
+    text: string,
+    mentions?: string[],
+    options?: { linkPreview?: boolean },
+  ): Promise<MessageResult> {
+    return this.messaging.sendTextMessage(chatId, text, mentions, options);
   }
 
   sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult> {

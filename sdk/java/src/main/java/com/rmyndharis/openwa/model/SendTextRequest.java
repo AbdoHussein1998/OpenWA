@@ -3,10 +3,15 @@ package com.rmyndharis.openwa.model;
 import java.util.List;
 
 /** Request body for sending a text message. */
-public record SendTextRequest(String chatId, String text, List<String> mentions) {
+public record SendTextRequest(String chatId, String text, List<String> mentions, Boolean linkPreview) {
     /** Back-compatible constructor without mentions. */
     public SendTextRequest(String chatId, String text) {
-        this(chatId, text, null);
+        this(chatId, text, null, null);
+    }
+
+    /** Back-compatible constructor without a link-preview choice. */
+    public SendTextRequest(String chatId, String text, List<String> mentions) {
+        this(chatId, text, mentions, null);
     }
 
     public static Builder builder() {
@@ -17,6 +22,7 @@ public record SendTextRequest(String chatId, String text, List<String> mentions)
         private String chatId;
         private String text;
         private List<String> mentions;
+        private Boolean linkPreview;
 
         public Builder chatId(String v) {
             this.chatId = v;
@@ -35,8 +41,18 @@ public record SendTextRequest(String chatId, String text, List<String> mentions)
             return this;
         }
 
+        /**
+         * {@code false} suppresses the URL preview. Guaranteed only in that direction: unset means the
+         * engine default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a
+         * preview, Baileys builds none unless its optional generator is installed.
+         */
+        public Builder linkPreview(Boolean v) {
+            this.linkPreview = v;
+            return this;
+        }
+
         public SendTextRequest build() {
-            return new SendTextRequest(chatId, text, mentions);
+            return new SendTextRequest(chatId, text, mentions, linkPreview);
         }
     }
 }
