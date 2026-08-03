@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Group participant adds are paced too.** `POST .../groups/:groupId/participants` and
+  `POST .../groups` reached WhatsApp with no gate of any kind — no moderation hook, no pacing, no
+  persisted record — while being the most ban-associated action the product performs: they put the
+  account in front of people who did not ask for it, in bulk, in one call.
+
+  Each participant the account has no history with now costs one cold reachout from the same budget
+  a first message draws on, so a day spent on direct outreach leaves nothing for group invites and
+  vice versa. A repeated id costs one; participants already known cost nothing. The whole request is
+  refused rather than partially applied — these endpoints already report per-participant failures,
+  and a pacing refusal must not be mistaken for one. No message is sent, so neither call consumes the
+  overall daily send allowance.
+
 - **Send pacing now bounds cold reachouts separately** (`SEND_PACING_COLD_DAILY_CAP`). A send counts
   as a cold reachout when the account has no history with that chat **in either direction**; a reply
   to someone who wrote first is never counted and never refused by this rule, and status posts, which

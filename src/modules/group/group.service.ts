@@ -4,6 +4,7 @@ import { GroupMemberAddMode, IWhatsAppEngine, MediaInput } from '../../engine/in
 import { assertBase64WithinMediaCap, stripBase64DataUri } from '../message/media-cap.util';
 import { SetGroupPictureDto } from './dto/group.dto';
 import { paginate, ListOptions } from '../../common/utils/paginate';
+import { SendPacingService } from '../message/send-pacing.service';
 
 /**
  * Owns engine access for group operations. Controllers depend on this service instead of
@@ -12,7 +13,10 @@ import { paginate, ListOptions } from '../../common/utils/paginate';
  */
 @Injectable()
 export class GroupService {
-  constructor(private readonly engines: EngineRegistry) {}
+  constructor(
+    private readonly engines: EngineRegistry,
+    private readonly pacing: SendPacingService,
+  ) {}
 
   private getEngine(sessionId: string): IWhatsAppEngine {
     // EngineRegistry.require()'s default is this exact 400 "Session is not started".
@@ -35,11 +39,22 @@ export class GroupService {
     return group;
   }
 
-  createGroup(sessionId: string, name: string, participants: string[]) {
+  /**
+   * Creating a group invites every listed participant in the same call, so it carries the same
+   * reachout cost as adding them one by one — and is paced accordingly.
+   */
+  async createGroup(sessionId: string, name: string, participants: string[]) {
+    await this.pacing.assertReachoutAllowed(sessionId, participants);
     return this.getEngine(sessionId).createGroup(name, participants);
   }
 
-  addParticipants(sessionId: string, groupId: string, participants: string[]) {
+  /**
+   * Paced: putting the account in front of people who did not ask for it, in bulk, is the most
+   * ban-associated action this product performs. Each participant the account has no history with
+   * draws on the same cold-reachout budget a first message does.
+   */
+  async addParticipants(sessionId: string, groupId: string, participants: string[]) {
+    await this.pacing.assertReachoutAllowed(sessionId, participants);
     return this.getEngine(sessionId).addParticipants(groupId, participants);
   }
 

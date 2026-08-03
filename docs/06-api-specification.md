@@ -1199,6 +1199,14 @@ not. Do not retry a `SEND_PACING_LIMITED` response before `retryAfterSeconds`.
 Inside a bulk batch a refusal fails just that item (honouring `stopOnError`), not the batch — the
 allowance may free up, and a batch killed outright could not be resumed.
 
+**Group participant adds draw on the same cold budget.** `POST .../groups/:groupId/participants` and
+`POST .../groups` put the account in front of people who did not ask for it, in bulk, in a single
+call — the most ban-associated action available — so each participant the account has no history
+with costs one cold reachout. A repeated id costs one; participants already known cost nothing. The
+whole request is refused rather than partially applied, so a `429` can never be confused with the
+per-participant failures those endpoints report normally. No message is sent, so neither call
+consumes the overall daily send allowance.
+
 Two consequences worth knowing: a paced-out send fires **no** `message:sending` plugin hook (see
 `docs/19-plugin-architecture.md`), and refusals are counted in the `openwa_send_pacing_refusals_total`
 Prometheus counter, labelled by rule.

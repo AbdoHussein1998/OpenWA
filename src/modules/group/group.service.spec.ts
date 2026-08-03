@@ -4,12 +4,17 @@ import { EngineRegistry } from '../../engine/engine-registry.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
+import { SendPacingService } from '../message/send-pacing.service';
 
 describe('GroupService', () => {
-  const makeService = (engine: Partial<IWhatsAppEngine> | undefined) => {
+  /** Pacing is off by default; its own spec covers the governor, so here it must simply not refuse. */
+  const inertPacing = (): SendPacingService =>
+    ({ assertReachoutAllowed: jest.fn().mockResolvedValue(undefined) }) as unknown as SendPacingService;
+
+  const makeService = (engine: Partial<IWhatsAppEngine> | undefined, pacing: SendPacingService = inertPacing()) => {
     const engines = new EngineRegistry();
     if (engine) engines.set('s1', engine as IWhatsAppEngine);
-    return new GroupService(engines);
+    return new GroupService(engines, pacing);
   };
 
   it('throws 400 "Session is not started" when the engine is missing (guard preserved)', () => {
