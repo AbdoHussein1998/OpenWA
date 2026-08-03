@@ -93,6 +93,59 @@ export class SendPacingService {
   }
 
   /**
+   * Throw unless this session may reach out to these contacts at once.
+   *
+   * Adding someone to a group is a reachout in every sense that matters: it puts the account in
+   * front of a stranger who did not ask for it, and doing it in bulk is the single most
+   * ban-associated action this product can perform. So it draws on the same cold budget a first
+   * message does — a batch of twenty strangers costs twenty, not one.
+   *
+   * It does NOT consume the overall daily message allowance: no message is sent, and spending a
+   * send budget on something that sends nothing would misreport both.
+   *
+   * The whole batch is refused rather than trimmed. Adding some of the requested participants and
+   * reporting success would leave the caller unable to tell who actually got added, and the engines
+   * report per-participant outcomes for real failures already — a pacing refusal must not be
+   * mistaken for one of those.
+   */
+  async assertReachoutAllowed(sessionId: string, contactIds: string[]): Promise<void> {
+    const config = resolveSendPacingConfig(this.configService);
+    if (!config.enabled) return;
+
+    this.assertBreakerClosed(sessionId, config);
+    if (config.coldSchedule.length === 0 || contactIds.length === 0) return;
+
+    // The same id twice in one request is one contact, and must cost one.
+    const unique = [...new Set(contactIds)];
+    const known = await this.messageRepository
+      .createQueryBuilder('m')
+      .select('DISTINCT m.chatId', 'chatId')
+      .where('m.sessionId = :sessionId', { sessionId })
+      .andWhere('m.chatId IN (:...ids)', { ids: unique })
+      .getRawMany<{ chatId: string }>();
+    const coldCount = unique.length - known.length;
+    if (coldCount === 0) return;
+
+    const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
+    if (!session) return;
+
+    const dayStart = startOfUtcDay(new Date());
+    const ageDays = Math.floor((dayStart.getTime() - startOfUtcDay(session.createdAt).getTime()) / DAY_MS);
+    const allowance = this.allowanceForAge(config.coldSchedule, ageDays);
+    const coldToday = await this.countColdReachoutsToday(sessionId, dayStart);
+    if (coldToday + coldCount <= allowance) return;
+
+    this.refuse('cold_daily_cap', sessionId, secondsUntilNextUtcDay(), {
+      reason:
+        `Reaching ${coldCount} new contact(s) would exceed the daily allowance of ${allowance} ` +
+        `new conversation(s) for a session ${ageDays} day(s) old (${coldToday} already used)`,
+      allowance,
+      coldToday,
+      coldCount,
+    });
+  }
+
+  /**
    * Record a send that failed. A run of these trips the breaker.
    *
    * Only called on failures that reached WhatsApp and came back refused — a validation error thrown

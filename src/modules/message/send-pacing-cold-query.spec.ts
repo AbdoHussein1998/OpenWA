@@ -127,3 +127,94 @@ describe('cold-reachout counting against a real database', () => {
     await expect(service.assertSendAllowed('s1', 'stranger@c.us')).resolves.toBeUndefined();
   });
 });
+
+// Adding people to a group is the highest-risk reachout this product performs: it puts the account
+// in front of strangers in bulk, in one call. It draws on the same cold budget a first message does.
+describe('group reachouts against a real database', () => {
+  let ds: DataSource;
+  let service: SendPacingService;
+
+  const DAY_MS = 86_400_000;
+  const NOW = new Date('2026-08-03T12:00:00.000Z');
+  const TODAY = '2026-08-03T09:00:00.000Z';
+  const YESTERDAY = '2026-08-02T09:00:00.000Z';
+
+  const config = (): ConfigService =>
+    ({
+      get: (key: string) =>
+        key === 'sendPacing'
+          ? { ...computeSendPacingConfig({}), enabled: true, warmupSchedule: [10_000], coldSchedule: [3] }
+          : undefined,
+    }) as unknown as ConfigService;
+
+  const addMessage = (chatId: string, at: string): Promise<unknown> =>
+    ds.query(
+      `INSERT INTO "messages" ("id","sessionId","chatId","from","to","type","direction","createdAt")
+       VALUES (?,?,?,'a','b','text','outgoing',?)`,
+      [`${chatId}-${at}`, 's1', chatId, at],
+    );
+
+  beforeEach(async () => {
+    jest.useFakeTimers().setSystemTime(NOW);
+    ds = new DataSource({
+      type: 'better-sqlite3',
+      database: ':memory:',
+      entities: [Message, Session],
+      synchronize: true,
+    });
+    await ds.initialize();
+    await ds.getRepository(Session).save({ name: 'bot', id: 's1', createdAt: new Date(NOW.getTime() - 30 * DAY_MS) });
+    service = new SendPacingService(ds.getRepository(Message), ds.getRepository(Session), config());
+  });
+
+  afterEach(async () => {
+    jest.useRealTimers();
+    await ds.destroy();
+  });
+
+  it("allows a batch that fits inside the day's remaining allowance", async () => {
+    await expect(service.assertReachoutAllowed('s1', ['a@c.us', 'b@c.us', 'c@c.us'])).resolves.toBeUndefined();
+  });
+
+  // The cost is per stranger, not per call — otherwise one request adding two hundred numbers would
+  // cost exactly as much as adding one, which is the abuse the rule exists to bound.
+  it('charges the batch per new contact, not per call', async () => {
+    await expect(service.assertReachoutAllowed('s1', ['a@c.us', 'b@c.us', 'c@c.us', 'd@c.us'])).rejects.toMatchObject({
+      status: 429,
+    });
+  });
+
+  it('does not charge for contacts the account already knows', async () => {
+    await addMessage('known-1@c.us', YESTERDAY);
+    await addMessage('known-2@c.us', YESTERDAY);
+
+    // Five participants, but only three are strangers — exactly the allowance.
+    await expect(
+      service.assertReachoutAllowed('s1', ['known-1@c.us', 'known-2@c.us', 'a@c.us', 'b@c.us', 'c@c.us']),
+    ).resolves.toBeUndefined();
+  });
+
+  it('counts a repeated id once', async () => {
+    await expect(
+      service.assertReachoutAllowed('s1', ['a@c.us', 'a@c.us', 'a@c.us', 'b@c.us', 'b@c.us']),
+    ).resolves.toBeUndefined();
+  });
+
+  // The two paths share one budget, so a day spent on direct messages leaves nothing for group adds.
+  it("shares the day's budget with cold sends already made", async () => {
+    await addMessage('dm-1@c.us', TODAY);
+    await addMessage('dm-2@c.us', TODAY);
+
+    await expect(service.assertReachoutAllowed('s1', ['a@c.us'])).resolves.toBeUndefined();
+    await addMessage('dm-3@c.us', TODAY);
+    await expect(service.assertReachoutAllowed('s1', ['a@c.us'])).rejects.toMatchObject({ status: 429 });
+  });
+
+  it('is inert for an empty participant list', async () => {
+    await addMessage('dm-1@c.us', TODAY);
+    await addMessage('dm-2@c.us', TODAY);
+    await addMessage('dm-3@c.us', TODAY);
+
+    await expect(service.assertReachoutAllowed('s1', [])).resolves.toBeUndefined();
+  });
+});

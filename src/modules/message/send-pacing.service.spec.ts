@@ -10,6 +10,7 @@ import { MessageService } from './message.service';
 import { BulkMessageService } from './bulk-message.service';
 import { StatusService } from '../status/status.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { GroupService } from '../group/group.service';
 
 const DAY_MS = 86_400_000;
 
@@ -347,6 +348,24 @@ describe('send paths consult the governor', () => {
     expect(pacing.assertSendAllowed).toHaveBeenCalledTimes(2);
     expect(engine.sendProduct).not.toHaveBeenCalled();
     expect(engine.sendCatalog).not.toHaveBeenCalled();
+  });
+
+  // Group participant adds reach WhatsApp with no moderation gate of any kind, so the governor is
+  // the only thing standing between a caller and a bulk invite blast.
+  it('GroupService refuses participant adds and group creation before the engine is asked', async () => {
+    const engine = { addParticipants: jest.fn(), createGroup: jest.fn() };
+    const pacing = {
+      assertReachoutAllowed: jest.fn().mockRejectedValue(new HttpException({ code: SEND_PACING_LIMITED }, 429)),
+    };
+    const service = new GroupService({ require: () => engine } as never, pacing as never);
+
+    await expect(service.addParticipants('s1', 'g@g.us', ['a@c.us', 'b@c.us'])).rejects.toBeInstanceOf(HttpException);
+    await expect(service.createGroup('s1', 'New', ['a@c.us'])).rejects.toBeInstanceOf(HttpException);
+
+    expect(pacing.assertReachoutAllowed).toHaveBeenNthCalledWith(1, 's1', ['a@c.us', 'b@c.us']);
+    expect(pacing.assertReachoutAllowed).toHaveBeenNthCalledWith(2, 's1', ['a@c.us']);
+    expect(engine.addParticipants).not.toHaveBeenCalled();
+    expect(engine.createGroup).not.toHaveBeenCalled();
   });
 
   // Bulk keeps its own inlined copy of the moderation gate, so it is the classic place for the two
