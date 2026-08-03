@@ -361,6 +361,28 @@ export class SessionController {
     return { success };
   }
 
+  @Delete(':id/chats/:chatId/messages')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete every message in a chat, keeping the chat itself' })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiParam({ name: 'chatId', description: "Chat JID, e.g. 1234567890-123@g.us (URL-encode the '@')" })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Returns `{ success }`. `false` means the engine declined to act — an unknown chat, or on the ' +
+      'Baileys engine a chat with no known history, since the change is keyed to its last message.',
+  })
+  @ApiResponse({ status: 400, description: 'Session not ready' })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  async clearChatMessages(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('chatId') chatId: string,
+  ): Promise<{ success: boolean }> {
+    const success = await this.sessionService.clearChatMessages(id, chatId);
+    return { success };
+  }
+
   @Post(':id/chats/archive')
   @RequireRole(ApiKeyRole.OPERATOR)
   @HttpCode(HttpStatus.OK)

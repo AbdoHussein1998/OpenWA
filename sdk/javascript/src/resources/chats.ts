@@ -66,6 +66,17 @@ export class ChatsResource {
     });
   }
 
+  /**
+   * Delete every message in a chat, keeping the chat itself. `success: false` means the engine
+   * declined — an unknown chat, or on Baileys a chat with no known history.
+   */
+  clearMessages(sessionId: string, chatId: string): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'DELETE',
+      path: `/api/sessions/${encodeSegment(sessionId)}/chats/${encodeSegment(chatId)}/messages`,
+    });
+  }
+
   /** Delete a chat from the chat list. */
   delete(sessionId: string, body: DeleteChatRequest): Promise<SuccessResult> {
     return this.client.request<SuccessResult>({

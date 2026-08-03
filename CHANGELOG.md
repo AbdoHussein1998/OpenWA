@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A chat's messages can be cleared without deleting the chat:**
+  `DELETE /api/sessions/:id/chats/:chatId/messages`. Available in all five SDKs as
+  `chats.clearMessages`. Like `chats/archive`, `success: false` is a defined outcome — an unknown
+  chat on whatsapp-web.js, or on Baileys a chat with no known history to key the change to.
+
 - **Chats can be archived and unarchived:** `POST /api/sessions/:id/chats/archive` with
   `{ chatId, archive }`, alongside the existing read/unread/delete chat operations. Available in all
   five SDKs as `chats.archive`.

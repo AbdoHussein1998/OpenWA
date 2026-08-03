@@ -480,6 +480,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.contacts.archiveChat(chatId, archive);
   }
 
+  async clearChatMessages(chatId: string): Promise<boolean> {
+    return this.contacts.clearChatMessages(chatId);
+  }
+
   // ----- Gated: not supported by this minimal slice (no store) -----
   /* eslint-disable @typescript-eslint/no-unused-vars */
 

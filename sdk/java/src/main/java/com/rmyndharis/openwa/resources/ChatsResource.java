@@ -50,6 +50,16 @@ public final class ChatsResource {
             HttpMethod.POST, "/api/sessions/" + encodeSegment(sessionId) + "/chats/unread", null, body, SuccessResult.class);
     }
 
+    /** Delete every message in a chat, keeping the chat itself. */
+    public SuccessResult clearMessages(String sessionId, String chatId) {
+        return client.request(
+            HttpMethod.DELETE,
+            "/api/sessions/" + encodeSegment(sessionId) + "/chats/" + encodeSegment(chatId) + "/messages",
+            null,
+            null,
+            SuccessResult.class);
+    }
+
     /**
      * Archive or unarchive a chat. A false success means the engine declined — on Baileys a chat
      * with no known history cannot be archived.

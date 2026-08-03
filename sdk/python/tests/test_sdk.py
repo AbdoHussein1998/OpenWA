@@ -555,6 +555,12 @@ class TestChatsAndHealth:
         client.chats.send_state("s", {"chatId": "a@c.us", "state": "typing"})
         assert "/chats/typing" in backend.calls[-1].url
 
+    def test_chats_clear_messages(self):
+        backend = MockBackend().on("DELETE", "/messages", body={"success": True})
+        make_client(backend).chats.clear_messages("s", "a@c.us")
+        assert backend.last_call.method == "DELETE"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/chats/a@c.us/messages"
+
     def test_chats_archive(self):
         backend = MockBackend().on("POST", "/chats/archive", body={"success": True})
         make_client(backend).chats.archive("s", {"chatId": "a@c.us", "archive": True})

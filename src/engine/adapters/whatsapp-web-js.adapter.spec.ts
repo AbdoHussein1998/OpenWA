@@ -744,6 +744,25 @@ describe('WhatsAppWebJsAdapter channel-JID guard (#554 — wwebjs Channel lacks 
     });
   });
 
+  describe('clearChatMessages', () => {
+    it('clears via Chat.clearMessages and returns its result', async () => {
+      const clearMessages = jest.fn().mockResolvedValue(true);
+      const getChatById = jest.fn().mockResolvedValue({ clearMessages });
+      await expect(readyAdapter({ getChatById }).clearChatMessages(USER)).resolves.toBe(true);
+      expect(clearMessages).toHaveBeenCalled();
+    });
+
+    it('returns false for an unknown chat (getChatById resolves undefined) instead of a TypeError', async () => {
+      const getChatById = jest.fn().mockResolvedValue(undefined);
+      await expect(readyAdapter({ getChatById }).clearChatMessages(USER)).resolves.toBe(false);
+    });
+
+    it('reports false instead of throwing when the engine call fails', async () => {
+      const getChatById = jest.fn().mockRejectedValue(new Error('Evaluation failed'));
+      await expect(readyAdapter({ getChatById }).clearChatMessages(USER)).resolves.toBe(false);
+    });
+  });
+
   describe('archiveChat', () => {
     it('archives via Client.archiveChat, not Chat.archive (which resolves void)', async () => {
       const archiveChat = jest.fn().mockResolvedValue(true);

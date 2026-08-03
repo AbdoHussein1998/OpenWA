@@ -357,6 +357,21 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   /**
+   * Delete every message in a chat, keeping the chat itself. Resolves false when the engine could
+   * not act — an unknown chat, or on Baileys a chat with no known history to key the change to.
+   */
+  async clearChatMessages(id: string, chatId: string): Promise<boolean> {
+    await this.findOne(id); // Verify session exists
+    const engine = this.engines.get(id);
+
+    if (!engine) {
+      throw new BadRequestException('Session is not started');
+    }
+
+    return engine.clearChatMessages(chatId);
+  }
+
+  /**
    * Archive or unarchive a chat. Resolves false when the engine could not act — on Baileys a chat
    * with no known history has no last message to key the app-state modification to. That is a
    * defined outcome, not an error, so it is reported as `success: false` rather than a 500.

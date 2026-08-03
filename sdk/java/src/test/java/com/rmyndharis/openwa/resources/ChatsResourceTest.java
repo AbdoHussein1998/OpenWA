@@ -62,6 +62,14 @@ class ChatsResourceTest {
     }
 
     @Test
+    void clearMessagesDeletesTheSubResource() {
+        tx.respond(200, "{\"success\":true}");
+        client.chats.clearMessages("s", "628321@c.us");
+        assertEquals("http://h/api/sessions/s/chats/628321@c.us/messages", tx.lastRequest().url());
+        assertEquals(HttpMethod.DELETE, tx.lastRequest().method());
+    }
+
+    @Test
     void archiveSendsBody() {
         tx.respond(200, "{\"success\":true}");
         client.chats.archive("s", ArchiveChatRequest.builder().chatId("628321@c.us").archive(true).build());
