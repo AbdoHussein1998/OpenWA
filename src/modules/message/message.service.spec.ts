@@ -1521,9 +1521,15 @@ describe('MessageService', () => {
       await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).rejects.toThrow(NotFoundException);
     });
 
-    it('404s when the row outlived its file', async () => {
-      const enoent = Object.assign(new Error('missing'), { code: 'ENOENT' });
-      const svc = build(archived('image/png'), { getFile: jest.fn().mockRejectedValue(enoent) });
+    it.each([
+      ['local ENOENT', Object.assign(new Error('missing'), { code: 'ENOENT' })],
+      // S3 reports a miss with a .name and NO .code — an ENOENT-only check turned this into a 500
+      // on the one backend where retention/lifecycle rules make a missing object most likely.
+      ['S3 NoSuchKey', Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' })],
+      ['S3 NotFound', Object.assign(new Error('NotFound'), { name: 'NotFound' })],
+      ['S3 404 metadata', Object.assign(new Error('gone'), { $metadata: { httpStatusCode: 404 } })],
+    ])('404s when the row outlived its file (%s)', async (_label, err) => {
+      const svc = build(archived('image/png'), { getFile: jest.fn().mockRejectedValue(err) });
       await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).rejects.toThrow(NotFoundException);
     });
 

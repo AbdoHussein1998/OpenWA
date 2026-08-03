@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { paginate, ListOptions } from '../../common/utils/paginate';
+import { parseWaId } from '../../engine/identity/wa-id';
 
 /**
  * Owns engine access for contact operations so the "session not started" guard and
@@ -101,11 +102,31 @@ export class ContactService {
     return this.getEngine(sessionId).blockContact(contactId);
   }
 
+  /**
+   * An addressbook entry is keyed by a PHONE NUMBER, so a privacy-id (`@lid`) contact cannot be
+   * saved or removed: the lid's digits are not a phone number, and whatsapp-web.js — which takes a
+   * bare number rather than a JID — would happily store them as one, silently creating an
+   * addressbook entry for a number that does not exist.
+   *
+   * Refused rather than forward-resolved through the lid mapping: the mapping is best-effort, and a
+   * write that lands under the wrong number is worse than one the caller is told to redo with a
+   * phone-based id.
+   */
+  private assertAddressable(contactId: string): void {
+    if (parseWaId(contactId).kind === 'lid') {
+      throw new BadRequestException(
+        `Contact ${contactId} is a privacy id (@lid) with no known phone number; the addressbook is keyed by phone number, so pass a phone-based contact id instead`,
+      );
+    }
+  }
+
   upsertContact(sessionId: string, contactId: string, firstName: string, lastName?: string) {
+    this.assertAddressable(contactId);
     return this.getEngine(sessionId).upsertContact(contactId, firstName, lastName);
   }
 
   deleteContact(sessionId: string, contactId: string) {
+    this.assertAddressable(contactId);
     return this.getEngine(sessionId).deleteContact(contactId);
   }
 

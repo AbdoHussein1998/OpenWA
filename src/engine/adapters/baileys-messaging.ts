@@ -1,7 +1,5 @@
 import type * as BaileysLib from '@whiskeysockets/baileys';
 import type { AnyMessageContent, MiscMessageGenerationOptions, WAMessage, WASocket } from '@whiskeysockets/baileys';
-// Runtime (not type-only): the pin message type is a wire-format enum value, not just a type.
-import { proto } from '@whiskeysockets/baileys';
 import {
   ChatState,
   ContactCard,
@@ -427,6 +425,10 @@ export class BaileysMessaging {
   async pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {
     this.host.ensureReady();
     const target = await this.requireStored(messageId);
+    // Read the enum through the LAZY loader rather than a static import. @whiskeysockets/baileys is
+    // pure ESM and every other site in this codebase defers it to first connect; a module-scope
+    // require would drag ~590 modules into boot even for whatsapp-web.js-only processes.
+    const { proto } = await this.host.loadLib();
     await this.sock().sendMessage(chatId, {
       pin: target.key,
       type: proto.PinInChat.Type.PIN_FOR_ALL,
@@ -439,6 +441,7 @@ export class BaileysMessaging {
   async unpinMessage(chatId: string, messageId: string): Promise<void> {
     this.host.ensureReady();
     const target = await this.requireStored(messageId);
+    const { proto } = await this.host.loadLib();
     // `time` is meaningless for an unpin and is omitted rather than sent as a dummy value.
     await this.sock().sendMessage(chatId, { pin: target.key, type: proto.PinInChat.Type.UNPIN_FOR_ALL });
   }

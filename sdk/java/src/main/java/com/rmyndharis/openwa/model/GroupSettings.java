@@ -30,13 +30,13 @@ public record GroupSettings(Boolean announce, Boolean locked, Integer ephemeralS
             return this;
         }
 
-        /** Disappearing-message timer in seconds ({@code 0} disables). Not supported on the whatsapp-web.js engine. */
         /** Who may add participants: "all" (any member) or "admins" (admins only). */
         public Builder memberAddMode(String v) {
             this.memberAddMode = v;
             return this;
         }
 
+        /** Disappearing-message timer in seconds ({@code 0} disables). Not supported on the whatsapp-web.js engine. */
         public Builder ephemeralSeconds(Integer v) {
             this.ephemeralSeconds = v;
             return this;
