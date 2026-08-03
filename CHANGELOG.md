@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without one. `send-catalog` stays `501` on both engines: neither library has a catalog-share
   message type. whatsapp-web.js is unchanged (`501` throughout — it has no catalog API). (#905)
 
+- **Helm chart for Kubernetes deployments, under `charts/openwa/`.** A single-replica
+  StatefulSet with a PVC for `/app/data` (session auth, main DB, media, plugins), the
+  docker-compose hardening mirrored (read-only rootfs, dropped capabilities, writable
+  `emptyDir` at `/tmp`), free-form `env`/`secretEnv` maps covering every variable in
+  `.env.example`, and optional Ingress, PodDisruptionBudget and ServiceMonitor.
+  Datastores are not bundled — point `env` at your own or stay on the SQLite default.
+  Closes #695.
+
 ### Fixed
 
 - **A contact who hides their number no longer keeps a stale `lid -> phone` mapping forever.**
