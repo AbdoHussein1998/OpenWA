@@ -15,6 +15,7 @@ import com.rmyndharis.openwa.model.ListMessagesQuery;
 import com.rmyndharis.openwa.model.MessageHistoryQuery;
 import com.rmyndharis.openwa.model.MessageListResponse;
 import com.rmyndharis.openwa.model.MessageResponse;
+import com.rmyndharis.openwa.model.PinMessageRequest;
 import com.rmyndharis.openwa.model.ReactMessageRequest;
 import com.rmyndharis.openwa.model.ReactionRecord;
 import com.rmyndharis.openwa.model.ReplyMessageRequest;
@@ -27,6 +28,7 @@ import com.rmyndharis.openwa.model.SendPollRequest;
 import com.rmyndharis.openwa.model.SendTemplateRequest;
 import com.rmyndharis.openwa.model.SendTextRequest;
 import com.rmyndharis.openwa.model.SuccessResult;
+import com.rmyndharis.openwa.model.UnpinMessageRequest;
 import java.util.List;
 
 /**
@@ -151,6 +153,29 @@ public final class MessagesResource {
         return client.request(
             HttpMethod.POST,
             "/api/sessions/" + encodeSegment(sessionId) + "/messages/react",
+            null,
+            body,
+            SuccessResult.class);
+    }
+
+    /**
+     * Pin a message in its chat. durationSeconds must be 86400 (24h), 604800 (7d) or 2592000 (30d);
+     * omit it for the server default of 24h. In a group only admins may pin.
+     */
+    public SuccessResult pin(String sessionId, PinMessageRequest body) {
+        return client.request(
+            HttpMethod.POST,
+            "/api/sessions/" + encodeSegment(sessionId) + "/messages/pin",
+            null,
+            body,
+            SuccessResult.class);
+    }
+
+    /** Remove a message's pin. */
+    public SuccessResult unpin(String sessionId, UnpinMessageRequest body) {
+        return client.request(
+            HttpMethod.POST,
+            "/api/sessions/" + encodeSegment(sessionId) + "/messages/unpin",
             null,
             body,
             SuccessResult.class);

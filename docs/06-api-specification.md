@@ -926,6 +926,44 @@ Returns a bare array of `MessageReaction`:
 
 **Errors:** `400` session not active · `401` missing/invalid API key · `500` engine error
 
+#### POST /api/sessions/:sessionId/messages/pin
+
+Pin a message in its chat for a bounded window.
+
+**Auth:** API key (OPERATOR)
+
+**Body**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| chatId | string | yes | Chat containing the message |
+| messageId | string | yes | Message to pin |
+| durationSeconds | number | no | `86400` (24h), `604800` (7d) or `2592000` (30d). Defaults to `86400`. Any other value is rejected with `400` — WhatsApp recognises no others. |
+
+**Response** `200` — `{ "success": true }`
+
+**Errors:** `400` session not active, or `durationSeconds` outside the three accepted values · `401` missing/invalid API key · `403` the engine refused the pin (in a group only admins may pin) · `404` message not found in the chat
+
+> On whatsapp-web.js the message must be within the 100-message fetch window for the chat, the same
+> limit that applies to react/delete/edit. On Baileys it must be in the adapter's message store.
+
+#### POST /api/sessions/:sessionId/messages/unpin
+
+Remove a message's pin. Takes no duration.
+
+**Auth:** API key (OPERATOR)
+
+**Body**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| chatId | string | yes | Chat containing the message |
+| messageId | string | yes | Message to unpin |
+
+**Response** `200` — `{ "success": true }`
+
+**Errors:** `400` session not active · `401` missing/invalid API key · `403` the engine refused the unpin (in a group only admins may unpin) · `404` message not found in the chat
+
 #### GET /api/sessions/:sessionId/messages/:chatId/:messageId/media
 
 Download a message's **archived** media bytes.

@@ -34,6 +34,9 @@ export interface GetMessagesOptions {
 /** Default cap on a rendered template's final text; overridable via TEMPLATE_RENDER_MAX_CHARS. */
 export const DEFAULT_TEMPLATE_RENDER_MAX_CHARS = 64 * 1024;
 
+/** Pin window applied when the caller does not choose one — WhatsApp's own default of 24h. */
+export const DEFAULT_PIN_DURATION_SECONDS = 86400;
+
 /**
  * Mimetypes an archived chat-media file may be served as. Everything else — documents, and notably
  * `image/svg+xml`, which is scriptable despite the `image/` prefix — is served as inert
@@ -783,6 +786,23 @@ export class MessageService {
   }
 
   // ========== Delete Message ==========
+
+  /**
+   * Pin a message for a bounded window. Nothing is persisted locally: a pin is chat state owned by
+   * WhatsApp, not a property of our message row, and it expires on WhatsApp's clock — a mirrored
+   * copy here would silently go stale.
+   */
+  async pinMessage(sessionId: string, dto: { chatId: string; messageId: string; durationSeconds?: number }) {
+    const engine = this.getEngine(sessionId);
+    await engine.pinMessage(dto.chatId, dto.messageId, dto.durationSeconds ?? DEFAULT_PIN_DURATION_SECONDS);
+    return { success: true };
+  }
+
+  async unpinMessage(sessionId: string, dto: { chatId: string; messageId: string }) {
+    const engine = this.getEngine(sessionId);
+    await engine.unpinMessage(dto.chatId, dto.messageId);
+    return { success: true };
+  }
 
   async deleteMessage(
     sessionId: string,

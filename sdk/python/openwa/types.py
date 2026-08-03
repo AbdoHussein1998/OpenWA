@@ -630,6 +630,19 @@ class StatusMedia(TypedDict):
     contentType: str | None
 
 
+class PinMessageRequest(TypedDict, total=False):
+    """Pin a message. ``durationSeconds`` is 86400 (24h), 604800 (7d) or 2592000 (30d)."""
+
+    chatId: str
+    messageId: str
+    durationSeconds: int
+
+
+class UnpinMessageRequest(TypedDict):
+    chatId: str
+    messageId: str
+
+
 class MessageMedia(TypedDict):
     """A message's archived media file: raw bytes plus the served content type."""
 

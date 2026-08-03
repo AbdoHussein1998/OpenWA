@@ -1,5 +1,7 @@
 import type * as BaileysLib from '@whiskeysockets/baileys';
 import type { AnyMessageContent, MiscMessageGenerationOptions, WAMessage, WASocket } from '@whiskeysockets/baileys';
+// Runtime (not type-only): the pin message type is a wire-format enum value, not just a type.
+import { proto } from '@whiskeysockets/baileys';
 import {
   ChatState,
   ContactCard,
@@ -405,5 +407,28 @@ export class BaileysMessaging {
       throw new MessageNotFoundError(messageId);
     }
     return found;
+  }
+
+  /**
+   * Pin/unpin a message IN THE CHAT. Deliberately not `chatModify({pin})` — that pins the chat
+   * itself in the chat list, a different feature that happens to share the word.
+   */
+  async pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {
+    this.host.ensureReady();
+    const target = await this.requireStored(messageId);
+    await this.sock().sendMessage(chatId, {
+      pin: target.key,
+      type: proto.PinInChat.Type.PIN_FOR_ALL,
+      // WhatsApp recognises only these three windows; the DTO rejects anything else before we
+      // get here, so the cast documents the contract rather than widening it.
+      time: durationSeconds as 86400 | 604800 | 2592000,
+    });
+  }
+
+  async unpinMessage(chatId: string, messageId: string): Promise<void> {
+    this.host.ensureReady();
+    const target = await this.requireStored(messageId);
+    // `time` is meaningless for an unpin and is omitted rather than sent as a dummy value.
+    await this.sock().sendMessage(chatId, { pin: target.key, type: proto.PinInChat.Type.UNPIN_FOR_ALL });
   }
 }

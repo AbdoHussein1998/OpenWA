@@ -655,4 +655,48 @@ export class WwebjsMessaging {
     this.host.logger.log(`Edited message ${messageId} in chat ${chatId}`);
     return toMessageResult(edited);
   }
+
+  /**
+   * Locate a message in the 100-message fetch window shared by react/delete/edit — and now pin.
+   * Deliberately NOT applied to the existing call sites: they differ in whether they tolerate an
+   * unknown chat, and rewriting them is not this change's business.
+   *
+   * As with those sites, chatId is NOT lid-resolved: the pin acts on the found message's own key,
+   * so resolving would only risk missing a message stored under the pre-migration @c.us chat.
+   */
+  private async findInFetchWindow(chatId: string, messageId: string): Promise<Message> {
+    const chat = await this.client().getChatById(chatId);
+    // getChatById RESOLVES undefined for an unknown chat rather than throwing, which is the same
+    // client-facing outcome as a message outside the window — a 404, not a TypeError-driven 500.
+    if (!chat) throw new MessageNotFoundError(messageId, chatId);
+    const messages = await chat.fetchMessages({ limit: 100 });
+    const message = messages.find(m => m.id._serialized === messageId || m.id.id === messageId);
+    if (!message) throw new MessageNotFoundError(messageId, chatId);
+    return message;
+  }
+
+  async pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {
+    this.host.ensureReady();
+    const message = await this.findInFetchWindow(chatId, messageId);
+    // The page-side helper returns false rather than throwing for every refusal — a non-number
+    // duration, a message it cannot resolve, or a send WhatsApp rejected (Injected/Utils.js:1670).
+    // Surface that as a refusal instead of reporting a pin that never happened.
+    if (!(await message.pin(durationSeconds))) {
+      throw new EngineRefusedError(
+        `the pin of message ${messageId} was rejected — in a group only admins may pin, and the duration must be 24h, 7d or 30d`,
+      );
+    }
+    this.host.logger.log(`Pinned message ${messageId} in chat ${chatId} for ${durationSeconds}s`);
+  }
+
+  async unpinMessage(chatId: string, messageId: string): Promise<void> {
+    this.host.ensureReady();
+    const message = await this.findInFetchWindow(chatId, messageId);
+    // unpin() passes duration 0 itself, so the injected non-number guard cannot bite here; a false
+    // return means WhatsApp refused the unpin (e.g. not an admin).
+    if (!(await message.unpin())) {
+      throw new EngineRefusedError(`the unpin of message ${messageId} was rejected — in a group only admins may unpin`);
+    }
+    this.host.logger.log(`Unpinned message ${messageId} in chat ${chatId}`);
+  }
 }

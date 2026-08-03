@@ -32,6 +32,8 @@ function createMockEngine() {
     reactToMessage: jest.fn().mockResolvedValue(undefined),
     getMessageReactions: jest.fn().mockResolvedValue([]),
     deleteMessage: jest.fn().mockResolvedValue(undefined),
+    pinMessage: jest.fn().mockResolvedValue(undefined),
+    unpinMessage: jest.fn().mockResolvedValue(undefined),
     editMessage: jest.fn().mockResolvedValue(mockEngineResult),
     getChatHistory: jest.fn().mockResolvedValue([]),
     sendChatState: jest.fn().mockResolvedValue(undefined),
@@ -1427,6 +1429,31 @@ describe('MessageService', () => {
       expect(repository.delete).not.toHaveBeenCalled();
     });
   });
+  // ── pin / unpin ───────────────────────────────────────────────────
+
+  describe('pinMessage / unpinMessage', () => {
+    it('defaults the pin window to 24h when the caller does not choose one', async () => {
+      await service.pinMessage('sess-1', { chatId: '621@c.us', messageId: 'M1' });
+      expect(mockEngine.pinMessage).toHaveBeenCalledWith('621@c.us', 'M1', 86400);
+    });
+
+    it('passes an explicit window through untouched', async () => {
+      await service.pinMessage('sess-1', { chatId: '621@c.us', messageId: 'M1', durationSeconds: 2592000 });
+      expect(mockEngine.pinMessage).toHaveBeenCalledWith('621@c.us', 'M1', 2592000);
+    });
+
+    it('unpins without a duration', async () => {
+      await service.unpinMessage('sess-1', { chatId: '621@c.us', messageId: 'M1' });
+      expect(mockEngine.unpinMessage).toHaveBeenCalledWith('621@c.us', 'M1');
+    });
+
+    it('does not touch the stored message row — a pin is WhatsApp-owned chat state that expires', async () => {
+      (repository.update as jest.Mock).mockClear();
+      await service.pinMessage('sess-1', { chatId: '621@c.us', messageId: 'M1' });
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+  });
+
   // ── archived chat media (read path) ───────────────────────────────
 
   describe('getChatMedia', () => {

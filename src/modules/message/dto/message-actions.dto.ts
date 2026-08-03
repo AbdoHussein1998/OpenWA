@@ -10,6 +10,7 @@ import {
   ArrayMinSize,
   ArrayMaxSize,
   MaxLength,
+  IsIn,
 } from 'class-validator';
 import { ToStrictBoolean, ToStrictNumber } from '../../../common/utils/strict-boolean';
 import { MESSAGE_TEXT_MAX_LENGTH } from './send-message.dto';
@@ -189,6 +190,50 @@ export class DeleteMessageDto {
   @IsOptional()
   @IsBoolean()
   forEveryone?: boolean;
+}
+
+/**
+ * The only pin windows WhatsApp recognises, in seconds. Anything else is rejected page-side by
+ * whatsapp-web.js (a silent `false`) and is not representable in the Baileys pin payload, so it is
+ * refused here with a 400 rather than turned into an engine-level mystery.
+ */
+export const PIN_DURATIONS_SECONDS = [86400, 604800, 2592000] as const;
+
+export class PinMessageDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  chatId: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  messageId: string;
+
+  @ApiPropertyOptional({
+    description: 'Pin duration in seconds: 86400 (24h), 604800 (7d) or 2592000 (30d). Defaults to 24h.',
+    enum: PIN_DURATIONS_SECONDS,
+    default: 86400,
+  })
+  // Strict conversion for the same reason as DeleteMessageDto.forEveryone: under the pipe's
+  // implicit conversion a non-numeric string would arrive as NaN and slip past IsIn as a
+  // "different" value rather than being rejected outright.
+  @ToStrictNumber()
+  @IsOptional()
+  @IsIn(PIN_DURATIONS_SECONDS)
+  durationSeconds?: number;
+}
+
+export class UnpinMessageDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  chatId: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  messageId: string;
 }
 
 export class EditMessageDto {

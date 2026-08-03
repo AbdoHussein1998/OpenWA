@@ -104,6 +104,8 @@ jest.mock('@whiskeysockets/baileys', () => ({
         Type: { REVOKE: 0, MESSAGE_EDIT: 14 },
       },
     },
+    // namespace proto.PinInChat { enum Type } — WAProto/index.d.ts:10355-10361
+    PinInChat: { Type: { UNKNOWN_TYPE: 0, PIN_FOR_ALL: 1, UNPIN_FOR_ALL: 2 } },
   },
 }));
 
@@ -2501,6 +2503,38 @@ describe('BaileysAdapter store-backed ops', () => {
     expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
       react: { text: '👍', key: stored.key },
     });
+  });
+
+  it('pinMessage pins IN CHAT via the stored key, with the requested window', async () => {
+    fakeStore.getMessage.mockResolvedValue(stored);
+    const adapter = await ready();
+    await adapter.pinMessage('628111@s.whatsapp.net', 'TARGET', 604800);
+    // PIN_FOR_ALL (1) on a sendMessage — NOT chatModify({pin}), which pins the CHAT in the chat
+    // list. The two are entirely different features that happen to share the word "pin".
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      pin: stored.key,
+      type: 1,
+      time: 604800,
+    });
+    expect(fakeSock.chatModify).not.toHaveBeenCalled();
+  });
+
+  it('unpinMessage sends UNPIN_FOR_ALL and omits the meaningless duration', async () => {
+    fakeStore.getMessage.mockResolvedValue(stored);
+    const adapter = await ready();
+    await adapter.unpinMessage('628111@s.whatsapp.net', 'TARGET');
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      pin: stored.key,
+      type: 2,
+    });
+  });
+
+  it('pinMessage 404s when the message is not in the store', async () => {
+    fakeStore.getMessage.mockResolvedValue(undefined);
+    const adapter = await ready();
+    await expect(adapter.pinMessage('628111@s.whatsapp.net', 'GONE', 86400)).rejects.toBeInstanceOf(
+      MessageNotFoundError,
+    );
   });
 
   it('deleteMessage revokes via the stored key', async () => {

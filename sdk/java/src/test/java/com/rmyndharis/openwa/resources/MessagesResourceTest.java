@@ -16,6 +16,7 @@ import com.rmyndharis.openwa.model.EditMessageRequest;
 import com.rmyndharis.openwa.model.ForwardMessageRequest;
 import com.rmyndharis.openwa.model.ListMessagesQuery;
 import com.rmyndharis.openwa.model.MessageHistoryQuery;
+import com.rmyndharis.openwa.model.PinMessageRequest;
 import com.rmyndharis.openwa.model.ReactMessageRequest;
 import com.rmyndharis.openwa.model.ReplyMessageRequest;
 import com.rmyndharis.openwa.model.SendBulkRequest;
@@ -26,6 +27,7 @@ import com.rmyndharis.openwa.model.SendAudioRequest;
 import com.rmyndharis.openwa.model.SendPollRequest;
 import com.rmyndharis.openwa.model.SendTemplateRequest;
 import com.rmyndharis.openwa.model.SendTextRequest;
+import com.rmyndharis.openwa.model.UnpinMessageRequest;
 import com.rmyndharis.openwa.support.MockTransport;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -277,5 +279,18 @@ class MessagesResourceTest {
         assertEquals(HttpMethod.GET, tx.lastRequest().method());
         assertArrayEquals("PNG_BYTES".getBytes(StandardCharsets.UTF_8), media.data());
         assertEquals("image/png", media.contentType());
+    }
+
+    @Test
+    void pinAndUnpinPostToTheirRoutes() {
+        tx.respond(200, "{\"success\":true}");
+        client.messages.pin("s", PinMessageRequest.builder().chatId("c1").messageId("m1").build());
+        assertEquals("http://h/api/sessions/s/messages/pin", tx.lastRequest().url());
+        assertEquals(HttpMethod.POST, tx.lastRequest().method());
+
+        tx.respond(200, "{\"success\":true}");
+        client.messages.unpin("s", UnpinMessageRequest.builder().chatId("c1").messageId("m1").build());
+        assertEquals("http://h/api/sessions/s/messages/unpin", tx.lastRequest().url());
+        assertEquals(HttpMethod.POST, tx.lastRequest().method());
     }
 }

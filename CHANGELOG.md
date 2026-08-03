@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Messages can be pinned and unpinned, on both engines:** `POST /api/sessions/:sessionId/messages/pin`
+  and `.../messages/unpin`. `durationSeconds` is `86400` (24h, the default), `604800` (7d) or
+  `2592000` (30d) — WhatsApp recognises no others, so anything else is a `400` here rather than a
+  silent no-op at the engine. In a group only admins may pin; that refusal surfaces as `403`, and a
+  message the engine cannot locate as `404`. Available in all five SDKs as `messages.pin` /
+  `messages.unpin`.
+
+  Nothing is stored locally: a pin is chat state owned by WhatsApp and expires on its clock, so a
+  mirrored copy in the message row would go stale silently. As with react/delete/edit, the target
+  must be within whatsapp-web.js's 100-message fetch window for the chat, or in the Baileys
+  adapter's message store.
+
 - **Chat media can now be archived to the file store and fetched back after delivery, via
   `GET /api/sessions/:sessionId/messages/:chatId/:messageId/media`.** Media has always been
   persisted as base64 inline on the message row, which makes it part of every row read and ties its

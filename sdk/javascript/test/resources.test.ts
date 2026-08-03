@@ -215,6 +215,16 @@ describe('StatusResource — nested media bodies', () => {
     expect(t.lastCall!.body).toEqual({ video: { url: 'http://vid' }, recipients: ['a@c.us'] });
   });
 
+  it('pin and unpin post to their own routes', async () => {
+    const t = new MockTransport().on('POST', /\/messages\/(un)?pin$/, { body: { success: true } });
+    const c = client(t);
+    await c.messages.pin('s', { chatId: 'c1', messageId: 'm1', durationSeconds: 604800 });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/messages/pin');
+    expect(t.lastCall!.body).toEqual({ chatId: 'c1', messageId: 'm1', durationSeconds: 604800 });
+    await c.messages.unpin('s', { chatId: 'c1', messageId: 'm1' });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/messages/unpin');
+  });
+
   it('message media fetches the archived bytes with their content type', async () => {
     const t = new MockTransport().on('GET', /\/messages\/c1\/m1\/media$/, {
       text: 'PNG_BYTES',

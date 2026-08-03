@@ -164,7 +164,18 @@ These are honestly out of reach of a clean adapter wiring because the installed 
 
 ## Snapshot summary
 
-- **80** interface methods, **160** adapter-cells (80 × 2 engines).
-- **139** supported cells; **21** not-available cells across **16** methods.
-- Of the 21 not-available cells: **6 adapter-gaps** (fixable) + **15 library-limitations** + **0 uncertain**.
-- **0 phantom-support rows** — every `not-available` row now throws at the adapter boundary, so the drift gate's throw-heuristic covers the full matrix.
+These are hand-maintained and had drifted from the source before this pass; they are now recomputed
+from `engine-capability-matrix.ts` rather than adjusted by hand. Re-derive them the same way when
+adding a method, instead of incrementing the previous figure.
+
+- **82** interface methods, **164** adapter-cells (82 × 2 engines).
+- **147** supported cells; **17** not-available cells across **16** methods.
+- Of the 17 not-available cells: **2 adapter-gaps** (fixable) + **15 library-limitations** + **0 uncertain**.
+- **0 phantom-support rows** — every `not-available` row throws at the adapter boundary.
+
+  Note that the drift gate does **not** verify that for whatsapp-web.js. `engine-parity.spec.ts`
+  detects a throw with `Class.prototype.method.toString()`, and the wwjs adapter's methods are thin
+  forwarders whose throws live in delegate modules (`wwebjs-catalog.ts` and friends), so the scan
+  sees no throwing method on that adapter at all — its `supported ⇒ does not throw` invariant is
+  vacuously true. Baileys is unaffected: its unavailable methods call `this.unsupported(...)` inline
+  on the adapter. Until that is addressed, the wwjs column is guarded by review, not by the gate.

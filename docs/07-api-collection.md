@@ -255,6 +255,24 @@ curl "$BASE/api/sessions/$SESSION_ID/messages/628123456789@c.us/true_62812345678
   -H "X-API-Key: $API_KEY"
 ```
 
+#### POST /api/sessions/:sessionId/messages/pin
+
+Pin a message for 24h (default), 7d or 30d.
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/pin" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"628123456789@c.us","messageId":"true_628123456789@c.us_3EB0ABCD","durationSeconds":604800}'
+```
+
+#### POST /api/sessions/:sessionId/messages/unpin
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/unpin" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"628123456789@c.us","messageId":"true_628123456789@c.us_3EB0ABCD"}'
+```
+
 #### GET /api/sessions/:sessionId/messages/:chatId/:messageId/media
 
 Download a message's archived media. Requires `CHAT_MEDIA_ARCHIVE_ENABLED=true` to have been set

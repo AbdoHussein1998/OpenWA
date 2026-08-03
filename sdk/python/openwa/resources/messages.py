@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 from .._http import quote_segment
 from ..types import (
     MessageMedia,
+    PinMessageRequest,
+    UnpinMessageRequest,
     BatchStatusResponse,
     BulkMessageResponse,
     ChatHistoryMessage,
@@ -107,6 +109,13 @@ class MessagesResource:
         return self._http.request(
             "GET", f"/api/sessions/{quote_segment(session_id)}/messages/{quote_segment(chat_id)}/{quote_segment(message_id)}/reactions"
         )
+
+    def pin(self, session_id: str, body: PinMessageRequest) -> SuccessResult:
+        """Pin a message. ``durationSeconds`` must be 86400, 604800 or 2592000; defaults to 24h."""
+        return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/messages/pin", body=body)
+
+    def unpin(self, session_id: str, body: UnpinMessageRequest) -> SuccessResult:
+        return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/messages/unpin", body=body)
 
     def media(self, session_id: str, chat_id: str, message_id: str) -> MessageMedia:
         """Fetch a message's archived media bytes (404 when nothing is archived for it)."""

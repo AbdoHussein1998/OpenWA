@@ -137,6 +137,24 @@ func (s *MessagesService) Reactions(ctx context.Context, sessionID, chatID, mess
 	return out, err
 }
 
+// Pin pins a message in its chat for a bounded window.
+func (s *MessagesService) Pin(ctx context.Context, sessionID string, body PinMessageRequest) (*SuccessResult, error) {
+	var out SuccessResult
+	if err := s.client.do(ctx, "POST", s.base(sessionID)+"/pin", nil, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Unpin removes a message's pin.
+func (s *MessagesService) Unpin(ctx context.Context, sessionID string, body UnpinMessageRequest) (*SuccessResult, error) {
+	var out SuccessResult
+	if err := s.client.do(ctx, "POST", s.base(sessionID)+"/unpin", nil, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Media fetches a message's archived media bytes. The server answers 404 when
 // nothing is archived for the message (archiving off when it arrived, no media,
 // over the archive cap, or cleared by retention).

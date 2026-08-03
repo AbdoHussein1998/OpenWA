@@ -497,6 +497,16 @@ class TestStatus:
         client.status.send_video("s", {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]})
         assert backend.calls[-1].body == {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]}
 
+    def test_pin_and_unpin_post_to_their_routes(self):
+        backend = MockBackend().on("POST", "/messages/pin", body={"success": True})
+        backend.on("POST", "/messages/unpin", body={"success": True})
+        client = make_client(backend)
+        client.messages.pin("s", {"chatId": "c1", "messageId": "m1", "durationSeconds": 604800})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/pin"
+        assert backend.last_call.method == "POST"
+        client.messages.unpin("s", {"chatId": "c1", "messageId": "m1"})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/unpin"
+
     def test_message_media_fetches_archived_bytes(self):
         backend = MockBackend()
         backend.fallback = lambda _: httpx.Response(200, content=b"PNG_BYTES", headers={"content-type": "image/png"})
