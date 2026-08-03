@@ -51,12 +51,33 @@ export interface SessionResponse {
   /** Only present when `status === 'failed'` (terminal failure) or `status === 'action_required'` (operator must intervene). */
   lastError?: string | null;
   /**
+   * A limit WhatsApp itself has placed on the account, or `null` when there is none. Distinct from
+   * `lastError`, which describes a fault on the gateway's side. Absent from a gateway that predates
+   * the field.
+   */
+  restriction?: AccountRestriction | null;
+  /**
    * Whether the gateway holds a live engine for this session right now — the precondition `stop`,
    * `logout` and `force-kill` require and `start` refuses. Not derivable from `status`:
    * `disconnected` covers both a session mid automatic-reconnect (engine present) and one stopped
    * with no engine. Absent from a gateway that predates the field.
    */
   engineLoaded?: boolean;
+}
+
+/**
+ * A restriction WhatsApp has in force on a session's account.
+ *
+ * `reachout_timelock` leaves the session connected and existing chats working — only starting new
+ * conversations is blocked — whereas `tos_block` and `proxy_block` refuse the connection itself and
+ * therefore cannot coexist with a `ready` status.
+ */
+export interface AccountRestriction {
+  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block';
+  /** The engine's own token for the cause, verbatim (`TOS_BLOCK`, `BIZ_QUALITY`, …). */
+  code: string;
+  /** ISO timestamp when enforcement ends, when WhatsApp states one. */
+  expiresAt?: string | null;
 }
 
 export interface CreateSessionRequest {
@@ -582,6 +603,7 @@ export type WebhookEvent =
   | 'session.authenticated'
   | 'session.disconnected'
   | 'session.reconnect_loop'
+  | 'session.restriction'
   | 'group.join'
   | 'group.leave'
   | 'group.update'

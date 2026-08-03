@@ -62,6 +62,9 @@ class FakeSock extends EventEmitter {
   public newsletterFollow = jest.fn().mockResolvedValue(undefined);
   public newsletterUnfollow = jest.fn().mockResolvedValue(undefined);
   public rejectCall = jest.fn().mockResolvedValue(undefined);
+  // Baileys answers this by emitting its own connection.update carrying the result, so the default
+  // mirrors that: resolving alone proves nothing reached the adapter.
+  public fetchAccountReachoutTimelock = jest.fn().mockResolvedValue({ isActive: false });
   public signalRepository: { lidMapping: { getLIDForPN: jest.Mock } } | undefined;
   fire(event: string, arg: unknown): void {
     this.emitter.emit(event, arg);
@@ -4122,5 +4125,123 @@ describe('BaileysAdapter catalog (#905)', () => {
 
     await expect(adapter.sendProduct('628111@s.whatsapp.net', 'p1')).rejects.toThrow(BadRequestException);
     expect(fakeSock.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+// Baileys models the reachout timelock first-class — a typed state with both a push notification and
+// a query — so this is not inference from failed sends. The account stays connected throughout: a
+// timelock blocks only the start of NEW conversations, which is why nothing here touches status.
+describe('BaileysAdapter account-restriction reporting', () => {
+  beforeEach(() => {
+    fakeSock.user = undefined;
+    fakeSock.resetEmitter();
+    jest.clearAllMocks();
+    fakeSock.fetchAccountReachoutTimelock.mockResolvedValue({ isActive: false });
+  });
+
+  it('reports an active timelock with its enforcement type and expiry', async () => {
+    const onAccountRestriction = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onAccountRestriction }));
+    const ends = new Date('2026-08-04T09:00:00.000Z');
+
+    fakeSock.fire('connection.update', {
+      reachoutTimeLock: { isActive: true, timeEnforcementEnds: ends, enforcementType: 'BIZ_QUALITY' },
+    });
+
+    expect(onAccountRestriction).toHaveBeenCalledWith({
+      kind: 'reachout_timelock',
+      code: 'BIZ_QUALITY',
+      expiresAt: ends.getTime(),
+    });
+  });
+
+  // WhatsApp can omit the enforcement type; DEFAULT is Baileys' own name for "no specific type",
+  // so the field is never left undefined for consumers to special-case.
+  it('falls back to DEFAULT when no enforcement type is given', async () => {
+    const onAccountRestriction = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onAccountRestriction }));
+
+    fakeSock.fire('connection.update', { reachoutTimeLock: { isActive: true } });
+
+    expect(onAccountRestriction).toHaveBeenCalledWith({
+      kind: 'reachout_timelock',
+      code: 'DEFAULT',
+      expiresAt: undefined,
+    });
+  });
+
+  // `time_enforcement_ends` is a server string Baileys parses with parseInt, so a malformed value
+  // reaches us as an Invalid Date. NaN must not be forwarded as if it were a real expiry.
+  it('drops an unparseable expiry rather than forwarding NaN', async () => {
+    const onAccountRestriction = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onAccountRestriction }));
+
+    fakeSock.fire('connection.update', {
+      reachoutTimeLock: { isActive: true, timeEnforcementEnds: new Date('nonsense'), enforcementType: 'BIZ_QUALITY' },
+    });
+
+    expect(onAccountRestriction).toHaveBeenCalledWith({
+      kind: 'reachout_timelock',
+      code: 'BIZ_QUALITY',
+      expiresAt: undefined,
+    });
+  });
+
+  // Baileys reports the lift as well as the onset, so this is a positive "no restriction" and is
+  // forwarded as null — consumers may clear on it.
+  it('forwards a lifted timelock as null', async () => {
+    const onAccountRestriction = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onAccountRestriction }));
+
+    fakeSock.fire('connection.update', { reachoutTimeLock: { isActive: false } });
+
+    expect(onAccountRestriction).toHaveBeenCalledWith(null);
+  });
+
+  // The push only fires when the state CHANGES, so a gateway that starts while the account is
+  // already restricted would never be told. Asking on every connection is what closes that gap.
+  it('asks WhatsApp for the current restriction on every connection open', async () => {
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({}));
+
+    fakeSock.fire('connection.update', { connection: 'open' });
+    await new Promise(r => setImmediate(r));
+
+    expect(fakeSock.fetchAccountReachoutTimelock).toHaveBeenCalledTimes(1);
+  });
+
+  // An account or server that will not answer the query must not turn a healthy connection into a
+  // failure — the connection is already open and READY by this point.
+  it('survives a probe that rejects, leaving the session READY', async () => {
+    fakeSock.fetchAccountReachoutTimelock.mockRejectedValue(new Error('not-authorized'));
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({}));
+    fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+
+    fakeSock.fire('connection.update', { connection: 'open' });
+    await new Promise(r => setImmediate(r));
+
+    expect(adapter.getStatus()).toBe(EngineStatus.READY);
+  });
+
+  // Detection is observation only: a timelock leaves the account connected, so treating it as a
+  // disconnect would tear down a session that is still able to serve every existing chat.
+  it('does not disturb the session status or connection when a timelock arrives', async () => {
+    const onDisconnected = jest.fn();
+    const onError = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onDisconnected, onError }));
+    fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+    fakeSock.fire('connection.update', { connection: 'open' });
+
+    fakeSock.fire('connection.update', { reachoutTimeLock: { isActive: true, enforcementType: 'BIZ_QUALITY' } });
+
+    expect(adapter.getStatus()).toBe(EngineStatus.READY);
+    expect(onDisconnected).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
   });
 });

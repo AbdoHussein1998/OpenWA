@@ -32,6 +32,8 @@ public enum WebhookEvent {
     SESSION_DISCONNECTED,
     @SerializedName("session.reconnect_loop")
     SESSION_RECONNECT_LOOP,
+    @SerializedName("session.restriction")
+    SESSION_RESTRICTION,
     @SerializedName("group.join")
     GROUP_JOIN,
     @SerializedName("group.leave")

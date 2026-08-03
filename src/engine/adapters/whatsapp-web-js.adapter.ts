@@ -41,6 +41,7 @@ import {
   ChatState,
   GroupEvent,
   IncomingCallEvent,
+  AccountRestriction,
 } from '../interfaces/whatsapp-engine.interface';
 import { resolveWebVersionPin } from '../wa-web-version';
 import { resolveAuthTimeoutMs } from '../engine-init-timeout';
@@ -113,6 +114,21 @@ export interface WhatsAppWebJsConfig {
 
 const READY_RECONCILE_INTERVAL_MS = 2000;
 const READY_RECONCILE_TIMEOUT_MS = 90_000;
+
+// WhatsApp Web states that mean WhatsApp has judged the account or its egress, mapped to the neutral
+// restriction kinds. This is the ONLY channel the library offers: there is no dedicated event, error
+// type or cause code for account standing (whatsapp-web.js 1.34.7), just a `WAState` string on the
+// `disconnected` event.
+//
+// Deliberately only three of the twelve states. UNPAIRED/UNPAIRED_IDLE and LOGOUT are unlinks,
+// CONFLICT is another device taking over, DEPRECATED_VERSION is our own client being too old, and
+// TIMEOUT is a fault — none is a statement about the account's standing, and reporting them as
+// restrictions would be exactly the false positive that makes the signal worthless to act on.
+const WA_STATE_RESTRICTIONS: Readonly<Record<string, AccountRestriction['kind']>> = {
+  TOS_BLOCK: 'tos_block',
+  SMB_TOS_BLOCK: 'tos_block',
+  PROXYBLOCK: 'proxy_block',
+};
 
 // Onboarding-modal watcher (#982). A freshly-linked account shows a "What's new on WhatsApp Web"
 // modal with a Continue button that must be acknowledged, or WhatsApp unlinks the companion ~5m
@@ -591,6 +607,13 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         );
       }
       this.setStatus(EngineStatus.DISCONNECTED);
+      // Report the account judgement BEFORE the disconnect so a consumer reacting to the disconnect
+      // already knows why it happened. Only the state token is passed through — the adapter draws no
+      // conclusion about recoverability from it and leaves the reconnect decision exactly as it was.
+      const restriction = WA_STATE_RESTRICTIONS[reason];
+      if (restriction) {
+        this.callbacks.onAccountRestriction?.({ kind: restriction, code: reason });
+      }
       this.callbacks.onDisconnected?.(reason);
     });
 

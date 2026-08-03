@@ -1100,6 +1100,7 @@ available_events:
   - session.authenticated  # Session authenticated
   - session.disconnected   # Session disconnected
   - session.reconnect_loop # Every 5th consecutive reconnect attempt (payload: sessionId, attempts, nextDelayMs)
+  - session.restriction   # WhatsApp restricted the account, or lifted it (payload: sessionId, active, kind, code, expiresAt)
 
   # Groups
   - group.join           # Participant(s) added/joined

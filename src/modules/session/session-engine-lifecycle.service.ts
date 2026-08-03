@@ -9,9 +9,10 @@ import { decideReconnect, type ReconnectAttemptState } from './reconnect-policy'
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
+import { SessionRestrictionStore } from './session-restriction-store.service';
 import { resolveEngineInitTimeoutMs } from '../../engine/engine-init-timeout';
 import { StatusStoreService } from '../status-store/status-store.service';
-import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
+import { IWhatsAppEngine, AccountRestriction } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { ShutdownService } from '../../common/services/shutdown.service';
 import {
@@ -209,6 +210,7 @@ export class SessionEngineLifecycle {
     private readonly watchdog: SessionLivenessWatchdog,
     private readonly messages: MessageProjector,
     private readonly sessionErrors: SessionErrorStore,
+    private readonly sessionRestrictions: SessionRestrictionStore,
     private readonly eventsGateway: EventsGateway,
     private readonly webhookService: WebhookService,
     private readonly hookManager: HookManager,
@@ -257,6 +259,7 @@ export class SessionEngineLifecycle {
       cancelReconnect: id => this.cancelReconnect(id),
       evictAndForceDestroy: (id, engine) => this.evictAndForceDestroy(id, engine),
       trackPendingCredentialTeardown: (sessionName, raw) => this.trackPendingCredentialTeardown(sessionName, raw),
+      reportRestrictionLifted: (id, lifted) => this.reportRestrictionLifted(id, lifted),
       claimStuckAuthRecovery: (id, engine) => {
         // SYNCHRONOUS atomic claim for the one-shot automatic credential-reset budget. The adapter
         // calls this right before it would wipe LocalAuth (recoverFromStuckAuth); a denial makes the
@@ -274,6 +277,7 @@ export class SessionEngineLifecycle {
       },
       messages: this.messages,
       sessionErrors: this.sessionErrors,
+      sessionRestrictions: this.sessionRestrictions,
       webhookService: this.webhookService,
       eventsGateway: this.eventsGateway,
       hookManager: this.hookManager,
@@ -289,6 +293,7 @@ export class SessionEngineLifecycle {
       engineFactory: this.engineFactory,
       engines: this.engineRegistry,
       sessionErrors: this.sessionErrors,
+      sessionRestrictions: this.sessionRestrictions,
       hookManager: this.hookManager,
       configService: this.configService,
       logger: this.logger,
@@ -423,7 +428,11 @@ export class SessionEngineLifecycle {
       proxyType: session.proxyType || undefined,
     });
     this.engines.set(id, engine);
-    // Clear any prior failure reason before a fresh start.
+    // Clear any prior failure reason before a fresh start. A recorded account restriction is
+    // deliberately NOT cleared here: it describes the account, not this attempt, so a restart does
+    // not resolve it — and clearing it per attempt would make it flicker off and on through a
+    // reconnect loop, re-announcing one unchanged block on every pass. It is dropped where it is
+    // actually disproved (handleEngineReady) or reported lifted.
     this.sessionErrors.clear(id);
 
     // Mark INITIALIZING before engine.initialize(): the engine drives status forward
@@ -575,6 +584,12 @@ export class SessionEngineLifecycle {
     // A fresh READY stretch starts the watchdog's failure budget clean too.
     this.watchdog.clear(id);
     this.sessionErrors.clear(id);
+    // Being linked and ready is proof that a connection-level block is over — it is exactly what such
+    // a block prevents. A reachout timelock survives: it never stopped the session connecting.
+    const liftedByReady = this.sessionRestrictions.clearIfDisprovedByReady(id);
+    if (liftedByReady) {
+      this.reportRestrictionLifted(id, liftedByReady);
+    }
     // READY proves any in-flight stuck-auth recovery succeeded (or none was needed), so the
     // one-shot recovery budget is re-armed for a future episode.
     this.stuckAuthRecoveryUsed.delete(id);
@@ -598,6 +613,31 @@ export class SessionEngineLifecycle {
     // posts arrive through onMessage below; this just backfills what was already up before we
     // connected. Not awaited — onReady must not block on it.
     void this.seedStatuses(id, engine);
+  }
+
+  /**
+   * Announce that a restriction has ended. Shared by the two paths that can end one — the engine
+   * reporting it lifted, and a session reaching READY despite a connection-level block — so the two
+   * cannot drift into announcing the same thing differently. The caller has already removed it from
+   * the store and passes what was removed, since the payload describes the restriction that ended.
+   */
+  reportRestrictionLifted(id: string, lifted: AccountRestriction): void {
+    // Phrased as "no longer in force" rather than "WhatsApp lifted it": only one of the two paths is
+    // WhatsApp saying so. The other infers it from the session having connected, and the log should
+    // not claim more than was actually observed.
+    this.logger.log(`The ${lifted.kind} restriction on this session is no longer in force`, {
+      sessionId: id,
+      kind: lifted.kind,
+      code: lifted.code,
+      action: 'account_restriction_lifted',
+    });
+    void this.webhookService.dispatch(id, 'session.restriction', {
+      sessionId: id,
+      active: false,
+      kind: lifted.kind,
+      code: lifted.code,
+      expiresAt: null,
+    });
   }
 
   /**

@@ -102,6 +102,7 @@ const availableEventNames = [
   'session.authenticated',
   'session.disconnected',
   'session.reconnect_loop',
+  'session.restriction',
   'group.join',
   'group.leave',
   'group.update',

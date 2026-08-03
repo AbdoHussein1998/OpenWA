@@ -504,6 +504,37 @@ export interface IncomingCallEvent {
   timestamp: number;
 }
 
+/**
+ * A restriction WhatsApp itself has placed on the account behind a session — as opposed to a
+ * connection fault, a stale credential, or an operator action.
+ *
+ * The two engines report genuinely different things, so `kind` is the discriminator consumers act
+ * on rather than a lowest common denominator:
+ *
+ *  - `reachout_timelock` (Baileys) — the account stays connected and existing chats keep working;
+ *    WhatsApp only blocks *starting new conversations*. Reported first-class by the library
+ *    (`connection.update.reachoutTimeLock`), including when it is lifted.
+ *  - `tos_block` / `proxy_block` (whatsapp-web.js) — a connection-level refusal: WhatsApp Web drops
+ *    the socket and the engine cannot stay linked at all. Derived from the `WAState` the library
+ *    reports on its `disconnected` event, which is the only channel that carries it.
+ *
+ * That difference is load-bearing for clearing: a `reachout_timelock` can only be resolved by an
+ * explicit lift signal, whereas a connection-scoped kind is disproved the moment the session reaches
+ * READY again — the block would have prevented that.
+ */
+export interface AccountRestriction {
+  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block';
+  /**
+   * The engine's own token for the cause, kept verbatim so an operator can search for it and so a
+   * new upstream value is surfaced rather than flattened: the `WAState` string on whatsapp-web.js
+   * (`TOS_BLOCK`, `SMB_TOS_BLOCK`, `PROXYBLOCK`) or the enforcement type on Baileys (`BIZ_QUALITY`,
+   * `WEB_COMPANION_ONLY`, one of the BIZ_COMMERCE_VIOLATION_* values, …).
+   */
+  code: string;
+  /** Unix ms when enforcement ends, when the engine states it (Baileys timelocks only). */
+  expiresAt?: number;
+}
+
 export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
   onReady?: (phone: string, pushName: string) => void;
@@ -551,6 +582,17 @@ export interface EngineEventCallbacks {
    * to READY.
    */
   onActionRequired?: (reason: string) => void;
+  /**
+   * Fired when the engine learns that WhatsApp has restricted (or un-restricted) the account behind
+   * this session. `null` means the engine positively reports no restriction in force — it is a
+   * *lift*, not "unknown", so consumers may clear state on it; an engine that simply never learns
+   * anything stays silent instead.
+   *
+   * Purely informational: the adapter does NOT change its own status or reconnect behavior because
+   * of a restriction, so this cannot turn a recoverable session into a dead one on a misread.
+   * Consumers decide what a restriction is worth.
+   */
+  onAccountRestriction?: (restriction: AccountRestriction | null) => void;
   /**
    * Fired on a terminal initialization/authentication failure (e.g. Chromium
    * could not launch, or WhatsApp rejected the stored credentials). The engine

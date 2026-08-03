@@ -10,6 +10,7 @@ import { BaileysStoredMessage } from '../../engine/adapters/baileys-stored-messa
 import { EngineFactory } from '../../engine/engine.factory';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SessionErrorStore } from './session-error-store.service';
+import { SessionRestrictionStore } from './session-restriction-store.service';
 import { type createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
 import { SessionLifecycleFences } from './session-lifecycle-fences';
@@ -43,6 +44,7 @@ export interface SessionEngineControlsHost {
   engineFactory: EngineFactory;
   engines: EngineRegistry;
   sessionErrors: SessionErrorStore;
+  sessionRestrictions: SessionRestrictionStore;
   hookManager: HookManager;
   configService?: ConfigService;
   logger: ReturnType<typeof createLogger>;
@@ -79,6 +81,7 @@ export class SessionEngineControls {
   private readonly engineFactory: EngineFactory;
   private readonly engines: EngineRegistry;
   private readonly sessionErrors: SessionErrorStore;
+  private readonly sessionRestrictions: SessionRestrictionStore;
   private readonly hookManager: HookManager;
   private readonly configService?: ConfigService;
   private readonly logger: ReturnType<typeof createLogger>;
@@ -94,6 +97,7 @@ export class SessionEngineControls {
     this.engineFactory = host.engineFactory;
     this.engines = host.engines;
     this.sessionErrors = host.sessionErrors;
+    this.sessionRestrictions = host.sessionRestrictions;
     this.hookManager = host.hookManager;
     this.configService = host.configService;
     this.logger = host.logger;
@@ -105,13 +109,13 @@ export class SessionEngineControls {
     this.initializingSessions = host.initializingSessions;
   }
 
-  /** findOne-or-404 with the last-error projection, mirroring SessionService.findOne. */
+  /** findOne-or-404 with the runtime-state projection, mirroring SessionService.findOne. */
   private async requireSession(id: string): Promise<Session> {
     const session = await this.sessionRepository.findOne({ where: { id } });
     if (!session) {
       throw new NotFoundException(`Session with id '${id}' not found`);
     }
-    return this.sessionErrors.attachTo(session);
+    return this.sessionRestrictions.attachTo(this.sessionErrors.attachTo(session));
   }
 
   async start(id: string): Promise<Session> {
@@ -507,6 +511,9 @@ export class SessionEngineControls {
         // Drop the FAILED-reason entry too: it's keyed by a now-deleted UUID that can never be read
         // again, so leaving it would grow the map without bound across create/fail/delete churn.
         this.sessionErrors.clear(id);
+        // Same unbounded-growth argument for the restriction entry, and the gauge it feeds must not
+        // keep counting an account whose session no longer exists.
+        this.sessionRestrictions.clear(id);
         // The stuck-auth recovery budget is keyed by id; a committed delete frees it (and a recreated
         // session under the same name gets a fresh UUID + fresh budget). Left only on a committed
         // delete so a failed/409 delete — the session still exists — keeps the budget intact.

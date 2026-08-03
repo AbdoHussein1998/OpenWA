@@ -5564,3 +5564,99 @@ describe('probeOnboardingModal (in-page onboarding modal detection)', () => {
     expect(button.click).not.toHaveBeenCalled();
   });
 });
+
+// WhatsApp Web has no dedicated channel for account standing: a ToS block arrives as a WAState
+// string on the same generic `disconnected` event as an unlink, a takeover or a version mismatch.
+// These tests pin which of those twelve states the adapter is willing to call a restriction, because
+// a false positive here is worse than no signal at all — it is the input a consumer acts on.
+describe('WhatsAppWebJsAdapter account-restriction reporting', () => {
+  type FakeClient = EventEmitter & { getState: jest.Mock; pupPage: { evaluate: jest.Mock } };
+
+  // These tests emit disconnected:LOGOUT, whose handler reaches clearLocalAuth() → fs.rm(force:true)
+  // of `<sessionDataPath>/session-sess-1`. Stub it: unmocked, running this suite on a machine that
+  // happens to hold a session with that name would silently delete its WhatsApp credentials.
+  let rmSpy: jest.SpyInstance;
+  beforeEach(() => {
+    rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+  });
+  afterEach(() => rmSpy.mockRestore());
+
+  const attachRestrictionAware = (): {
+    client: FakeClient;
+    onAccountRestriction: jest.Mock;
+    onDisconnected: jest.Mock;
+  } => {
+    const adapter = new WhatsAppWebJsAdapter({
+      sessionId: 'sess-1',
+      sessionDataPath: './data/sessions',
+      puppeteer: {},
+    });
+    const client = Object.assign(new EventEmitter(), {
+      getState: jest.fn().mockResolvedValue(WAState.CONNECTED),
+      pupPage: { evaluate: jest.fn().mockResolvedValue(true) },
+    }) as FakeClient;
+    const onAccountRestriction = jest.fn();
+    const onDisconnected = jest.fn();
+    (adapter as unknown as { client: unknown }).client = client;
+    (adapter as unknown as { callbacks: unknown }).callbacks = { onAccountRestriction, onDisconnected };
+    (adapter as unknown as { setupEventHandlers: () => void }).setupEventHandlers();
+    return { client, onAccountRestriction, onDisconnected };
+  };
+
+  it.each([
+    [WAState.TOS_BLOCK, 'tos_block'],
+    [WAState.SMB_TOS_BLOCK, 'tos_block'],
+    [WAState.PROXYBLOCK, 'proxy_block'],
+  ])('reports %s as a %s restriction, passing the state through as the cause', (state, kind) => {
+    const { client, onAccountRestriction } = attachRestrictionAware();
+
+    client.emit('disconnected', state);
+
+    expect(onAccountRestriction).toHaveBeenCalledWith({ kind, code: state });
+  });
+
+  // The states that are NOT WhatsApp judging the account. UNPAIRED/LOGOUT are unlinks, CONFLICT is
+  // another device taking over, DEPRECATED_VERSION is our client being stale and TIMEOUT is a fault.
+  // Reporting any of them would make the signal meaningless for the consumers that act on it.
+  it.each([
+    WAState.UNPAIRED,
+    WAState.UNPAIRED_IDLE,
+    WAState.CONFLICT,
+    WAState.DEPRECATED_VERSION,
+    WAState.TIMEOUT,
+    'LOGOUT',
+    'NAVIGATION',
+  ])('does not report %s as a restriction', state => {
+    const { client, onAccountRestriction } = attachRestrictionAware();
+
+    client.emit('disconnected', state);
+
+    expect(onAccountRestriction).not.toHaveBeenCalled();
+    // Guards the stub above rather than the feature: proves no LOGOUT path in these tests reached a
+    // real credential removal, so a future change here cannot start deleting a developer's profile.
+    expect(rmSpy).not.toHaveBeenCalled();
+  });
+
+  // The restriction explains the disconnect, so it has to be known before the disconnect is handled —
+  // a consumer that schedules a reconnect on the disconnect must already be able to see why.
+  it('reports the restriction before the disconnect it explains', () => {
+    const order: string[] = [];
+    const { client, onAccountRestriction, onDisconnected } = attachRestrictionAware();
+    onAccountRestriction.mockImplementation(() => order.push('restriction'));
+    onDisconnected.mockImplementation(() => order.push('disconnected'));
+
+    client.emit('disconnected', WAState.TOS_BLOCK);
+
+    expect(order).toEqual(['restriction', 'disconnected']);
+  });
+
+  // Detection is observation only. If it also decided the session were dead, a misread state would
+  // permanently down a session that the existing reconnect would have recovered.
+  it('leaves the disconnect handling untouched — the reason still flows through unchanged', () => {
+    const { client, onDisconnected } = attachRestrictionAware();
+
+    client.emit('disconnected', WAState.TOS_BLOCK);
+
+    expect(onDisconnected).toHaveBeenCalledWith(WAState.TOS_BLOCK);
+  });
+});

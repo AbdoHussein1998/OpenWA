@@ -18,6 +18,7 @@ import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SessionLidResolver } from './session-lid-resolver.service';
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { SessionErrorStore } from './session-error-store.service';
+import { SessionRestrictionStore } from './session-restriction-store.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { paginate, ListOptions, resolveListWindow } from '../../common/utils/paginate';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
@@ -70,6 +71,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     private readonly lidResolver: SessionLidResolver,
     private readonly watchdog: SessionLivenessWatchdog,
     private readonly sessionErrors: SessionErrorStore,
+    private readonly sessionRestrictions: SessionRestrictionStore,
     private readonly hookManager: HookManager,
     private readonly engineLifecycle: SessionEngineLifecycle,
     @Optional()
@@ -208,7 +210,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       options.where = { id: In(allowedSessions) };
     }
     const sessions = await this.sessionRepository.find(options);
-    return sessions.map(session => this.attachLastError(session));
+    return sessions.map(session => this.attachRuntimeState(session));
   }
 
   async findOne(id: string): Promise<Session> {
@@ -216,12 +218,16 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     if (!session) {
       throw new NotFoundException(`Session with id '${id}' not found`);
     }
-    return this.attachLastError(session);
+    return this.attachRuntimeState(session);
   }
 
-  /** See SessionErrorStore — the reason map and this projection live together. */
-  private attachLastError(session: Session): Session {
-    return this.sessionErrors.attachTo(session);
+  /**
+   * Attach the transient fields no column carries: why the session last failed, and whether
+   * WhatsApp is restricting its account. See SessionErrorStore / SessionRestrictionStore — each map
+   * and its projection live together.
+   */
+  private attachRuntimeState(session: Session): Session {
+    return this.sessionRestrictions.attachTo(this.sessionErrors.attachTo(session));
   }
 
   async findByName(name: string): Promise<Session> {

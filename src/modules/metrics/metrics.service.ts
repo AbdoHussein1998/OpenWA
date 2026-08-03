@@ -7,6 +7,7 @@ import {
   getSessionReconnectAttemptsTotal,
   getSessionReconnectLoopAlertsTotal,
 } from '../../common/metrics/session-reconnect-metrics';
+import { getRestrictedSessionCount } from '../../common/metrics/session-restriction-metrics';
 import { renderHttpRequestMetrics } from '../../common/metrics/request-metrics';
 
 /**
@@ -116,6 +117,10 @@ export class MetricsService {
     lines.push('# HELP openwa_session_reconnect_loop_alerts_total Reconnect-loop alerts emitted since process start.');
     lines.push('# TYPE openwa_session_reconnect_loop_alerts_total counter');
     lines.push(`openwa_session_reconnect_loop_alerts_total ${getSessionReconnectLoopAlertsTotal()}`);
+
+    lines.push('# HELP openwa_sessions_restricted Sessions whose account WhatsApp is currently restricting.');
+    lines.push('# TYPE openwa_sessions_restricted gauge');
+    lines.push(`openwa_sessions_restricted ${getRestrictedSessionCount()}`);
 
     // HTTP RED metrics (request rate + duration per route), recorded by RequestMetricsInterceptor.
     // Included in the same cached render — a few seconds of staleness is fine for Prometheus.

@@ -8,6 +8,7 @@ import { SessionLidResolver } from './session-lid-resolver.service';
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
+import { SessionRestrictionStore } from './session-restriction-store.service';
 import { SessionController } from './session.controller';
 import { WebhookModule } from '../webhook/webhook.module';
 import { StatusStoreModule } from '../status-store/status-store.module';
@@ -22,6 +23,7 @@ import { ChatMediaModule } from '../chat-media/chat-media.module';
     SessionService,
     SessionEngineLifecycle,
     SessionErrorStore,
+    SessionRestrictionStore,
     SessionLidResolver,
     SessionLivenessWatchdog,
     MessageProjector,

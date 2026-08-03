@@ -2,6 +2,38 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { Session } from '../entities/session.entity';
 import { SessionStatus } from '../entities/session.entity';
 
+export class AccountRestrictionDto {
+  @ApiProperty({
+    enum: ['reachout_timelock', 'tos_block', 'proxy_block'],
+    description:
+      'What WhatsApp is restricting. `reachout_timelock` leaves the session connected and existing ' +
+      'chats working, blocking only the start of new conversations. `tos_block` and `proxy_block` ' +
+      'are connection-level refusals — the session cannot stay linked while one is in force, so ' +
+      'seeing either alongside a `ready` status is not possible.',
+    example: 'reachout_timelock',
+  })
+  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block';
+
+  @ApiProperty({
+    description:
+      "The engine's own token for the cause, passed through verbatim so it can be searched for and " +
+      'so a value newer than this gateway is still surfaced rather than flattened.',
+    example: 'BIZ_QUALITY',
+  })
+  code: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    description:
+      'When enforcement ends, if the engine states it. Only reachout timelocks carry an expiry; ' +
+      'absent means the engine gave no end time, not that the restriction is permanent.',
+    example: '2026-08-04T09:00:00Z',
+    nullable: true,
+  })
+  expiresAt?: Date | null;
+}
+
 export class SessionResponseDto {
   @ApiProperty({ example: 'sess_123e4567-e89b-12d3-a456-426614174000' })
   id: string;
@@ -40,6 +72,16 @@ export class SessionResponseDto {
   })
   lastError?: string | null;
 
+  @ApiPropertyOptional({
+    type: AccountRestrictionDto,
+    description:
+      "A restriction WhatsApp itself has placed on this session's account, or null when there is " +
+      'none. Distinct from `lastError`, which describes a fault on our side of the link. Derived ' +
+      'from live engine state, so it is never persisted: it is re-established on the next connect.',
+    nullable: true,
+  })
+  restriction?: AccountRestrictionDto | null;
+
   @ApiProperty({
     description:
       'Whether the gateway currently holds a live engine for this session. This is the precondition ' +
@@ -74,6 +116,15 @@ export class SessionResponseDto {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       lastError: session.lastError ?? null,
+      restriction: session.restriction
+        ? {
+            kind: session.restriction.kind,
+            code: session.restriction.code,
+            // Held as epoch ms internally (what the engine gives us); served as a date-time like
+            // every other timestamp in this response.
+            expiresAt: session.restriction.expiresAt ? new Date(session.restriction.expiresAt) : null,
+          }
+        : null,
       engineLoaded,
     };
   }

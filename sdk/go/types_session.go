@@ -15,6 +15,20 @@ func (q *ListSessionsQuery) values() url.Values {
 	return v
 }
 
+// AccountRestriction is a restriction WhatsApp has in force on a session's account.
+//
+// "reachout_timelock" leaves the session connected and existing chats working -- only starting new
+// conversations is blocked -- whereas "tos_block" and "proxy_block" refuse the connection itself and
+// therefore cannot coexist with a "ready" status.
+type AccountRestriction struct {
+	// Kind is one of: reachout_timelock, tos_block, proxy_block.
+	Kind string `json:"kind"`
+	// Code is the engine's own token for the cause, verbatim (TOS_BLOCK, BIZ_QUALITY, ...).
+	Code string `json:"code"`
+	// ExpiresAt is an ISO timestamp for the end of enforcement, when WhatsApp states one.
+	ExpiresAt *string `json:"expiresAt,omitempty"`
+}
+
 // SessionResponse describes a WhatsApp session. Status is one of: created,
 // initializing, qr_ready, authenticating, ready, disconnected, action_required,
 // failed.
@@ -29,6 +43,9 @@ type SessionResponse struct {
 	CreatedAt   string  `json:"createdAt,omitempty"`
 	UpdatedAt   string  `json:"updatedAt,omitempty"`
 	LastError   *string `json:"lastError,omitempty"`
+	// Restriction reports a limit WhatsApp itself has placed on the account, or nil when there is
+	// none. Distinct from LastError, which describes a fault on the gateway's side.
+	Restriction *AccountRestriction `json:"restriction,omitempty"`
 	// EngineLoaded reports whether the gateway holds a live engine for this session -- the
 	// precondition stop/logout/force-kill require and start refuses. Not derivable from Status:
 	// "disconnected" covers both a session mid automatic-reconnect (engine present) and one stopped
