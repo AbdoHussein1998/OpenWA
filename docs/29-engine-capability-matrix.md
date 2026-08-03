@@ -168,9 +168,9 @@ These are hand-maintained and had drifted from the source before this pass; they
 from `engine-capability-matrix.ts` rather than adjusted by hand. Re-derive them the same way when
 adding a method, instead of incrementing the previous figure.
 
-- **90** interface methods, **180** adapter-cells (90 × 2 engines).
-- **163** supported cells; **17** not-available cells across **16** methods.
-- Of the 17 not-available cells: **2 adapter-gaps** (fixable) + **15 library-limitations** + **0 uncertain**.
+- **91** interface methods, **182** adapter-cells (91 × 2 engines).
+- **164** supported cells; **18** not-available cells across **17** methods.
+- Of the 18 not-available cells: **2 adapter-gaps** (fixable) + **16 library-limitations** + **0 uncertain**.
 - **0 phantom-support rows** — every `not-available` row throws at the adapter boundary.
 
   Note that the drift gate does **not** verify that for whatsapp-web.js. `engine-parity.spec.ts`

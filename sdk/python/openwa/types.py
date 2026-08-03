@@ -665,6 +665,14 @@ class ArchiveChatRequest(TypedDict):
     archive: bool
 
 
+class VotePollRequest(TypedDict):
+    """Vote on a poll. options are option TEXTS (no ids); [] clears the vote."""
+
+    chatId: str
+    pollMessageId: str
+    options: list[str]
+
+
 class StarMessageRequest(TypedDict):
     """Star or unstar a message. Best-effort on whatsapp-web.js."""
 

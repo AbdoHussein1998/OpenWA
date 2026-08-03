@@ -991,6 +991,36 @@ Returns a bare array of `MessageReaction`:
 
 **Errors:** `400` session not active · `401` missing/invalid API key · `500` engine error
 
+#### POST /api/sessions/:sessionId/messages/vote-poll
+
+Cast a vote on a poll.
+
+**Auth:** API key (OPERATOR)  ·  **Engines:** whatsapp-web.js only — Baileys returns `501`
+
+**Body**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| chatId | string | yes | Chat containing the poll |
+| pollMessageId | string | yes | The poll creation message |
+| options | string[] | yes | The option **texts** to select, exactly as they appear on the poll (max 12). Replaces the current selection; `[]` clears the vote |
+
+**Response** `200` — `{ "success": true }`
+
+> **Options are texts, not ids.** whatsapp-web.js matches poll options by name, and no engine
+> surfaces a stable per-option id through this API, so the text is the only handle available. A poll
+> with two identically-worded options will therefore select **both**.
+
+> **Only recent polls can be voted on.** The poll must be within the 100-message window the engine
+> fetches for the chat — the same limit that applies to react/delete/edit/pin. An older poll comes
+> back `404`.
+
+> **Baileys returns `501`.** The library exposes no vote-send helper at all — only `decryptPollVote`
+> for *receiving* votes. Sending one requires hand-building a `PollUpdateMessage` with HMAC-SHA256
+> vote encryption keyed by the poll creation's `messageSecret`, which is not wired here.
+
+**Errors:** `400` session not active, or the target message is not a poll · `401` missing/invalid API key · `403` key lacks OPERATOR role · `404` poll not found in recent history · `501` Baileys engine
+
 #### POST /api/sessions/:sessionId/messages/pin
 
 Pin a message in its chat for a bounded window.

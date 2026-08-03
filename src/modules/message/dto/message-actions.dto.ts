@@ -224,6 +224,33 @@ export class PinMessageDto {
   durationSeconds?: number;
 }
 
+/** Cap on how many options one vote may select — WhatsApp polls hold at most 12. */
+export const POLL_VOTE_MAX_OPTIONS = 12;
+
+export class VotePollDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  chatId: string;
+
+  @ApiProperty({ description: 'The poll creation message to vote on.' })
+  @IsString()
+  @IsNotEmpty()
+  pollMessageId: string;
+
+  @ApiProperty({
+    description:
+      'The option TEXTS to select, exactly as they appear on the poll. Replaces the current ' +
+      'selection; an empty array clears the vote.',
+    type: [String],
+    maxItems: POLL_VOTE_MAX_OPTIONS,
+  })
+  @IsArray()
+  @ArrayMaxSize(POLL_VOTE_MAX_OPTIONS)
+  @IsString({ each: true })
+  options: string[];
+}
+
 export class StarMessageDto {
   @ApiProperty()
   @IsString()

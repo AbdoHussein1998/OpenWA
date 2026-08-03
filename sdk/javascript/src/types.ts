@@ -209,6 +209,17 @@ export interface ArchiveChatRequest {
   archive: boolean;
 }
 
+export interface VotePollRequest {
+  chatId: Jid;
+  /** The poll creation message to vote on. */
+  pollMessageId: string;
+  /**
+   * Option TEXTS to select, exactly as they appear on the poll — there are no option ids.
+   * Replaces the current selection; an empty array clears the vote.
+   */
+  options: string[];
+}
+
 export interface StarMessageRequest {
   chatId: Jid;
   messageId: string;

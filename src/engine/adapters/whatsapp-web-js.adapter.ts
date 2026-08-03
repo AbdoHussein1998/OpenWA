@@ -1442,6 +1442,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.messaging.pinMessage(chatId, messageId, durationSeconds);
   }
 
+  votePoll(chatId: string, pollMessageId: string, options: string[]): Promise<void> {
+    return this.messaging.votePoll(chatId, pollMessageId, options);
+  }
+
   unpinMessage(chatId: string, messageId: string): Promise<void> {
     return this.messaging.unpinMessage(chatId, messageId);
   }

@@ -28,6 +28,7 @@ import com.rmyndharis.openwa.model.SendPollRequest;
 import com.rmyndharis.openwa.model.SendTemplateRequest;
 import com.rmyndharis.openwa.model.SendTextRequest;
 import com.rmyndharis.openwa.model.StarMessageRequest;
+import com.rmyndharis.openwa.model.VotePollRequest;
 import com.rmyndharis.openwa.model.UnpinMessageRequest;
 import com.rmyndharis.openwa.support.MockTransport;
 import java.nio.charset.StandardCharsets;
@@ -300,6 +301,15 @@ class MessagesResourceTest {
         tx.respond(200, "{\"success\":true}");
         client.messages.star("s", StarMessageRequest.builder().chatId("c1").messageId("m1").star(false).build());
         assertEquals("http://h/api/sessions/s/messages/star", tx.lastRequest().url());
+        assertEquals(HttpMethod.POST, tx.lastRequest().method());
+    }
+
+    @Test
+    void votePollPostsToItsRoute() {
+        tx.respond(200, "{\"success\":true}");
+        client.messages.votePoll(
+            "s", VotePollRequest.builder().chatId("c1").pollMessageId("p1").options(List.of("Pizza")).build());
+        assertEquals("http://h/api/sessions/s/messages/vote-poll", tx.lastRequest().url());
         assertEquals(HttpMethod.POST, tx.lastRequest().method());
     }
 }

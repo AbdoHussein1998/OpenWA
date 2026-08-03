@@ -28,6 +28,7 @@ import com.rmyndharis.openwa.model.SendPollRequest;
 import com.rmyndharis.openwa.model.SendTemplateRequest;
 import com.rmyndharis.openwa.model.SendTextRequest;
 import com.rmyndharis.openwa.model.StarMessageRequest;
+import com.rmyndharis.openwa.model.VotePollRequest;
 import com.rmyndharis.openwa.model.SuccessResult;
 import com.rmyndharis.openwa.model.UnpinMessageRequest;
 import java.util.List;
@@ -167,6 +168,16 @@ public final class MessagesResource {
         return client.request(
             HttpMethod.POST,
             "/api/sessions/" + encodeSegment(sessionId) + "/messages/pin",
+            null,
+            body,
+            SuccessResult.class);
+    }
+
+    /** Cast a vote on a poll. Not supported on the Baileys engine (501). */
+    public SuccessResult votePoll(String sessionId, VotePollRequest body) {
+        return client.request(
+            HttpMethod.POST,
+            "/api/sessions/" + encodeSegment(sessionId) + "/messages/vote-poll",
             null,
             body,
             SuccessResult.class);

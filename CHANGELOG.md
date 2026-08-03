@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Polls can be voted on, on the whatsapp-web.js engine:**
+  `POST /api/sessions/:sessionId/messages/vote-poll` with `{ chatId, pollMessageId, options }`.
+  Exposed in all five SDKs as `messages.votePoll`. Baileys returns `501` — it has no vote-send
+  helper at all, only `decryptPollVote` for *receiving*.
+
+  `options` are the option **texts**, not ids: whatsapp-web.js matches options by name, and no
+  engine surfaces a stable per-option id through this API, so there is nothing else to name an
+  option by. A poll with two identically-worded options will select both. The list replaces the
+  current selection, and `[]` clears the vote.
+
+  Two limits are documented rather than papered over: the poll must be inside the engine's
+  100-message window for the chat (an older one is `404`), and a non-poll target is `400` — the
+  library throws a bare string there, which would otherwise have surfaced as an opaque `500`.
+
 - **Group pictures can be read, set and removed:**
   `GET|PUT|DELETE /api/sessions/:sessionId/groups/:groupId/picture`. Supported on both engines and
   exposed in all five SDKs as `groups.getPicture` / `setPicture` / `deletePicture`. The `PUT` body

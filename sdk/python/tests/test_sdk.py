@@ -497,6 +497,12 @@ class TestStatus:
         client.status.send_video("s", {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]})
         assert backend.calls[-1].body == {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]}
 
+    def test_vote_poll_posts_option_texts(self):
+        backend = MockBackend().on("POST", "/messages/vote-poll", body={"success": True})
+        make_client(backend).messages.vote_poll("s", {"chatId": "c1", "pollMessageId": "p1", "options": ["Pizza"]})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/vote-poll"
+        assert backend.last_call.body == {"chatId": "c1", "pollMessageId": "p1", "options": ["Pizza"]}
+
     def test_star_posts_the_boolean_through(self):
         backend = MockBackend().on("POST", "/messages/star", body={"success": True})
         make_client(backend).messages.star("s", {"chatId": "c1", "messageId": "m1", "star": False})

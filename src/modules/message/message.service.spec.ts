@@ -34,6 +34,7 @@ function createMockEngine() {
     deleteMessage: jest.fn().mockResolvedValue(undefined),
     pinMessage: jest.fn().mockResolvedValue(undefined),
     starMessage: jest.fn().mockResolvedValue(undefined),
+    votePoll: jest.fn().mockResolvedValue(undefined),
     unpinMessage: jest.fn().mockResolvedValue(undefined),
     editMessage: jest.fn().mockResolvedValue(mockEngineResult),
     getChatHistory: jest.fn().mockResolvedValue([]),
@@ -1452,6 +1453,18 @@ describe('MessageService', () => {
       (repository.update as jest.Mock).mockClear();
       await service.pinMessage('sess-1', { chatId: '621@c.us', messageId: 'M1' });
       expect(repository.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('votePoll', () => {
+    it('passes the option texts through unchanged', async () => {
+      await service.votePoll('sess-1', { chatId: '621@c.us', pollMessageId: 'P1', options: ['A', 'B'] });
+      expect(mockEngine.votePoll).toHaveBeenCalledWith('621@c.us', 'P1', ['A', 'B']);
+    });
+
+    it('forwards an empty selection, which clears the vote rather than being a no-op', async () => {
+      await service.votePoll('sess-1', { chatId: '621@c.us', pollMessageId: 'P1', options: [] });
+      expect(mockEngine.votePoll).toHaveBeenCalledWith('621@c.us', 'P1', []);
     });
   });
 

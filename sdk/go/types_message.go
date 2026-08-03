@@ -348,3 +348,11 @@ type StarMessageRequest struct {
 	MessageID string `json:"messageId"`
 	Star      bool   `json:"star"`
 }
+
+// VotePollRequest casts a vote on a poll. Options are option TEXTS, not ids —
+// no engine surfaces stable per-option ids. An empty slice clears the vote.
+type VotePollRequest struct {
+	ChatID        string   `json:"chatId"`
+	PollMessageID string   `json:"pollMessageId"`
+	Options       []string `json:"options"`
+}

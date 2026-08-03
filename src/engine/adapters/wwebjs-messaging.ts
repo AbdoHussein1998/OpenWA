@@ -10,6 +10,7 @@ import {
   PollInput,
 } from '../interfaces/whatsapp-engine.interface';
 import { MessageWithReactions, SerializedWid } from '../types/whatsapp-web-js.types';
+import { BadRequestException } from '@nestjs/common';
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
@@ -673,6 +674,25 @@ export class WwebjsMessaging {
     const message = messages.find(m => m.id._serialized === messageId || m.id.id === messageId);
     if (!message) throw new MessageNotFoundError(messageId, chatId);
     return message;
+  }
+
+  async votePoll(chatId: string, pollMessageId: string, options: string[]): Promise<void> {
+    this.host.ensureReady();
+    // Same 100-message window as pin/react/delete, so a poll older than that is unreachable and
+    // reported as not-found rather than as a failed vote.
+    const message = await this.findInFetchWindow(chatId, pollMessageId);
+    try {
+      await (message as unknown as { vote(selected: string[]): Promise<void> }).vote(options);
+    } catch (error) {
+      // vote() throws a BARE STRING (not an Error) when the target is not a poll creation message
+      // (Message.js:1010). Left alone that surfaces as an opaque 500; it is a client mistake, so
+      // map it to a 400. Anything that is a real Error is a genuine engine fault and propagates.
+      if (typeof error === 'string') {
+        throw new BadRequestException(`Message ${pollMessageId} is not a poll: ${error}`);
+      }
+      throw error;
+    }
+    this.host.logger.log(`Voted on poll ${pollMessageId} in chat ${chatId} (${options.length} option(s))`);
   }
 
   async pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {

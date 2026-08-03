@@ -17,7 +17,7 @@ import { getEffectiveWebVersionInfo, resolveWebVersionPin, __resetWebVersionCach
 import * as fs from 'fs';
 import * as path from 'path';
 import * as qrcode from 'qrcode';
-import { InternalServerErrorException, UnprocessableEntityException } from '@nestjs/common';
+import { InternalServerErrorException, UnprocessableEntityException, BadRequestException } from '@nestjs/common';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
@@ -3651,6 +3651,57 @@ describe('editMessage', () => {
     const err = await adapter.editMessage('628@c.us', 'M1', 'x').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(EngineRefusedError);
     expect((err as Error).message).toMatch(/was rejected/);
+  });
+});
+
+describe('votePoll', () => {
+  const ready = (client: unknown): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = client;
+    return adapter;
+  };
+  const chatWith = (messages: unknown[]) => ({
+    getChatById: jest.fn().mockResolvedValue({ fetchMessages: jest.fn().mockResolvedValue(messages) }),
+  });
+
+  it('passes the option TEXTS straight through — wwjs matches by name, not id', async () => {
+    const vote = jest.fn().mockResolvedValue(undefined);
+    const adapter = ready(chatWith([{ id: { _serialized: 'P1' }, vote }]));
+    await adapter.votePoll('628@c.us', 'P1', ['Pizza', 'Sushi']);
+    expect(vote).toHaveBeenCalledWith(['Pizza', 'Sushi']);
+  });
+
+  it('passes an empty array through to clear the vote', async () => {
+    const vote = jest.fn().mockResolvedValue(undefined);
+    const adapter = ready(chatWith([{ id: { _serialized: 'P1' }, vote }]));
+    await adapter.votePoll('628@c.us', 'P1', []);
+    expect(vote).toHaveBeenCalledWith([]);
+  });
+
+  it('maps the BARE STRING throw on a non-poll target to a 400, not an opaque 500', async () => {
+    // Message.js:1010 throws a plain string, which would otherwise escape as an unhandled
+    // non-Error and surface as a 500 for what is really a client mistake.
+    const vote = jest.fn().mockRejectedValue('Invalid usage! Can only be used with a pollCreation message');
+    const adapter = ready(chatWith([{ id: { _serialized: 'M1' }, vote }]));
+    const err = await adapter.votePoll('628@c.us', 'M1', ['x']).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect((err as Error).message).toMatch(/is not a poll/);
+  });
+
+  it('propagates a genuine Error unchanged rather than calling it a client mistake', async () => {
+    const vote = jest.fn().mockRejectedValue(new Error('Evaluation failed'));
+    const adapter = ready(chatWith([{ id: { _serialized: 'P1' }, vote }]));
+    const err = await adapter.votePoll('628@c.us', 'P1', ['x']).catch((e: unknown) => e);
+    // Asserting the TYPE, not the message: a wrapped error would still contain the original text,
+    // so a message match alone would not notice a real engine fault being downgraded to a 400.
+    expect(err).not.toBeInstanceOf(BadRequestException);
+    expect((err as Error).message).toBe('Evaluation failed');
+  });
+
+  it('404s for a poll outside the 100-message fetch window', async () => {
+    const adapter = ready(chatWith([]));
+    await expect(adapter.votePoll('628@c.us', 'OLD', ['x'])).rejects.toBeInstanceOf(MessageNotFoundError);
   });
 });
 

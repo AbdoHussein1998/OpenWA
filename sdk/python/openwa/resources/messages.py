@@ -13,6 +13,7 @@ from ..types import (
     MessageMedia,
     PinMessageRequest,
     StarMessageRequest,
+    VotePollRequest,
     UnpinMessageRequest,
     BatchStatusResponse,
     BulkMessageResponse,
@@ -114,6 +115,10 @@ class MessagesResource:
     def pin(self, session_id: str, body: PinMessageRequest) -> SuccessResult:
         """Pin a message. ``durationSeconds`` must be 86400, 604800 or 2592000; defaults to 24h."""
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/messages/pin", body=body)
+
+    def vote_poll(self, session_id: str, body: VotePollRequest) -> SuccessResult:
+        """Cast a vote on a poll. Not supported on the Baileys engine (501)."""
+        return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/messages/vote-poll", body=body)
 
     def star(self, session_id: str, body: StarMessageRequest) -> SuccessResult:
         """Star or unstar a message. Best-effort on whatsapp-web.js."""
