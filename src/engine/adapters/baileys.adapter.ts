@@ -131,6 +131,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getOnMessageAck: () => this.callbacks.onMessageAck,
       getOnGroupEvent: () => this.callbacks.onGroupEvent,
       getOnCall: () => this.callbacks.onCall,
+      getOnPresenceUpdate: () => this.callbacks.onPresenceUpdate,
     });
     this.groups = new BaileysGroups({
       ensureReady: () => this.ensureReady(),
@@ -211,6 +212,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       handleGroupParticipantsUpdate: event => this.events.handleGroupParticipantsUpdate(event),
       handleGroupsUpdate: updates => this.events.handleGroupsUpdate(updates),
       handleCallEvents: calls => this.events.handleCallEvents(calls),
+      handlePresenceUpdate: update => this.events.handlePresenceUpdate(update),
       captureHistoryMessages: messages => this.history.captureHistoryMessages(messages),
       hydrateNames: () => this.history.hydrateNames(),
       getOnQRCode: () => this.callbacks.onQRCode,
@@ -484,6 +486,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   async getChats(): Promise<ChatSummary[]> {
     return this.contacts.getChats();
+  }
+
+  async subscribeToPresence(chatId: string): Promise<void> {
+    return this.messaging.subscribeToPresence(chatId);
   }
 
   async sendSeen(chatId: string): Promise<boolean> {

@@ -5660,3 +5660,25 @@ describe('WhatsAppWebJsAdapter account-restriction reporting', () => {
     expect(onDisconnected).toHaveBeenCalledWith(WAState.TOS_BLOCK);
   });
 });
+
+// whatsapp-web.js can publish the account's OWN presence but cannot observe anyone else's, and
+// emits no presence event at all. The refusal is declared inline on the adapter rather than in a
+// delegate so the parity gate — which reads method bodies off the prototype — can actually see it.
+describe('WhatsAppWebJsAdapter presence', () => {
+  it('refuses to subscribe, with the method named', async () => {
+    const adapter = new WhatsAppWebJsAdapter({
+      sessionId: 'sess-1',
+      sessionDataPath: './data/sessions',
+      puppeteer: {},
+    });
+
+    await expect(adapter.subscribeToPresence('628111@c.us')).rejects.toThrow(/subscribeToPresence/);
+  });
+
+  it('declares the refusal inline, where the parity gate can read it', () => {
+    const body = Object.getOwnPropertyDescriptor(WhatsAppWebJsAdapter.prototype, 'subscribeToPresence')
+      ?.value as () => unknown;
+
+    expect(String(body)).toMatch(/EngineNotSupportedError/);
+  });
+});

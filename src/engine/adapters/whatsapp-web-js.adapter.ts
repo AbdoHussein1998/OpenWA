@@ -43,6 +43,7 @@ import {
   IncomingCallEvent,
   AccountRestriction,
 } from '../interfaces/whatsapp-engine.interface';
+import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { resolveWebVersionPin } from '../wa-web-version';
 import { resolveAuthTimeoutMs } from '../engine-init-timeout';
 import { killOrphanedChromiumProcesses, removeStaleSingletonFiles } from './chromium-profile-hygiene';
@@ -625,6 +626,20 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // through onError (FAILED, no reconnect) rather than onDisconnected (reconnect).
       this.callbacks.onError?.(message ? `Authentication failed: ${message}` : 'Authentication failed');
     });
+  }
+
+  /**
+   * whatsapp-web.js exposes no way to observe another party's presence: WAWebPresenceChatAction
+   * offers only sendPresenceAvailable/sendPresenceUnavailable, which publish the ACCOUNT's own
+   * presence, and the library surfaces no presence event at all.
+   *
+   * Declared here inline rather than in a delegate on purpose. The parity gate reads method bodies
+   * off the prototype, so a throw hidden behind a delegate call is invisible to it and the
+   * `not-available` matrix row would go unverified; inline, the gate checks it.
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
+  async subscribeToPresence(_chatId: string): Promise<void> {
+    throw new EngineNotSupportedError('subscribeToPresence');
   }
 
   /**

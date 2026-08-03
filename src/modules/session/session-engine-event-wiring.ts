@@ -2,6 +2,7 @@ import { SessionStatus } from './entities/session.entity';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { PresenceStore } from './presence-store.service';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { EventsGateway } from '../events/events.gateway';
@@ -13,6 +14,7 @@ import {
   IWhatsAppEngine,
   IncomingCallEvent,
   AccountRestriction,
+  PresenceUpdateEvent,
 } from '../../engine/interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { SessionEngineLeafEvents } from './session-engine-leaf-events';
@@ -48,6 +50,7 @@ export interface SessionEngineWiringHost {
   messages: MessageProjector;
   sessionErrors: SessionErrorStore;
   sessionRestrictions: SessionRestrictionStore;
+  presence: PresenceStore;
   /** @Global AuditService; absent only in the standalone constructions specs build. */
   auditService?: AuditService;
   webhookService: WebhookService;
@@ -216,6 +219,17 @@ export class SessionEngineEventWiring {
         // onActionRequired, but persisting the reason here means it is available regardless.
         host.sessionErrors.set(id, reason);
         void host.hookManager.execute('session:error', { reason }, { sessionId: id, source: 'Engine' });
+      },
+      onPresenceUpdate: (event: PresenceUpdateEvent): void => {
+        if (!host.isLiveEngine(id, engine)) return;
+        // WhatsApp reports presence on every transition and freely repeats itself, so only an actual
+        // change is published. Without this, one watched chat with an active typist produces a
+        // continuous stream of identical events — enough to drown every other webhook a consumer
+        // subscribes to. The store is the only thing that knows the previous state, so it decides.
+        if (!host.presence.record(id, event)) return;
+        const payload: Record<string, unknown> = { sessionId: id, ...event };
+        host.eventsGateway.emitPresenceUpdate(id, payload);
+        void host.webhookService.dispatch(id, 'presence.update', payload);
       },
       onAccountRestriction: (restriction: AccountRestriction | null): void => {
         if (!host.isLiveEngine(id, engine)) return;

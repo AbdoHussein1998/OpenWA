@@ -90,6 +90,8 @@ func TestRouting(t *testing.T) {
 
 		{"Chats.List", func(c *Client) { c.Chats.List(ctx, "s1", nil) }, "GET", "/api/sessions/s1/chats"},
 		{"Chats.MarkRead", func(c *Client) { c.Chats.MarkRead(ctx, "s1", MarkChatRequest{}) }, "POST", "/api/sessions/s1/chats/read"},
+		{"Chats.SubscribePresence", func(c *Client) { c.Chats.SubscribePresence(ctx, "s1", MarkChatRequest{}) }, "POST", "/api/sessions/s1/presence/subscribe"},
+		{"Chats.GetPresence", func(c *Client) { c.Chats.GetPresence(ctx, "s1", "c@c.us") }, "GET", "/api/sessions/s1/presence/c@c.us"},
 		{"Chats.MarkUnread", func(c *Client) { c.Chats.MarkUnread(ctx, "s1", MarkChatRequest{}) }, "POST", "/api/sessions/s1/chats/unread"},
 		{"Chats.ClearMessages", func(c *Client) { c.Chats.ClearMessages(ctx, "s1", "c1") }, "DELETE", "/api/sessions/s1/chats/c1/messages"},
 		{"Chats.Archive", func(c *Client) { c.Chats.Archive(ctx, "s1", ArchiveChatRequest{}) }, "POST", "/api/sessions/s1/chats/archive"},

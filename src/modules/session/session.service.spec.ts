@@ -1,5 +1,6 @@
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { PresenceStore } from './presence-store.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
@@ -161,6 +162,7 @@ describe('SessionService', () => {
       emitSessionStatus: jest.fn(),
       emitSessionAuthenticated: jest.fn(),
       emitSessionDisconnected: jest.fn(),
+      emitPresenceUpdate: jest.fn(),
       emitMessage: jest.fn(),
       emitMessageSent: jest.fn(),
       emitMessageAck: jest.fn(),
@@ -206,6 +208,7 @@ describe('SessionService', () => {
         SessionEngineLifecycle,
         SessionErrorStore,
         SessionRestrictionStore,
+        PresenceStore,
         { provide: AuditService, useValue: auditService },
         {
           provide: getRepositoryToken(Session, 'data'),
@@ -2202,6 +2205,78 @@ describe('SessionService', () => {
       callbacks.onAccountRestriction?.(timelock);
 
       expect(repository.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // Presence is the noisiest thing WhatsApp reports — an update per transition, repeated freely — so
+  // the suppression is what keeps it from drowning every other event a consumer subscribes to.
+  describe('engine presence updates', () => {
+    const presence = (state: 'composing' | 'paused') => ({
+      chatId: 'c@c.us',
+      participants: [{ id: 'c@c.us', state }],
+    });
+
+    const startAndCapture = async (): Promise<EngineEventCallbacks> => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      await service.start('sess-uuid-1');
+      const calls = mockEngine.initialize.mock.calls as [EngineEventCallbacks][];
+      return calls[0][0];
+    };
+
+    it('publishes a change to both the socket and webhook subscribers', async () => {
+      const callbacks = await startAndCapture();
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onPresenceUpdate?.(presence('composing'));
+
+      const payload = { sessionId: 'sess-uuid-1', ...presence('composing') };
+      expect(webhookService.dispatch).toHaveBeenCalledWith('sess-uuid-1', 'presence.update', payload);
+      expect(eventsGateway.emitPresenceUpdate).toHaveBeenCalledWith('sess-uuid-1', payload);
+    });
+
+    it('publishes nothing when the reported state has not changed', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onPresenceUpdate?.(presence('composing'));
+      (webhookService.dispatch as jest.Mock).mockClear();
+      (eventsGateway.emitPresenceUpdate as jest.Mock).mockClear();
+
+      callbacks.onPresenceUpdate?.(presence('composing'));
+      callbacks.onPresenceUpdate?.(presence('composing'));
+
+      expect(webhookService.dispatch).not.toHaveBeenCalled();
+      expect(eventsGateway.emitPresenceUpdate).not.toHaveBeenCalled();
+    });
+
+    it('publishes again once the state actually changes', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onPresenceUpdate?.(presence('composing'));
+      (webhookService.dispatch as jest.Mock).mockClear();
+
+      callbacks.onPresenceUpdate?.(presence('paused'));
+
+      expect(webhookService.dispatch).toHaveBeenCalledWith(
+        'sess-uuid-1',
+        'presence.update',
+        expect.objectContaining({ participants: [{ id: 'c@c.us', state: 'paused' }] }),
+      );
+    });
+
+    it('serves the last report back through the read model', async () => {
+      const callbacks = await startAndCapture();
+      callbacks.onPresenceUpdate?.(presence('composing'));
+
+      await expect(service.getPresence('sess-uuid-1', 'c@c.us')).resolves.toMatchObject({
+        chatId: 'c@c.us',
+        participants: [{ id: 'c@c.us', state: 'composing' }],
+      });
+    });
+
+    // Subscribed but quiet is a normal state, not a missing resource.
+    it('reports null for a chat nothing was reported for', async () => {
+      await startAndCapture();
+
+      await expect(service.getPresence('sess-uuid-1', 'silent@c.us')).resolves.toBeNull();
     });
   });
 

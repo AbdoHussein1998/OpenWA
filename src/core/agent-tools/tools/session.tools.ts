@@ -53,6 +53,37 @@ export function sessionTools(session: SessionService): ToolDescriptor[] {
       handler: (_input, apiKey) => session.getStats(apiKey.allowedSessions),
     },
     {
+      name: 'SessionSubscribePresence',
+      description:
+        "Subscribe to a chat's presence (online / typing / recording). Updates then arrive as " +
+        'presence.update events; read the latest with SessionGetPresence. The subscription is lost on ' +
+        'a reconnect and must be re-issued. Not available on the whatsapp-web.js engine. Requires ' +
+        'OPERATOR role.',
+      tier: 'write',
+      requiredRole: ApiKeyRole.OPERATOR,
+      sessionScoped: true,
+      inputSchema: z.object({
+        sessionId,
+        chatId: z.string().describe('Chat JID (e.g. 1234567890@c.us)'),
+      }),
+      handler: (input: { sessionId: string; chatId: string }) =>
+        session.subscribeToPresence(input.sessionId, input.chatId).then(() => ({ success: true })),
+    },
+    {
+      name: 'SessionGetPresence',
+      description:
+        'The last presence reported for a chat, or null when none has been — the chat was never ' +
+        'subscribed, or nothing has changed since. Subscribe first with SessionSubscribePresence.',
+      tier: 'read',
+      requiredRole: ApiKeyRole.VIEWER,
+      sessionScoped: true,
+      inputSchema: z.object({
+        sessionId,
+        chatId: z.string().describe('Chat JID (e.g. 1234567890@c.us)'),
+      }),
+      handler: (input: { sessionId: string; chatId: string }) => session.getPresence(input.sessionId, input.chatId),
+    },
+    {
       name: 'SessionMarkChatRead',
       description: 'Mark a chat as read (clears unread count). Requires OPERATOR role.',
       tier: 'write',

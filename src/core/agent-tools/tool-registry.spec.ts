@@ -53,6 +53,8 @@ describe('v1 tool surface snapshot', () => {
       'SessionFindOne',
       'SessionGetChats',
       'SessionGetStats',
+      'SessionSubscribePresence',
+      'SessionGetPresence',
       'SessionMarkChatRead',
       'SessionMarkChatUnread',
       'SessionSendChatState',
@@ -101,6 +103,6 @@ describe('v1 tool surface snapshot', () => {
       .sort();
 
     expect(actualNames).toEqual(expected);
-    expect(expected).toHaveLength(39);
+    expect(expected).toHaveLength(41);
   });
 });

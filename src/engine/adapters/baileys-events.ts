@@ -5,6 +5,8 @@ import {
   EngineEventCallbacks,
   GroupEvent,
   IncomingCallEvent,
+  ParticipantPresence,
+  PresenceState,
   IncomingMessage,
   ReactionEvent,
   RevokedMessage,
@@ -39,6 +41,26 @@ import { createSilentLogger } from './baileys-logger';
  * `rejectCall` as a thin forwarder (it is a public IWhatsAppEngine method), injecting this
  * narrow host surface via closures so the delegate never touches lifecycle state directly.
  */
+/** The slice of Baileys' PresenceData this adapter reads. */
+interface RawPresence {
+  lastKnownPresence?: PresenceState;
+  lastSeen?: number;
+  groupOnlineCount?: number;
+}
+
+/**
+ * The states Baileys can report. Checked rather than trusted: the value crosses a library boundary
+ * and lands straight in a public webhook payload, so an unknown state added upstream must be dropped
+ * here rather than published as if this gateway understood it.
+ */
+const PRESENCE_STATES: ReadonlySet<PresenceState> = new Set<PresenceState>([
+  'available',
+  'unavailable',
+  'composing',
+  'recording',
+  'paused',
+]);
+
 export interface BaileysEventsHost {
   /** Live socket handle for media re-upload requests (inbound media download). */
   getSocket(): WASocket;
@@ -77,6 +99,8 @@ export interface BaileysEventsHost {
   getOnGroupEvent(): EngineEventCallbacks['onGroupEvent'];
   /** The currently-registered onCall callback, if any (assigned at initialize()). */
   getOnCall(): EngineEventCallbacks['onCall'];
+  /** The currently-registered onPresenceUpdate callback, if any (assigned at initialize()). */
+  getOnPresenceUpdate(): EngineEventCallbacks['onPresenceUpdate'];
 }
 
 export class BaileysEvents {
@@ -427,6 +451,46 @@ export class BaileysEvents {
       };
       this.host.getOnCall()?.(payload);
     }
+  }
+
+  /**
+   * Map Baileys' `presence.update` onto the neutral event.
+   *
+   * The payload is a per-participant map even for a 1:1 chat, where it holds the one contact — so
+   * the shape is preserved rather than flattened, and a group reports everyone WhatsApp mentioned.
+   * Ids are neutralized on both the chat and each participant, so a consumer never sees a raw
+   * `@s.whatsapp.net` or a lid that the phone-dialect side of the API would not accept back.
+   *
+   * `lastSeen` is absent far more often than not: WhatsApp withholds it whenever the contact's
+   * privacy settings do, which is the default for most accounts. That is not an error and is not
+   * substituted with a guess.
+   */
+  handlePresenceUpdate(update: { id?: string; presences?: Record<string, RawPresence> }): void {
+    const report = this.host.getOnPresenceUpdate();
+    if (!report || !update?.id || !update.presences) return;
+
+    const participants: ParticipantPresence[] = [];
+    for (const [participant, data] of Object.entries(update.presences)) {
+      const state = data?.lastKnownPresence;
+      // An entry with no state says nothing; forwarding it as a guessed 'unavailable' would report
+      // a contact offline on the strength of a malformed payload.
+      if (!state || !PRESENCE_STATES.has(state)) continue;
+      participants.push({
+        id: this.host.toNeutralJid(participant),
+        state,
+        ...(typeof data.lastSeen === 'number' && Number.isFinite(data.lastSeen) ? { lastSeen: data.lastSeen } : {}),
+      });
+    }
+    if (participants.length === 0) return;
+
+    const groupOnlineCount = Object.values(update.presences).find(
+      p => typeof p?.groupOnlineCount === 'number',
+    )?.groupOnlineCount;
+    this.host.getOnPresenceUpdate()?.({
+      chatId: this.host.toNeutralJid(update.id),
+      participants,
+      ...(typeof groupOnlineCount === 'number' ? { groupOnlineCount } : {}),
+    });
   }
 
   /**

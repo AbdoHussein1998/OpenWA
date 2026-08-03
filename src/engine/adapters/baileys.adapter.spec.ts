@@ -62,6 +62,7 @@ class FakeSock extends EventEmitter {
   public newsletterFollow = jest.fn().mockResolvedValue(undefined);
   public newsletterUnfollow = jest.fn().mockResolvedValue(undefined);
   public rejectCall = jest.fn().mockResolvedValue(undefined);
+  public presenceSubscribe = jest.fn().mockResolvedValue(undefined);
   // Baileys answers this by emitting its own connection.update carrying the result, so the default
   // mirrors that: resolving alone proves nothing reached the adapter.
   public fetchAccountReachoutTimelock = jest.fn().mockResolvedValue({ isActive: false });
@@ -4243,5 +4244,117 @@ describe('BaileysAdapter account-restriction reporting', () => {
     expect(adapter.getStatus()).toBe(EngineStatus.READY);
     expect(onDisconnected).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+// Presence is push-only after a subscription — it cannot be queried — so the mapping is the only
+// place a wrong shape can be caught before it reaches a public webhook payload.
+describe('BaileysAdapter presence', () => {
+  beforeEach(() => {
+    fakeSock.user = undefined;
+    fakeSock.resetEmitter();
+    jest.clearAllMocks();
+  });
+
+  /** Subscribing is a live-socket operation, so the session has to be connected first. */
+  const readyAdapter = async (callbacks = noopCallbacks({})) => {
+    const adapter = newAdapter();
+    await adapter.initialize(callbacks);
+    fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+    fakeSock.fire('connection.update', { connection: 'open' });
+    return adapter;
+  };
+
+  it('subscribes through the socket for the addressed chat', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.subscribeToPresence('628111@c.us');
+
+    expect(fakeSock.presenceSubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  // Unlike the typing indicator next door, this one is NOT best-effort: the caller asked for a
+  // subscription, and swallowing the failure would leave them waiting for updates that never come.
+  it('surfaces a failed subscription instead of swallowing it', async () => {
+    const adapter = await readyAdapter();
+    fakeSock.presenceSubscribe.mockRejectedValueOnce(new Error('no LID for user'));
+
+    await expect(adapter.subscribeToPresence('628111@c.us')).rejects.toThrow('no LID for user');
+  });
+
+  it('maps a per-participant presence map onto the neutral event', async () => {
+    const onPresenceUpdate = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onPresenceUpdate }));
+
+    fakeSock.fire('presence.update', {
+      id: '628111@s.whatsapp.net',
+      presences: { '628222@s.whatsapp.net': { lastKnownPresence: 'composing', lastSeen: 1786000000 } },
+    });
+
+    expect(onPresenceUpdate).toHaveBeenCalledWith({
+      chatId: '628111@c.us',
+      participants: [{ id: '628222@c.us', state: 'composing', lastSeen: 1786000000 }],
+    });
+  });
+
+  // Most contacts hide last-seen, so its absence is the common case and must not become a guess.
+  it('omits lastSeen rather than inventing one', async () => {
+    const onPresenceUpdate = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onPresenceUpdate }));
+
+    fakeSock.fire('presence.update', {
+      id: '628111@s.whatsapp.net',
+      presences: { '628111@s.whatsapp.net': { lastKnownPresence: 'available' } },
+    });
+
+    const [event] = onPresenceUpdate.mock.calls[0] as [{ participants: Record<string, unknown>[] }];
+    expect(event.participants[0]).not.toHaveProperty('lastSeen');
+  });
+
+  it('carries the group online count when the engine reports one', async () => {
+    const onPresenceUpdate = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onPresenceUpdate }));
+
+    fakeSock.fire('presence.update', {
+      id: '12036@g.us',
+      presences: { '628222@s.whatsapp.net': { lastKnownPresence: 'available', groupOnlineCount: 4 } },
+    });
+
+    expect(onPresenceUpdate).toHaveBeenCalledWith(expect.objectContaining({ groupOnlineCount: 4 }));
+  });
+
+  // An unknown state crossing the library boundary lands straight in a public payload, so it is
+  // dropped rather than published as if this gateway understood it.
+  it('drops a participant whose state is unknown or missing', async () => {
+    const onPresenceUpdate = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onPresenceUpdate }));
+
+    fakeSock.fire('presence.update', {
+      id: '12036@g.us',
+      presences: {
+        '628222@s.whatsapp.net': { lastKnownPresence: 'telepathic' },
+        '628333@s.whatsapp.net': {},
+        '628444@s.whatsapp.net': { lastKnownPresence: 'available' },
+      },
+    });
+
+    expect(onPresenceUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ participants: [{ id: '628444@c.us', state: 'available' }] }),
+    );
+  });
+
+  it('emits nothing when no participant survives the mapping', async () => {
+    const onPresenceUpdate = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onPresenceUpdate }));
+
+    fakeSock.fire('presence.update', { id: '12036@g.us', presences: { 'x@s.whatsapp.net': {} } });
+    fakeSock.fire('presence.update', { id: '12036@g.us' });
+
+    expect(onPresenceUpdate).not.toHaveBeenCalled();
   });
 });
