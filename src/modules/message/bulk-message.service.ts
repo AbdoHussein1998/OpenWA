@@ -13,6 +13,7 @@ import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { MessageStatus } from './entities/message.entity';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { MessageService } from './message.service';
+import { SendPacingService } from './send-pacing.service';
 import { HookManager } from '../../core/hooks';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from './media-cap.util';
 import { SsrfBlockedError, SSRF_BLOCKED_CLIENT_MESSAGE } from '../../common/security/ssrf-guard';
@@ -89,6 +90,7 @@ export class BulkMessageService implements OnApplicationBootstrap {
     private readonly engines: EngineRegistry,
     private readonly messageService: MessageService,
     private readonly hookManager: HookManager,
+    private readonly pacing: SendPacingService,
   ) {}
 
   /**
@@ -376,6 +378,11 @@ export class BulkMessageService implements OnApplicationBootstrap {
     try {
       // Apply template variables
       content = this.applyVariables(msg.content, msg.variables);
+
+      // Pacing runs BEFORE the moderation gate, matching MessageService: a send policy forbids is not
+      // offered to plugins at all. A refusal is a 429 that fails THIS item (honouring stopOnError),
+      // not the batch — the allowance may free up, and a batch killed outright could not resume.
+      await this.pacing.assertSendAllowed(batch.sessionId);
 
       // Per-message moderation gate — the SAME message:sending hook single sends use, so a
       // compliance/moderation plugin sees bulk traffic too (bulk previously bypassed it entirely).

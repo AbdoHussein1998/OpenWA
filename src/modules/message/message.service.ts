@@ -12,6 +12,7 @@ import { assertBase64WithinMediaCap, stripBase64DataUri } from './media-cap.util
 import { MediaInput, IWhatsAppEngine, MessageResult } from '../../engine/interfaces/whatsapp-engine.interface';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
 import { HookManager, applySendingGate } from '../../core/hooks';
+import { SendPacingService } from './send-pacing.service';
 import { TemplateService } from '../template/template.service';
 import { renderTemplate } from '../../common/utils/template-render';
 import { createLogger } from '../../common/services/logger.service';
@@ -94,6 +95,9 @@ export class MessageService {
     private readonly hookManager: HookManager,
     private readonly templateService: TemplateService,
     private readonly lidMappingStore: LidMappingStoreService,
+    // Required, not @Optional: a missing pacing service would silently mean "no pacing", which is
+    // the one failure mode this feature must not have. The service itself no-ops when disabled.
+    private readonly pacing: SendPacingService,
     @Optional()
     private readonly configService?: ConfigService,
     // Optional so the existing standalone constructions keep working; absent means the archive
@@ -145,7 +149,13 @@ export class MessageService {
    * reply/forward) and edit — passes through the same moderation chokepoint, instead of only
    * `sendText`. The implementation is shared with StatusService via core/hooks/sending-gate.
    */
-  private applySendingGate<T extends object>(sessionId: string, type: string, input: T): Promise<T> {
+  private async applySendingGate<T extends object>(sessionId: string, type: string, input: T): Promise<T> {
+    // Pacing runs BEFORE the plugin gate, so a send that policy forbids never reaches a plugin at
+    // all — plugins should not be asked to moderate, or given the chance to rewrite, traffic that is
+    // not going to be sent. The consequence is deliberate and documented in the hook contract: a
+    // paced-out send fires no `message:sending`, so a plugin cannot observe it. Refusals are a 429
+    // carrying `code: SEND_PACING_LIMITED`; a plugin veto stays a 400.
+    await this.pacing.assertSendAllowed(sessionId);
     return applySendingGate(this.hookManager, sessionId, type, input, 'MessageService');
   }
 
@@ -163,6 +173,10 @@ export class MessageService {
     input: unknown,
     error: unknown,
   ): Promise<never> {
+    // The engine was asked and refused, so this counts toward the breaker's streak. Validation
+    // errors thrown before the engine is reached never come through here, which is what keeps a
+    // client sending malformed requests from tripping the breaker on a healthy session.
+    this.pacing.recordSendFailure(sessionId);
     await this.saveFailedMessage(message);
     // Sanitize the hook payload: an SSRF block's raw .message names the resolved internal address
     // (a recon/DNS-rebind oracle) — the client-facing throw below already maps it to a generic
@@ -669,6 +683,9 @@ export class MessageService {
     // A send whose engine couldn't read the sent message's id back reports an empty id — a forward that
     // can't recover the copy, or a WhatsApp Web build that renamed the id field out from under the
     // engine. Leave waMessageId unset (NULL) so no ack mis-matches it.
+    // The engine accepted the message, so whatever streak the breaker was tracking is over. Recorded
+    // here rather than at each call site for the same reason failSend is: one funnel, twelve senders.
+    this.pacing.recordSendSuccess(message.sessionId);
     if (result.id) message.waMessageId = result.id;
     message.status = MessageStatus.SENT;
     message.timestamp = result.timestamp;

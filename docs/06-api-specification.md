@@ -1166,6 +1166,42 @@ Get the processing status and progress of a bulk batch.
 
 **Errors:** `401` missing/invalid API key · `404` batch not found for this session
 
+### Send pacing (opt-in, `429 SEND_PACING_LIMITED`)
+
+Every outbound send — the `messages/send-*` routes, `messages/edit`, bulk batches, status posts and
+`messages/send-product` — passes an optional pacing governor before it reaches WhatsApp. It is **off
+by default**: unless `SEND_PACING_ENABLED=true`, nothing is refused and no extra work is done.
+
+When enabled, two rules can refuse a send:
+
+| Rule | What it means |
+|---|---|
+| Warm-up daily cap | The session has used its allowance for the current **UTC** day. The allowance grows with the session's age (`SEND_PACING_WARMUP_SCHEDULE`), because a brand-new WhatsApp account that immediately sends at volume is the pattern that gets numbers banned. The count comes from the messages table, so it survives restarts. |
+| Failure breaker | Consecutive send failures reached `SEND_PACING_BREAKER_THRESHOLD`, which usually means WhatsApp has already started refusing this account. Sends resume after `SEND_PACING_BREAKER_COOLDOWN_MS`, or immediately after any send succeeds. |
+
+A refusal is `429` with a body carrying **`code: "SEND_PACING_LIMITED"`** and `retryAfterSeconds`:
+
+```json
+{
+  "statusCode": 429,
+  "error": "Too Many Requests",
+  "message": "Daily send allowance of 20 reached for a session 0 day(s) old",
+  "code": "SEND_PACING_LIMITED",
+  "retryAfterSeconds": 34521
+}
+```
+
+The `code` is what distinguishes it from the **global rate limiter's** own `429`, which carries no
+`code`. The difference matters to a client: the throttler's 429 clears in seconds, a daily cap does
+not. Do not retry a `SEND_PACING_LIMITED` response before `retryAfterSeconds`.
+
+Inside a bulk batch a refusal fails just that item (honouring `stopOnError`), not the batch — the
+allowance may free up, and a batch killed outright could not be resumed.
+
+Two consequences worth knowing: a paced-out send fires **no** `message:sending` plugin hook (see
+`docs/19-plugin-architecture.md`), and refusals are counted in the `openwa_send_pacing_refusals_total`
+Prometheus counter, labelled by rule.
+
 #### POST /api/sessions/:sessionId/messages/send-text
 
 Send a plain text message.

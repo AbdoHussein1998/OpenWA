@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { computeFeatureFlags } from './feature-flags';
+import { computeSendPacingConfig } from '../modules/message/send-pacing.config';
 import { resolveInflightBodyBudgetBytes } from './inflight-body-budget';
 import { readWsRateLimitConfig } from '../modules/events/ws-rate-limit';
 
@@ -113,6 +114,10 @@ export default () => ({
   // Runtime feature flags. Single source of truth: src/config/feature-flags.ts. Exposed here so the
   // full set is discoverable via ConfigService (`features.*`) instead of scattered process.env reads.
   features: computeFeatureFlags(),
+
+  // Outbound send pacing. Its own object rather than a feature flag: every field needs clamping,
+  // because a bad value here decides whether messages are refused. See message/send-pacing.config.ts.
+  sendPacing: computeSendPacingConfig(),
 
   // Redis configuration
   redis: {
