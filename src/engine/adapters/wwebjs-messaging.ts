@@ -689,6 +689,16 @@ export class WwebjsMessaging {
     this.host.logger.log(`Pinned message ${messageId} in chat ${chatId} for ${durationSeconds}s`);
   }
 
+  async starMessage(chatId: string, messageId: string, star: boolean): Promise<void> {
+    this.host.ensureReady();
+    const message = await this.findInFetchWindow(chatId, messageId);
+    // Both resolve void, and the page-side helper silently does nothing when canStarMsg() refuses
+    // the message (Message.js:672-712). There is no signal to map, so a star that WhatsApp declined
+    // is indistinguishable from one it accepted — documented rather than faked into a refusal.
+    await (star ? message.star() : message.unstar());
+    this.host.logger.log(`${star ? 'Starred' : 'Unstarred'} message ${messageId} in chat ${chatId}`);
+  }
+
   async unpinMessage(chatId: string, messageId: string): Promise<void> {
     this.host.ensureReady();
     const message = await this.findInFetchWindow(chatId, messageId);

@@ -215,6 +215,13 @@ describe('StatusResource — nested media bodies', () => {
     expect(t.lastCall!.body).toEqual({ video: { url: 'http://vid' }, recipients: ['a@c.us'] });
   });
 
+  it('star posts the boolean through', async () => {
+    const t = new MockTransport().on('POST', /\/messages\/star$/, { body: { success: true } });
+    await client(t).messages.star('s', { chatId: 'c1', messageId: 'm1', star: false });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/messages/star');
+    expect(t.lastCall!.body).toEqual({ chatId: 'c1', messageId: 'm1', star: false });
+  });
+
   it('pin and unpin post to their own routes', async () => {
     const t = new MockTransport().on('POST', /\/messages\/(un)?pin$/, { body: { success: true } });
     const c = client(t);

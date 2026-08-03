@@ -234,6 +234,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   sendStickerMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   sendTextMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   sendVideoMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  starMessage: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      "wwjs Message.star()/unstar() → Promise<void> (index.d.ts:1336-1338) — void, so there is no refusal signal to map, unlike pin; baileys chatModify({star:{messages:[{id,fromMe}],star}}, jid) (Types/Chat.d.ts:83-89) — needs the stored key's fromMe, since the same id means different messages depending on direction",
+  },
   setGroupDescription: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },

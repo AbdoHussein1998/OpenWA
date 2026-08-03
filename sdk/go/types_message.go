@@ -340,3 +340,11 @@ type UnpinMessageRequest struct {
 	ChatID    string `json:"chatId"`
 	MessageID string `json:"messageId"`
 }
+
+// StarMessageRequest stars or unstars a message. Best-effort on whatsapp-web.js,
+// which silently ignores a message it will not star.
+type StarMessageRequest struct {
+	ChatID    string `json:"chatId"`
+	MessageID string `json:"messageId"`
+	Star      bool   `json:"star"`
+}

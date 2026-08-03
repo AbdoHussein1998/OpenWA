@@ -338,6 +338,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.messaging.deleteMessage(chatId, messageId, forEveryone);
   }
 
+  async starMessage(chatId: string, messageId: string, star: boolean): Promise<void> {
+    return this.messaging.starMessage(chatId, messageId, star);
+  }
+
   async pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {
     return this.messaging.pinMessage(chatId, messageId, durationSeconds);
   }

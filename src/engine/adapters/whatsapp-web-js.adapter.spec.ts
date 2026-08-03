@@ -3591,6 +3591,41 @@ describe('pinMessage / unpinMessage', () => {
   });
 });
 
+describe('starMessage', () => {
+  const ready = (client: unknown): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = client;
+    return adapter;
+  };
+  const chatWith = (messages: unknown[]) => ({
+    getChatById: jest.fn().mockResolvedValue({ fetchMessages: jest.fn().mockResolvedValue(messages) }),
+  });
+
+  it('stars via star() and never calls unstar()', async () => {
+    const star = jest.fn().mockResolvedValue(undefined);
+    const unstar = jest.fn().mockResolvedValue(undefined);
+    const adapter = ready(chatWith([{ id: { _serialized: 'M1' }, star, unstar }]));
+    await adapter.starMessage('628@c.us', 'M1', true);
+    expect(star).toHaveBeenCalled();
+    expect(unstar).not.toHaveBeenCalled();
+  });
+
+  it('unstars via unstar() and never calls star()', async () => {
+    const star = jest.fn().mockResolvedValue(undefined);
+    const unstar = jest.fn().mockResolvedValue(undefined);
+    const adapter = ready(chatWith([{ id: { _serialized: 'M1' }, star, unstar }]));
+    await adapter.starMessage('628@c.us', 'M1', false);
+    expect(unstar).toHaveBeenCalled();
+    expect(star).not.toHaveBeenCalled();
+  });
+
+  it('throws MessageNotFoundError when the message is outside the fetch window', async () => {
+    const adapter = ready(chatWith([]));
+    await expect(adapter.starMessage('628@c.us', 'GONE', true)).rejects.toBeInstanceOf(MessageNotFoundError);
+  });
+});
+
 describe('LID mapping persistence to LidMappingStore (#583 R3)', () => {
   const readyWithStore = (client: unknown, lidMappingStore: unknown): WhatsAppWebJsAdapter => {
     const adapter = new WhatsAppWebJsAdapter({

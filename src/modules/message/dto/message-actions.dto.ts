@@ -224,6 +224,25 @@ export class PinMessageDto {
   durationSeconds?: number;
 }
 
+export class StarMessageDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  chatId: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  messageId: string;
+
+  @ApiProperty({ description: 'true to star, false to remove the star.' })
+  // Read strictly for the same reason as DeleteMessageDto.forEveryone: implicit conversion would
+  // turn the string "false" into boolean true, silently inverting the caller's intent.
+  @ToStrictBoolean()
+  @IsBoolean()
+  star: boolean;
+}
+
 export class UnpinMessageDto {
   @ApiProperty()
   @IsString()

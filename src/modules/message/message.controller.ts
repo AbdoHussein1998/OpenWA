@@ -16,6 +16,7 @@ import {
   DeleteMessageDto,
   EditMessageDto,
   PinMessageDto,
+  StarMessageDto,
   UnpinMessageDto,
 } from './dto/message-actions.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
@@ -438,6 +439,23 @@ export class MessageController {
     @Body() dto: UnpinMessageDto,
   ): Promise<{ success: boolean }> {
     return this.messageService.unpinMessage(sessionId, dto);
+  }
+
+  @Post('star')
+  @HttpCode(HttpStatus.OK)
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Star or unstar a message' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Instruction delivered. On whatsapp-web.js the engine silently ignores a message it will not ' +
+      'star, so this does not guarantee the star is set.',
+  })
+  @ApiResponse({ status: 400, description: 'Session not active' })
+  @ApiResponse({ status: 404, description: 'Message not found in the chat' })
+  async starMessage(@Param('sessionId') sessionId: string, @Body() dto: StarMessageDto): Promise<{ success: boolean }> {
+    return this.messageService.starMessage(sessionId, dto);
   }
 
   // ========== Edit Message ==========

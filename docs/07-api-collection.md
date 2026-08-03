@@ -265,6 +265,16 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/pin" \
   -d '{"chatId":"628123456789@c.us","messageId":"true_628123456789@c.us_3EB0ABCD","durationSeconds":604800}'
 ```
 
+#### POST /api/sessions/:sessionId/messages/star
+
+Star or unstar a message.
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/star" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"628123456789@c.us","messageId":"true_628123456789@c.us_3EB0ABCD","star":true}'
+```
+
 #### POST /api/sessions/:sessionId/messages/unpin
 
 ```bash
