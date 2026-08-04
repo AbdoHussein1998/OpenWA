@@ -292,14 +292,17 @@ export class BaileysMessaging {
   async reactToMessage(chatId: string, messageId: string, emoji: string): Promise<void> {
     this.host.ensureReady();
     const target = await this.requireStored(messageId);
-    await this.sock().sendMessage(chatId, { react: { text: emoji, key: target.key } });
+    this.assertStoredInChat(target, chatId, messageId);
+    // Resolved like any other send: a lid-migrated contact rejects PN-addressed sends (ack 463).
+    await this.sock().sendMessage(await this.toDeliverableJid(chatId), { react: { text: emoji, key: target.key } });
   }
 
   async deleteMessage(chatId: string, messageId: string, forEveryone = true): Promise<void> {
     this.host.ensureReady();
     const target = await this.requireStored(messageId);
+    this.assertStoredInChat(target, chatId, messageId);
     if (forEveryone) {
-      await this.sock().sendMessage(chatId, { delete: target.key });
+      await this.sock().sendMessage(await this.toDeliverableJid(chatId), { delete: target.key });
       return;
     }
     // Delete-for-me (revoke on this device only): Baileys exposes it as a chat modification, not a
@@ -327,12 +330,7 @@ export class BaileysMessaging {
         `the edit of message ${messageId} was rejected — only the account's own messages can be edited`,
       );
     }
-    // The stored key must belong to the requested chat — editing with another chat's key is a
-    // not-found here, not a cross-chat write. Both sides are neutralized so @c.us/@s.whatsapp.net
-    // (and a known lid<->pn twin) compare equal.
-    if (this.host.toNeutralJid(target.key.remoteJid ?? '') !== this.host.toNeutralJid(chatId)) {
-      throw new MessageNotFoundError(messageId, chatId);
-    }
+    this.assertStoredInChat(target, chatId, messageId);
     // An edit keeps the original message id, so it is neither re-persisted nor echoed as a new send.
     // The destination is resolved like any other send: a lid-migrated contact rejects PN-addressed
     // sends with ack error 463 (see toDeliverableJid).
@@ -449,9 +447,22 @@ export class BaileysMessaging {
     return found;
   }
 
+  /**
+   * The stored key must belong to the requested chat — acting with another chat's key is a
+   * not-found here, not a cross-chat write (a pin sent into chat A referencing chat B's message, or
+   * a star indexed under the wrong conversation, would report success). Both sides are neutralized
+   * so @c.us/@s.whatsapp.net (and a known lid<->pn twin) compare equal.
+   */
+  private assertStoredInChat(target: WAMessage, chatId: string, messageId: string): void {
+    if (this.host.toNeutralJid(target.key.remoteJid ?? '') !== this.host.toNeutralJid(chatId)) {
+      throw new MessageNotFoundError(messageId, chatId);
+    }
+  }
+
   async starMessage(chatId: string, messageId: string, star: boolean): Promise<void> {
     this.host.ensureReady();
     const target = await this.requireStored(messageId);
+    this.assertStoredInChat(target, chatId, messageId);
     // fromMe is load-bearing: the same message id addresses a different message depending on
     // direction, so omitting it would star the wrong side of the conversation.
     // Fold @c.us -> @s.whatsapp.net: chatModify keys the star app-state index by the raw jid (no
@@ -470,11 +481,12 @@ export class BaileysMessaging {
   async pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {
     this.host.ensureReady();
     const target = await this.requireStored(messageId);
+    this.assertStoredInChat(target, chatId, messageId);
     // Read the enum through the LAZY loader rather than a static import. @whiskeysockets/baileys is
     // pure ESM and every other site in this codebase defers it to first connect; a module-scope
     // require would drag ~590 modules into boot even for whatsapp-web.js-only processes.
     const { proto } = await this.host.loadLib();
-    await this.sock().sendMessage(chatId, {
+    await this.sock().sendMessage(await this.toDeliverableJid(chatId), {
       pin: target.key,
       type: proto.PinInChat.Type.PIN_FOR_ALL,
       // WhatsApp recognises only these three windows; the DTO rejects anything else before we
@@ -486,8 +498,12 @@ export class BaileysMessaging {
   async unpinMessage(chatId: string, messageId: string): Promise<void> {
     this.host.ensureReady();
     const target = await this.requireStored(messageId);
+    this.assertStoredInChat(target, chatId, messageId);
     const { proto } = await this.host.loadLib();
     // `time` is meaningless for an unpin and is omitted rather than sent as a dummy value.
-    await this.sock().sendMessage(chatId, { pin: target.key, type: proto.PinInChat.Type.UNPIN_FOR_ALL });
+    await this.sock().sendMessage(await this.toDeliverableJid(chatId), {
+      pin: target.key,
+      type: proto.PinInChat.Type.UNPIN_FOR_ALL,
+    });
   }
 }

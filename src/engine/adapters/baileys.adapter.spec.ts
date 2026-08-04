@@ -2731,6 +2731,46 @@ describe('BaileysAdapter store-backed ops', () => {
     expect(fakeSock.removeChatLabel).toHaveBeenCalledWith('628111@s.whatsapp.net', 'LABEL8');
   });
 
+  // chatModify keys the label app-state index by the RAW jid, so a neutral @c.us would label a
+  // phantom chat the phone never reads — reported as success. Same fold the deleteForMe/star
+  // writes carry.
+  it('addLabelToChat folds the neutral @c.us id to the engine form', async () => {
+    const adapter = await ready();
+    await adapter.addLabelToChat('628111@c.us', 'LABEL8');
+    expect(fakeSock.addChatLabel).toHaveBeenCalledWith('628111@s.whatsapp.net', 'LABEL8');
+  });
+
+  it('removeLabelFromChat folds the neutral @c.us id to the engine form', async () => {
+    const adapter = await ready();
+    await adapter.removeLabelFromChat('628111@c.us', 'LABEL8');
+    expect(fakeSock.removeChatLabel).toHaveBeenCalledWith('628111@s.whatsapp.net', 'LABEL8');
+  });
+
+  // A stored key must belong to the requested chat: the pin/star/react/delete would otherwise land
+  // in whatever chat the caller named while referencing another conversation's message — and
+  // report success. editMessage has carried this guard from the start; these are its siblings.
+  it.each([
+    ['starMessage', (a: BaileysAdapter) => a.starMessage('628999@c.us', 'TARGET', true)],
+    ['pinMessage', (a: BaileysAdapter) => a.pinMessage('628999@c.us', 'TARGET', 86400)],
+    ['unpinMessage', (a: BaileysAdapter) => a.unpinMessage('628999@c.us', 'TARGET')],
+    ['reactToMessage', (a: BaileysAdapter) => a.reactToMessage('628999@c.us', 'TARGET', '👍')],
+    ['deleteMessage', (a: BaileysAdapter) => a.deleteMessage('628999@c.us', 'TARGET', true)],
+  ])('%s refuses a chat/message pair mismatch as not-found', async (_name, call) => {
+    fakeStore.getMessage.mockResolvedValue(stored); // stored under 628111, requested for 628999
+    const adapter = await ready();
+    await expect(call(adapter)).rejects.toBeInstanceOf(MessageNotFoundError);
+    expect(fakeSock.sendMessage).not.toHaveBeenCalled();
+    expect(fakeSock.chatModify).not.toHaveBeenCalled();
+  });
+
+  it('pinMessage resolves the LID deliverable jid like the send path', async () => {
+    fakeStore.getMessage.mockResolvedValue(stored);
+    fakeSock.signalRepository = { lidMapping: { getLIDForPN: jest.fn().mockResolvedValue('484848@lid') } };
+    const adapter = await ready();
+    await adapter.pinMessage('628111@c.us', 'TARGET', 86400);
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('484848@lid', expect.objectContaining({ pin: stored.key }));
+  });
+
   it('getChannelById maps newsletterMetadata(jid) → Channel (optionals only when present)', async () => {
     fakeSock.newsletterMetadata.mockResolvedValue({
       id: '120363N@newsletter',
