@@ -88,6 +88,25 @@ describe('cold-reachout counting against a real database', () => {
     await expect(service.assertSendAllowed('s1', 'stranger@c.us')).resolves.toBeUndefined();
   });
 
+  // The class rule — answering someone who wrote first is not a reachout — must hold for the
+  // AGGREGATE too, not just the per-send probe. A reply to a chat whose first-ever message arrived
+  // today used to inflate the count and spend budget the account never used.
+  it('does not count a reply to someone who wrote first today toward the cold budget', async () => {
+    // They wrote first this morning; we answered. A new chat, but an answered one.
+    await addMessage('wrote-first@c.us', '2026-08-03T08:00:00.000Z', MessageDirection.INCOMING);
+    await addMessage('wrote-first@c.us', TODAY);
+    // Genuine reachouts: we wrote first — one even got a reply, which keeps it OUR reachout.
+    await addMessage('cold-1@c.us', TODAY);
+    await addMessage('cold-2@c.us', TODAY);
+    await addMessage('cold-2@c.us', '2026-08-03T10:00:00.000Z', MessageDirection.INCOMING);
+
+    // Two of three used: the answered chat did not count, the replied-to reachout still does.
+    await expect(service.assertSendAllowed('s1', 'stranger@c.us')).resolves.toBeUndefined();
+
+    await addMessage('cold-3@c.us', TODAY);
+    await expect(service.assertSendAllowed('s1', 'stranger@c.us')).rejects.toMatchObject({ status: 429 });
+  });
+
   it("does not count another session's reachouts", async () => {
     await ds.query(
       `INSERT INTO "messages" ("id","sessionId","chatId","from","to","type","direction","createdAt")

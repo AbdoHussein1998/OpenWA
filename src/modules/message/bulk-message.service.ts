@@ -20,7 +20,7 @@ import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { MessageStatus } from './entities/message.entity';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { MessageService } from './message.service';
-import { SendPacingService, isPacingLimitedError } from './send-pacing.service';
+import { SendPacingService, isPacingLimitedError, SEND_PACING_LIMITED } from './send-pacing.service';
 import { SessionOwnershipService } from '../session/session-ownership.service';
 import { HookManager } from '../../core/hooks';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from './media-cap.util';
@@ -59,11 +59,15 @@ export function resolveFinalBatchStatus(
 /**
  * Build the error stored on a batch result. An SSRF block names the internal host/IP it refused, so
  * it must never be persisted/returned verbatim — it would be readable via GET batch status. Map it to
- * a generic, code-tagged message; ordinary errors keep their (non-sensitive) message.
+ * a generic, code-tagged message; a pacing refusal keeps its own code so batch results distinguish
+ * policy 429s from engine refusals; ordinary errors keep their (non-sensitive) message.
  */
 export function sanitizeBatchError(error: unknown): { code: string; message: string } {
   if (error instanceof SsrfBlockedError) {
     return { code: 'SEND_BLOCKED', message: SSRF_BLOCKED_CLIENT_MESSAGE };
+  }
+  if (isPacingLimitedError(error)) {
+    return { code: SEND_PACING_LIMITED, message: error instanceof Error ? error.message : String(error) };
   }
   return { code: 'SEND_FAILED', message: error instanceof Error ? error.message : String(error) };
 }

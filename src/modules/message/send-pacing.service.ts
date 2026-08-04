@@ -361,9 +361,11 @@ export class SendPacingService {
   }
 
   /**
-   * Distinct chats this session started today: it sent to them today, and nothing in the chat
-   * predates today. Expressed as a NOT EXISTS rather than a `MIN(createdAt)` group-by so it stays on
-   * the `(sessionId, createdAt)` and `chatId` indexes instead of grouping the whole table.
+   * Distinct chats this session started today: it sent to them today, nothing in the chat predates
+   * today, and nobody wrote to it first — a chat whose counterpart messaged earlier the same day is
+   * an answered conversation, not a reachout (the "cold" rule above), however new the chat is.
+   * Expressed as NOT EXISTS probes so the outer query stays on the `(sessionId, createdAt)` and
+   * `chatId` indexes; the only aggregate is a per-chat MIN over today's outgoing rows.
    */
   private countColdReachoutsToday(sessionId: string, dayStart: Date): Promise<number> {
     return (
@@ -378,6 +380,12 @@ export class SendPacingService {
         // them to lowercase and the query would fail at runtime on the very first cold send.
         .andWhere(
           'NOT EXISTS (SELECT 1 FROM "messages" p WHERE p."sessionId" = :sessionId AND p."chatId" = m."chatId" AND p."createdAt" < :dayStart)',
+        )
+        // They wrote first: an incoming row strictly earlier than today's first outgoing one makes
+        // the chat an answered conversation, not a cold start. A tie stays cold (conservative).
+        .andWhere(
+          'NOT EXISTS (SELECT 1 FROM "messages" i WHERE i."sessionId" = :sessionId AND i."chatId" = m."chatId" AND i."direction" = :incoming AND i."createdAt" < (SELECT MIN(o."createdAt") FROM "messages" o WHERE o."sessionId" = :sessionId AND o."chatId" = m."chatId" AND o."direction" = :direction AND o."createdAt" >= :dayStart))',
+          { incoming: MessageDirection.INCOMING },
         )
         .getRawOne<{ count: string | number }>()
         .then(row => Number(row?.count ?? 0))
