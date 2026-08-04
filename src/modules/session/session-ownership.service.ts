@@ -232,6 +232,20 @@ export class SessionOwnershipService {
   }
 
   /**
+   * Sessions another node held whose lease has lapsed — a crashed peer, or this node's own
+   * previous identity after a container recreate (the default nodeId is the hostname, which a
+   * recreate changes). These are the adoptable orphans the takeover sweep starts here; a
+   * deliberately released session (stop, graceful shutdown) has `nodeId` NULL and is not one.
+   */
+  async lapsedHeldByOthers(now = new Date()): Promise<Session[]> {
+    return this.sessions
+      .createQueryBuilder('session')
+      .where('"nodeId" IS NOT NULL AND "nodeId" <> :me', { me: this.nodeId })
+      .andWhere('"leaseExpiresAt" < :now', { now: leaseParam(now) })
+      .getMany();
+  }
+
+  /**
    * Session ids another node currently holds on a live lease.
    *
    * For operations that can only act on this process's own engines and would otherwise report

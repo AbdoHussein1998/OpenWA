@@ -22,6 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent tools (`AutomationRuleFindAll`, `AutomationRuleFindOne`) expose the rules to MCP callers;
   as operator-level configuration the module is not part of the SDK surface.
 
+### Added
+
+- **Sessions abandoned by a dead node are now adopted automatically.** The ownership lease made a
+  crashed node's sessions *claimable*, but nothing ever claimed them: boot auto-start runs exactly
+  once, so a peer that was already up — or a recreated container whose boot landed before its own
+  previous identity's lease expired — left the sessions sitting disconnected until someone called
+  `POST /start` (both cases observed live). A periodic takeover sweep (default every 30s,
+  `SESSION_TAKEOVER_SWEEP_MS`, gated by the same `AUTO_START_SESSIONS` flag as boot auto-start) now
+  finds lapsed-lease sessions and starts them through the ordinary race-safe claim path. Only
+  sessions worth resuming are adopted: authenticated ones in a running-or-should-be state — never
+  mid-pairing (`qr_ready`), never operator-flagged `failed`, and never deliberately released ones
+  (stop and graceful shutdown clear the holder, so they are not "lapsed"). Adopting a session also
+  fails its stuck in-flight bulk batches (same no-auto-resume policy as the boot reaper — the dead
+  node's already-sent messages are unknowable, so resuming would risk double-sends).
+
 ### Fixed
 
 - **whatsapp-web.js sessions could come up "ready" with a dead inbound pipeline after a warm

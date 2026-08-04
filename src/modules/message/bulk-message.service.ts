@@ -123,9 +123,7 @@ export class BulkMessageService implements OnApplicationBootstrap {
     const processing = await this.batchRepository.find({ where: { status: BatchStatus.PROCESSING } });
     const orphaned = await this.ownedByThisNode(processing);
     for (const batch of orphaned) {
-      batch.status = BatchStatus.FAILED;
-      this.stripBatchMediaPayloads(batch.messages);
-      await this.batchRepository.save(batch);
+      await this.failOrphanedBatch(batch);
     }
     if (orphaned.length > 0) {
       this.logger.warn(
@@ -136,6 +134,29 @@ export class BulkMessageService implements OnApplicationBootstrap {
     if (skipped > 0) {
       this.logger.log(`Left ${skipped} PROCESSING batch(es) alone: their sessions are held by another node`);
     }
+  }
+
+  private async failOrphanedBatch(batch: MessageBatch): Promise<void> {
+    batch.status = BatchStatus.FAILED;
+    this.stripBatchMediaPayloads(batch.messages);
+    await this.batchRepository.save(batch);
+  }
+
+  /**
+   * Fail a session's stuck PROCESSING batches after the session was adopted from a lapsed node.
+   * Same policy as the boot reaper and for the same reason: the dead node's already-sent messages
+   * are unknowable, so resuming risks double-sends — FAILED with the payloads stripped is the
+   * honest terminal state, and the caller can re-issue the batch knowingly.
+   */
+  async reapProcessingBatches(sessionId: string, reason: string): Promise<number> {
+    const processing = await this.batchRepository.find({ where: { status: BatchStatus.PROCESSING, sessionId } });
+    for (const batch of processing) {
+      await this.failOrphanedBatch(batch);
+    }
+    if (processing.length > 0) {
+      this.logger.warn(`Marked ${processing.length} PROCESSING batch(es) FAILED for session ${sessionId} (${reason})`);
+    }
+    return processing.length;
   }
 
   /**

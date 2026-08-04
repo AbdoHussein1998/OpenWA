@@ -109,6 +109,29 @@ describe('BulkMessageService.onApplicationBootstrap', () => {
   });
 
   /**
+   * The takeover path's reconcile: adopting a session from a lapsed node must fail THAT session's
+   * stuck batches (same no-auto-resume policy as boot — the dead node's already-sent messages are
+   * unknowable), scoped strictly to the one session, with inline media payloads stripped.
+   */
+  it('reapProcessingBatches fails only the given session’s PROCESSING batches and strips payloads', async () => {
+    const mine = {
+      id: 'b1',
+      sessionId: 'sess-a',
+      status: BatchStatus.PROCESSING,
+      messages: [{ content: { image: { base64: 'x'.repeat(64) } } }],
+    } as unknown as MessageBatch;
+    repo.find.mockResolvedValue([mine]);
+
+    const reaped = await service.reapProcessingBatches('sess-a', 'session adopted from a lapsed node');
+
+    expect(repo.find).toHaveBeenCalledWith({ where: { status: BatchStatus.PROCESSING, sessionId: 'sess-a' } });
+    expect(reaped).toBe(1);
+    expect(mine.status).toBe(BatchStatus.FAILED);
+    expect(repo.save).toHaveBeenCalledWith(mine);
+    expect(JSON.stringify(mine.messages)).not.toContain('x'.repeat(64));
+  });
+
+  /**
    * A batch is only ever driven by the process holding its session's engine, so on a second replica
    * "PROCESSING" does not mean "abandoned". Reaping a peer's batch tells the caller their send
    * failed while the messages continue going out — a wrong answer about work that is still running.
