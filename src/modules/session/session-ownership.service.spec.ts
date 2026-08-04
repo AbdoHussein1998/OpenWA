@@ -303,6 +303,21 @@ describe('SessionOwnershipService', () => {
     });
   });
 
+  describe('lapsed sessions held by others (the takeover sweep feed)', () => {
+    it('returns only expired-lease rows held by ANOTHER node', async () => {
+      const past = new Date(Date.now() - 1000);
+      const future = new Date(Date.now() + 60_000);
+      const lapsedOther = await seed({ nodeId: 'dead-node', leaseExpiresAt: past });
+      await seed({ nodeId: 'live-node', leaseExpiresAt: future }); // live peer — not adoptable
+      await seed({ nodeId: 'me', leaseExpiresAt: past }); // own row — boot reset territory, not takeover
+      await seed({ nodeId: null }); // deliberately released (stop/shutdown) — not adoptable
+
+      const lapsed = await service('me').lapsedHeldByOthers();
+
+      expect(lapsed.map(s => s.id)).toEqual([lapsedOther.id]);
+    });
+  });
+
   describe('node identity', () => {
     it('falls back to the hostname when nothing is configured, and never to the pid', () => {
       const bare = new SessionOwnershipService(sessions);

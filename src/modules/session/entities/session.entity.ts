@@ -65,6 +65,14 @@ export class Session {
   claimedAt!: Date | null;
 
   /**
+   * Where the owning node answers HTTP, so a peer can forward a request it cannot serve (the
+   * engine lives with the owner). Written at claim time from NODE_URL; null when the operator has
+   * not configured routing — a peer then answers 409 instead of forwarding.
+   */
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  nodeUrl!: string | null;
+
+  /**
    * When the claim above stops being honoured. A process that dies without releasing leaves a row
    * pointing at an owner that is gone, so the claim expires rather than requiring a clean shutdown
    * to recover; a running owner keeps extending it.

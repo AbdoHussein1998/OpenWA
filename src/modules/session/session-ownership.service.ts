@@ -62,6 +62,11 @@ export class SessionOwnershipService {
     return this.configService?.get<string>('session.nodeId') || process.env.NODE_ID || hostname();
   }
 
+  /** Where this node answers HTTP for peers; empty when the operator has not configured routing. */
+  get nodeUrl(): string {
+    return this.configService?.get<string>('session.nodeUrl') || process.env.NODE_URL || '';
+  }
+
   private get leaseTtlMs(): number {
     return this.configService?.get<number>('session.leaseTtlMs') ?? 60_000;
   }
@@ -102,7 +107,12 @@ export class SessionOwnershipService {
     const result = await this.sessions
       .createQueryBuilder()
       .update(Session)
-      .set({ nodeId: this.nodeId, claimedAt: now, leaseExpiresAt: new Date(now.getTime() + this.leaseTtlMs) })
+      .set({
+        nodeId: this.nodeId,
+        claimedAt: now,
+        leaseExpiresAt: new Date(now.getTime() + this.leaseTtlMs),
+        nodeUrl: this.nodeUrl || null,
+      })
       .where('id = :id', { id: sessionId })
       // Without leaseParam this clause would silently never match, so an expired claim would never
       // be taken over — stranding every session a crashed process was holding.
@@ -124,7 +134,7 @@ export class SessionOwnershipService {
     await this.sessions
       .createQueryBuilder()
       .update(Session)
-      .set({ nodeId: null, claimedAt: null, leaseExpiresAt: null })
+      .set({ nodeId: null, claimedAt: null, leaseExpiresAt: null, nodeUrl: null })
       .where('id = :id AND "nodeId" = :me', { id: sessionId, me: this.nodeId })
       .execute();
   }
@@ -137,7 +147,7 @@ export class SessionOwnershipService {
     await this.sessions
       .createQueryBuilder()
       .update(Session)
-      .set({ nodeId: null, claimedAt: null, leaseExpiresAt: null })
+      .set({ nodeId: null, claimedAt: null, leaseExpiresAt: null, nodeUrl: null })
       .where({ id: In(ids), nodeId: this.nodeId })
       .execute();
     this.logger.log(`Released ${ids.length} session claim(s) on shutdown`, { nodeId: this.nodeId });
@@ -229,6 +239,20 @@ export class SessionOwnershipService {
   ownedByOtherLiveNode(session: Pick<Session, 'nodeId' | 'leaseExpiresAt'>, now = new Date()): boolean {
     if (!session.nodeId || session.nodeId === this.nodeId) return false;
     return session.leaseExpiresAt != null && session.leaseExpiresAt > now;
+  }
+
+  /**
+   * Sessions another node held whose lease has lapsed — a crashed peer, or this node's own
+   * previous identity after a container recreate (the default nodeId is the hostname, which a
+   * recreate changes). These are the adoptable orphans the takeover sweep starts here; a
+   * deliberately released session (stop, graceful shutdown) has `nodeId` NULL and is not one.
+   */
+  async lapsedHeldByOthers(now = new Date()): Promise<Session[]> {
+    return this.sessions
+      .createQueryBuilder('session')
+      .where('"nodeId" IS NOT NULL AND "nodeId" <> :me', { me: this.nodeId })
+      .andWhere('"leaseExpiresAt" < :now', { now: leaseParam(now) })
+      .getMany();
   }
 
   /**

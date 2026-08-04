@@ -22,6 +22,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent tools (`AutomationRuleFindAll`, `AutomationRuleFindOne`) expose the rules to MCP callers;
   as operator-level configuration the module is not part of the SDK surface.
 
+### Added
+
+- **Session requests are now routed to the owning node (opt-in via `NODE_URL`).** In a multi-node
+  deployment a load balancer knows nothing about session placement; a request landing on a
+  non-owner previously could not be served. When every node announces its own reachable URL
+  (`NODE_URL`), a session-scoped request is now forwarded to the live owner after API-key
+  authentication and the owner's response is relayed back, marked `x-openwa-served-by`. The
+  forward carries the caller's credentials (nodes share the auth database), is bounded by
+  `SESSION_PROXY_TIMEOUT_MS` (default 60s), and is strictly one hop — a forwarded request is never
+  forwarded again, so stale ownership data degrades to a wrong-node answer instead of a loop. A
+  lapsed owner is deliberately not forwarded to: the local node serves the request, which is how a
+  takeover begins. An unreachable live owner answers a clear `503` naming the node. Without
+  `NODE_URL` the path is entirely inert, so single-node deployments pay nothing.
+
+- **Sessions abandoned by a dead node are now adopted automatically.** The ownership lease made a
+  crashed node's sessions *claimable*, but nothing ever claimed them: boot auto-start runs exactly
+  once, so a peer that was already up — or a recreated container whose boot landed before its own
+  previous identity's lease expired — left the sessions sitting disconnected until someone called
+  `POST /start` (both cases observed live). A periodic takeover sweep (default every 30s,
+  `SESSION_TAKEOVER_SWEEP_MS`, gated by the same `AUTO_START_SESSIONS` flag as boot auto-start) now
+  finds lapsed-lease sessions and starts them through the ordinary race-safe claim path. Only
+  sessions worth resuming are adopted: authenticated ones in a running-or-should-be state — never
+  mid-pairing (`qr_ready`), never operator-flagged `failed`, and never deliberately released ones
+  (stop and graceful shutdown clear the holder, so they are not "lapsed"). Adopting a session also
+  fails its stuck in-flight bulk batches (same no-auto-resume policy as the boot reaper — the dead
+  node's already-sent messages are unknowable, so resuming would risk double-sends).
+
 ### Fixed
 
 - **whatsapp-web.js sessions could come up "ready" with a dead inbound pipeline after a warm

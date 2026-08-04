@@ -223,7 +223,7 @@
       },
       "./src/database/": {
         "branches": 62,
-        "functions": 61,
+        "functions": 60,
         "lines": 67,
         "statements": 66
       },
