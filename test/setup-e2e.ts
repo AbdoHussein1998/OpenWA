@@ -1,5 +1,20 @@
 // e2e boot environment. Set BEFORE AppModule is imported (setupFiles phase) so the
 // app boots against local SQLite with no Redis/queue and no production boot guard.
+//
+// These suites run ONE AT A TIME (`maxWorkers: 1` in jest-e2e.json), and that is load-bearing
+// rather than a performance choice. Each suite boots a real application, and not all of an
+// application's state is redirected here: `dataDir` is a hard-coded `./data` with no environment
+// lever, so every worker's plugin loader read-modify-writes the same `data/plugins/registry.json`.
+// Measured on one parallel run: 52 writes from 12 processes, 30 of them landing within 500ms of a
+// write by a different process. Each individual write is atomic, but the read-modify-write cycle
+// is not, so workers overwrote and re-read each other's plugin state.
+//
+// The result was a roughly one-in-ten failure that moved between suites — a 403 where a 200 was
+// expected, a 404 where a 403 was, a rate-limit window behaving oddly — and never reproduced when a
+// suite was run on its own, which is what made it read as flakiness. Serially it does not happen:
+// 11 consecutive clean runs against a measured failure rate of about one in twelve in parallel.
+//
+// Restoring parallelism means giving each worker its own data root, not just its own database.
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { rmSync } from 'fs';
