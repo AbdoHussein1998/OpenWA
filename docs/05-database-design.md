@@ -63,7 +63,7 @@ OpenWA v0.2+ implements a **dual-database architecture** that separates boot con
 | **Main DB** | SQLite (always)      | `./data/main.sqlite` (default) | Boot-critical config, API keys, audit logs |
 | **Data DB** | SQLite or PostgreSQL | Configurable                   | User data, sessions, messages, webhooks    |
 
-The main DB is unconditionally SQLite, but its *path* is not fixed: `MAIN_DATABASE_NAME` overrides the
+The main DB is unconditionally SQLite, but its _path_ is not fixed: `MAIN_DATABASE_NAME` overrides the
 `./data/main.sqlite` default, and is honoured by both the runtime connection factory
 (`src/config/configuration.ts`) and the CLI DataSource (`src/database/data-source-main.ts`).
 
@@ -89,16 +89,18 @@ Because the container can therefore still be coming up when the `data` connectio
 
 When using PostgreSQL, OpenWA can place its tables and migration ledger in a dedicated schema via the `POSTGRES_SCHEMA` environment variable:
 
-| Setting            | Default | Description                                                                 |
-| ------------------ | ------- | --------------------------------------------------------------------------- |
-| `POSTGRES_SCHEMA`  | `public` | PostgreSQL schema for OpenWA tables and TypeORM migration ledger          |
+| Setting           | Default  | Description                                                      |
+| ----------------- | -------- | ---------------------------------------------------------------- |
+| `POSTGRES_SCHEMA` | `public` | PostgreSQL schema for OpenWA tables and TypeORM migration ledger |
 
 **Use Cases:**
+
 - **Managed PostgreSQL:** Use your cloud provider's project schema (e.g., a schema provisioned by the provider)
 - **Multi-tenant databases:** Isolate OpenWA from other applications sharing the same database
 - **Clean separation:** Keep OpenWA's tables organized separately from other schemas
 
 **Configuration:**
+
 ```bash
 # .env or dashboard Infrastructure page
 POSTGRES_SCHEMA=openwa  # Use a dedicated schema
@@ -106,12 +108,14 @@ POSTGRES_SCHEMA=public   # Default behavior (historical)
 ```
 
 **Requirements:**
+
 - The schema must already exist before migration time
 - Built-in PostgreSQL container automatically creates the schema via init script
 - External/managed PostgreSQL: run `CREATE SCHEMA <name>;` once before first startup
 - SQLite ignores this setting
 
 **Validation:**
+
 - Schema name is validated at boot as a legal Postgres identifier (letters, digits, underscores, max 63 chars)
 - Reserved `pg_` prefix is rejected to prevent conflicts with system schemas
 - Invalid values cause fast boot failure rather than migration-time errors
@@ -287,6 +291,12 @@ CREATE TABLE sessions (
     "proxyType" VARCHAR(10),
     "connectedAt" TIMESTAMP WITH TIME ZONE,
     "lastActiveAt" TIMESTAMP WITH TIME ZONE,
+    -- Session ownership / multi-node routing: which process runs the engine, since when, where it
+    -- answers HTTP for peers, and how long its claim survives unrenewed. All NULL on a single node.
+    "nodeId" VARCHAR(190),
+    "claimedAt" TIMESTAMP WITH TIME ZONE,
+    "nodeUrl" VARCHAR(2048),
+    "leaseExpiresAt" TIMESTAMP WITH TIME ZONE,
     "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
@@ -346,11 +356,11 @@ clears it, and so does a gateway restart.
 }
 ```
 
-| Key                    | Default    | Effect                                                                     |
-| ---------------------- | ---------- | -------------------------------------------------------------------------- |
-| `maxReconnectAttempts` | unlimited  | Reconnect attempt cap, clamped to 0–20 (`0` disables reconnect entirely)     |
-| `reconnectBaseDelay`   | `5000` ms  | Base delay of the reconnect backoff, clamped to 1000–300000 ms               |
-| `autoRejectCalls`      | `false`    | Auto-reject an incoming call as soon as it rings                            |
+| Key                    | Default   | Effect                                                                   |
+| ---------------------- | --------- | ------------------------------------------------------------------------ |
+| `maxReconnectAttempts` | unlimited | Reconnect attempt cap, clamped to 0–20 (`0` disables reconnect entirely) |
+| `reconnectBaseDelay`   | `5000` ms | Base delay of the reconnect backoff, clamped to 1000–300000 ms           |
+| `autoRejectCalls`      | `false`   | Auto-reject an incoming call as soon as it rings                         |
 
 > [!NOTE]
 > Proxy settings are **not** read from `config` — they live in the dedicated `proxyUrl` / `proxyType` columns shown in the DDL above. Puppeteer options are global engine configuration from the environment (`engine.puppeteer.*`), not per-session. Anything else placed in `config` is stored but ignored.
@@ -405,6 +415,27 @@ CREATE TABLE webhooks (
   "call.rejected",
   "call.missed"
 ]
+```
+
+---
+
+### 5.3.2a automation_rules
+
+Per-session single-message autoreply rules. `conditions` reuses the webhook filter shape verbatim
+(null/empty matches every inbound message); the reply goes through the ordinary send path.
+
+```sql
+CREATE TABLE automation_rules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "sessionId" VARCHAR NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    conditions JSONB,                    -- webhook filter shape; null = match every inbound message
+    "replyText" TEXT NOT NULL,
+    "cooldownSeconds" INTEGER NOT NULL DEFAULT 60,  -- per-(rule, chat) quiet period; 0 disables
+    "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
 ```
 
 ---
@@ -597,7 +628,7 @@ The data connection also owns:
 Additionally, the `AddMessagesFts` migration creates the full-text-search structures over `messages` (a FTS5 virtual table on SQLite, a generated `body_ts` `tsvector` column plus GIN index on PostgreSQL) that back the `/search` endpoint.
 
 > [!NOTE]
-> **Tables that do *not* exist.** Earlier drafts referenced `contacts`, `session_logs`, `webhook_logs`, `api_key_logs`, `webhook_idempotency`, and `ip_whitelist`. None of these are implemented. Contacts are read live from the engine; auditing is the single `audit_logs` table; webhook idempotency is not a persisted table; and per-key IP restrictions are stored inline on `api_keys.allowed_ips` (a `simple-array`), not in a separate `ip_whitelist` table.
+> **Tables that do _not_ exist.** Earlier drafts referenced `contacts`, `session_logs`, `webhook_logs`, `api_key_logs`, `webhook_idempotency`, and `ip_whitelist`. None of these are implemented. Contacts are read live from the engine; auditing is the single `audit_logs` table; webhook idempotency is not a persisted table; and per-key IP restrictions are stored inline on `api_keys.allowed_ips` (a `simple-array`), not in a separate `ip_whitelist` table.
 
 ---
 
@@ -607,17 +638,17 @@ Additionally, the `AddMessagesFts` migration creates the full-text-search struct
 
 These indexes are the ones declared on the entities (see §5.3); the rows below map them to the hot query paths.
 
-| Query Pattern                    | Index Used                                            | Frequency |
-| -------------------------------- | ----------------------------------------------------- | --------- |
-| Get session by ID                | `sessions.id` (PK)                                    | Very High |
-| Get session by name              | `sessions.name` (UNIQUE)                              | High      |
-| List messages by session (paged) | `("sessionId", "createdAt")` composite                | Very High |
-| Look up message by chat          | `"chatId"`                                            | High      |
-| Ack/dedup a message              | `UQ_messages_sessionId_waMessageId` (UNIQUE)          | Very High |
-| Message stats over a date range  | `IDX_messages_createdAt`                              | Medium    |
-| Find a session's webhooks        | `IDX_webhooks_sessionId`                              | Very High |
-| Authenticate API key             | UNIQUE on `api_keys("keyHash")`, main DB              | Very High |
-| Filter audit logs                | `audit_logs` indexes on `action` / `apiKeyId` / `sessionId` | Medium |
+| Query Pattern                    | Index Used                                                  | Frequency |
+| -------------------------------- | ----------------------------------------------------------- | --------- |
+| Get session by ID                | `sessions.id` (PK)                                          | Very High |
+| Get session by name              | `sessions.name` (UNIQUE)                                    | High      |
+| List messages by session (paged) | `("sessionId", "createdAt")` composite                      | Very High |
+| Look up message by chat          | `"chatId"`                                                  | High      |
+| Ack/dedup a message              | `UQ_messages_sessionId_waMessageId` (UNIQUE)                | Very High |
+| Message stats over a date range  | `IDX_messages_createdAt`                                    | Medium    |
+| Find a session's webhooks        | `IDX_webhooks_sessionId`                                    | Very High |
+| Authenticate API key             | UNIQUE on `api_keys("keyHash")`, main DB                    | Very High |
+| Filter audit logs                | `audit_logs` indexes on `action` / `apiKeyId` / `sessionId` | Medium    |
 
 ### Composite & Unique Indexes (as implemented)
 
@@ -726,10 +757,10 @@ flowchart LR
 
 OpenWA runs **two separate TypeORM connections**, each with its own migrations directory and CLI DataSource:
 
-| Connection | DataSource              | Migrations dir              | Owns                                                                   |
-| ---------- | ----------------------- | --------------------------- | ---------------------------------------------------------------------- |
-| **main**   | `data-source-main.ts`   | `src/database/migrations-main/` | `api_keys`, `audit_logs` — always SQLite (`./data/main.sqlite` by default) |
-| **data**   | `data-source.ts`        | `src/database/migrations/`  | `sessions`, `webhooks`, `messages`, `message_batches`, `templates`, `status_updates`, `webhook_delivery_failures`, the integration tables (`plugin_instances`, `ingress_events`, `conversation_mappings`, `integration_delivery_failures`), engine tables — SQLite **or** PostgreSQL |
+| Connection | DataSource            | Migrations dir                  | Owns                                                                                                                                                                                                                                                                                 |
+| ---------- | --------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **main**   | `data-source-main.ts` | `src/database/migrations-main/` | `api_keys`, `audit_logs` — always SQLite (`./data/main.sqlite` by default)                                                                                                                                                                                                           |
+| **data**   | `data-source.ts`      | `src/database/migrations/`      | `sessions`, `webhooks`, `messages`, `message_batches`, `templates`, `status_updates`, `webhook_delivery_failures`, the integration tables (`plugin_instances`, `ingress_events`, `conversation_mappings`, `integration_delivery_failures`), engine tables — SQLite **or** PostgreSQL |
 
 Migrations are hand-authored and idempotent (`IF NOT EXISTS`) so they are safe to adopt on a database originally created by `synchronize`. The two connections differ in how schema is managed:
 
@@ -801,17 +832,17 @@ export class AddMessagesWaMessageIdUnique1781300000000 implements MigrationInter
 
 ### Retention Policies
 
-Five tables have an automated *time-based* retention job, across four services: **`audit_logs`**, **`status_updates`**, **`webhook_delivery_failures`**, **`ingress_events`** and **`integration_delivery_failures`**. Separately, **`baileys_stored_messages`** is capped per session rather than by age — each write keeps the newest `BAILEYS_MESSAGE_STORE_LIMIT` rows (default 5000) for that session and deletes the rest. Everything else is kept indefinitely (sessions, webhooks, batches, templates, conversation mappings, plugin instances) and is removed only by user action (e.g. deleting a session) or operational backup/restore — the `messages` history table in particular has no auto-purge and grows without bound.
+Five tables have an automated _time-based_ retention job, across four services: **`audit_logs`**, **`status_updates`**, **`webhook_delivery_failures`**, **`ingress_events`** and **`integration_delivery_failures`**. Separately, **`baileys_stored_messages`** is capped per session rather than by age — each write keeps the newest `BAILEYS_MESSAGE_STORE_LIMIT` rows (default 5000) for that session and deletes the rest. Everything else is kept indefinitely (sessions, webhooks, batches, templates, conversation mappings, plugin instances) and is removed only by user action (e.g. deleting a session) or operational backup/restore — the `messages` history table in particular has no auto-purge and grows without bound.
 
-| Data Type                     | Default Retention | Configurable                          |
-| ----------------------------- | ----------------- | ------------------------------------- |
-| Sessions / Webhooks           | Indefinite        | No                                    |
-| Messages / Batches            | Indefinite        | No (delete a session to drop its data) |
-| Status updates                | 24 hours          | No (fixed, matches WhatsApp's own story expiry) |
-| Audit logs                    | 90 days           | Yes — `AUDIT_RETENTION_DAYS` (≤ 0 disables) |
-| Webhook delivery failures     | 90 days           | Yes — `WEBHOOK_FAILURE_RETENTION_DAYS` (≤ 0 disables) |
+| Data Type                     | Default Retention | Configurable                                                    |
+| ----------------------------- | ----------------- | --------------------------------------------------------------- |
+| Sessions / Webhooks           | Indefinite        | No                                                              |
+| Messages / Batches            | Indefinite        | No (delete a session to drop its data)                          |
+| Status updates                | 24 hours          | No (fixed, matches WhatsApp's own story expiry)                 |
+| Audit logs                    | 90 days           | Yes — `AUDIT_RETENTION_DAYS` (≤ 0 disables)                     |
+| Webhook delivery failures     | 90 days           | Yes — `WEBHOOK_FAILURE_RETENTION_DAYS` (≤ 0 disables)           |
 | Ingress events (dedup rows)   | 7 days            | Yes — `INGRESS_DEDUP_RETENTION_DAYS` (≤ 0 does **not** disable) |
-| Integration delivery failures | 90 days           | Yes — `INGRESS_RETENTION_DAYS` (≤ 0 disables this prune only) |
+| Integration delivery failures | 90 days           | Yes — `INGRESS_RETENTION_DAYS` (≤ 0 disables this prune only)   |
 
 ### Audit-Log Cleanup Job
 

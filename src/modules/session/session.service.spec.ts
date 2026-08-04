@@ -2304,13 +2304,15 @@ describe('SessionService', () => {
     });
 
     it('surfaces the restriction on the session read model', async () => {
+      // A future expiry: one that has already passed reads as no restriction at all.
+      const expiresAt = Date.now() + 60_000;
       const callbacks = await startAndCapture();
-      callbacks.onAccountRestriction?.({ ...timelock, expiresAt: 1234 });
+      callbacks.onAccountRestriction?.({ ...timelock, expiresAt });
 
       (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ status: SessionStatus.READY }));
       const result = await service.findOne('sess-uuid-1');
 
-      expect(result.restriction).toEqual({ ...timelock, expiresAt: 1234 });
+      expect(result.restriction).toEqual({ ...timelock, expiresAt });
     });
 
     // whatsapp-web.js never reports a block being lifted — it only stops refusing. Reaching READY is

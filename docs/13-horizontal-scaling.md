@@ -16,9 +16,11 @@
 >
 > A node that loses its claim gives up the engine. A lease can lapse while the process is
 > perfectly healthy — a slow query is enough — after which a peer may legitimately take the
-> session; renewal detects the loss and tears the local engine down, so the account never
-> ends up with two. A failed renewal is deliberately not read as a loss: the TTL is sized to
-> absorb a database blip, and concluding otherwise would stop every healthy engine on the node.
+> session; renewal detects the loss and tears the local engine down at the next heartbeat, so
+> any two-engine overlap is bounded to roughly one heartbeat interval (and a teardown failure
+> is logged as an error rather than silently retried). A failed renewal is deliberately not
+> read as a loss: the TTL is sized to absorb a database blip, and concluding otherwise would
+> stop every healthy engine on the node.
 >
 > Bulk-send batches follow the same rule. A batch is only ever driven by the process
 > holding its session's engine, so a booting replica now reaps only the batches whose
@@ -72,7 +74,7 @@
 > Everything below (node affinity, `replicas: 3`) remains a **design sketch** until those
 > land.
 
-This guide explains a *proposed* design for deploying OpenWA in a horizontally scaled environment for high availability and increased capacity.
+This guide explains a _proposed_ design for deploying OpenWA in a horizontally scaled environment for high availability and increased capacity.
 
 ## 13.1 Architecture Overview
 
@@ -566,12 +568,12 @@ The replica count stays at **1** (see 13.3 and 13.4), so the only levers availab
 single-instance deployment with its own session volume and split sessions between them. Horizontal
 `scale up` / `scale down` becomes an option only once session-claim is implemented.
 
-| Metric                            | Threshold  | Action                                                 |
-| --------------------------------- | ---------- | ------------------------------------------------------ |
-| CPU > 80%                         | 5 minutes  | Raise `limits.cpu` (StatefulSet); the Swarm block above declares no CPU constraint, so add one |
-| Memory > 85%                      | 5 minutes  | Raise the memory limit                                 |
+| Metric                            | Threshold  | Action                                                                                                     |
+| --------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------- |
+| CPU > 80%                         | 5 minutes  | Raise `limits.cpu` (StatefulSet); the Swarm block above declares no CPU constraint, so add one             |
+| Memory > 85%                      | 5 minutes  | Raise the memory limit                                                                                     |
 | CPU < 30%                         | 15 minutes | Lower `requests.cpu` — that is what the scheduler reserves; lowering `limits.cpu` only tightens throttling |
-| Active sessions per instance > 20 | -          | Move sessions to a second instance with its own volume |
+| Active sessions per instance > 20 | -          | Move sessions to a second instance with its own volume                                                     |
 
 ### Throughput Projections
 
@@ -631,11 +633,12 @@ groups:
 
 ### Health Check Endpoints
 
-| Endpoint            | Purpose                                                          |
-| ------------------- | ---------------------------------------------------------------- |
-| `/api/health`       | Basic health check — returns `status`, `timestamp`, `version`    |
-| `/api/health/live`  | Liveness probe (static `ok`; reflects process liveness only)     |
+| Endpoint            | Purpose                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `/api/health`       | Basic health check — returns `status`, `timestamp`, `version`                                                |
+| `/api/health/live`  | Liveness probe (static `ok`; reflects process liveness only)                                                 |
 | `/api/health/ready` | Readiness probe — verifies the main + data databases respond (returns 503 while draining or if a DB is down) |
+
 ---
 
 <div align="center">

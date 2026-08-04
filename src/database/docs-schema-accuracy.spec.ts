@@ -25,6 +25,7 @@ describe('docs/05 documents the real column names', () => {
     'modules/webhook',
     'modules/message',
     'modules/template',
+    'modules/automation',
     'engine',
     'modules/integration',
     'modules/status-store',

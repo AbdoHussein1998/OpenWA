@@ -475,13 +475,14 @@ export class SessionEngineControls {
       );
 
       // DB removal is NOT best-effort: a genuine failure must surface (500) rather than be swallowed.
-      // Delete every child row explicitly, in one transaction, children before the parent. messages/
-      // message_batches carry a plain sessionId with no FK. webhooks/templates/baileys_stored_messages
-      // DO declare an ON DELETE CASCADE FK, but the default `data` engine (SQLite) runs with
-      // foreign_keys OFF, so that cascade never fires there — a session delete would otherwise orphan
-      // them forever (webhooks in particular retain the signing secret + custom headers). Deleting them
-      // explicitly is engine-agnostic (redundant-but-harmless on Postgres, where the cascade finds
-      // nothing left) and mirrors the restore path's explicit-clear ordering.
+      // Delete every child row explicitly, in one transaction, children before the parent. For
+      // messages/message_batches this is load-bearing: they carry a plain sessionId with no FK, so
+      // nothing else would ever remove them. webhooks/templates/baileys_stored_messages (and
+      // automation_rules) DO declare an ON DELETE CASCADE FK that fires on BOTH engines —
+      // better-sqlite3 defaults `foreign_keys` ON and TypeORM's driver re-asserts it at connection
+      // creation — so their explicit deletes are belt-and-braces rather than required; they stay
+      // because depending on a pragma neither this file nor a test pins is a thinner guarantee than
+      // an explicit delete, and the ordering mirrors the restore path's explicit-clear.
       await this.host.dataSource().transaction(async manager => {
         await manager.delete(Message, { sessionId: id });
         await manager.delete(MessageBatch, { sessionId: id });
