@@ -32,6 +32,7 @@ import { StorageModule } from './common/storage/storage.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { StatusModule } from './modules/status/status.module';
+import { MediaModule } from './modules/media/media.module';
 import { StatusStoreModule } from './modules/status-store/status-store.module';
 import { ChatMediaModule } from './modules/chat-media/chat-media.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -293,6 +294,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
     StatsModule, // Phase 3: Statistics Dashboard
     MetricsModule, // Prometheus /api/metrics
     StatusModule, // Phase 3: Status/Stories API
+    MediaModule, // Server-side media conversion (opt-in)
     StatusStoreModule, // Phase 3: inbound status/story TTL store (24h purge + media persistence)
     ChatMediaModule, // opt-in chat-media archive (retention purge + orphan sweep)
     CatalogModule, // Phase 3: Catalog API (WhatsApp Business)

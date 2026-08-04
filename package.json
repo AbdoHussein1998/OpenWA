@@ -298,6 +298,12 @@
         "lines": 45,
         "statements": 46
       },
+      "./src/modules/media/": {
+        "branches": 71,
+        "functions": 87,
+        "lines": 89,
+        "statements": 88
+      },
       "./src/modules/message/": {
         "branches": 57,
         "functions": 66,

@@ -399,6 +399,30 @@ export default () => ({
     })(),
   },
 
+  // Server-side media conversion (opt-in): transcodes caller-supplied audio and video into the
+  // shapes WhatsApp clients actually play, by running the ffmpeg binary. Nothing is converted
+  // implicitly — only the explicit conversion endpoints use this.
+  mediaConversion: {
+    // Off by default: it spawns an external process per request, so an operator opts in knowingly.
+    // Even when true the endpoints stay unavailable unless the binary is actually present, so
+    // enabling it on a host without ffmpeg degrades to a clear 503 rather than a spawn error.
+    enabled: process.env.MEDIA_CONVERSION_ENABLED === 'true',
+    // Absolute path to the binary, for hosts that keep it outside PATH. Resolved via PATH by default.
+    ffmpegPath: process.env.FFMPEG_PATH || 'ffmpeg',
+    // Wall-clock ceiling for one conversion (default 60s). A codec can spin on malformed input, and
+    // this process is spawned on a request path, so the timeout kills it rather than tying up a slot.
+    timeoutMs: (() => {
+      const n = parseInt(process.env.MEDIA_CONVERSION_TIMEOUT_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60_000;
+    })(),
+    // Cap on the CONVERTED bytes (default 50 MiB, matching the inbound media cap). Transcoding can
+    // inflate as well as shrink, so the output needs its own ceiling and not just the input's.
+    maxOutputBytes: (() => {
+      const n = parseInt(process.env.MEDIA_CONVERSION_MAX_OUTPUT_BYTES ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 50 * 1024 * 1024;
+    })(),
+  },
+
   // Message-template rendering
   template: {
     // Cap on the FINAL rendered text of a send-template request (header+body+footer joined, after
