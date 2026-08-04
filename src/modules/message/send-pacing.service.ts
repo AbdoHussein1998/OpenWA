@@ -135,15 +135,19 @@ export class SendPacingService {
     this.assertBreakerClosed(sessionId, config);
     if (config.coldSchedule.length === 0 || contactIds.length === 0) return;
 
-    // The same id twice in one request is one contact, and must cost one.
+    // The same id twice in one request is one contact, and must cost one. Each contact is probed
+    // under both user-id dialects (see dialectVariants) — a contact known under the other spelling
+    // is not a stranger.
     const unique = [...new Set(contactIds)];
-    const known = await this.messageRepository
+    const variantsByContact = new Map(unique.map(id => [id, dialectVariants(id)]));
+    const knownRows = await this.messageRepository
       .createQueryBuilder('m')
       .select('DISTINCT m.chatId', 'chatId')
       .where('m.sessionId = :sessionId', { sessionId })
-      .andWhere('m.chatId IN (:...ids)', { ids: unique })
+      .andWhere('m.chatId IN (:...ids)', { ids: [...new Set([...variantsByContact.values()].flat())] })
       .getRawMany<{ chatId: string }>();
-    const coldCount = unique.length - known.length;
+    const knownIds = new Set(knownRows.map(row => row.chatId));
+    const coldCount = unique.filter(id => !variantsByContact.get(id)!.some(v => knownIds.has(v))).length;
     if (coldCount === 0) return;
 
     const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
@@ -336,9 +340,12 @@ export class SendPacingService {
     if (!chatId || config.coldSchedule.length === 0) return;
 
     // Any row at all, either direction, any time: one message from them, or one from us last month,
-    // and this is an existing relationship rather than a reachout. The send being checked has not
-    // persisted its own row yet — the gate runs before saveOutgoingMessage — so this cannot see it.
-    const hasHistory = await this.messageRepository.exists({ where: { sessionId, chatId } });
+    // and this is an existing relationship rather than a reachout. Probed under both user-id
+    // dialects (see dialectVariants). The send being checked has not persisted its own row yet —
+    // the gate runs before saveOutgoingMessage — so this cannot see it.
+    const hasHistory = await this.messageRepository.exists({
+      where: dialectVariants(chatId).map(id => ({ sessionId, chatId: id })),
+    });
     if (hasHistory) return;
 
     const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
@@ -424,6 +431,23 @@ export class SendPacingService {
 }
 
 const DAY_MS = 86_400_000;
+
+/**
+ * Both spellings of a user id. Stored rows carry either dialect — inbound rows are neutralized to
+ * `@c.us`, outbound rows keep the caller's raw form — so a byte-exact history probe misreads a
+ * known contact addressed the other way as cold and over-draws the budget. Non-user ids (groups,
+ * lids, …) pass through unchanged; a lid has no derivable phone twin to probe.
+ */
+function dialectVariants(chatId: string): string[] {
+  const lower = chatId.toLowerCase();
+  if (lower.endsWith('@c.us')) {
+    return [chatId, chatId.slice(0, chatId.length - '@c.us'.length) + '@s.whatsapp.net'];
+  }
+  if (lower.endsWith('@s.whatsapp.net')) {
+    return [chatId, chatId.slice(0, chatId.length - '@s.whatsapp.net'.length) + '@c.us'];
+  }
+  return [chatId];
+}
 
 /**
  * The cap's day boundary is UTC, not the server's local midnight: a deployment that moves timezone,

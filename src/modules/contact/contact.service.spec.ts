@@ -119,5 +119,17 @@ describe('ContactService', () => {
       await makeService({ upsertContact }).upsertContact('s1', '628123@c.us', 'Ada', 'Lovelace');
       expect(upsertContact).toHaveBeenCalledWith('628123@c.us', 'Ada', 'Lovelace');
     });
+
+    // Same hazard as the lid, different ids: a group/newsletter/broadcast id also carries digits
+    // that would be stored as a phone number for a contact that does not exist.
+    it.each(['120363000000000000@g.us', '120363000000000000@newsletter', 'status@broadcast'])(
+      'refuses the non-person id %s with a 400',
+      id => {
+        const upsertContact = jest.fn();
+        const svc = makeService({ upsertContact });
+        expect(() => svc.upsertContact('s1', id, 'Ada')).toThrow(BadRequestException);
+        expect(upsertContact).not.toHaveBeenCalled();
+      },
+    );
   });
 });
