@@ -116,6 +116,34 @@ describe('CallsResource — exact paths', () => {
   });
 });
 
+describe('MediaResource — exact paths', () => {
+  it('conversionStatus GETs the convert root', async () => {
+    const t = new MockTransport().on('GET', /\/media\/convert$/, { body: { available: true } });
+    const res = await client(t).media.conversionStatus('s');
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/media/convert');
+    expect(res.available).toBe(true);
+  });
+
+  it('convertVoice POSTs the media to /convert/voice and returns the converted bytes', async () => {
+    const t = new MockTransport().on('POST', /\/media\/convert\/voice$/, {
+      body: { base64: 'T2dnUw==', mimetype: 'audio/ogg; codecs=opus', bytes: 8 },
+    });
+    const res = await client(t).media.convertVoice('s', { base64: 'SUQz' });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/media/convert/voice');
+    expect(t.lastCall!.body).toEqual({ base64: 'SUQz' });
+    expect(res.mimetype).toBe('audio/ogg; codecs=opus');
+  });
+
+  it('convertVideo forwards a url variant verbatim', async () => {
+    const t = new MockTransport().on('POST', /\/media\/convert\/video$/, {
+      body: { base64: 'AAAA', mimetype: 'video/mp4', bytes: 4 },
+    });
+    await client(t).media.convertVideo('s', { url: 'https://example.com/clip.mov' });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/media/convert/video');
+    expect(t.lastCall!.body).toEqual({ url: 'https://example.com/clip.mov' });
+  });
+});
+
 describe('ContactsResource — exact paths', () => {
   it('list / get / check / profilePicture / phone', async () => {
     const t = new MockTransport()

@@ -1053,3 +1053,20 @@ class SearchResults(TypedDict):
     total: int
     tookMs: int
     provider: str
+
+
+class ConvertedMedia(TypedDict, total=False):
+    """Converted media, shaped for handing straight to a send call."""
+
+    #: The converted bytes, ready to use as a send call's ``base64``.
+    base64: str
+    #: What the bytes now are — not what they were.
+    mimetype: str
+    #: Decoded size, so a size check needs no decoding.
+    bytes: int
+
+
+class MediaConversionAvailability(TypedDict, total=False):
+    """Whether server-side conversion can be used on this deployment."""
+
+    available: bool
