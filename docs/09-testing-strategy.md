@@ -160,17 +160,54 @@ authentication plumbing, public health endpoints, engine selection paths, and da
 Coverage thresholds are defined in `package.json` under the Jest configuration. Treat that file as the
 authoritative gate. Current policy:
 
-| Scope                      | Branches | Functions | Lines | Statements |
-| -------------------------- | -------- | --------- | ----- | ---------- |
-| Global                     | 58%      | 58%       | 66%   | 65%        |
-| `src/common/security/`     | 85%      | 95%       | 90%   | 90%        |
-| `src/modules/auth/`        | 62%      | 70%       | 72%   | 72%        |
-| `src/engine/adapters/`     | 63%      | 63%       | 70%   | 70%        |
-| `src/modules/integration/` | 67%      | 68%       | 77%   | 77%        |
-| `src/core/hooks/`          | 80%      | 70%       | 82%   | 81%        |
-| `src/modules/session/`     | 50%      | 63%       | 74%   | 72%        |
-| `src/modules/webhook/`     | 65%      | 83%       | 84%   | 80%        |
-| `src/modules/search/`      | 58%      | 72%       | 58%   | 58%        |
+| Scope                       | Branches | Functions | Lines | Statements |
+| --------------------------- | -------- | --------- | ----- | ---------- |
+| Global                      | 58%      | 63%       | 66%   | 65%        |
+| `src/common/cache/`         | 34%      | 33%       | 42%   | 42%        |
+| `src/common/security/`      | 85%      | 95%       | 93%   | 92%        |
+| `src/common/services/`      | 74%      | 91%       | 87%   | 84%        |
+| `src/common/storage/`       | 75%      | 80%       | 80%   | 77%        |
+| `src/common/utils/`         | 86%      | 92%       | 92%   | 91%        |
+| `src/config/`               | 88%      | 92%       | 91%   | 91%        |
+| `src/core/agent-tools/`     | 77%      | 32%       | 49%   | 50%        |
+| `src/core/hooks/`           | 81%      | 73%       | 85%   | 84%        |
+| `src/core/plugins/`         | 72%      | 74%       | 81%   | 80%        |
+| `src/database/`             | 62%      | 61%       | 67%   | 66%        |
+| `src/engine/adapters/`      | 74%      | 84%       | 83%   | 83%        |
+| `src/engine/identity/`      | 85%      | 95%       | 94%   | 93%        |
+| `src/modules/audit/`        | 59%      | 45%       | 72%   | 68%        |
+| `src/modules/auth/`         | 75%      | 85%       | 86%   | 85%        |
+| `src/modules/chat-media/`   | 78%      | 81%       | 92%   | 90%        |
+| `src/modules/contact/`      | 25%      | 48%       | 44%   | 43%        |
+| `src/modules/docker/`       | 26%      | 52%       | 37%   | 38%        |
+| `src/modules/events/`       | 70%      | 84%       | 81%   | 80%        |
+| `src/modules/group/`        | 64%      | 47%       | 67%   | 67%        |
+| `src/modules/infra/`        | 73%      | 71%       | 87%   | 86%        |
+| `src/modules/integration/`  | 76%      | 83%       | 90%   | 89%        |
+| `src/modules/mcp/`          | 33%      | 48%       | 45%   | 46%        |
+| `src/modules/message/`      | 57%      | 66%       | 81%   | 80%        |
+| `src/modules/metrics/`      | 61%      | 65%       | 68%   | 65%        |
+| `src/modules/plugins/`      | 67%      | 63%       | 74%   | 73%        |
+| `src/modules/queue/`        | 74%      | 88%       | 95%   | 95%        |
+| `src/modules/search/`       | 66%      | 87%       | 71%   | 71%        |
+| `src/modules/session/`      | 75%      | 79%       | 88%   | 87%        |
+| `src/modules/stats/`        | 67%      | 63%       | 71%   | 69%        |
+| `src/modules/status-store/` | 79%      | 83%       | 92%   | 91%        |
+| `src/modules/status/`       | 47%      | 45%       | 62%   | 60%        |
+| `src/modules/template/`     | 43%      | 52%       | 70%   | 67%        |
+| `src/modules/webhook/`      | 72%      | 89%       | 90%   | 87%        |
+
+Each floor sits roughly five points below that scope's measured coverage, so it catches a real
+regression without failing on ordinary churn. Raise a floor when coverage rises; never lower one.
+
+Two behaviours of Jest's threshold matching are worth knowing before adding a scope:
+
+- A file counts toward **every** path key it matches — there is no most-specific-wins. Keys must
+  therefore be disjoint, or a nested scope's files are graded twice and the parent floor becomes a
+  restatement of the child.
+- A file matched by any path key is **removed from the global group**. Global therefore grades only
+  the scopes with no floor of their own, which is why its numbers are lower than the repository-wide
+  figure and why adding a scope changes what Global means.
 
 The stricter scoped gates protect security-sensitive code and high-risk boundary layers. When adding
 security, engine-adapter, or integration-fabric behavior, add focused regression tests instead of relying
