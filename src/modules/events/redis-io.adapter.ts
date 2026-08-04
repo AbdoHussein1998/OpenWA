@@ -7,6 +7,9 @@ import { createLogger } from '../../common/services/logger.service';
 
 const logger = createLogger('RedisIoAdapter');
 
+/** Max time to await a graceful `quit()` per client on shutdown before force-disconnecting. */
+export const WS_REDIS_QUIT_TIMEOUT_MS = 2000;
+
 /**
  * Whether cross-replica WebSocket fan-out is switched on. Same `REDIS_ENABLED === 'true'` gate the
  * throttler and cache read at boot, so a deployment already using Redis for those gets event
@@ -87,9 +90,32 @@ export class RedisIoAdapter extends IoAdapter {
 
   /** Close the pub/sub connections so a shutdown does not leak them. Called by Nest on app close. */
   async close(server: Server): Promise<void> {
-    await Promise.allSettled([this.pubClient?.quit(), this.subClient?.quit()]);
+    await Promise.allSettled([this.quitClient(this.pubClient), this.quitClient(this.subClient)]);
     this.pubClient = undefined;
     this.subClient = undefined;
     await super.close(server);
+  }
+
+  /**
+   * Release one client on shutdown without ever blocking. `quit()` waits for the QUIT reply, which
+   * never arrives on a half-open/partitioned socket — and with the never-give-up retryStrategy and
+   * ioredis's default `enableOfflineQueue:true`, quit() is queued and hangs indefinitely rather
+   * than rejecting. Race it against a short deadline, then ALWAYS `disconnect()` in the finally so
+   * the socket and its reconnect timer are gone regardless of connection state (mirrors
+   * CacheService/RedisThrottlerStorage). disconnect() is idempotent after a clean quit.
+   */
+  private async quitClient(client: Redis | undefined): Promise<void> {
+    if (!client) return;
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<void>(resolve => {
+      timer = setTimeout(resolve, WS_REDIS_QUIT_TIMEOUT_MS);
+      timer.unref();
+    });
+    try {
+      await Promise.race([client.quit().catch(() => undefined), deadline]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      client.disconnect();
+    }
   }
 }
