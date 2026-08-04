@@ -20,7 +20,7 @@ import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { MessageStatus } from './entities/message.entity';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { MessageService } from './message.service';
-import { SendPacingService } from './send-pacing.service';
+import { SendPacingService, isPacingLimitedError } from './send-pacing.service';
 import { SessionOwnershipService } from '../session/session-ownership.service';
 import { HookManager } from '../../core/hooks';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from './media-cap.util';
@@ -460,8 +460,19 @@ export class BulkMessageService implements OnApplicationBootstrap {
       // A violation fails just this item (honouring stopOnError) instead of sending it.
       this.assertContentMediaWithinCap(content);
 
-      // Send message based on type
-      const messageResult = await this.sendMessage(engine, msg.chatId, msg.type, content);
+      // Send message based on type. The engine call is bracketed on its own so the pacing breaker
+      // hears exactly what the single-send path feeds it (message.service failSend/persistSentState):
+      // recordSendFailure only when the ENGINE was asked and refused — never for the pre-engine
+      // pacing/plugin/media-cap throws above — and recordSendSuccess the moment it accepts. Without
+      // this the breaker was blind to bulk, the highest-volume path it exists to protect.
+      let messageResult;
+      try {
+        messageResult = await this.sendMessage(engine, msg.chatId, msg.type, content);
+      } catch (engineError) {
+        this.pacing.recordSendFailure(batch.sessionId);
+        throw engineError;
+      }
+      this.pacing.recordSendSuccess(batch.sessionId);
 
       result.status = BatchMessageStatus.SENT;
       result.messageId = messageResult.id;
@@ -484,9 +495,10 @@ export class BulkMessageService implements OnApplicationBootstrap {
       batch.progress.pending--;
 
       // Fire message:failed so alerting/analytics plugins observe bulk failures too (previously
-      // none) — but NOT for a plugin gate-block, which is a moderation decision, not a delivery
-      // failure (matches single send, where a block is a 400 with no message:failed).
-      if (!blockedByPlugin) {
+      // none) — but NOT for a plugin gate-block (a moderation decision) nor a pacing refusal (a
+      // policy 429, thrown before the engine was asked): neither is a delivery failure, matching
+      // single send where a block is a 400 and a pacing refusal is a 429, neither firing the hook.
+      if (!blockedByPlugin && !isPacingLimitedError(error)) {
         await this.hookManager.execute(
           'message:failed',
           { sessionId: batch.sessionId, error: sanitized.message, input: content, type: msg.type },

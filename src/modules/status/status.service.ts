@@ -87,13 +87,30 @@ export class StatusService {
     }
   }
 
+  /**
+   * Report the engine post's outcome to the pacing breaker, exactly as the chat send path does
+   * (message.service failSend/persistSentState): the engine was asked, so a refusal counts toward
+   * the failure streak and an accept resets it. The pre-engine pacing/plugin gate runs OUTSIDE this
+   * wrapper, so a policy refusal never feeds the breaker — only a genuine engine refusal does.
+   */
+  private async recordedPost(sessionId: string, post: () => Promise<StatusResult>): Promise<StatusResult> {
+    try {
+      const result = await post();
+      this.pacing.recordSendSuccess(sessionId);
+      return result;
+    } catch (error) {
+      this.pacing.recordSendFailure(sessionId);
+      throw error;
+    }
+  }
+
   async postTextStatus(sessionId: string, text: string, options: StatusPostOptions): Promise<StatusResult> {
     const engine = this.engines.require(
       sessionId,
       () => new NotFoundException(`Session ${sessionId} not found or not connected`),
     );
     const gated = await this.gate(sessionId, 'status-text', { text, options });
-    return engine.postTextStatus(gated.text, gated.options);
+    return this.recordedPost(sessionId, () => engine.postTextStatus(gated.text, gated.options));
   }
 
   async postImageStatus(
@@ -116,7 +133,7 @@ export class StatusService {
       media: { mimetype: mimetype ?? 'image/jpeg', data: base64 || url || '' },
       options,
     });
-    return engine.postImageStatus(this.guardGatedMedia(gated.media), gated.options);
+    return this.recordedPost(sessionId, () => engine.postImageStatus(this.guardGatedMedia(gated.media), gated.options));
   }
 
   async postVideoStatus(
@@ -139,7 +156,7 @@ export class StatusService {
       media: { mimetype: mimetype ?? 'video/mp4', data: base64 || url || '' },
       options,
     });
-    return engine.postVideoStatus(this.guardGatedMedia(gated.media), gated.options);
+    return this.recordedPost(sessionId, () => engine.postVideoStatus(this.guardGatedMedia(gated.media), gated.options));
   }
 
   /**
@@ -172,7 +189,7 @@ export class StatusService {
       media: { mimetype: mimetype ?? 'audio/ogg; codecs=opus', data: base64 || url || '' },
       options,
     });
-    return engine.postVoiceStatus(this.guardGatedMedia(gated.media), gated.options);
+    return this.recordedPost(sessionId, () => engine.postVoiceStatus(this.guardGatedMedia(gated.media), gated.options));
   }
 
   async deleteStatus(sessionId: string, statusId: string): Promise<void> {
