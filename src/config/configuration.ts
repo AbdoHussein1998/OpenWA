@@ -405,6 +405,18 @@ export default () => ({
     // Stable across restarts by design — a restarted process must recognise its own leftover rows
     // in order to reset them. Defaults to the hostname, which is the container or host boundary.
     nodeId: process.env.NODE_ID || '',
+    // Where THIS node answers HTTP for its peers (e.g. http://10.0.0.5:2785). Written onto every
+    // session this node claims, so a peer can forward a request to the engine's host. Empty (the
+    // default) disables request forwarding entirely — the right setting for single-node
+    // deployments, where the lookup would be pure overhead.
+    nodeUrl: process.env.NODE_URL || '',
+    // Ceiling for one forwarded request (default 60s): engine operations can legitimately take
+    // tens of seconds (a send with typing simulation, a media fetch), but a peer must not hold a
+    // caller forever when the owner hangs.
+    proxyTimeoutMs: (() => {
+      const n = parseInt(process.env.SESSION_PROXY_TIMEOUT_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60_000;
+    })(),
     // How long a claim is honoured without renewal (default 60s). This is the worst-case delay
     // before a peer may take over from a process that died without releasing.
     leaseTtlMs: (() => {

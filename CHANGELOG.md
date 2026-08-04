@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Session requests are now routed to the owning node (opt-in via `NODE_URL`).** In a multi-node
+  deployment a load balancer knows nothing about session placement; a request landing on a
+  non-owner previously could not be served. When every node announces its own reachable URL
+  (`NODE_URL`), a session-scoped request is now forwarded to the live owner after API-key
+  authentication and the owner's response is relayed back, marked `x-openwa-served-by`. The
+  forward carries the caller's credentials (nodes share the auth database), is bounded by
+  `SESSION_PROXY_TIMEOUT_MS` (default 60s), and is strictly one hop — a forwarded request is never
+  forwarded again, so stale ownership data degrades to a wrong-node answer instead of a loop. A
+  lapsed owner is deliberately not forwarded to: the local node serves the request, which is how a
+  takeover begins. An unreachable live owner answers a clear `503` naming the node. Without
+  `NODE_URL` the path is entirely inert, so single-node deployments pay nothing.
+
 - **Sessions abandoned by a dead node are now adopted automatically.** The ownership lease made a
   crashed node's sessions *claimable*, but nothing ever claimed them: boot auto-start runs exactly
   once, so a peer that was already up — or a recreated container whose boot landed before its own

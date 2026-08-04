@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Session } from './entities/session.entity';
 import { Message } from '../message/entities/message.entity';
@@ -7,6 +8,7 @@ import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { SessionLidResolver } from './session-lid-resolver.service';
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { SessionOwnershipService } from './session-ownership.service';
+import { SessionProxyInterceptor } from './session-proxy.interceptor';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
@@ -29,6 +31,8 @@ import { AutomationModule } from '../automation/automation.module';
   ],
   controllers: [SessionController],
   providers: [
+    // Global on purpose: any controller may carry a session dimension. Inert unless NODE_URL is set.
+    { provide: APP_INTERCEPTOR, useClass: SessionProxyInterceptor },
     SessionService,
     SessionEngineLifecycle,
     SessionErrorStore,

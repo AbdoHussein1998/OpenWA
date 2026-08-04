@@ -26,14 +26,33 @@
 > are still sending. A data import likewise reports the sessions it could not reconcile
 > because another node is running them.
 >
-> **What does not exist yet, and is why one replica is still the answer.** Live engine state
-> (browser + WebSocket + reconnect/error state) still lives in an in-memory `Map` in
-> `EngineRegistry`, and there is **no request routing** — a call that lands on a replica
-> which does not own the session cannot serve it. Not every lifecycle path is fenced: the
-> liveness watchdog and reconnect timers still act on whatever is in the local registry.
-> `BulkMessageService` keeps its live batch state in process, so a takeover cannot resume a
-> batch — only fail it. There is **no** Socket.IO Redis adapter, so a WebSocket client
-> connected to one replica does not receive events raised on another.
+> **Failover now completes on its own.** A periodic takeover sweep (default every 30s,
+> `SESSION_TAKEOVER_SWEEP_MS`, gated by the same `AUTO_START_SESSIONS` flag as boot
+> auto-start) adopts sessions whose holder's lease lapsed — a crashed peer, or a recreated
+> container whose new identity boots before its old lease expires. Only authenticated
+> sessions in a running-or-should-be state are adopted; mid-pairing and operator-`failed`
+> ones are left alone, and a cleanly stopped session releases its claim so it is never
+> "lapsed". Adopting a session fails its stuck in-flight batches (no auto-resume — the dead
+> node's already-sent messages are unknowable).
+>
+> **Request routing now exists, opt-in via `NODE_URL`.** When every node sets its own
+> reachable URL (e.g. `NODE_URL=http://10.0.0.5:2785`), a session-scoped request landing on
+> a non-owner is forwarded to the live owner and the owner's response is relayed back
+> (`x-openwa-served-by` names it). The forward happens after API-key auth, carries the
+> caller's credentials (both nodes share the auth database), is bounded by
+> `SESSION_PROXY_TIMEOUT_MS` (default 60s), and is one hop only — a forwarded request is
+> never forwarded again, so stale ownership degrades to a wrong-node answer instead of a
+> loop. A lapsed owner is deliberately NOT forwarded to: the local node handles the request,
+> which is exactly how a takeover begins. Without `NODE_URL` the whole path is inert and
+> single-node deployments pay nothing.
+>
+> **What does not exist yet, and is why one replica is still the answer.** There is **no**
+> Socket.IO Redis adapter, so a WebSocket client connected to one replica does not receive
+> events raised on another. Not every lifecycle path is fenced: the liveness watchdog and
+> reconnect timers still act on whatever is in the local registry. `BulkMessageService`
+> keeps its live batch state in process, so a takeover cannot resume a batch — only fail
+> it. MCP/agent tool invocations execute on the node that received them rather than being
+> forwarded.
 >
 > Everything below (node affinity, `replicas: 3`) remains a **design sketch** until those
 > land.
