@@ -1,4 +1,11 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+  Optional,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Not, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { createHash, randomUUID } from 'crypto';
@@ -14,6 +21,7 @@ import { MessageStatus } from './entities/message.entity';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { MessageService } from './message.service';
 import { SendPacingService } from './send-pacing.service';
+import { SessionOwnershipService } from '../session/session-ownership.service';
 import { HookManager } from '../../core/hooks';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from './media-cap.util';
 import { SsrfBlockedError, SSRF_BLOCKED_CLIENT_MESSAGE } from '../../common/security/ssrf-guard';
@@ -91,6 +99,11 @@ export class BulkMessageService implements OnApplicationBootstrap {
     private readonly messageService: MessageService,
     private readonly hookManager: HookManager,
     private readonly pacing: SendPacingService,
+    // Trailing @Optional, matching the convention used elsewhere here: the running app always
+    // provides it, while direct-construction unit tests omit it and every batch then reads as this
+    // node's — which is exactly a single-process deployment.
+    @Optional()
+    private readonly ownership?: SessionOwnershipService,
   ) {}
 
   /**
@@ -98,9 +111,17 @@ export class BulkMessageService implements OnApplicationBootstrap {
    * previous (crashed/restarted) process — this fresh process is not driving it, so it would
    * otherwise be stuck in PROCESSING forever. Mark it FAILED. Auto-resume is intentionally NOT
    * done here: resuming risks re-sending messages already delivered before the crash.
+   *
+   * "A previous process" is not the same as "any process". A batch is only ever driven by whichever
+   * process holds its session's engine, so a batch belongs to a peer exactly when its session does.
+   * Without that distinction a booting replica declares a live peer's in-flight batches FAILED
+   * while they are still sending — the caller is told the send failed, and the messages go out
+   * anyway. Batch ownership follows session ownership rather than being tracked separately,
+   * because the two cannot diverge: only the engine holder can send.
    */
   async onApplicationBootstrap(): Promise<void> {
-    const orphaned = await this.batchRepository.find({ where: { status: BatchStatus.PROCESSING } });
+    const processing = await this.batchRepository.find({ where: { status: BatchStatus.PROCESSING } });
+    const orphaned = await this.ownedByThisNode(processing);
     for (const batch of orphaned) {
       batch.status = BatchStatus.FAILED;
       this.stripBatchMediaPayloads(batch.messages);
@@ -111,6 +132,21 @@ export class BulkMessageService implements OnApplicationBootstrap {
         `Marked ${orphaned.length} orphaned PROCESSING batch(es) FAILED on startup (interrupted by a restart)`,
       );
     }
+    const skipped = processing.length - orphaned.length;
+    if (skipped > 0) {
+      this.logger.log(`Left ${skipped} PROCESSING batch(es) alone: their sessions are held by another node`);
+    }
+  }
+
+  /**
+   * Narrow to the batches this process may act on. With no ownership service — a single-process
+   * deployment, or a directly-constructed unit test — every batch qualifies, which is the behaviour
+   * that existed before ownership was recorded at all.
+   */
+  private async ownedByThisNode(batches: MessageBatch[]): Promise<MessageBatch[]> {
+    if (!this.ownership || batches.length === 0) return batches;
+    const claimable = new Set(await this.ownership.claimable([...new Set(batches.map(b => b.sessionId))]));
+    return batches.filter(batch => claimable.has(batch.sessionId));
   }
 
   async createBatch(sessionId: string, dto: SendBulkMessageDto): Promise<MessageBatch> {

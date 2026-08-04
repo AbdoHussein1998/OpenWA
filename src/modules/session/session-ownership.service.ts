@@ -174,6 +174,22 @@ export class SessionOwnershipService {
     return session.leaseExpiresAt != null && session.leaseExpiresAt > now;
   }
 
+  /**
+   * Session ids another node currently holds on a live lease.
+   *
+   * For operations that can only act on this process's own engines and would otherwise report
+   * success over work they never touched.
+   */
+  async heldByOtherNodes(now = new Date()): Promise<string[]> {
+    const rows = await this.sessions
+      .createQueryBuilder('session')
+      .select('session.id', 'id')
+      .where('"nodeId" IS NOT NULL AND "nodeId" <> :me', { me: this.nodeId })
+      .andWhere('"leaseExpiresAt" > :now', { now: DateTransformer.to(now) })
+      .getRawMany<{ id: string }>();
+    return rows.map(row => row.id);
+  }
+
   /** Test seam: what this process currently believes it holds. */
   ownedIds(): string[] {
     return [...this.owned];

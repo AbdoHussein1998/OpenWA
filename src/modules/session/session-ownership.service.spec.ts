@@ -207,6 +207,28 @@ describe('SessionOwnershipService', () => {
     });
   });
 
+  /**
+   * Drives an operator-facing warning during a data import: this process can only stop its own
+   * engines, so a session running elsewhere has to be named rather than quietly counted as handled.
+   */
+  describe('sessions held elsewhere', () => {
+    it('names sessions another node holds on a live lease', async () => {
+      const mine = await seed();
+      const peers = await seed();
+      await service('node-a').claim(mine.id);
+      await service('node-b').claim(peers.id);
+
+      await expect(service('node-a').heldByOtherNodes()).resolves.toEqual([peers.id]);
+    });
+
+    it('ignores unclaimed sessions and lapsed claims, which nobody is running', async () => {
+      await seed();
+      await seed({ nodeId: 'node-b', leaseExpiresAt: new Date(Date.now() - 1_000) });
+
+      await expect(service('node-a').heldByOtherNodes()).resolves.toEqual([]);
+    });
+  });
+
   describe('node identity', () => {
     it('falls back to the hostname when nothing is configured, and never to the pid', () => {
       const bare = new SessionOwnershipService(sessions);

@@ -14,13 +14,20 @@
 > does not depend on one. `NODE_ID` names the process; it defaults to the hostname and must
 > be stable across restarts.
 >
+> Bulk-send batches follow the same rule. A batch is only ever driven by the process
+> holding its session's engine, so a booting replica now reaps only the batches whose
+> sessions it may claim, instead of declaring a peer's in-flight batches FAILED while they
+> are still sending. A data import likewise reports the sessions it could not reconcile
+> because another node is running them.
+>
 > **What does not exist yet, and is why one replica is still the answer.** Live engine state
 > (browser + WebSocket + reconnect/error state) still lives in an in-memory `Map` in
 > `EngineRegistry`, and there is **no request routing** — a call that lands on a replica
-> which does not own the session cannot serve it. Not every lifecycle path is fenced.
-> `BulkMessageService` keeps batch state in process and its boot reaper does not distinguish
-> a peer's in-flight batches from its own. There is **no** Socket.IO Redis adapter, so a
-> WebSocket client connected to one replica does not receive events raised on another.
+> which does not own the session cannot serve it. Not every lifecycle path is fenced: the
+> liveness watchdog and reconnect timers still act on whatever is in the local registry.
+> `BulkMessageService` keeps its live batch state in process, so a takeover cannot resume a
+> batch — only fail it. There is **no** Socket.IO Redis adapter, so a WebSocket client
+> connected to one replica does not receive events raised on another.
 >
 > Everything below (node affinity, `replicas: 3`) remains a **design sketch** until those
 > land.
