@@ -41,10 +41,17 @@
 > (`x-openwa-served-by` names it). The forward happens after API-key auth, carries the
 > caller's credentials (both nodes share the auth database), is bounded by
 > `SESSION_PROXY_TIMEOUT_MS` (default 60s), and is one hop only — a forwarded request is
-> never forwarded again, so stale ownership degrades to a wrong-node answer instead of a
-> loop. A lapsed owner is deliberately NOT forwarded to: the local node handles the request,
+> never forwarded again; one that still lands on a live non-owner (stale ownership, or a
+> client-forged hop marker) is refused with a retryable 409 rather than executed there. A
+> lapsed owner is deliberately NOT forwarded to: the local node handles the request,
 > which is exactly how a takeover begins. Without `NODE_URL` the whole path is inert and
 > single-node deployments pay nothing.
+>
+> Forwards carry the client address in `x-forwarded-for` (inbound chain preserved, the
+> observed peer appended). For an `allowedIps`-restricted key or the per-IP throttler to see
+> the REAL client on forwarded calls, each node must list its peer nodes' addresses in its
+> `TRUSTED_PROXIES` — otherwise the owner (correctly) ignores the chain and every forwarded
+> request appears to come from the peer node itself.
 >
 > **WebSocket events now fan out across replicas** when Redis is enabled (`REDIS_ENABLED=true`,
 > the same flag the throttler and cache already use). The gateway broadcasts to rooms; a Redis

@@ -1,7 +1,15 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Optional } from '@nestjs/common';
+import {
+  CallHandler,
+  ConflictException,
+  ExecutionContext,
+  Injectable,
+  NestInterceptor,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
+import { isUUID } from 'class-validator';
 import { Repository } from 'typeorm';
 import { EMPTY, Observable } from 'rxjs';
 import type { Request, Response } from 'express';
@@ -9,6 +17,7 @@ import { Session } from './entities/session.entity';
 import { SessionOwnershipService } from './session-ownership.service';
 import { SESSION_SCOPED_KEY } from '../auth/decorators/auth.decorators';
 import { createLogger } from '../../common/services/logger.service';
+import { normalizeIp } from '../../common/utils/ip';
 
 /** The request headers a forwarded call carries over. Everything else is this hop's business. */
 const FORWARDED_REQUEST_HEADERS = ['x-api-key', 'authorization', 'content-type', 'accept'] as const;
@@ -37,8 +46,10 @@ export const FORWARDED_HEADER = 'x-openwa-forwarded';
  *   request (a POST /start claims it here) is the takeover semantic, not an error.
  * - A live owner WITHOUT a nodeUrl cannot be reached; the request proceeds locally and the
  *   engine-level "held by another node" conflict answers it — precise, if unrouteable.
- * - One hop only: a forwarded request is never forwarded again (FORWARDED_HEADER), so stale
- *   ownership data degrades to a wrong-node answer instead of a loop.
+ * - One hop only: a forwarded request is never forwarded again (FORWARDED_HEADER). The marker is
+ *   client-settable, so it is verified rather than trusted: a marked request that still lands on a
+ *   live non-owner — forged, or ownership moved mid-flight — is refused with a retryable 409
+ *   instead of executed against a node with no engine.
  */
 @Injectable()
 export class SessionProxyInterceptor implements NestInterceptor {
@@ -61,10 +72,13 @@ export class SessionProxyInterceptor implements NestInterceptor {
     if (!this.ownership.nodeUrl) return next.handle();
 
     const request = context.switchToHttp().getRequest<Request>();
-    if (request.headers[FORWARDED_HEADER]) return next.handle();
 
     const sessionId = this.sessionIdOf(context, request);
     if (!sessionId) return next.handle();
+    // A malformed id cannot name a routed session, and on Postgres a raw findOne against the uuid
+    // column throws (a 500) before the route's ParseUUIDPipe could answer 400 — skip routing and
+    // let the pipe reject it.
+    if (!isUUID(sessionId)) return next.handle();
 
     const owner = await this.sessions.findOne({
       where: { id: sessionId },
@@ -72,7 +86,17 @@ export class SessionProxyInterceptor implements NestInterceptor {
     });
     if (!owner?.nodeId || owner.nodeId === this.ownership.nodeId) return next.handle();
     const leaseLive = owner.leaseExpiresAt != null && owner.leaseExpiresAt > new Date();
-    if (!leaseLive || !owner.nodeUrl) return next.handle();
+    if (!leaseLive) return next.handle();
+
+    // One hop only — but never "execute anywhere": the hop marker is client-settable, so a request
+    // marked forwarded that still lands on a live non-owner (forged header, or ownership moved
+    // mid-flight) is refused rather than run here — a stop() on this node would write DISCONNECTED
+    // while the owner's engine stays up. A retry re-routes against fresh ownership data.
+    if (request.headers[FORWARDED_HEADER]) {
+      throw new ConflictException(`Session ${sessionId} is running on another node`);
+    }
+
+    if (!owner.nodeUrl) return next.handle();
 
     await this.forward(request, context.switchToHttp().getResponse<Response>(), owner.nodeId, owner.nodeUrl);
     // The response has been written; complete without emitting so nothing downstream re-answers it.
@@ -102,6 +126,17 @@ export class SessionProxyInterceptor implements NestInterceptor {
     for (const name of FORWARDED_REQUEST_HEADERS) {
       const value = request.headers[name];
       if (typeof value === 'string') headers[name] = value;
+    }
+
+    // The owner re-authenticates the forwarded call (allowedIps) and throttles per client IP, so
+    // the chain must carry what this hop observed — without it every forwarded call shows up as
+    // THIS node's address. Standard proxy behavior: relay the inbound chain, append the immediate
+    // peer. The owner only honors the chain when this node is in its TRUSTED_PROXIES (docs/13).
+    const inbound = request.headers['x-forwarded-for'];
+    const inboundChain = Array.isArray(inbound) ? inbound.join(', ') : inbound;
+    const observedPeer = normalizeIp(request.socket?.remoteAddress || request.ip || '');
+    if (observedPeer) {
+      headers['x-forwarded-for'] = inboundChain ? `${inboundChain}, ${observedPeer}` : observedPeer;
     }
 
     const hasBody = !['GET', 'HEAD'].includes(request.method);
