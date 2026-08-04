@@ -124,6 +124,21 @@ describe('resolveReconnectConfig', () => {
 
 E2E smoke tests live in `test/` and use `test/jest-e2e.json`.
 
+> **They run one at a time (`maxWorkers: 1`), and that is a correctness requirement, not a
+> performance preference.** Each suite boots a real application, and not every piece of application
+> state is redirected to a per-worker location. `dataDir` is a hard-coded `./data` with no
+> environment lever, so every worker's plugin loader read-modify-writes the same
+> `data/plugins/registry.json`. Measured on a single parallel run: 52 writes from 12 processes, 30
+> of them within 500ms of a write by a different process. Individual writes are atomic; the
+> read-modify-write cycle is not.
+>
+> Running them in parallel produced a roughly one-in-ten failure that moved between suites — a 403
+> where a 200 was expected, a 404 where a 403 was, a rate-limit window misbehaving — and never
+> reproduced when a suite ran on its own, which is what made it look like flakiness. Serially it
+> does not occur.
+>
+> Adding a suite is safe. Restoring parallelism is not, until each worker gets its own data root.
+
 ```text
 test/
 ├── __mocks__/
