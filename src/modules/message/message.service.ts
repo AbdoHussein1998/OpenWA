@@ -12,7 +12,7 @@ import { assertBase64WithinMediaCap, stripBase64DataUri } from './media-cap.util
 import { MediaInput, IWhatsAppEngine, MessageResult } from '../../engine/interfaces/whatsapp-engine.interface';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
 import { HookManager, applySendingGate } from '../../core/hooks';
-import { SendPacingService } from './send-pacing.service';
+import { SendPacingService, countsTowardSendBreaker } from './send-pacing.service';
 import { TemplateService } from '../template/template.service';
 import { renderTemplate } from '../../common/utils/template-render';
 import { createLogger } from '../../common/services/logger.service';
@@ -178,10 +178,13 @@ export class MessageService {
     input: unknown,
     error: unknown,
   ): Promise<never> {
-    // The engine was asked and refused, so this counts toward the breaker's streak. Validation
-    // errors thrown before the engine is reached never come through here, which is what keeps a
-    // client sending malformed requests from tripping the breaker on a healthy session.
-    this.pacing.recordSendFailure(sessionId);
+    // Only failures that say something about the account's standing feed the breaker: adapters also
+    // raise client-fault and engine-state errors from inside this call (a blocked media URL, an
+    // unsupported capability, a disconnected socket), and counting those let a client sending bad
+    // requests trip the breaker on a healthy session.
+    if (countsTowardSendBreaker(error)) {
+      this.pacing.recordSendFailure(sessionId);
+    }
     await this.saveFailedMessage(message);
     // Sanitize the hook payload: an SSRF block's raw .message names the resolved internal address
     // (a recon/DNS-rebind oracle) — the client-facing throw below already maps it to a generic

@@ -7,6 +7,8 @@ import { Session } from '../session/entities/session.entity';
 import { resolveSendPacingConfig, type SendPacingConfig } from './send-pacing.config';
 import { incrementSendPacingRefusals, type SendPacingRefusalReason } from '../../common/metrics/send-pacing-metrics';
 import { createLogger } from '../../common/services/logger.service';
+import { EngineRefusedError } from '../../common/errors/engine-refused.error';
+import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 
@@ -22,6 +24,32 @@ export function isPacingLimitedError(error: unknown): boolean {
   if (!(error instanceof HttpException)) return false;
   const body = error.getResponse();
   return typeof body === 'object' && body !== null && (body as { code?: string }).code === SEND_PACING_LIMITED;
+}
+
+/**
+ * Whether a failed send says anything about the ACCOUNT's standing with WhatsApp — the only thing
+ * the breaker is meant to measure.
+ *
+ * Adapters raise plenty of failures before (or instead of) asking WhatsApp: a blocked media URL, a
+ * capability the engine does not implement, a socket that is not connected, a message id that is
+ * not in the local store, a malformed request. Counting those lets a client sending bad requests
+ * open the breaker on a perfectly healthy session and 429 every send for the cooldown. The rule is
+ * therefore: a client-fault or engine-state HTTP status (4xx/501/503) does NOT count; a refusal
+ * WhatsApp itself returned — EngineRefusedError (403) — and anything unclassified (a raw engine
+ * error, a timeout, a 5xx) does.
+ */
+export function countsTowardSendBreaker(error: unknown): boolean {
+  if (error instanceof EngineRefusedError) return true;
+  if (error instanceof SsrfBlockedError) return false;
+  if (error instanceof HttpException) {
+    const status = error.getStatus();
+    // 4xx = the caller's request was wrong; 501 = this engine cannot do it; 503 = the engine is not
+    // connected (a transport fault the reconnect machinery owns, not an account signal).
+    const NOT_IMPLEMENTED: number = HttpStatus.NOT_IMPLEMENTED;
+    const SERVICE_UNAVAILABLE: number = HttpStatus.SERVICE_UNAVAILABLE;
+    return !((status >= 400 && status < 500) || status === NOT_IMPLEMENTED || status === SERVICE_UNAVAILABLE);
+  }
+  return true;
 }
 
 /** Per-session breaker state. Deliberately in memory — see the class doc. */
@@ -378,7 +406,12 @@ export class SendPacingService {
     return (
       this.messageRepository
         .createQueryBuilder('m')
-        .select('COUNT(DISTINCT m.chatId)', 'count')
+        // Counted per CONTACT, not per stored spelling: the same person reached under both user-id
+        // dialects today is one reachout, and the correlated lookups below match either spelling
+        // (see dialectVariants — a chat known as @s.whatsapp.net is not a stranger as @c.us).
+        // REPLACE is the portable normalisation both SQLite and Postgres carry; the paired IN keeps
+        // the inner side's `chatId` index usable.
+        .select(`COUNT(DISTINCT REPLACE(m."chatId", '@s.whatsapp.net', '@c.us'))`, 'count')
         .where('m.sessionId = :sessionId', { sessionId })
         .andWhere('m.direction = :direction', { direction: MessageDirection.OUTGOING })
         .andWhere('m.createdAt >= :dayStart', { dayStart })
@@ -386,12 +419,12 @@ export class SendPacingService {
         // — there is no snake_case naming strategy on this connection. Unquoted, Postgres would fold
         // them to lowercase and the query would fail at runtime on the very first cold send.
         .andWhere(
-          'NOT EXISTS (SELECT 1 FROM "messages" p WHERE p."sessionId" = :sessionId AND p."chatId" = m."chatId" AND p."createdAt" < :dayStart)',
+          `NOT EXISTS (SELECT 1 FROM "messages" p WHERE p."sessionId" = :sessionId AND p."chatId" IN (${DIALECT_PAIR('m')}) AND p."createdAt" < :dayStart)`,
         )
         // They wrote first: an incoming row strictly earlier than today's first outgoing one makes
         // the chat an answered conversation, not a cold start. A tie stays cold (conservative).
         .andWhere(
-          'NOT EXISTS (SELECT 1 FROM "messages" i WHERE i."sessionId" = :sessionId AND i."chatId" = m."chatId" AND i."direction" = :incoming AND i."createdAt" < (SELECT MIN(o."createdAt") FROM "messages" o WHERE o."sessionId" = :sessionId AND o."chatId" = m."chatId" AND o."direction" = :direction AND o."createdAt" >= :dayStart))',
+          `NOT EXISTS (SELECT 1 FROM "messages" i WHERE i."sessionId" = :sessionId AND i."chatId" IN (${DIALECT_PAIR('m')}) AND i."direction" = :incoming AND i."createdAt" < (SELECT MIN(o."createdAt") FROM "messages" o WHERE o."sessionId" = :sessionId AND o."chatId" IN (${DIALECT_PAIR('m')}) AND o."direction" = :direction AND o."createdAt" >= :dayStart))`,
           { incoming: MessageDirection.INCOMING },
         )
         .getRawOne<{ count: string | number }>()
@@ -438,6 +471,14 @@ const DAY_MS = 86_400_000;
  * known contact addressed the other way as cold and over-draws the budget. Non-user ids (groups,
  * lids, …) pass through unchanged; a lid has no derivable phone twin to probe.
  */
+/**
+ * SQL for both user-id spellings of `<alias>."chatId"`, for use as an `IN (…)` list. The same idea
+ * as {@link dialectVariants}, expressed portably: REPLACE exists on SQLite and Postgres alike, and
+ * for a non-user id (a group, a lid) both branches collapse to the raw value.
+ */
+const DIALECT_PAIR = (alias: string): string =>
+  `REPLACE(${alias}."chatId", '@s.whatsapp.net', '@c.us'), REPLACE(${alias}."chatId", '@c.us', '@s.whatsapp.net')`;
+
 function dialectVariants(chatId: string): string[] {
   const lower = chatId.toLowerCase();
   if (lower.endsWith('@c.us')) {

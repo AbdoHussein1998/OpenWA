@@ -298,6 +298,8 @@ export class BaileysGroups {
 
   async setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
     this.host.ensureReady();
-    await this.sock().groupToggleEphemeral(groupId, durationSec);
+    await mapServerRefusal('Setting the disappearing-message timer', () =>
+      this.sock().groupToggleEphemeral(groupId, durationSec),
+    );
   }
 }

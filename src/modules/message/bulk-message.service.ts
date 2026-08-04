@@ -20,7 +20,12 @@ import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { MessageStatus } from './entities/message.entity';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { MessageService } from './message.service';
-import { SendPacingService, isPacingLimitedError, SEND_PACING_LIMITED } from './send-pacing.service';
+import {
+  SendPacingService,
+  isPacingLimitedError,
+  countsTowardSendBreaker,
+  SEND_PACING_LIMITED,
+} from './send-pacing.service';
 import { SessionOwnershipService } from '../session/session-ownership.service';
 import { HookManager } from '../../core/hooks';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from './media-cap.util';
@@ -473,7 +478,11 @@ export class BulkMessageService implements OnApplicationBootstrap {
       try {
         messageResult = await this.sendMessage(engine, msg.chatId, msg.type, content);
       } catch (engineError) {
-        this.pacing.recordSendFailure(batch.sessionId);
+        // Same filter the single-send path applies: adapters also raise client-fault and
+        // engine-state errors from inside this call, and those say nothing about the account.
+        if (countsTowardSendBreaker(engineError)) {
+          this.pacing.recordSendFailure(batch.sessionId);
+        }
         throw engineError;
       }
       this.pacing.recordSendSuccess(batch.sessionId);

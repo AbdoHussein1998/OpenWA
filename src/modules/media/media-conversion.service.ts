@@ -1,7 +1,8 @@
-import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createLogger } from '../../common/services/logger.service';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
+import { SsrfBlockedError, SSRF_BLOCKED_CLIENT_MESSAGE } from '../../common/security/ssrf-guard';
 import { ConcurrencyLimiter } from '../../common/utils/concurrency-limiter';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from '../message/media-cap.util';
 import { FfmpegConversionError, probeFfmpeg, runFfmpeg, videoEncodeArgs, voiceEncodeArgs } from './ffmpeg';
@@ -105,8 +106,20 @@ export class MediaConversionService {
       // Through the SSRF guard, exactly as a send does: it validates the host and pins the
       // connection to the vetted address. ffmpeg itself never sees a URL — it is restricted to the
       // file protocol and handed bytes this process already fetched and checked.
-      const { data } = await loadRemoteMediaBuffer(dto.url);
-      return data;
+      try {
+        const { data } = await loadRemoteMediaBuffer(dto.url);
+        return data;
+      } catch (error) {
+        // The fetch layer throws plain Errors (bad status, over the byte cap) and SsrfBlockedError,
+        // none of them HttpExceptions — unmapped they leave as a 500 for what is squarely a bad
+        // input, while the send path answers 400 for the very same URL. An SSRF block is reported
+        // generically: its raw message names the resolved internal address.
+        if (error instanceof SsrfBlockedError) {
+          throw new BadRequestException(SSRF_BLOCKED_CLIENT_MESSAGE);
+        }
+        if (error instanceof HttpException) throw error;
+        throw new BadRequestException(error instanceof Error ? error.message : String(error));
+      }
     }
     throw new BadRequestException('Either url or base64 must be provided');
   }

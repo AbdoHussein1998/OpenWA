@@ -28,6 +28,7 @@ import type {
   WebhookDeliveryFailureRow,
   IntegrationDeliveryFailureRow,
   StatusUpdateRow,
+  AutomationRuleRow,
 } from './migration-tables.types';
 import { TABLE_IMPORTERS } from './table-importers';
 
@@ -87,6 +88,7 @@ export class InfraDataController {
       webhookDeliveryFailures: number;
       integrationDeliveryFailures: number;
       statusUpdates: number;
+      automationRules: number;
     };
     /** Optional tables that were skipped because they genuinely do not exist in this DB (older schema). */
     skippedTables: string[];
@@ -135,6 +137,7 @@ export class InfraDataController {
       'integration_delivery_failures',
     );
     const statusUpdates = await queryOptionalTable<StatusUpdateRow>('status_updates');
+    const automationRules = await queryOptionalTable<AutomationRuleRow>('automation_rules');
 
     const counts = {
       sessions: sessions.length,
@@ -150,6 +153,7 @@ export class InfraDataController {
       webhookDeliveryFailures: webhookDeliveryFailures.length,
       integrationDeliveryFailures: integrationDeliveryFailures.length,
       statusUpdates: statusUpdates.length,
+      automationRules: automationRules.length,
     };
 
     // Audit the full-DB export: this payload carries webhook + plugin-instance secrets, so WHO pulled
@@ -174,6 +178,7 @@ export class InfraDataController {
         webhookDeliveryFailures,
         integrationDeliveryFailures,
         statusUpdates,
+        automationRules,
       },
       counts,
       skippedTables,

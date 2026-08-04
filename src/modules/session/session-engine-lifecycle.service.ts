@@ -409,7 +409,15 @@ export class SessionEngineLifecycle {
    * "already starting/started" refusal never releases a session this node genuinely runs.
    */
   isEngineActive(id: string): boolean {
-    return this.engines.has(id) || this.initializingSessions.has(id) || this.reconnectStates.has(id);
+    if (this.engines.has(id) || this.initializingSessions.has(id)) return true;
+    // Reconnect state counts only while an attempt is actually pending: a timer armed by
+    // scheduleReconnect, or one that has fired and is running executeReconnect (which leaves the
+    // spent handle in place and has already counted its attempt). The entry start() creates up
+    // front — {attempts: 0, timer: null} — is dormant: a start that then failed leaves nothing
+    // that will ever re-register an engine, and treating it as liveness would pin the claim to
+    // this node forever.
+    const reconnect = this.reconnectStates.get(id);
+    return reconnect != null && (reconnect.timer !== null || reconnect.attempts > 0);
   }
 
   // --- Leaf-event delegates (SessionEngineLeafEvents) ------------------------------------------

@@ -14,6 +14,7 @@ import type {
   WebhookDeliveryFailureRow,
   IntegrationDeliveryFailureRow,
   StatusUpdateRow,
+  AutomationRuleRow,
 } from './migration-tables.types';
 
 // A per-table restore step for importData: which backup key to read, the exact INSERT text (kept in
@@ -357,6 +358,27 @@ export const TABLE_IMPORTERS: AnyTableImporter[] = [
       su.expiresAt,
     ],
   }),
+  // Import automation rules (per-session autoreply rules; FK sessions ON DELETE CASCADE, so the
+  // import's `DELETE FROM sessions` wipes them and they must be re-inserted or a restore
+  // permanently loses every rule).
+  defineTableImporter({
+    key: 'automationRules',
+    label: 'automation rule',
+    sql: `INSERT INTO automation_rules (id, "sessionId", name, enabled, conditions, "replyText", "cooldownSeconds", "createdAt", "updatedAt")
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    id: (rule: AutomationRuleRow) => rule.id,
+    map: (rule: AutomationRuleRow) => [
+      rule.id,
+      rule.sessionId,
+      rule.name,
+      rule.enabled ?? true,
+      rule.conditions ?? null,
+      rule.replyText,
+      rule.cooldownSeconds ?? 60,
+      rule.createdAt,
+      rule.updatedAt,
+    ],
+  }),
 ];
 
 // The `as TableCounts` cast in importData means a dropped or mis-keyed descriptor is invisible to
@@ -376,6 +398,7 @@ const EXPECTED_TABLE_KEYS: ReadonlyArray<keyof MigrationTables> = [
   'webhookDeliveryFailures',
   'integrationDeliveryFailures',
   'statusUpdates',
+  'automationRules',
 ];
 const importerKeys = TABLE_IMPORTERS.map(importer => importer.key);
 for (const key of EXPECTED_TABLE_KEYS) {

@@ -1,6 +1,6 @@
 import http from 'http';
 import { AddressInfo } from 'net';
-import { of, lastValueFrom, isEmpty } from 'rxjs';
+import { of, lastValueFrom } from 'rxjs';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { SessionProxyInterceptor, FORWARDED_HEADER } from './session-proxy.interceptor';
 import type { Session } from './entities/session.entity';
@@ -188,8 +188,10 @@ describe('SessionProxyInterceptor', () => {
       const { interceptor, context, next, handle, res } = build({ req, row: row({ nodeUrl: serverUrl }) });
 
       const result = await interceptor.intercept(context, next);
-      // EMPTY: the response was written directly; nothing may flow to the route handler.
-      expect(await lastValueFrom(result.pipe(isEmpty()))).toBe(true);
+      // The response was written directly, so nothing may flow to the route handler. The observable
+      // still EMITS (undefined) rather than completing empty: Nest resolves it with lastValueFrom,
+      // which rejects on an empty one and logged an ERROR for every successful forward.
+      expect(await lastValueFrom(result)).toBeUndefined();
       expect(handle).not.toHaveBeenCalled();
 
       expect(seen).toHaveLength(1);

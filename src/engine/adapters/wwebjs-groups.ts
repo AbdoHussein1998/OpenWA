@@ -339,7 +339,7 @@ export class WwebjsGroups {
    */
   async getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo> {
     this.host.ensureReady();
-    const raw = (await this.client().getInviteInfo(inviteCode)) as {
+    type RawInviteInfo = {
       id?: { _serialized?: string; $1?: string } | string;
       subject?: string;
       desc?: string;
@@ -348,6 +348,19 @@ export class WwebjsGroups {
       size?: number;
       participants?: unknown[];
     } | null;
+    // A refused invite (invalid, expired, revoked) rejects PAGE-SIDE inside WA Web's query job, and
+    // Client.getInviteInfo bare-forwards that rejection — unmapped it escapes as an opaque 500 for
+    // the endpoint's most common error input, which the route documents (and Baileys answers) as
+    // 404. The sibling joinGroupViaInviteCode maps the same cause; this is the read half.
+    let raw: RawInviteInfo;
+    try {
+      raw = await this.client().getInviteInfo(inviteCode);
+    } catch (error) {
+      this.host.logger.debug('getInviteInfo rejected; treating the invite as not found', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new GroupNotFoundError(inviteCode);
+    }
 
     // Raw page-context Wids: read `$1` before concluding absence (#747, the WA Web minifier
     // rename) — without the fallback a renamed build turns every VALID invite into a false 404.
