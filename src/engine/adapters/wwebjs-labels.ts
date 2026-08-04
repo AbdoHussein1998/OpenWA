@@ -42,7 +42,10 @@ export class WwebjsLabels {
     const chats = await (this.client() as unknown as BusinessClient).getChatsByLabelId(labelId);
     const summaries: ChatSummary[] = [];
     for (const chat of chats ?? []) {
-      const id = chat.id?._serialized;
+      // The library builds this list via getChatById per label item and yields UNDEFINED entries
+      // for chats that no longer resolve (Client.js getChatsByLabelId → ChatFactory) — the whole
+      // entry, not just the id, so the optional chain must start at the entry itself.
+      const id = chat?.id?._serialized;
       if (!id) continue;
       summaries.push({
         id,

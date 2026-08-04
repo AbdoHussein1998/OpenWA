@@ -6054,3 +6054,64 @@ describe('WhatsAppWebJsAdapter voice status', () => {
     expect(options.sendAudioAsVoice).toBeUndefined();
   });
 });
+
+// WA Web's minifier periodically renames the page-context `_serialized` property to `$1` (#747),
+// and getChatsByLabelId yields undefined ENTRIES for label items whose chat no longer resolves.
+// These raw-id extraction sites must read the rename and skip the hole instead of crashing or
+// minting the literal id "undefined".
+describe('WhatsAppWebJsAdapter raw-id extraction hardening', () => {
+  const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = client;
+    return adapter;
+  };
+
+  it('getChatsByLabel skips an undefined entry (deleted chat behind the label) instead of a 500', async () => {
+    const getChatsByLabelId = jest
+      .fn()
+      .mockResolvedValue([undefined, { id: { _serialized: '628111@c.us' }, name: 'Kept', isGroup: false }, { id: {} }]);
+
+    const result = await readyAdapter({ getChatsByLabelId }).getChatsByLabel('7');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('628111@c.us');
+  });
+
+  it('getSubscribedChannels reads $1 on a renamed build, never the literal "undefined"', async () => {
+    const getChannels = jest.fn().mockResolvedValue([{ id: { $1: '120363@newsletter' }, name: 'Renamed' }]);
+
+    const result = await readyAdapter({ getChannels }).getSubscribedChannels();
+
+    expect(result[0].id).toBe('120363@newsletter');
+  });
+
+  it('createChannel reads nid.$1 on a renamed build instead of returning id "undefined"', async () => {
+    const createChannel = jest.fn().mockResolvedValue({ title: 'C', nid: { $1: '120363@newsletter' } });
+
+    const channel = await readyAdapter({ createChannel }).createChannel('C');
+
+    expect(channel.id).toBe('120363@newsletter');
+  });
+
+  it('createChannel refuses when no id is readable rather than minting "undefined"', async () => {
+    const createChannel = jest.fn().mockResolvedValue({ title: 'C', nid: {} });
+
+    await expect(readyAdapter({ createChannel }).createChannel('C')).rejects.toBeInstanceOf(EngineRefusedError);
+  });
+
+  it('getGroupJoinInfo reads id/owner via $1 on a renamed build instead of a false 404', async () => {
+    const getInviteInfo = jest.fn().mockResolvedValue({
+      id: { $1: '120363000@g.us' },
+      subject: 'G',
+      owner: { $1: '628111@c.us' },
+      size: 3,
+    });
+
+    const info = await readyAdapter({ getInviteInfo }).getGroupJoinInfo('CODE');
+
+    expect(info.id).toBe('120363000@g.us');
+    expect(info.owner).toBe('628111@c.us');
+    expect(info.participantCount).toBe(3);
+  });
+});
