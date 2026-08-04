@@ -26,7 +26,9 @@ export class WwebjsChannels {
       return [];
     }
     return channels.map((ch: WwjsChannelData) => ({
-      id: String(typeof ch.id === 'object' ? ch.id._serialized : ch.id),
+      // Read `$1` before giving up (#747: WA Web's minifier renamed the serialized property), and
+      // never String() the object branch — that manufactures the literal "undefined" as an id.
+      id: (typeof ch.id === 'object' ? (ch.id._serialized ?? ch.id.$1) : String(ch.id)) || '',
       name: String(ch.name || ''),
       description: ch.description ? String(ch.description) : undefined,
       inviteCode: ch.inviteCode ? String(ch.inviteCode) : undefined,
@@ -52,8 +54,15 @@ export class WwebjsChannels {
     if (typeof result === 'string' || !result?.nid) {
       throw new EngineRefusedError(typeof result === 'string' ? result : `Failed to create the channel '${name}'`);
     }
+    // The nid crosses the puppeteer boundary as a raw page-context Wid, exactly the object class
+    // WA Web's minifier rename hits (#747): read `$1` before giving up, and never String() an
+    // absent id — a channel with the literal id "undefined" is unusable for every follow-up call.
+    const channelId = result.nid._serialized ?? result.nid.$1;
+    if (!channelId) {
+      throw new EngineRefusedError(`Channel '${name}' was created but its id was unreadable — refusing to return it`);
+    }
     return {
-      id: String(result.nid._serialized),
+      id: String(channelId),
       name: String(result.title ?? name),
       ...(description === undefined ? {} : { description }),
       // The library hands back a full invite LINK; the neutral shape carries the code, which is what

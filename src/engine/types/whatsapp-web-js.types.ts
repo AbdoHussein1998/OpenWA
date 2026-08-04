@@ -122,7 +122,10 @@ export interface BusinessClient extends Omit<
   getChatsByLabelId(
     labelId: string,
   ): Promise<
-    Array<{ id?: { _serialized?: string }; name?: string; isGroup?: boolean; unreadCount?: number; timestamp?: number }>
+    Array<
+      | { id?: { _serialized?: string }; name?: string; isGroup?: boolean; unreadCount?: number; timestamp?: number }
+      | undefined
+    >
   >;
   getChannels(): Promise<WwjsChannelData[]>;
   /** Takes a channel ID (`…@newsletter`), NOT an invite code; resolves true only on success. */
@@ -134,7 +137,7 @@ export interface BusinessClient extends Omit<
   createChannel(
     title: string,
     options?: { description?: string },
-  ): Promise<{ title?: string; nid: { _serialized: string }; inviteLink?: string } | string>;
+  ): Promise<{ title?: string; nid: { _serialized?: string; $1?: string }; inviteLink?: string } | string>;
   /** False when the channel was not found or the server refused. */
   deleteChannel(channelId: string): Promise<boolean>;
   /** Resolves true only when the unsubscription completed. */
@@ -145,7 +148,7 @@ export interface BusinessClient extends Omit<
  * WhatsApp Channel/Newsletter data.
  */
 export interface WwjsChannelData {
-  id: { _serialized: string } | string;
+  id: { _serialized?: string; $1?: string } | string;
   name?: string;
   description?: string;
   inviteCode?: string;

@@ -340,20 +340,22 @@ export class WwebjsGroups {
   async getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo> {
     this.host.ensureReady();
     const raw = (await this.client().getInviteInfo(inviteCode)) as {
-      id?: { _serialized?: string } | string;
+      id?: { _serialized?: string; $1?: string } | string;
       subject?: string;
       desc?: string;
-      owner?: { _serialized?: string } | string;
+      owner?: { _serialized?: string; $1?: string } | string;
       creation?: number;
       size?: number;
       participants?: unknown[];
     } | null;
 
-    const id = typeof raw?.id === 'string' ? raw.id : raw?.id?._serialized;
+    // Raw page-context Wids: read `$1` before concluding absence (#747, the WA Web minifier
+    // rename) — without the fallback a renamed build turns every VALID invite into a false 404.
+    const id = typeof raw?.id === 'string' ? raw.id : (raw?.id?._serialized ?? raw?.id?.$1);
     if (!id) {
       throw new GroupNotFoundError(inviteCode);
     }
-    const owner = typeof raw?.owner === 'string' ? raw.owner : raw?.owner?._serialized;
+    const owner = typeof raw?.owner === 'string' ? raw.owner : (raw?.owner?._serialized ?? raw?.owner?.$1);
     // `size` is the disclosed count; a participants array is used only as a fallback for builds that
     // send one instead. Neither is synthesised when both are missing.
     const count = typeof raw?.size === 'number' ? raw.size : raw?.participants?.length;
