@@ -25,10 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Existing rows read as unclaimed, so a single-process deployment behaves exactly as before.
 
-  This is ownership only. Request routing, fencing on every lifecycle path, cross-process bulk-batch
-  state and WebSocket fan-out are not done, so **one API instance per session-data volume remains
-  the supported topology** — `docs/13-horizontal-scaling.md` states precisely what is and is not in
-  place.
+  Bulk-send batches follow the same ownership. The boot reaper marked every `PROCESSING` batch
+  `FAILED`, which on a second replica meant declaring a peer's in-flight batches failed while they
+  were still sending — the caller told the send failed, the messages going out regardless. A batch
+  is only ever driven by the process holding its session's engine, so the reaper now acts only on
+  batches whose session this node may claim. A data import reports the sessions it could not
+  reconcile because another node is running them, rather than returning cleanly over engines it
+  never touched.
+
+  Request routing, fencing on the remaining lifecycle paths and WebSocket fan-out are still not
+  done, so **one API instance per session-data volume remains the supported topology** —
+  `docs/13-horizontal-scaling.md` states precisely what is and is not in place.
 
 
 - **Voice status.** `POST /api/sessions/:sessionId/status/send-voice` posts an audio status as a

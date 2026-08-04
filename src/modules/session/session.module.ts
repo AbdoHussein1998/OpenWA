@@ -32,6 +32,6 @@ import { ChatMediaModule } from '../chat-media/chat-media.module';
     SessionOwnershipService,
     MessageProjector,
   ],
-  exports: [SessionService, MessageProjector],
+  exports: [SessionService, MessageProjector, SessionOwnershipService],
 })
 export class SessionModule {}

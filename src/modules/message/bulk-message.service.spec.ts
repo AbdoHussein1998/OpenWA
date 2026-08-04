@@ -15,6 +15,7 @@ import { EngineRegistry } from '../../engine/engine-registry.service';
 import type { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { MessageService } from './message.service';
 import { SendPacingService } from './send-pacing.service';
+import { SessionOwnershipService } from '../session/session-ownership.service';
 import { HookManager } from '../../core/hooks';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 
@@ -105,6 +106,73 @@ describe('BulkMessageService.onApplicationBootstrap', () => {
     repo.find.mockResolvedValue([]);
     await service.onApplicationBootstrap();
     expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A batch is only ever driven by the process holding its session's engine, so on a second replica
+   * "PROCESSING" does not mean "abandoned". Reaping a peer's batch tells the caller their send
+   * failed while the messages continue going out — a wrong answer about work that is still running.
+   */
+  describe('with another node in play', () => {
+    /** Rebuild the service with an ownership service that owns only `ownedSessionIds`. */
+    const withOwnership = async (ownedSessionIds: string[]): Promise<BulkMessageService> => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          BulkMessageService,
+          { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
+          EngineRegistry,
+          { provide: MessageService, useValue: { saveOutgoingMessage: jest.fn() } },
+          { provide: SendPacingService, useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) } },
+          {
+            provide: HookManager,
+            useValue: {
+              execute: jest
+                .fn()
+                .mockImplementation((_e: string, d: unknown) => Promise.resolve({ continue: true, data: d })),
+            },
+          },
+          {
+            provide: SessionOwnershipService,
+            useValue: {
+              claimable: jest.fn((ids: string[]) => Promise.resolve(ids.filter(id => ownedSessionIds.includes(id)))),
+            },
+          },
+        ],
+      }).compile();
+      return module.get<BulkMessageService>(BulkMessageService);
+    };
+
+    it('leaves a batch alone when its session belongs to another node', async () => {
+      const peers = { id: 'b1', sessionId: 'peer-session', status: BatchStatus.PROCESSING } as MessageBatch;
+      repo.find.mockResolvedValue([peers]);
+
+      await (await withOwnership([])).onApplicationBootstrap();
+
+      expect(peers.status).toBe(BatchStatus.PROCESSING);
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('still reaps a batch whose session this node may claim', async () => {
+      const mine = { id: 'b2', sessionId: 'my-session', status: BatchStatus.PROCESSING } as MessageBatch;
+      repo.find.mockResolvedValue([mine]);
+
+      await (await withOwnership(['my-session'])).onApplicationBootstrap();
+
+      expect(mine.status).toBe(BatchStatus.FAILED);
+      expect(repo.save).toHaveBeenCalledWith(mine);
+    });
+
+    it('reaps only its own when both are present', async () => {
+      const mine = { id: 'b2', sessionId: 'my-session', status: BatchStatus.PROCESSING } as MessageBatch;
+      const peers = { id: 'b1', sessionId: 'peer-session', status: BatchStatus.PROCESSING } as MessageBatch;
+      repo.find.mockResolvedValue([mine, peers]);
+
+      await (await withOwnership(['my-session'])).onApplicationBootstrap();
+
+      expect(mine.status).toBe(BatchStatus.FAILED);
+      expect(peers.status).toBe(BatchStatus.PROCESSING);
+      expect(repo.save).toHaveBeenCalledTimes(1);
+    });
   });
 });
 
