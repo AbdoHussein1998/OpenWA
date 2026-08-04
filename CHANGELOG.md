@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The full TypeScript strict family is now enabled.** `strictFunctionTypes`,
+  `strictPropertyInitialization` and `useUnknownInCatchVariables` were off, so the compiler accepted
+  unsound code the project had no other guard against. Six explicit flags collapse to `strict: true`,
+  which is also the compiler's own default, so the configuration no longer has to track the strict
+  family as it evolves.
+
+  Nearly all of the fallout was mechanical: entity, DTO and framework-injected properties have no
+  constructor assignment because TypeORM, class-transformer and Nest populate them, and now carry a
+  definite-assignment assertion — syntax that is erased at compile time, so runtime behaviour is
+  unchanged. Three registries that stored differently-shaped descriptors in one list relied on
+  parameter bivariance and now use an explicitly erased type, with the single bridging cast placed
+  where the real type is known rather than spread across every definition.
+
+  The catch-variable flag also found four places interpolating a caught value straight into a
+  message. Two reach operators through API responses, where a non-`Error` throw rendered as
+  `[object Object]` instead of a cause.
+
+- **Each agent tool's handler is now tied to its own input schema.** Declaring the tool lists as an
+  array pinned the input type to `unknown` for every entry, so a tool's schema and its handler were
+  only ever checked against `unknown` and never against each other — a handler reading a field its
+  schema did not declare compiled fine. Inferring the type per tool closes that, and makes the forty
+  hand-written parameter annotations redundant: the shape is now stated once, in the schema that
+  validates it and is advertised to callers.
+
+- **Coverage floors now cover every substantial module.** Eight directories had floors; everything
+  else was graded only by the global average, where a well-tested module masks a neglected one. Each
+  remaining module of meaningful size gains a floor, and the eight that had drifted are re-tightened
+  — the session floor sat thirty points below its actual branch coverage. The policy table in
+  `docs/09-testing-strategy.md` restated these by hand; a spec now holds the document and the
+  configuration in agreement, so it cannot advertise a floor the build does not enforce.
+
 ### Fixed
 
 - **`docs/05-database-design.md` documented column names that do not exist.** Every table but
