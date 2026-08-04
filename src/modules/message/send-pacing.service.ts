@@ -13,6 +13,17 @@ import { AuditAction } from '../audit/entities/audit-log.entity';
 /** Body code on a pacing refusal. The throttler's own 429 carries no `code`, which is what tells the two apart. */
 export const SEND_PACING_LIMITED = 'SEND_PACING_LIMITED';
 
+/**
+ * True for the 429 `assertSendAllowed` throws — a policy refusal, distinguished from any other 429
+ * by the `code` on its body. Callers use it to treat a paced-out send as a refusal-to-send rather
+ * than a delivery failure (no `message:failed`, no breaker increment — the engine was never asked).
+ */
+export function isPacingLimitedError(error: unknown): boolean {
+  if (!(error instanceof HttpException)) return false;
+  const body = error.getResponse();
+  return typeof body === 'object' && body !== null && (body as { code?: string }).code === SEND_PACING_LIMITED;
+}
+
 /** Per-session breaker state. Deliberately in memory — see the class doc. */
 interface BreakerState {
   consecutiveFailures: number;

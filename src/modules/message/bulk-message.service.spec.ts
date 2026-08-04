@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PayloadTooLargeException } from '@nestjs/common';
+import { HttpException, PayloadTooLargeException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { In, Not } from 'typeorm';
 import {
@@ -14,7 +14,7 @@ import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import type { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { MessageService } from './message.service';
-import { SendPacingService } from './send-pacing.service';
+import { SendPacingService, SEND_PACING_LIMITED } from './send-pacing.service';
 import { SessionOwnershipService } from '../session/session-ownership.service';
 import { HookManager } from '../../core/hooks';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
@@ -76,7 +76,11 @@ describe('BulkMessageService.onApplicationBootstrap', () => {
           // Pacing is off by default; its own spec covers the governor. Here it must simply not
           // refuse, so the bulk assertions exercise the paths they were written for.
           provide: SendPacingService,
-          useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) },
+          useValue: {
+            assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+            recordSendFailure: jest.fn(),
+            recordSendSuccess: jest.fn(),
+          },
         },
         {
           provide: HookManager,
@@ -145,7 +149,14 @@ describe('BulkMessageService.onApplicationBootstrap', () => {
           { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
           EngineRegistry,
           { provide: MessageService, useValue: { saveOutgoingMessage: jest.fn() } },
-          { provide: SendPacingService, useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) } },
+          {
+            provide: SendPacingService,
+            useValue: {
+              assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+              recordSendFailure: jest.fn(),
+              recordSendSuccess: jest.fn(),
+            },
+          },
           {
             provide: HookManager,
             useValue: {
@@ -227,6 +238,7 @@ describe('BulkMessageService.processBatch', () => {
   };
   let engines: EngineRegistry;
   let hookManager: { execute: jest.Mock };
+  let pacing: { assertSendAllowed: jest.Mock; recordSendFailure: jest.Mock; recordSendSuccess: jest.Mock };
 
   const makeBatch = (messageCount: number): MessageBatch =>
     ({
@@ -253,6 +265,11 @@ describe('BulkMessageService.processBatch', () => {
     hookManager = {
       execute: jest.fn().mockImplementation((_e: string, data: unknown) => Promise.resolve({ continue: true, data })),
     };
+    pacing = {
+      assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+      recordSendFailure: jest.fn(),
+      recordSendSuccess: jest.fn(),
+    };
     repo = {
       findOne: jest.fn(),
       save: jest.fn().mockImplementation(b => Promise.resolve(b)),
@@ -267,7 +284,7 @@ describe('BulkMessageService.processBatch', () => {
         { provide: MessageService, useValue: messageService },
         {
           provide: SendPacingService,
-          useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) },
+          useValue: pacing,
         },
         { provide: HookManager, useValue: hookManager },
       ],
@@ -375,6 +392,42 @@ describe('BulkMessageService.processBatch', () => {
     // A moderation block must not be reported as a delivery failure — matches single send, where a
     // block is a 400 with no message:failed.
     expect(hookManager.execute).not.toHaveBeenCalledWith('message:failed', expect.anything(), expect.anything());
+  });
+
+  it('feeds the pacing breaker: a successful bulk send records success, so bulk can reset a streak', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+
+    await runProcessBatch();
+
+    expect(pacing.recordSendSuccess).toHaveBeenCalledWith('s1');
+    expect(pacing.recordSendFailure).not.toHaveBeenCalled();
+  });
+
+  it('feeds the pacing breaker: an engine refusal records a failure, so bulk can trip the streak', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    engine.sendTextMessage.mockRejectedValueOnce(new Error('boom'));
+
+    await runProcessBatch();
+
+    // The engine was asked and refused — exactly what the breaker's streak counts, just like the
+    // single-send path (message.service failSend). A success never happened, so no reset.
+    expect(pacing.recordSendFailure).toHaveBeenCalledWith('s1');
+    expect(pacing.recordSendSuccess).not.toHaveBeenCalled();
+  });
+
+  it('a pacing 429 fails the item WITHOUT a message:failed hook or a breaker increment (policy, not delivery)', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    pacing.assertSendAllowed.mockRejectedValueOnce(
+      new HttpException({ statusCode: 429, code: SEND_PACING_LIMITED }, 429),
+    );
+
+    await runProcessBatch();
+
+    // Thrown before the engine was asked: not a delivery failure (no message:failed), and it must
+    // not feed the breaker — matching single send, where a pacing refusal is a bare 429.
+    expect(engine.sendTextMessage).not.toHaveBeenCalled();
+    expect(hookManager.execute).not.toHaveBeenCalledWith('message:failed', expect.anything(), expect.anything());
+    expect(pacing.recordSendFailure).not.toHaveBeenCalled();
   });
 
   it('sends a bulk audio item with ptt as a voice note and persists type "voice"', async () => {
@@ -683,7 +736,11 @@ describe('BulkMessageService.cancelBatch', () => {
         { provide: MessageService, useValue: {} },
         {
           provide: SendPacingService,
-          useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) },
+          useValue: {
+            assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+            recordSendFailure: jest.fn(),
+            recordSendSuccess: jest.fn(),
+          },
         },
         { provide: HookManager, useValue: { execute: jest.fn() } },
       ],
@@ -762,7 +819,11 @@ describe('BulkMessageService.createBatch base64 media cap', () => {
         { provide: MessageService, useValue: messageService },
         {
           provide: SendPacingService,
-          useValue: { assertSendAllowed: jest.fn().mockResolvedValue(undefined) },
+          useValue: {
+            assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+            recordSendFailure: jest.fn(),
+            recordSendSuccess: jest.fn(),
+          },
         },
         {
           provide: HookManager,

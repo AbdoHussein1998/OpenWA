@@ -30,19 +30,37 @@ describe('StatusService media validation and selection', () => {
   const hookManager = { execute: jest.fn(passThrough) };
   const store = { list: jest.fn(), listByContact: jest.fn(), getMedia: jest.fn() };
   const storageService = { getFile: jest.fn() };
+  const pacing = {
+    assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+    recordSendFailure: jest.fn(),
+    recordSendSuccess: jest.fn(),
+  };
   const service = new StatusService(
     engines,
     hookManager as unknown as HookManager,
     store as unknown as StatusStoreService,
     storageService as unknown as StorageService,
-    {
-      assertSendAllowed: jest.fn().mockResolvedValue(undefined),
-    } as unknown as SendPacingService,
+    pacing as unknown as SendPacingService,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
     hookManager.execute.mockImplementation(passThrough);
+  });
+
+  describe('pacing breaker feed', () => {
+    it('records success when the engine accepts a status post', async () => {
+      await service.postTextStatus('s1', 'hello', { recipients: [] });
+      expect(pacing.recordSendSuccess).toHaveBeenCalledWith('s1');
+      expect(pacing.recordSendFailure).not.toHaveBeenCalled();
+    });
+
+    it('records a failure when the engine refuses a status post', async () => {
+      engine.postTextStatus.mockRejectedValueOnce(new Error('refused'));
+      await expect(service.postTextStatus('s1', 'hello', { recipients: [] })).rejects.toThrow('refused');
+      expect(pacing.recordSendFailure).toHaveBeenCalledWith('s1');
+      expect(pacing.recordSendSuccess).not.toHaveBeenCalled();
+    });
   });
 
   describe('reading statuses', () => {
