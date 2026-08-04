@@ -125,6 +125,11 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // The watchdog owns the probe cadence and failure counting; a session it proves dead comes
     // back through the same disconnect path an engine-reported drop uses.
     this.watchdog.start((id, engine, reason) => this.engineLifecycle.handleEngineDisconnected(id, engine, reason));
+    // A session this node has lost belongs to a peer now, which is free to start its own engine.
+    // Leaving ours running would put two engines on one WhatsApp account — the thing the claim
+    // exists to prevent — so the engine goes down. stopOrphanEngines is the right verb: it tears
+    // down locally and leaves the row alone, because the row is no longer ours to write.
+    this.ownership?.onLeaseLoss(ids => this.engineLifecycle.stopOrphanEngines(ids));
     // Renewal runs regardless of auto-start: a session started through the API later is claimed the
     // same way and must keep its lease alive.
     this.ownership?.startHeartbeat();

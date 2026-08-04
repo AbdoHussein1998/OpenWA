@@ -14,6 +14,12 @@
 > does not depend on one. `NODE_ID` names the process; it defaults to the hostname and must
 > be stable across restarts.
 >
+> A node that loses its claim gives up the engine. A lease can lapse while the process is
+> perfectly healthy — a slow query is enough — after which a peer may legitimately take the
+> session; renewal detects the loss and tears the local engine down, so the account never
+> ends up with two. A failed renewal is deliberately not read as a loss: the TTL is sized to
+> absorb a database blip, and concluding otherwise would stop every healthy engine on the node.
+>
 > Bulk-send batches follow the same rule. A batch is only ever driven by the process
 > holding its session's engine, so a booting replica now reaps only the batches whose
 > sessions it may claim, instead of declaring a peer's in-flight batches FAILED while they

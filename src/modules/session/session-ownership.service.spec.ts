@@ -177,6 +177,80 @@ describe('SessionOwnershipService', () => {
     });
   });
 
+  /**
+   * The lease only means something if losing it has a consequence. A node can lose one while
+   * perfectly healthy — a slow query is enough — after which a peer may legitimately claim the
+   * session; an engine left running here would be the second one on that WhatsApp account.
+   */
+  describe('losing a claim', () => {
+    it('reports the sessions a peer has taken, and stops counting them as its own', async () => {
+      const mine = await seed();
+      const taken = await seed();
+      const nodeA = service('node-a');
+      await nodeA.claim(mine.id);
+      await nodeA.claim(taken.id);
+      const lost: string[][] = [];
+      nodeA.onLeaseLoss(ids => void lost.push(ids));
+
+      // The peer took it after node-a's lease lapsed.
+      await sessions.update({ id: taken.id }, { nodeId: 'node-b', leaseExpiresAt: new Date(Date.now() + 60_000) });
+      await nodeA.renew();
+
+      expect(lost).toEqual([[taken.id]]);
+      expect(nodeA.ownedIds()).toEqual([mine.id]);
+    });
+
+    it('says nothing while everything is still held', async () => {
+      const session = await seed();
+      const nodeA = service('node-a');
+      await nodeA.claim(session.id);
+      const lost: string[][] = [];
+      nodeA.onLeaseLoss(ids => void lost.push(ids));
+
+      await nodeA.renew();
+
+      expect(lost).toEqual([]);
+    });
+
+    /**
+     * The property that matters most. Concluding loss from a failed query would tear down every
+     * healthy engine on this node the first time the database hiccuped — far worse than a renewal
+     * arriving late, which the TTL is sized to absorb.
+     */
+    it('treats a database failure as a late renewal, never as lost ownership', async () => {
+      const session = await seed();
+      const nodeA = service('node-a');
+      await nodeA.claim(session.id);
+      const lost: string[][] = [];
+      nodeA.onLeaseLoss(ids => void lost.push(ids));
+      const find = jest.spyOn(sessions, 'find').mockRejectedValue(new Error('connection reset'));
+
+      await expect(nodeA.renew()).resolves.toBeUndefined();
+
+      expect(lost).toEqual([]);
+      expect(nodeA.ownedIds()).toEqual([session.id]);
+      find.mockRestore();
+    });
+
+    /**
+     * Renewal runs on an interval, so a throwing handler would surface as an unhandled rejection
+     * and could take the loop down with it — losing every remaining lease as a consequence of one
+     * failed teardown.
+     */
+    it('survives a handler that throws, and still forgets the lost session', async () => {
+      const session = await seed();
+      const nodeA = service('node-a');
+      await nodeA.claim(session.id);
+      nodeA.onLeaseLoss(() => {
+        throw new Error('teardown exploded');
+      });
+      await sessions.update({ id: session.id }, { nodeId: 'node-b', leaseExpiresAt: new Date(Date.now() + 60_000) });
+
+      await expect(nodeA.renew()).resolves.toBeUndefined();
+      expect(nodeA.ownedIds()).toEqual([]);
+    });
+  });
+
   describe('what a booting process may reset', () => {
     const now = new Date();
 
