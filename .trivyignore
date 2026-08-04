@@ -2,16 +2,23 @@
 # Everything else — anything in the application's own dependency tree, and every OS package —
 # still blocks promotion (see the image-scan job in .github/workflows/release.yml).
 
-# CVE-2026-14257 — brace-expansion ReDoS, fixed upstream in 5.0.8.
+# CVE-2026-14257 and CVE-2026-69152 — brace-expansion ReDoS, and the follow-up that bypasses the
+# first one's mitigation. Fixed upstream in 5.0.8 and 5.0.9 respectively.
 #
-# The only copy in the image is the one bundled inside the npm CLI
-# (/usr/local/lib/node_modules/npm/node_modules/brace-expansion). The application tree resolves
-# 5.0.8 via the root `overrides` block, and npm itself is never on the request path: the
-# entrypoint runs `node dist/main`, and npm is present only for the documented operator runbooks
-# (`docker exec openwa npm run cli …`). Reaching this code requires an operator to run an npm
-# command with an attacker-chosen glob inside the container.
+# The only copies left in the image are the ones bundled inside the npm CLI
+# (/usr/local/lib/node_modules/npm/node_modules/brace-expansion, currently 5.0.7). npm is never on
+# the request path: the entrypoint runs `node dist/main`, and npm is present only for the
+# documented operator runbooks (`docker exec openwa npm run cli …`). Reaching this code requires an
+# operator to run an npm command with an attacker-chosen glob inside the container.
 #
-# npm 12 — the newest release, already installed by the Dockerfile — still bundles 5.0.7, so
-# there is currently no npm version that clears this finding. Drop this entry once npm ships a
-# bundle with brace-expansion >= 5.0.8.
+# npm 12 — the newest release, already installed by the Dockerfile — still bundles 5.0.7, so there
+# is currently no npm version that clears either finding. Drop both entries once npm ships a bundle
+# with brace-expansion >= 5.0.9.
+#
+# These are ID-level ignores, so they would also silence the same CVEs in the APPLICATION tree,
+# which this file otherwise refuses to do. What keeps that honest is the root `overrides` entry
+# pinning brace-expansion to ^5.0.9: npm cannot resolve the application tree below the fixed
+# version, so there is no app-tree finding for these ids to hide. Raise that floor alongside any
+# future brace-expansion advisory rather than widening this list.
 CVE-2026-14257
+CVE-2026-69152

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Five advisories in the production dependency tree resolved**, all through transitive bumps —
+  `brace-expansion` 5.0.9, `fast-uri` 3.1.5, `hono` 4.13.0, `ip-address` 10.4.0, `socket.io-parser`
+  4.2.7. No direct dependency changed and nothing was added or removed.
+
+  The one that mattered most for release was `brace-expansion`. A second advisory
+  (CVE-2026-69152) bypasses the mitigation the first one's fix introduced, and it reached the
+  **application's own tree** in the shipped image — which the image-scan allow-list explicitly does
+  not cover. The next release scan would have failed on it. The root override floor now sits at
+  ^5.0.9 so the application tree cannot resolve below the fix, which is also what keeps the
+  id-level allow-list entries for npm's own bundled copy from silently hiding an app-tree
+  regression.
+
+  `ip-address` carries SSRF and trust-boundary advisories, but this project's SSRF guard does not
+  use it — the guard resolves and pins addresses through Node's built-in `net` and `dns`. The
+  vulnerable copy reached the tree through the rate limiter and the SOCKS proxy agent.
+
 ### Fixed
 
 - **Voice notes sent through the Baileys engine now carry a waveform.** Baileys draws the amplitude
