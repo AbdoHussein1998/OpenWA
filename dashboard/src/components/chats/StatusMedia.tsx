@@ -12,7 +12,7 @@ function StatusMedia({
 }: {
   sessionId: string | null;
   statusId: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'audio';
 }) {
   const { t } = useTranslation();
   const [src, setSrc] = useState<string | null>(null);
@@ -43,6 +43,8 @@ function StatusMedia({
   if (error) return <span className="status-media-placeholder">{t('chats.status.mediaUnavailable')}</span>;
   if (!src) return null;
   if (type === 'video') return <video className="channel-media" src={src} controls />;
+  // Voice statuses: the blob is an Ogg/Opus voice note — an <img> would render as a broken image.
+  if (type === 'audio') return <audio className="channel-media" src={src} controls />;
   return <img className="channel-media" src={src} alt="" />;
 }
 

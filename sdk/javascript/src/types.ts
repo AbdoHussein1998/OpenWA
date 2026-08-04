@@ -614,10 +614,10 @@ export interface JoinGroupResponse {
   groupId: Jid;
 }
 
-/** Group settings as returned by `GET /sessions/:id/groups/:groupId/settings`. */
 /** Who may add participants to a group. */
 export type GroupMemberAddMode = 'all' | 'admins';
 
+/** Group settings as returned by `GET /sessions/:id/groups/:groupId/settings`. */
 export interface GroupSettingsResponse {
   /** Only admins can send messages (announce group). */
   announce?: boolean;
@@ -779,7 +779,7 @@ export interface StatusRecord {
     name?: string;
     pushName?: string;
   };
-  type: 'text' | 'image' | 'video';
+  type: 'text' | 'image' | 'video' | 'voice';
   /** Text body for a text status, caption for an image/video one. */
   caption?: string;
   mediaUrl?: string;
