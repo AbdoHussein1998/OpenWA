@@ -540,6 +540,16 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   }
 
   /**
+   * Emit a restriction change (imposed or lifted), mirroring the `session.restriction` webhook
+   * payload. Needed live because a restriction can arrive with no status transition at all (the
+   * Baileys reachout timelock rides a connect probe) — without this push the dashboard badge only
+   * appeared on a full page reload.
+   */
+  emitSessionRestriction(sessionId: string, data: Record<string, unknown>) {
+    this.emitToRooms(sessionId, 'session.restriction', data);
+  }
+
+  /**
    * The end of a ringing call, one method per outcome.
    *
    * Three methods rather than one taking the name as a parameter: the drift guard discovers emitters

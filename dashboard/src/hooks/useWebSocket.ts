@@ -71,6 +71,12 @@ interface StatusReceivedEvent {
   timestamp: string;
 }
 
+/** A restriction imposed or lifted — the dashboard uses it purely as a refetch signal for the badge. */
+interface SessionRestrictionEvent {
+  sessionId: string;
+  timestamp: string;
+}
+
 /** Ack frame answering a client `subscribe` request (`{type: 'subscribed'}`). */
 interface SubscribedEvent {
   sessionId: string;
@@ -92,6 +98,7 @@ interface WebSocketEvents {
   onMessageRevoked?: (event: MessageRevokedEvent) => void;
   onMessageEdited?: (event: MessageEditedEvent) => void;
   onStatusReceived?: (event: StatusReceivedEvent) => void;
+  onSessionRestriction?: (event: SessionRestrictionEvent) => void;
   onSubscribed?: (event: SubscribedEvent) => void;
   onServerError?: (event: ServerErrorEvent) => void;
 }
@@ -271,6 +278,9 @@ export function useWebSocket(events: WebSocketEvents = {}) {
           break;
         case 'status.received':
           events.onStatusReceived?.({ sessionId, timestamp: msg.timestamp });
+          break;
+        case 'session.restriction':
+          events.onSessionRestriction?.({ sessionId, timestamp: msg.timestamp });
           break;
         case 'message.ack':
           events.onMessageAck?.({

@@ -148,6 +148,12 @@ export function Sessions() {
     sessions,
     sessionsRef,
     onQRCode: applyQrPush,
+    // The badge renders from the server projection (`session.restriction`), and a restriction can
+    // arrive with no status transition at all (the Baileys reachout timelock rides a connect
+    // probe) — so the push is purely a refetch signal.
+    onSessionRestriction: useCallback(() => {
+      void fetchSessions();
+    }, [fetchSessions]),
     onSessionStatus: useCallback(
       (event: { sessionId: string; status: string }) => {
         const prev = sessionsRef.current.find(s => s.id === event.sessionId);

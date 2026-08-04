@@ -166,6 +166,7 @@ describe('SessionService', () => {
       emitSessionStatus: jest.fn(),
       emitSessionAuthenticated: jest.fn(),
       emitSessionDisconnected: jest.fn(),
+      emitSessionRestriction: jest.fn(),
       emitPresenceUpdate: jest.fn(),
       emitCallAccepted: jest.fn(),
       emitCallRejected: jest.fn(),
@@ -2237,6 +2238,28 @@ describe('SessionService', () => {
       callbacks.onAccountRestriction?.(timelock);
 
       expect(webhookService.dispatch).not.toHaveBeenCalled();
+    });
+
+    // A restriction can arrive with no status transition at all (the Baileys reachout timelock
+    // rides a connect probe), so without a live push the dashboard badge only appeared on reload.
+    it('pushes the restriction and its lift to socket subscribers', async () => {
+      const callbacks = await startAndCapture();
+
+      callbacks.onAccountRestriction?.({ ...timelock, expiresAt: Date.UTC(2026, 7, 4, 9) });
+      expect(eventsGateway.emitSessionRestriction).toHaveBeenCalledWith('sess-uuid-1', {
+        active: true,
+        kind: 'reachout_timelock',
+        code: 'BIZ_QUALITY',
+        expiresAt: '2026-08-04T09:00:00.000Z',
+      });
+
+      callbacks.onAccountRestriction?.(null);
+      expect(eventsGateway.emitSessionRestriction).toHaveBeenCalledWith('sess-uuid-1', {
+        active: false,
+        kind: 'reachout_timelock',
+        code: 'BIZ_QUALITY',
+        expiresAt: null,
+      });
     });
 
     it('announces again when the cause changes', async () => {

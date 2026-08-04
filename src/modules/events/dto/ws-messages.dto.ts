@@ -23,6 +23,7 @@ export const SUBSCRIBABLE_EVENTS = [
   'session.qr',
   'session.authenticated',
   'session.disconnected',
+  'session.restriction',
   'group.join',
   'group.leave',
   'group.update',

@@ -276,13 +276,14 @@ export class SessionEngineEventWiring {
           expiresAt: restriction.expiresAt,
           action: 'account_restricted',
         });
-        void host.webhookService.dispatch(id, 'session.restriction', {
-          sessionId: id,
+        const payload = {
           active: true,
           kind: restriction.kind,
           code: restriction.code,
           expiresAt: restriction.expiresAt ? new Date(restriction.expiresAt).toISOString() : null,
-        });
+        };
+        void host.webhookService.dispatch(id, 'session.restriction', { sessionId: id, ...payload });
+        host.eventsGateway.emitSessionRestriction(id, payload);
         // Audited, unlike the engine-level connect/disconnect transitions next door: this is rare,
         // it is not reconnect noise, and the store that serves it to the API is in memory — so this
         // row is the only durable record of when the account was restricted.
