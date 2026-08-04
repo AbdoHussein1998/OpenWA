@@ -3828,6 +3828,77 @@ describe('BaileysAdapter sendSeen + markUnread + deleteChat', () => {
     expect(await adapter.archiveChat('628999@s.whatsapp.net', true)).toBe(false);
     expect(fakeSock.chatModify).not.toHaveBeenCalled();
   });
+
+  /**
+   * The neutral @c.us id the gateway API and getContacts speak must be folded to the engine
+   * @s.whatsapp.net form before it becomes the app-state index key. chatModify/addOrEditContact
+   * (unlike the send path) do NOT call jidNormalizedUser, so a raw @c.us would key the mutation
+   * under an index WhatsApp never reads — the write silently targets nothing while the endpoint
+   * reports success. These pass the neutral id (the shape a list-then-mutate round-trip yields).
+   */
+  describe('folds the neutral @c.us id to the engine form for chatModify/contact app-state ops', () => {
+    it('upsertContact folds @c.us -> @s.whatsapp.net', async () => {
+      const adapter = await readyWithMessage();
+      await adapter.upsertContact('628111@c.us', 'Ada');
+      expect(fakeSock.addOrEditContact).toHaveBeenCalledWith('628111@s.whatsapp.net', expect.any(Object));
+    });
+
+    it('deleteContact folds @c.us -> @s.whatsapp.net', async () => {
+      const adapter = await readyWithMessage();
+      await adapter.deleteContact('628111@c.us');
+      expect(fakeSock.removeContact).toHaveBeenCalledWith('628111@s.whatsapp.net');
+    });
+
+    it('clearChatMessages folds the chatModify index jid for a 1:1 chat', async () => {
+      const adapter = await readyWithMessage();
+      expect(await adapter.clearChatMessages('628111@c.us')).toBe(true);
+      expect(fakeSock.chatModify).toHaveBeenCalledWith(
+        expect.objectContaining({ clear: true }),
+        '628111@s.whatsapp.net',
+      );
+    });
+
+    it('archiveChat folds the chatModify index jid for a 1:1 chat', async () => {
+      const adapter = await readyWithMessage();
+      expect(await adapter.archiveChat('628111@c.us', true)).toBe(true);
+      expect(fakeSock.chatModify).toHaveBeenCalledWith(
+        expect.objectContaining({ archive: true }),
+        '628111@s.whatsapp.net',
+      );
+    });
+
+    it('starMessage folds the chatModify index jid for a 1:1 chat', async () => {
+      fakeStore.getMessage.mockResolvedValue({
+        key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'M1' },
+        message: { conversation: 'hi' },
+        messageTimestamp: 1700000020,
+      });
+      const adapter = await readyWithMessage();
+      await adapter.starMessage('628111@c.us', 'TARGET', true);
+      expect(fakeSock.chatModify).toHaveBeenCalledWith(
+        { star: { messages: [{ id: 'M1', fromMe: false }], star: true } },
+        '628111@s.whatsapp.net',
+      );
+    });
+
+    it('leaves a group @g.us id unchanged (identical in both dialects)', async () => {
+      const adapter = await readyWithMessage();
+      // A group last-message lives under the g.us key; seed one so archive proceeds.
+      fakeSock.fire('messages.upsert', {
+        type: 'notify',
+        messages: [
+          {
+            key: { remoteJid: '120363@g.us', fromMe: false, id: 'G1' },
+            message: { conversation: 'hi' },
+            messageTimestamp: 1700000021,
+          },
+        ],
+      });
+      await new Promise(resolve => setImmediate(resolve));
+      await adapter.archiveChat('120363@g.us', true);
+      expect(fakeSock.chatModify).toHaveBeenCalledWith(expect.objectContaining({ archive: true }), '120363@g.us');
+    });
+  });
 });
 
 describe('BaileysAdapter status posting', () => {

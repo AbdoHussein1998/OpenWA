@@ -312,7 +312,7 @@ export class BaileysMessaging {
           timestamp: this.host.toUnixSeconds(target.messageTimestamp),
         },
       },
-      chatId,
+      this.host.toEngineJid(chatId),
     );
   }
 
@@ -454,9 +454,12 @@ export class BaileysMessaging {
     const target = await this.requireStored(messageId);
     // fromMe is load-bearing: the same message id addresses a different message depending on
     // direction, so omitting it would star the wrong side of the conversation.
+    // Fold @c.us -> @s.whatsapp.net: chatModify keys the star app-state index by the raw jid (no
+    // jidNormalizedUser, unlike the send path), so a neutral @c.us would index a phantom chat and
+    // the star would silently apply to nothing on a 1:1 conversation.
     await this.sock().chatModify(
       { star: { messages: [{ id: target.key.id!, fromMe: target.key.fromMe ?? false }], star } },
-      chatId,
+      this.host.toEngineJid(chatId),
     );
   }
 
