@@ -98,8 +98,25 @@ describe('Session request forwarding (e2e)', () => {
     expect(ownerSeen[0].headers['x-api-key']).toBe(apiKey);
   });
 
-  it('a forwarded request is answered locally — the loop dies at one hop', async () => {
+  it('a forwarded request landing on a live non-owner is refused — the loop dies at one hop', async () => {
+    // The hop marker is client-settable, so it is verified rather than trusted: a marked request
+    // that still lands on a node that is NOT the live owner (forged header, or ownership moved
+    // mid-flight) answers a retryable 409 instead of executing here. Never re-forwarded either way.
     const session = await seedOwnedElsewhere();
+    ownerSeen = [];
+
+    await request(app.getHttpServer())
+      .get(`/api/sessions/${session.id}`)
+      .set('X-API-Key', apiKey)
+      .set('x-openwa-forwarded', 'peer-node')
+      .expect(409);
+
+    expect(ownerSeen).toHaveLength(0);
+  });
+
+  it('a forwarded request is answered locally when nothing holds the session elsewhere', async () => {
+    const session = await seedOwnedElsewhere();
+    await sessions.update(session.id, { nodeId: null, nodeUrl: null, leaseExpiresAt: null });
     ownerSeen = [];
 
     const res = await request(app.getHttpServer())
