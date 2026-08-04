@@ -5430,6 +5430,89 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/media/convert": {
+      "get": {
+        "operationId": "MediaController_conversionStatus",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Reports whether conversion is switched on AND the ffmpeg binary can be run, so a client can decide between converting here and converting before it sends."
+          }
+        },
+        "summary": "Whether server-side media conversion is available",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/media/convert/voice": {
+      "post": {
+        "operationId": "MediaController_convertVoice",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConvertMediaDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Converted bytes, ready to post to send-audio with ptt=true. WhatsApp only renders a playable mic bubble for Ogg/Opus; other formats arrive as an audio file that will not play."
+          },
+          "400": {
+            "description": "Neither url nor base64 given, or ffmpeg refused the input."
+          },
+          "413": {
+            "description": "The supplied media is above the media size cap."
+          },
+          "503": {
+            "description": "Conversion is disabled, or the ffmpeg binary is not runnable."
+          }
+        },
+        "summary": "Convert audio into a WhatsApp voice note (Ogg/Opus)",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/media/convert/video": {
+      "post": {
+        "operationId": "MediaController_convertVideo",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConvertMediaDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Converted bytes: baseline H.264 with AAC audio, long edge bounded at 1280, index moved to the front so the recipient can start playing before the whole file arrives."
+          },
+          "400": {
+            "description": "Neither url nor base64 given, or ffmpeg refused the input."
+          },
+          "413": {
+            "description": "The supplied media is above the media size cap."
+          },
+          "503": {
+            "description": "Conversion is disabled, or the ffmpeg binary is not runnable."
+          }
+        },
+        "summary": "Convert video into a WhatsApp-compatible MP4",
+        "tags": [
+          "media"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/catalog": {
       "get": {
         "operationId": "CatalogController_getCatalog",
@@ -9061,6 +9144,21 @@
         "required": [
           "video"
         ]
+      },
+      "ConvertMediaDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Public http(s) URL of the media to convert (server-fetched, SSRF-guarded).",
+            "example": "https://example.com/note.m4a"
+          },
+          "base64": {
+            "type": "string",
+            "description": "Base64-encoded media to convert. Takes precedence when both are supplied.",
+            "example": "SUQzBAAAAAAA..."
+          }
+        }
       },
       "SendProductDto": {
         "type": "object",

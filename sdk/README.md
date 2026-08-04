@@ -38,6 +38,7 @@ All five SDKs expose the same fluent resource surface:
 | `templates`| list, get, create, update, delete                                                                                                                                                     |
 | `profile`  | setProfileName, setProfileStatus, setProfilePicture _(OPERATOR)_                                                                                                                       |
 | `calls`    | rejectCall _(OPERATOR)_                                                                                                                                                                |
+| `media`    | conversionStatus, convertVoice, convertVideo _(OPERATOR)_                                                                                                                              |
 | `health`   | check, live, ready                                                                                                                                                                     |
 
 > ⚠️ Endpoints requiring an `OPERATOR`-level API key are noted in the inline

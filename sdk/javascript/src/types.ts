@@ -1043,3 +1043,26 @@ export interface SearchResults {
   /** Which provider answered (id), e.g. `builtin-fts`. */
   provider: string;
 }
+
+/** Media to convert: exactly one of `url` or `base64`; `base64` wins if both are given. */
+export interface ConvertMediaInput {
+  /** Public http(s) URL the server fetches (SSRF-guarded). */
+  url?: string;
+  /** Inline bytes. No mimetype is needed — the input format is read from the bytes. */
+  base64?: string;
+}
+
+/** The converted media, in the shape a send endpoint accepts. */
+export interface ConvertedMedia {
+  /** Converted bytes, ready to pass as a send endpoint's `base64`. */
+  base64: string;
+  /** What the bytes now are — not what they were. */
+  mimetype: string;
+  /** Decoded size, so a size check needs no decoding. */
+  bytes: number;
+}
+
+/** Whether server-side conversion can actually be used on this deployment. */
+export interface MediaConversionAvailability {
+  available: boolean;
+}

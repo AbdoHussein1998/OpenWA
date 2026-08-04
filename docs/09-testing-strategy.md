@@ -185,6 +185,7 @@ authoritative gate. Current policy:
 | `src/modules/infra/`        | 73%      | 71%       | 87%   | 86%        |
 | `src/modules/integration/`  | 76%      | 83%       | 90%   | 89%        |
 | `src/modules/mcp/`          | 33%      | 48%       | 45%   | 46%        |
+| `src/modules/media/`        | 71%      | 87%       | 89%   | 88%        |
 | `src/modules/message/`      | 57%      | 66%       | 81%   | 80%        |
 | `src/modules/metrics/`      | 61%      | 65%       | 68%   | 65%        |
 | `src/modules/plugins/`      | 67%      | 63%       | 74%   | 73%        |

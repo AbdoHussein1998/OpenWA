@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Server-side media conversion, and `ffmpeg` in the image.** WhatsApp renders a playable
+  voice-note bubble only for Ogg/Opus. Nothing in the pipeline transcoded, so posting MP3 bytes to
+  `send-audio` with `ptt: true` sent them as they were — labelled `audio/ogg; codecs=opus`, because
+  that is the default applied when no mimetype is given — and the recipient got a mic bubble that
+  would not play.
+
+  `POST /api/sessions/:sessionId/media/convert/voice` and `.../video` transcode caller-supplied
+  media and return it in the same base64 shape the send endpoints accept, so converting is one extra
+  call rather than a change to how sending works. `GET .../media/convert` reports whether the
+  feature is usable here. Opt-in via `MEDIA_CONVERSION_ENABLED`; sends are untouched otherwise.
+
+  ffmpeg is run as a binary rather than through a wrapper package, and comes from Debian rather than
+  a bundled static build, so codec fixes arrive through the same security stream as everything else
+  in the image. Measured cost: about 210 MB, with no new fixable CRITICAL/HIGH findings under the
+  release image scan. ffmpeg is only ever handed a file this server wrote and is confined to the
+  file protocol — left unrestricted it resolves its input as a URL and will make the request.
+
+  This also repairs an existing gap: whatsapp-web.js requires `fluent-ffmpeg` and uses it to build
+  animated stickers from video, so `send-sticker` with a video mimetype has been failing in the
+  published image for want of the binary.
+
 ### Changed
 
 - **The full TypeScript strict family is now enabled.** `strictFunctionTypes`,

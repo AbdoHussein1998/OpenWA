@@ -68,6 +68,13 @@ FROM docker.io/node:22-slim AS production
 ARG TARGETARCH
 # sqlite3 ships the CLI so an in-container scripts/backup.sh run takes online-consistent SQLite
 # snapshots (.backup) instead of plain-copying a live database (which can archive a torn file).
+#
+# ffmpeg backs the opt-in media-conversion endpoints, and also repairs an existing gap: whatsapp-web.js
+# requires fluent-ffmpeg at module load and calls it for video-to-webp animated stickers, so
+# sendSticker with a video mimetype has been failing in this image for want of the binary. Measured
+# cost with --no-install-recommends: ~210 MB, and no new fixable CRITICAL/HIGH findings under the
+# release image scan. It is the Debian package rather than a bundled static build precisely so that
+# codec CVEs arrive through the same security stream as everything else here.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     $([ "$TARGETARCH" = arm64 ] && echo "chromium chromium-sandbox") \
     fonts-liberation \
@@ -93,6 +100,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     procps \
     sqlite3 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Puppeteer to skip automatic download during npm install (we download it explicitly below)

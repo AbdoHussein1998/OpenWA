@@ -5603,6 +5603,73 @@ Reject a currently ringing incoming call. Only a live call can be rejected — t
 
 > **Auto-reject per session.** Set `"config": { "autoRejectCalls": true }` when creating a session to have the server reject every incoming call automatically — the `call.received` event is still dispatched first, so automations keep full visibility.
 
+### 6.4.15 Media conversion (opt-in)
+
+Server-side transcoding into the shapes WhatsApp clients actually play. Disabled by default; set
+`MEDIA_CONVERSION_ENABLED=true`. The official Docker image already ships the `ffmpeg` binary these
+endpoints run — on a source install it must be present, or they answer `503`.
+
+Nothing is converted implicitly: sends behave exactly as before unless a caller runs media through
+these endpoints first and posts the result.
+
+> **Why voice conversion matters.** WhatsApp renders a playable voice-note bubble only for Ogg/Opus.
+> Posting MP3 bytes to `send-audio` with `ptt: true` sends those bytes as they are, so the recipient
+> gets a mic bubble that will not play. Converting first is what produces a real voice note.
+
+#### GET /api/sessions/:sessionId/media/convert
+
+Report whether conversion is both switched on and actually runnable here, so a client can choose
+between converting server-side and converting before it sends.
+
+**Auth:** API key
+
+**Response** `200` — `{ "available": true }`
+
+#### POST /api/sessions/:sessionId/media/convert/voice
+
+Convert audio (or the audio track of a video) into a WhatsApp voice note: Ogg/Opus, mono, 48 kHz,
+tuned for speech. Post the returned `base64` to `send-audio` with `ptt: true`.
+
+**Auth:** API key (OPERATOR)
+
+**Request body**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| url | string | Public http(s) URL to fetch (server-side, SSRF-guarded) |
+| base64 | string | Inline bytes. Takes precedence when both are given |
+
+Exactly one of `url` / `base64` is required. No `mimetype` is accepted: the input format is
+identified from the bytes.
+
+**Response** `200`
+
+```json
+{ "base64": "T2dnUwACAAAA...", "mimetype": "audio/ogg; codecs=opus", "bytes": 14970 }
+```
+
+**Errors:** `400` neither field given, or ffmpeg refused the input (its reason is included) · `401`
+missing/invalid `X-API-Key` · `403` key lacks OPERATOR role · `413` media above the size cap · `503`
+conversion disabled, or the binary is not runnable
+
+#### POST /api/sessions/:sessionId/media/convert/video
+
+Convert video into an MP4 every WhatsApp client accepts: baseline H.264 with AAC audio, long edge
+bounded at 1280 (never upscaled), index moved to the front so playback can start before the whole
+file arrives.
+
+Request body and errors are identical to the voice endpoint.
+
+**Response** `200`
+
+```json
+{ "base64": "AAAAIGZ0eXBpc29t...", "mimetype": "video/mp4", "bytes": 90660 }
+```
+
+**Size note.** Both endpoints return the converted media inline, so the response is bounded by the
+same `MEDIA_CONVERSION_MAX_OUTPUT_BYTES` cap (default 50 MiB) — and a client posting it onward is
+still bound by `BODY_SIZE_LIMIT` (default 25 MiB) on that next request.
+
 ## 6.5 Real-time API (WebSocket)
 
 Live events are delivered over a **Socket.IO** connection (not a raw WebSocket). The server mounts a single Socket.IO namespace, **`/events`**, on the same port as the REST API. There are no REST routes in this module.

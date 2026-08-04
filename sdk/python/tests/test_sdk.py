@@ -395,6 +395,33 @@ class TestProfile:
         assert backend.calls[-1].body == {"base64": "aGVsbG8=", "mimetype": "image/jpeg"}
 
 
+class TestMedia:
+    def test_conversion_status(self):
+        backend = MockBackend().on("GET", "/media/convert", body={"available": True})
+        res = make_client(backend).media.conversion_status("s")
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/media/convert"
+        assert res["available"] is True
+
+    def test_convert_voice(self):
+        backend = MockBackend().on(
+            "POST", "/media/convert/voice", body={"base64": "T2dnUw==", "mimetype": "audio/ogg; codecs=opus", "bytes": 8}
+        )
+        res = make_client(backend).media.convert_voice("s", base64="SUQz")
+        assert backend.last_call.method == "POST"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/media/convert/voice"
+        # Only the field that was given: a blank one reads as supplied-but-empty.
+        assert backend.last_call.body == {"base64": "SUQz"}
+        assert res["mimetype"] == "audio/ogg; codecs=opus"
+
+    def test_convert_video_with_url(self):
+        backend = MockBackend().on(
+            "POST", "/media/convert/video", body={"base64": "AAAA", "mimetype": "video/mp4", "bytes": 4}
+        )
+        make_client(backend).media.convert_video("s", url="https://example.com/c.mov")
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/media/convert/video"
+        assert backend.last_call.body == {"url": "https://example.com/c.mov"}
+
+
 class TestCalls:
     def test_reject_call(self):
         backend = MockBackend().on("POST", "/reject", body={"success": True})
