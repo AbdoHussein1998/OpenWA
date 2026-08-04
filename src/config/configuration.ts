@@ -460,6 +460,14 @@ export default () => ({
       const n = parseInt(process.env.MEDIA_CONVERSION_MAX_OUTPUT_BYTES ?? '', 10);
       return Number.isFinite(n) && n > 0 ? n : 50 * 1024 * 1024;
     })(),
+    // At most this many ffmpeg processes at once (default 2). Each conversion spawns an external
+    // process and holds its input in heap; without a bound, requests inside the rate-limit window
+    // can stack processes for as long as each one runs. A short queue absorbs bursts; beyond it
+    // the endpoint answers 503 rather than piling on.
+    concurrency: (() => {
+      const n = parseInt(process.env.MEDIA_CONVERSION_CONCURRENCY ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 2;
+    })(),
   },
 
   // Message-template rendering

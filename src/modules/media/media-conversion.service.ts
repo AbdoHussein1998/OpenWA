@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, ServiceUnavailableException } from '@n
 import { ConfigService } from '@nestjs/config';
 import { createLogger } from '../../common/services/logger.service';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
+import { ConcurrencyLimiter } from '../../common/utils/concurrency-limiter';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from '../message/media-cap.util';
 import { FfmpegConversionError, probeFfmpeg, runFfmpeg, videoEncodeArgs, voiceEncodeArgs } from './ffmpeg';
 import type { ConvertMediaDto } from './dto/convert-media.dto';
@@ -21,8 +22,18 @@ export class MediaConversionService {
   private readonly logger = createLogger('MediaConversionService');
   /** Result of the binary probe. Cached because it cannot change without a restart. */
   private binaryAvailable?: Promise<boolean>;
+  /**
+   * Bounds concurrent ffmpeg processes (the rate limiter caps admission per second, not how many
+   * long-running processes stack up while each runs toward its timeout). Queue depth is a small
+   * multiple of the cap: each parked task holds its input buffer in heap, so anything beyond it
+   * answers 503 instead of accumulating.
+   */
+  private readonly ffmpegGate: ConcurrencyLimiter;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {
+    const concurrency = this.configService.get<number>('mediaConversion.concurrency', 2);
+    this.ffmpegGate = new ConcurrencyLimiter(concurrency, concurrency * 4);
+  }
 
   /**
    * Convert to a WhatsApp voice note: Ogg/Opus, which is what produces a playable mic bubble.
@@ -57,14 +68,19 @@ export class MediaConversionService {
     const input = await this.resolveInput(dto);
 
     try {
-      const output = await runFfmpeg(input, 'bin', outputExtension, encodeArgs, {
-        ffmpegPath: this.configService.get<string>('mediaConversion.ffmpegPath', 'ffmpeg'),
-        timeoutMs: this.configService.get<number>('mediaConversion.timeoutMs', 60_000),
-        maxOutputBytes: this.configService.get<number>('mediaConversion.maxOutputBytes', 50 * 1024 * 1024),
-      });
+      const output = await this.ffmpegGate.run(() =>
+        runFfmpeg(input, 'bin', outputExtension, encodeArgs, {
+          ffmpegPath: this.configService.get<string>('mediaConversion.ffmpegPath', 'ffmpeg'),
+          timeoutMs: this.configService.get<number>('mediaConversion.timeoutMs', 60_000),
+          maxOutputBytes: this.configService.get<number>('mediaConversion.maxOutputBytes', 50 * 1024 * 1024),
+        }),
+      );
       this.logger.log('Media converted', { inputBytes: input.length, outputBytes: output.length, outputMimetype });
       return { base64: output.toString('base64'), mimetype: outputMimetype, bytes: output.length };
     } catch (error) {
+      if (error instanceof Error && error.message === 'ConcurrencyLimiter queue full') {
+        throw new ServiceUnavailableException('Media conversion is busy — retry shortly');
+      }
       if (error instanceof FfmpegConversionError) {
         // ffmpeg's stderr is about the caller's own bytes, so returning it is what makes a rejection
         // actionable. It never names a path the caller did not supply: the only paths in the command
