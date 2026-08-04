@@ -35,6 +35,7 @@ import { Request, Response, NextFunction, json, urlencoded } from 'express';
 import { randomBytes } from 'crypto';
 import { readFileSync } from 'fs';
 import { extname, join } from 'path';
+import { RedisIoAdapter } from './modules/events/redis-io.adapter';
 
 // The created app, exposed at module scope so the fatal handler below can run a best-effort teardown
 // (engine sessions, Redis/pg) when bootstrap fails AFTER NestFactory.create succeeded — notably a
@@ -98,6 +99,11 @@ async function bootstrap() {
   // Disable Nest's default body parser so we can set an explicit size cap below.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   appInstance = app;
+
+  // Cross-replica WebSocket fan-out: when Redis is enabled, broadcasts reach clients on every
+  // replica, not just this process. Set before the gateway's namespace is created so it inherits
+  // the adapter. Inert (plain in-memory adapter) without REDIS_ENABLED, so single-node pays nothing.
+  app.useWebSocketAdapter(new RedisIoAdapter(app));
 
   // Aggregate in-flight body budget (DoS hardening): once too many body bytes are being buffered
   // across ALL connections, new requests get 503 + Retry-After without their body being read.

@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **WebSocket events now fan out across replicas when Redis is enabled.** The realtime gateway
+  broadcasts to Socket.IO rooms, but the default in-memory adapter only reached sockets on the same
+  process — so a client connected to one replica never saw an event raised on another. A Socket.IO
+  Redis adapter (`@socket.io/redis-adapter`, pub/sub over the existing `REDIS_*` connection) is now
+  attached when `REDIS_ENABLED=true` — the same flag the throttler and cache already use — so a
+  broadcast reaches clients on every replica. The scope is fan-out only: mid-connection API-key
+  eviction, per-key WS rate-limit state, and the engine registry remain process-local (see
+  docs/13). Without `REDIS_ENABLED` the adapter is inert and delivery is single-node exactly as
+  before; a Redis outage falls back to local delivery rather than failing the boot.
+
 - **Session requests are now routed to the owning node (opt-in via `NODE_URL`).** In a multi-node
   deployment a load balancer knows nothing about session placement; a request landing on a
   non-owner previously could not be served. When every node announces its own reachable URL

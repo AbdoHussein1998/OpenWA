@@ -46,13 +46,21 @@
 > which is exactly how a takeover begins. Without `NODE_URL` the whole path is inert and
 > single-node deployments pay nothing.
 >
-> **What does not exist yet, and is why one replica is still the answer.** There is **no**
-> Socket.IO Redis adapter, so a WebSocket client connected to one replica does not receive
-> events raised on another. Not every lifecycle path is fenced: the liveness watchdog and
-> reconnect timers still act on whatever is in the local registry. `BulkMessageService`
-> keeps its live batch state in process, so a takeover cannot resume a batch — only fail
-> it. MCP/agent tool invocations execute on the node that received them rather than being
-> forwarded.
+> **WebSocket events now fan out across replicas** when Redis is enabled (`REDIS_ENABLED=true`,
+> the same flag the throttler and cache already use). The gateway broadcasts to rooms; a Redis
+> pub/sub adapter attached to Socket.IO relays those broadcasts to every replica, so a client
+> connected to node A receives an event raised on node B. Scope honestly: this distributes event
+> **fan-out only**. Mid-connection key eviction (`socketsByKeyId`) is still process-local — a key
+> revoked on node A tears down only A's sockets — as are the per-key WS rate-limit buckets (counted
+> per replica) and the engine registry. Without `REDIS_ENABLED` the adapter is inert and delivery
+> is single-node, exactly as before.
+>
+> **What does not exist yet, and is why one replica is still the answer.** The cross-replica gaps
+> just named (key eviction, WS rate-limit state) remain process-local. Not every lifecycle path is
+> fenced: the liveness watchdog and reconnect timers still act on whatever is in the local
+> registry. `BulkMessageService` keeps its live batch state in process, so a takeover cannot resume
+> a batch — only fail it. MCP/agent tool invocations execute on the node that received them rather
+> than being forwarded.
 >
 > Everything below (node affinity, `replicas: 3`) remains a **design sketch** until those
 > land.
