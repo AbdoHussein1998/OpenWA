@@ -162,7 +162,7 @@ authoritative gate. Current policy:
 
 | Scope                       | Branches | Functions | Lines | Statements |
 | --------------------------- | -------- | --------- | ----- | ---------- |
-| Global                      | 58%      | 58%       | 66%   | 65%        |
+| Global                      | 58%      | 63%       | 66%   | 65%        |
 | `src/common/cache/`         | 34%      | 33%       | 42%   | 42%        |
 | `src/common/security/`      | 85%      | 95%       | 93%   | 92%        |
 | `src/common/services/`      | 74%      | 91%       | 87%   | 84%        |
