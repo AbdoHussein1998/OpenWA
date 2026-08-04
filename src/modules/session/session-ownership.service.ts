@@ -43,6 +43,8 @@ export class SessionOwnershipService {
   private readonly owned = new Set<string>();
   /** Notified when a renewal proves this process no longer holds sessions it thought it did. */
   private onLeaseLost?: (sessionIds: string[]) => Promise<void> | void;
+  /** Answers "does anything still run for this id here?" — consulted by renew(). See setEngineLiveness. */
+  private engineLiveness?: (sessionId: string) => boolean;
 
   constructor(
     @InjectRepository(Session, 'data')
@@ -181,6 +183,15 @@ export class SessionOwnershipService {
   }
 
   /**
+   * Register the probe renew() consults before extending a lease. Wired by SessionService to the
+   * engine lifecycle (engine registered, start in flight, or reconnect pending). Optional like the
+   * lease-loss handler: without it every held claim renews unconditionally.
+   */
+  setEngineLiveness(probe: (sessionId: string) => boolean): void {
+    this.engineLiveness = probe;
+  }
+
+  /**
    * Push every held lease out by another TTL, and find out whether any were lost.
    *
    * A lease can lapse while this process is perfectly healthy — a slow query or a long pause is
@@ -188,18 +199,27 @@ export class SessionOwnershipService {
    * moment to notice, because it is the only regular contact with the row.
    */
   async renew(): Promise<void> {
-    const ids = [...this.owned];
-    if (ids.length === 0) return;
+    const held = [...this.owned];
+    if (held.length === 0) return;
+
+    // Only claims that still cover something alive on this process are pushed out. A claim whose
+    // engine is gone (a failed start, an exhausted reconnect) must be allowed to lapse — renewing
+    // it unconditionally pinned such sessions to this node forever: unstartable on any peer and
+    // invisible to the takeover sweep, which only sees lapsed leases. The id stays in `owned` so
+    // the loss is still noticed below once a peer actually takes the row.
+    const live = this.engineLiveness ? held.filter(id => this.engineLiveness!(id)) : held;
 
     let kept: Set<string>;
     try {
-      await this.sessions
-        .createQueryBuilder()
-        .update(Session)
-        .set({ leaseExpiresAt: new Date(Date.now() + this.leaseTtlMs) })
-        .where({ id: In(ids), nodeId: this.nodeId })
-        .execute();
-      const rows = await this.sessions.find({ where: { id: In(ids), nodeId: this.nodeId }, select: { id: true } });
+      if (live.length > 0) {
+        await this.sessions
+          .createQueryBuilder()
+          .update(Session)
+          .set({ leaseExpiresAt: new Date(Date.now() + this.leaseTtlMs) })
+          .where({ id: In(live), nodeId: this.nodeId })
+          .execute();
+      }
+      const rows = await this.sessions.find({ where: { id: In(held), nodeId: this.nodeId }, select: { id: true } });
       kept = new Set(rows.map(row => row.id));
     } catch (error) {
       // A failed renewal is survivable — the next tick tries again, and the TTL is long enough to
@@ -213,7 +233,7 @@ export class SessionOwnershipService {
       return;
     }
 
-    const lost = ids.filter(id => !kept.has(id));
+    const lost = held.filter(id => !kept.has(id));
     if (lost.length === 0) return;
     for (const id of lost) this.owned.delete(id);
     this.logger.warn(`Lost the claim on ${lost.length} session(s); another node now holds them`, {
