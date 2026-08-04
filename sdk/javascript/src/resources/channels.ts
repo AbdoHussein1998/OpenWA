@@ -45,7 +45,6 @@ export class ChannelsResource {
     });
   }
 
-  /** Subscribe to a channel using its invite code. Requires an OPERATOR-level key. */
   /** Create a channel. The account owns it, which is what makes `delete` possible later. */
   create(sessionId: string, body: CreateChannelRequest): Promise<ChannelRecord> {
     return this.client.request<ChannelRecord>({
@@ -77,6 +76,7 @@ export class ChannelsResource {
     });
   }
 
+  /** Subscribe to a channel using its invite code. Requires an OPERATOR-level key. */
   subscribe(sessionId: string, body: SubscribeChannelRequest): Promise<ChannelRecord> {
     return this.client.request<ChannelRecord>({
       method: 'POST',

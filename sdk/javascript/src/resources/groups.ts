@@ -161,7 +161,6 @@ export class GroupsResource {
     });
   }
 
-  /** Get the group invite code and link. */
   /** Get the group's picture URL (null when it has none). */
   getPicture(sessionId: string, groupId: string): Promise<{ url: string | null }> {
     return this.client.request<{ url: string | null }>({
@@ -187,6 +186,7 @@ export class GroupsResource {
     });
   }
 
+  /** Get the group invite code and link. */
   inviteCode(sessionId: string, groupId: string): Promise<InviteCodeResponse> {
     return this.client.request<InviteCodeResponse>({
       method: 'GET',
