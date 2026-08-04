@@ -1030,6 +1030,112 @@ describe('SessionService', () => {
     });
   });
 
+  // ── ownership claim lifecycle (multi-node) ────────────────────────
+
+  describe('ownership release', () => {
+    type OwnershipStub = { claim: jest.Mock; release: jest.Mock };
+
+    // The trailing @Optional constructor dep the DI module deliberately omits; poked onto the
+    // instance like the other white-box seams in this file.
+    const withOwnership = (claimResult = true): OwnershipStub => {
+      const ownership: OwnershipStub = {
+        claim: jest.fn().mockResolvedValue(claimResult),
+        release: jest.fn().mockResolvedValue(undefined),
+      };
+      Object.assign(service as unknown as Record<string, unknown>, { ownership });
+      return ownership;
+    };
+
+    it('start() releases the claim when the launch fails and nothing stays alive here', async () => {
+      const ownership = withOwnership();
+      jest.spyOn(lifecycle, 'start').mockRejectedValue(new Error('engine init failed'));
+      jest.spyOn(lifecycle, 'isEngineActive').mockReturnValue(false);
+
+      await expect(service.start('sess-uuid-1')).rejects.toThrow('engine init failed');
+
+      expect(ownership.claim).toHaveBeenCalledWith('sess-uuid-1');
+      expect(ownership.release).toHaveBeenCalledWith('sess-uuid-1');
+    });
+
+    it('start() keeps the claim when the refusal means the engine genuinely runs here', async () => {
+      const ownership = withOwnership();
+      jest.spyOn(lifecycle, 'start').mockRejectedValue(new BadRequestException('Session is already started'));
+      jest.spyOn(lifecycle, 'isEngineActive').mockReturnValue(true);
+
+      await expect(service.start('sess-uuid-1')).rejects.toThrow(BadRequestException);
+
+      // Releasing here would invite a peer to open a second connection to the account.
+      expect(ownership.release).not.toHaveBeenCalled();
+    });
+
+    it('start() answers 404, not 409, when the claim matched nothing because the session does not exist', async () => {
+      withOwnership(false);
+      (repository.findOne as jest.Mock).mockResolvedValue(null);
+
+      await expect(service.start('missing-uuid')).rejects.toThrow(NotFoundException);
+    });
+
+    it('start() answers 409 when a live peer really holds the session', async () => {
+      withOwnership(false);
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+
+      await expect(service.start('sess-uuid-1')).rejects.toThrow(ConflictException);
+    });
+
+    it('logout() hands the claim back once the engine is torn down', async () => {
+      const ownership = withOwnership();
+      jest.spyOn(lifecycle, 'logout').mockResolvedValue(createMockSession());
+
+      await service.logout('sess-uuid-1');
+
+      expect(ownership.release).toHaveBeenCalledWith('sess-uuid-1');
+    });
+
+    it('logout() releases on the 502-incomplete path too — the engine is down either way', async () => {
+      const ownership = withOwnership();
+      jest.spyOn(lifecycle, 'logout').mockRejectedValue(new BadGatewayException('incomplete'));
+      jest.spyOn(lifecycle, 'isEngineActive').mockReturnValue(false);
+
+      await expect(service.logout('sess-uuid-1')).rejects.toThrow(BadGatewayException);
+
+      expect(ownership.release).toHaveBeenCalledWith('sess-uuid-1');
+    });
+
+    it('forceKill() hands the claim back after the kill', async () => {
+      const ownership = withOwnership();
+      jest.spyOn(lifecycle, 'forceKill').mockResolvedValue(createMockSession());
+
+      await service.forceKill('sess-uuid-1');
+
+      expect(ownership.release).toHaveBeenCalledWith('sess-uuid-1');
+    });
+  });
+
+  describe('isEngineActive', () => {
+    it('is live for a registered engine, an in-flight start, or reconnect state — dead otherwise', () => {
+      const intern = lifecycle as unknown as {
+        engines: { set: (id: string, e: unknown) => void; delete: (id: string) => void };
+        initializingSessions: Set<string>;
+        reconnectStates: Map<string, unknown>;
+      };
+      expect(lifecycle.isEngineActive('x')).toBe(false);
+
+      intern.engines.set('x', {});
+      expect(lifecycle.isEngineActive('x')).toBe(true);
+      intern.engines.delete('x');
+
+      intern.initializingSessions.add('x');
+      expect(lifecycle.isEngineActive('x')).toBe(true);
+      intern.initializingSessions.delete('x');
+
+      intern.reconnectStates.set('x', { attempts: 1, timer: null });
+      expect(lifecycle.isEngineActive('x')).toBe(true);
+      intern.reconnectStates.delete('x');
+
+      expect(lifecycle.isEngineActive('x')).toBe(false);
+    });
+  });
+
   // ── engine onError / lastError surfacing (#219) ───────────────────
 
   describe('terminal-failure engine eviction', () => {
@@ -1216,6 +1322,23 @@ describe('SessionService', () => {
       expect(service.isActive('sess-uuid-1')).toBe(false);
       expect(deadEngine.forceDestroy).toHaveBeenCalledTimes(1);
       expect(i.sessionErrors.get('sess-uuid-1')).toMatch(/reconnection failed after 2 attempts/i);
+    });
+
+    it('drops the reconnect state on exhaustion so the session no longer reads engine-active', async () => {
+      // A stale entry would keep isEngineActive() true, and the ownership heartbeat would renew
+      // the claim on a session with no engine — pinning a FAILED session to this node forever.
+      const i = lifecycle as unknown as {
+        reconnectStates: Map<string, { attempts: number; timer: null; maxAttempts: number; baseDelay: number }>;
+        scheduleReconnect: (id: string, session: Session) => void;
+      };
+      i.reconnectStates.set('sess-uuid-1', { attempts: 2, timer: null, maxAttempts: 2, baseDelay: 5000 });
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+
+      i.scheduleReconnect('sess-uuid-1', createMockSession());
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(i.reconnectStates.has('sess-uuid-1')).toBe(false);
+      expect(lifecycle.isEngineActive('sess-uuid-1')).toBe(false);
     });
 
     it('does not throw when the engine was already evicted (executeReconnect-catch path)', () => {

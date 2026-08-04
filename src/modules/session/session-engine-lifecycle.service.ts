@@ -401,6 +401,17 @@ export class SessionEngineLifecycle {
     this.fences.evictAndForceDestroy(id, engine);
   }
 
+  /**
+   * True while this process still has anything alive for the session: a registered engine, an
+   * in-flight start(), or reconnect state whose armed/executing attempt will re-register one.
+   * The ownership heartbeat consults this so a claim that no longer covers an engine stops being
+   * renewed and can lapse for a peer to adopt; the service-level release paths consult it so an
+   * "already starting/started" refusal never releases a session this node genuinely runs.
+   */
+  isEngineActive(id: string): boolean {
+    return this.engines.has(id) || this.initializingSessions.has(id) || this.reconnectStates.has(id);
+  }
+
   // --- Leaf-event delegates (SessionEngineLeafEvents) ------------------------------------------
   // Same-named, same-signature forwarders onto the extracted unit, so handleEngineReady's call
   // site stays byte-identical (the wiring reaches the unit directly through host.leafEvents).
@@ -768,6 +779,10 @@ export class SessionEngineLifecycle {
       if (deadEngine) {
         this.evictAndForceDestroy(id, deadEngine);
       }
+      // Terminal: drop the reconnect state too. Nothing fires again for this episode, and a stale
+      // entry would keep isEngineActive() true — the ownership heartbeat would renew the claim on
+      // a session with no engine, pinning it to this node. start() builds fresh state anyway.
+      this.cancelReconnect(id);
       return;
     }
 

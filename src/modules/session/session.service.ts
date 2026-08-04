@@ -132,6 +132,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // The teardown report is not consulted here: losing a claim is not a request anyone is waiting
     // on, and stopOrphanEngines already logs what it could not stop.
     this.ownership?.onLeaseLoss(async ids => void (await this.engineLifecycle.stopOrphanEngines(ids)));
+    // Claims are only renewed while something still runs for them here, so a claim left behind by
+    // an untracked teardown path lapses instead of pinning the session to this node forever.
+    this.ownership?.setEngineLiveness(id => this.engineLifecycle.isEngineActive(id));
     // Renewal runs regardless of auto-start: a session started through the API later is claimed the
     // same way and must keep its lease alive.
     this.ownership?.startHeartbeat();
@@ -281,9 +284,21 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // Claimed before the engine is launched, never after: launching first and discovering the
     // session belongs elsewhere would already have opened a second connection to the account.
     if (this.ownership && !(await this.ownership.claim(id))) {
+      // The claim is a conditional UPDATE, so an id that does not exist also matches zero rows —
+      // surface the route's documented 404 for that case instead of a misleading 409.
+      await this.findOne(id);
       throw new ConflictException(`Session ${id} is running on another node`);
     }
-    return this.engineLifecycle.start(id);
+    try {
+      return await this.engineLifecycle.start(id);
+    } catch (error) {
+      // A failed or refused start must not leave the claim pinned here — the heartbeat would renew
+      // it and the session could never be started anywhere else. Released only when nothing is
+      // actually alive locally: an "already starting/started" refusal means this node genuinely
+      // runs the engine, and releasing then would invite a peer to open a second connection.
+      await this.releaseUnlessEngineActive(id);
+      throw error;
+    }
   }
 
   async stop(id: string): Promise<Session> {
@@ -296,11 +311,36 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   /** See SessionEngineLifecycle.logout() for the full unlink/502 contract. */
   async logout(id: string): Promise<Session> {
-    return this.engineLifecycle.logout(id);
+    try {
+      const session = await this.engineLifecycle.logout(id);
+      // Torn down locally on the 200 path — hand the claim back the way stop() does.
+      await this.ownership?.release(id);
+      return session;
+    } catch (error) {
+      // The 502-incomplete path tears the engine down too, and a "not started" refusal never had
+      // one — either way a claim that no longer covers an engine must not survive the call.
+      await this.releaseUnlessEngineActive(id);
+      throw error;
+    }
   }
 
   async forceKill(id: string): Promise<Session> {
-    return this.engineLifecycle.forceKill(id);
+    try {
+      const session = await this.engineLifecycle.forceKill(id);
+      await this.ownership?.release(id);
+      return session;
+    } catch (error) {
+      await this.releaseUnlessEngineActive(id);
+      throw error;
+    }
+  }
+
+  /** Hand the claim back unless something still runs here (engine, in-flight start, pending reconnect). */
+  private async releaseUnlessEngineActive(id: string): Promise<void> {
+    if (!this.ownership || this.engineLifecycle.isEngineActive(id)) {
+      return;
+    }
+    await this.ownership.release(id);
   }
 
   async getQRCode(id: string): Promise<{ qrCode: string; status: SessionStatus }> {

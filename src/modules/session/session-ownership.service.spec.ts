@@ -155,6 +155,45 @@ describe('SessionOwnershipService', () => {
     });
 
     /**
+     * A claim whose engine is gone must be allowed to lapse: renewing it unconditionally pinned
+     * the session to this node forever — unstartable on any peer, invisible to the takeover sweep.
+     * The id stays tracked so the loss is still noticed when a peer takes the row.
+     */
+    it('skips renewal for a held claim the liveness probe reports dead, so the lease can lapse', async () => {
+      const session = await seed();
+      const nodeA = service('node-a', 5_000);
+      await nodeA.claim(session.id);
+      const first = (await sessions.findOneByOrFail({ id: session.id })).leaseExpiresAt!;
+
+      nodeA.setEngineLiveness(() => false);
+      await new Promise(resolve => setTimeout(resolve, 25));
+      await nodeA.renew();
+
+      const stored = await sessions.findOneByOrFail({ id: session.id });
+      expect(stored.leaseExpiresAt!.getTime()).toBe(first.getTime());
+      expect(nodeA.ownedIds()).toContain(session.id);
+    });
+
+    it('keeps renewing the claims the liveness probe reports alive', async () => {
+      const liveSession = await seed();
+      const deadSession = await seed();
+      const nodeA = service('node-a', 5_000);
+      await nodeA.claim(liveSession.id);
+      await nodeA.claim(deadSession.id);
+      const firstLive = (await sessions.findOneByOrFail({ id: liveSession.id })).leaseExpiresAt!;
+      const firstDead = (await sessions.findOneByOrFail({ id: deadSession.id })).leaseExpiresAt!;
+
+      nodeA.setEngineLiveness(id => id === liveSession.id);
+      await new Promise(resolve => setTimeout(resolve, 25));
+      await nodeA.renew();
+
+      const live = (await sessions.findOneByOrFail({ id: liveSession.id })).leaseExpiresAt!;
+      const dead = (await sessions.findOneByOrFail({ id: deadSession.id })).leaseExpiresAt!;
+      expect(live.getTime()).toBeGreaterThan(firstLive.getTime());
+      expect(dead.getTime()).toBe(firstDead.getTime());
+    });
+
+    /**
      * A node that lost a session must stop extending it. Renewal only writes `leaseExpiresAt`, so
      * the evidence is that value staying put — a stale node refreshing a peer's lease would keep
      * the peer's claim alive on the strength of a process that no longer owns anything.
