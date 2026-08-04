@@ -49,6 +49,27 @@ export function refusedStatusCode(error: unknown): number | undefined {
 }
 
 /**
+ * Run a socket write and map a SERVER refusal (a 4xx-class WA code: admin rights missing, not
+ * permitted, not acceptable) to EngineRefusedError — HTTP 403, the same status the whatsapp-web.js
+ * adapter gives these causes — instead of letting the raw Boom escape as a 500. Transport/local
+ * failures (dropped socket, timeout) propagate untouched: folding them in would report a dead
+ * connection as a permissions problem.
+ */
+export async function mapServerRefusal<T>(operation: string, op: () => Promise<T>): Promise<T> {
+  try {
+    return await op();
+  } catch (error) {
+    const code = refusedStatusCode(error);
+    if (code !== undefined && code >= 400 && code < 500) {
+      throw new EngineRefusedError(
+        `${operation} was refused by WhatsApp (code ${code}) — admin rights or permissions may be missing`,
+      );
+    }
+    throw error;
+  }
+}
+
+/**
  * Fold neutral `<phone>@c.us` participant ids back to the engine wire dialect (`@s.whatsapp.net`) before
  * a group write. `@lid` (a first-class addressing mode) and the group id itself are left untouched.
  */
@@ -159,12 +180,14 @@ export class BaileysGroups {
 
   async setGroupSubject(groupId: string, subject: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().groupUpdateSubject(groupId, subject);
+    await mapServerRefusal('Setting the group subject', () => this.sock().groupUpdateSubject(groupId, subject));
   }
 
   async setGroupDescription(groupId: string, description: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().groupUpdateDescription(groupId, description);
+    await mapServerRefusal('Setting the group description', () =>
+      this.sock().groupUpdateDescription(groupId, description),
+    );
   }
 
   async getGroupInviteCode(groupId: string): Promise<string> {
@@ -187,7 +210,18 @@ export class BaileysGroups {
    */
   async getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo> {
     this.host.ensureReady();
-    const meta = await this.sock().groupGetInviteInfo(inviteCode);
+    let meta: Awaited<ReturnType<WASocket['groupGetInviteInfo']>>;
+    try {
+      meta = await this.sock().groupGetInviteInfo(inviteCode);
+    } catch (error) {
+      // Baileys throws a Boom carrying the WA code for an invalid/expired/revoked invite — the
+      // route's documented 404 (matching whatsapp-web.js), not a 500. Transport failures propagate.
+      const code = refusedStatusCode(error);
+      if (code !== undefined && code >= 400 && code < 500) {
+        throw new GroupNotFoundError(inviteCode);
+      }
+      throw error;
+    }
     if (!meta?.id) {
       throw new GroupNotFoundError(inviteCode);
     }
@@ -230,30 +264,36 @@ export class BaileysGroups {
 
   async setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
     this.host.ensureReady();
-    await this.sock().groupSettingUpdate(groupId, adminsOnly ? 'announcement' : 'not_announcement');
+    await mapServerRefusal('Setting who may send messages', () =>
+      this.sock().groupSettingUpdate(groupId, adminsOnly ? 'announcement' : 'not_announcement'),
+    );
   }
 
   async setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
     this.host.ensureReady();
-    await this.sock().groupSettingUpdate(groupId, adminsOnly ? 'locked' : 'unlocked');
+    await mapServerRefusal('Setting who may edit group info', () =>
+      this.sock().groupSettingUpdate(groupId, adminsOnly ? 'locked' : 'unlocked'),
+    );
   }
 
   async setGroupPicture(groupId: string, media: MediaInput): Promise<void> {
     this.host.ensureReady();
     // Same socket call as the own-account picture, addressed at the group JID.
     const { data } = await resolveMediaBuffer(media);
-    await this.sock().updateProfilePicture(groupId, data);
+    await mapServerRefusal('Setting the group picture', () => this.sock().updateProfilePicture(groupId, data));
   }
 
   async deleteGroupPicture(groupId: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().removeProfilePicture(groupId);
+    await mapServerRefusal('Removing the group picture', () => this.sock().removeProfilePicture(groupId));
   }
 
   async setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void> {
     this.host.ensureReady();
     // A dedicated socket call, not a groupSettingUpdate option.
-    await this.sock().groupMemberAddMode(groupId, mode === 'admins' ? 'admin_add' : 'all_member_add');
+    await mapServerRefusal('Setting the member-add mode', () =>
+      this.sock().groupMemberAddMode(groupId, mode === 'admins' ? 'admin_add' : 'all_member_add'),
+    );
   }
 
   async setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
