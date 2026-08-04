@@ -24,6 +24,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **whatsapp-web.js sessions could come up "ready" with a dead inbound pipeline after a warm
+  restart, silently losing every incoming message.** whatsapp-web.js runs its whole post-auth
+  pipeline — including attaching the page-to-Node message listeners — inside a callback fired only
+  by the page's `change:hasSynced` *transition*. On a warm profile the page can restore to
+  already-synced before that listener exists (the callback then never runs), and the listener
+  attachment itself can fail partway with the rejection swallowed; in both cases `ready` never
+  fires while sends keep working, and this gateway's readiness reconciliation then promoted the
+  session, masking the loss. Confirmed live: messages visible in the WhatsApp store, never
+  persisted, never dispatched to webhooks.
+
+  A new postinstall patcher (`scripts/patch-wwebjs-ready-sync.js`, run fatally in the image build
+  like its siblings) closes the missed-transition race by also firing the handler when the synced
+  state has already been reached, and records completion of the listener attachment on the client.
+  The adapter now refuses to promote a session whose message bridge never attached — on BOTH paths:
+  the genuine `ready` event (whatsapp-web.js bare-re-emits it while the first run's listener
+  attachment is still in flight, so a premature emit is ignored and the attach's own completion
+  re-emit promotes instead) and the readiness reconciliation. When the bridge stays dead the
+  reconciliation reloads the page once to reinject it (whatsapp-web.js reinjects on navigation),
+  and — if it still never attaches — marks the session failed **without** deleting the saved
+  credentials: the link itself is healthy, so a restart must be enough to recover, never a re-pair.
+
 - **Status posting on the whatsapp-web.js engine, which current WhatsApp Web had broken outright.**
   whatsapp-web.js 1.34.7 builds every status message with
   `window.require('WAWebStatusGatingUtils').canCheckStatusRankingPosterGating()`. That helper no
