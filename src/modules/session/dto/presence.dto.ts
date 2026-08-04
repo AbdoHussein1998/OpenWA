@@ -13,12 +13,12 @@ export class SubscribePresenceDto {
   @Matches(/^[^\s@]+@[^\s@]+$/, {
     message: 'chatId must be a valid chat JID in the form localpart@host',
   })
-  chatId: string;
+  chatId!: string;
 }
 
 export class ParticipantPresenceDto {
   @ApiProperty({ description: 'Participant id. In a 1:1 chat this is the chat itself.', example: '1234567890@c.us' })
-  id: string;
+  id!: string;
 
   @ApiProperty({
     enum: ['available', 'unavailable', 'composing', 'recording', 'paused'],
@@ -27,7 +27,7 @@ export class ParticipantPresenceDto {
       'they stopped without sending. `available`/`unavailable` describe reachability.',
     example: 'composing',
   })
-  state: string;
+  state!: string;
 
   @ApiPropertyOptional({
     type: Number,
@@ -41,10 +41,10 @@ export class ParticipantPresenceDto {
 
 export class ChatPresenceResponseDto {
   @ApiProperty({ example: '1234567890@c.us' })
-  chatId: string;
+  chatId!: string;
 
   @ApiProperty({ type: [ParticipantPresenceDto] })
-  participants: ParticipantPresenceDto[];
+  participants!: ParticipantPresenceDto[];
 
   @ApiPropertyOptional({ type: Number, description: 'Online member count, groups only.', example: 3 })
   groupOnlineCount?: number;
@@ -57,5 +57,5 @@ export class ChatPresenceResponseDto {
       'an old `observedAt` means the state is stale rather than steady.',
     example: '2026-08-03T12:00:00Z',
   })
-  observedAt: Date;
+  observedAt!: Date;
 }

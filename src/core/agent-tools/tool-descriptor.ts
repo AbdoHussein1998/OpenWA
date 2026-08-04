@@ -24,3 +24,20 @@ export interface ToolDescriptor<I = unknown> {
   /** Calls the service. Receives validated input + the resolved, scoped key. */
   handler: (input: I, apiKey: ApiKey) => Promise<unknown>;
 }
+
+/**
+ * A descriptor with its input type erased, for storing tools of different shapes in one list.
+ *
+ * The handler parameter is `never`, not `unknown`. Under `strictFunctionTypes` parameters are checked
+ * CONTRAVARIANTLY, so a handler that accepts a specific validated shape is assignable to one
+ * accepting `never` but not to one accepting `unknown` — and `unknown` would be the wrong promise
+ * anyway, since the registry cannot hand a handler just anything.
+ *
+ * What makes the erasure sound is the invoker: it parses `inputSchema` first, so a handler only ever
+ * receives a value its own schema accepted. The one cast that bridges the two lives there, next to
+ * the parse that justifies it, rather than being spread across every tool definition.
+ */
+export type AnyToolDescriptor = Omit<ToolDescriptor, 'inputSchema' | 'handler'> & {
+  inputSchema: z.ZodType;
+  handler: (input: never, apiKey: ApiKey) => Promise<unknown>;
+};

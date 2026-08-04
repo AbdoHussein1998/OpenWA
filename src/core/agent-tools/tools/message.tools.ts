@@ -8,11 +8,11 @@ import {
   LOCATION_TEXT_MAX_LENGTH,
   REACTION_EMOJI_MAX_LENGTH,
 } from '../../../modules/message/dto/message-actions.dto';
-import type { ToolDescriptor } from '../tool-descriptor';
+import type { AnyToolDescriptor } from '../tool-descriptor';
 
 const sessionId = z.string().min(1).describe('Session UUID (the session id, not the name)');
 
-export function messageTools(message: MessageService): ToolDescriptor[] {
+export function messageTools(message: MessageService): AnyToolDescriptor[] {
   return [
     {
       name: 'MessageList',

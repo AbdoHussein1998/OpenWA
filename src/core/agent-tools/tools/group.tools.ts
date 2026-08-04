@@ -6,11 +6,11 @@ import {
   GROUP_NAME_MAX_LENGTH,
   GROUP_PARTICIPANTS_MAX,
 } from '../../../modules/group/dto/group.dto';
-import type { ToolDescriptor } from '../tool-descriptor';
+import type { AnyToolDescriptor } from '../tool-descriptor';
 
 const sessionId = z.string().min(1).describe('Session UUID (the session id, not the name)');
 
-export function groupTools(group: GroupService): ToolDescriptor[] {
+export function groupTools(group: GroupService): AnyToolDescriptor[] {
   return [
     {
       name: 'GroupFindAll',

@@ -12,7 +12,7 @@ export class AccountRestrictionDto {
       'seeing either alongside a `ready` status is not possible.',
     example: 'reachout_timelock',
   })
-  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block';
+  kind!: 'reachout_timelock' | 'tos_block' | 'proxy_block';
 
   @ApiProperty({
     description:
@@ -20,7 +20,7 @@ export class AccountRestrictionDto {
       'so a value newer than this gateway is still surfaced rather than flattened.',
     example: 'BIZ_QUALITY',
   })
-  code: string;
+  code!: string;
 
   @ApiPropertyOptional({
     type: String,
@@ -36,13 +36,13 @@ export class AccountRestrictionDto {
 
 export class SessionResponseDto {
   @ApiProperty({ example: 'sess_123e4567-e89b-12d3-a456-426614174000' })
-  id: string;
+  id!: string;
 
   @ApiProperty({ example: 'my-bot' })
-  name: string;
+  name!: string;
 
   @ApiProperty({ enum: SessionStatus, example: SessionStatus.READY })
-  status: SessionStatus;
+  status!: SessionStatus;
 
   @ApiPropertyOptional({ type: String, example: '628123456789', nullable: true })
   phone?: string | null;
@@ -57,10 +57,10 @@ export class SessionResponseDto {
   lastActive?: Date | null;
 
   @ApiProperty({ example: '2025-02-02T09:00:00Z' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @ApiProperty({ example: '2025-02-02T10:00:00Z' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @ApiPropertyOptional({
     type: String,
@@ -92,7 +92,7 @@ export class SessionResponseDto {
       'Derived per request from live process state, so it is never persisted and never historical.',
     example: true,
   })
-  engineLoaded: boolean;
+  engineLoaded!: boolean;
 
   /**
    * Map a Session entity to the public response shape, stripping sensitive
@@ -135,8 +135,8 @@ export class QRCodeResponseDto {
     description: 'QR code as data URL',
     example: 'data:image/png;base64,...',
   })
-  qrCode: string;
+  qrCode!: string;
 
   @ApiProperty({ enum: SessionStatus, example: SessionStatus.QR_READY })
-  status: SessionStatus;
+  status!: SessionStatus;
 }

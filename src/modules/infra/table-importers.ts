@@ -33,17 +33,28 @@ export interface TableImporter<K extends keyof MigrationTables = keyof Migration
   skip?: (row: MigrationTables[K][number]) => string | null;
 }
 
-// Registers one concrete descriptor into the union-keyed TABLE_IMPORTERS array. The return type
-// widens the row-specific id/map/skip to the union of all row types; sound because the import loop
-// only ever feeds a descriptor rows read from data.tables[its own key].
-function defineTableImporter<K extends keyof MigrationTables>(importer: TableImporter<K>): TableImporter {
+/**
+ * A registered importer with its row type erased, which is what the union-keyed TABLE_IMPORTERS
+ * array holds. The row-consuming members take `never` rather than the union of every row type: a
+ * holder of the erased form cannot know which row type a given descriptor wants, and `never` is the
+ * only parameter type that every concrete `TableImporter<K>` can be assigned to. Soundness comes
+ * from the import loop, which only ever hands a descriptor rows read from `data.tables[its key]`.
+ */
+export type AnyTableImporter = Omit<TableImporter, 'id' | 'map' | 'skip'> & {
+  id: (row: never) => string;
+  map: (row: never) => unknown[];
+  skip?: (row: never) => string | null;
+};
+
+// Registers one concrete descriptor into the union-keyed TABLE_IMPORTERS array.
+function defineTableImporter<K extends keyof MigrationTables>(importer: TableImporter<K>): AnyTableImporter {
   return importer;
 }
 
 // Restore order is FK order: sessions first (webhooks/messages/templates/etc. reference it), the
 // standalone cache/DLQ tables after. The per-block comments from the former inline import blocks
 // live on their descriptor entries.
-export const TABLE_IMPORTERS: TableImporter[] = [
+export const TABLE_IMPORTERS: AnyTableImporter[] = [
   // Import sessions first
   defineTableImporter({
     key: 'sessions',

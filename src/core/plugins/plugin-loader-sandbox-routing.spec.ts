@@ -2,7 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
 import { PluginLoaderService } from './plugin-loader.service';
 import { PluginStorageService } from './plugin-storage.service';
-import { HookManager } from '../hooks';
+import { HookContext, HookEvent, HookHandler, HookManager } from '../hooks';
 import { IPlugin, PluginInstance, PluginManifest, PluginStatus, PluginType } from './plugin.interfaces';
 import { PluginWorkerHost } from './sandbox/plugin-worker-host';
 import { PluginLogLevel } from './sandbox/protocol';
@@ -177,13 +177,20 @@ describe('PluginLoaderService — sandbox tier routing', () => {
 });
 
 describe('PluginLoaderService — sandbox hook error surfacing', () => {
-  type Handler = (hookCtx: { data: unknown; sessionId?: string; source: string }) => Promise<unknown>;
-
   const loggerOf = (loader: TestableLoader): { warn: jest.Mock; log: jest.Mock } =>
     (loader as unknown as { logger: { warn: jest.Mock; log: jest.Mock } }).logger;
 
+  /** A context in the shape the emitters actually build — the shim reads `event` to route. */
+  const ctx = (event: HookEvent): HookContext => ({
+    event,
+    data: {},
+    sessionId: 's1',
+    timestamp: new Date(0),
+    source: 'Engine',
+  });
+
   /** Enable p1, subscribe it to `event`, and return the shim the loader registered for it. */
-  const setupShim = async (loader: TestableLoader, event: string): Promise<Handler> => {
+  const setupShim = async (loader: TestableLoader, event: HookEvent): Promise<HookHandler> => {
     seed(loader, { builtIn: false, instance: null });
     const hookManager = (loader as unknown as { hookManager: HookManager }).hookManager;
     const registerSpy = jest.spyOn(hookManager, 'register');
@@ -201,18 +208,18 @@ describe('PluginLoaderService — sandbox hook error surfacing', () => {
     loader.hosts[0].dispatchHook.mockResolvedValue({ continue: true, error: 'boom' });
     const warnSpy = jest.spyOn(loggerOf(loader), 'warn').mockImplementation(() => undefined);
 
-    await handler({ data: {}, sessionId: 's1', source: 'Engine' });
+    await handler(ctx('message:sent'));
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Sandboxed plugin p1 hook 'message:sent' handler failed: boom"),
       expect.objectContaining({ action: 'sandbox_hook_error', pluginId: 'p1', event: 'message:sent' }),
     );
 
     // A second failure inside the rate-limit window is counted, not logged again.
-    await handler({ data: {}, sessionId: 's1', source: 'Engine' });
+    await handler(ctx('message:sent'));
     expect(warnSpy).toHaveBeenCalledTimes(1);
 
     // The chain still fails open: the shim resolves continue:true for the hook manager.
-    await expect(handler({ data: {}, sessionId: 's1', source: 'Engine' })).resolves.toEqual({ continue: true });
+    await expect(handler(ctx('message:sent'))).resolves.toEqual({ continue: true });
 
     // The health surface carries the last hook error without overriding the worker's own verdict.
     const health = await loader.checkPluginHealth('p1');
@@ -235,7 +242,7 @@ describe('PluginLoaderService — sandbox hook error surfacing', () => {
     loader.hosts[0].dispatchHook.mockResolvedValue({ continue: true, error: 'boom' });
     jest.spyOn(loggerOf(loader), 'warn').mockImplementation(() => undefined);
 
-    await handler({ data: {}, sessionId: 's1', source: 'Engine' });
+    await handler(ctx('message:sent'));
     expect((await loader.checkPluginHealth('p1')).message).toContain('last hook error');
 
     // Worker crashes (intentional=false): the host is dropped without any disable running.
@@ -252,7 +259,7 @@ describe('PluginLoaderService — sandbox hook error surfacing', () => {
     loader.hosts[0].dispatchHook.mockResolvedValue({ continue: false, data: { n: 1 } });
     const warnSpy = jest.spyOn(loggerOf(loader), 'warn').mockImplementation(() => undefined);
 
-    await expect(handler({ data: {}, sessionId: 's1', source: 'Engine' })).resolves.toEqual({
+    await expect(handler(ctx('message:sent'))).resolves.toEqual({
       continue: false,
       data: { n: 1 },
     });

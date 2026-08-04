@@ -43,7 +43,7 @@ export class SendImageStatusDto {
   @IsDefined()
   @ValidateNested()
   @Type(() => StatusMediaInput)
-  image: StatusMediaInput;
+  image!: StatusMediaInput;
 
   @ApiPropertyOptional({ description: 'Optional caption.', example: 'New drop!', maxLength: 1024 })
   @IsOptional()
@@ -74,7 +74,7 @@ export class SendVideoStatusDto {
   @IsDefined()
   @ValidateNested()
   @Type(() => StatusMediaInput)
-  video: StatusMediaInput;
+  video!: StatusMediaInput;
 
   @ApiPropertyOptional({ description: 'Optional caption.', example: 'Demo', maxLength: 1024 })
   @IsOptional()

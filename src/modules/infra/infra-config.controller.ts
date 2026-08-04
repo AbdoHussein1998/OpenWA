@@ -407,7 +407,7 @@ export class InfraConfigController {
               removalResult.errors.push(`Failed to stop ${profile}`);
             }
           } catch (err) {
-            removalResult.errors.push(`Error stopping ${profile}: ${err}`);
+            removalResult.errors.push(`Error stopping ${profile}: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
         this.logger.log('Teardown result', { removalResult });

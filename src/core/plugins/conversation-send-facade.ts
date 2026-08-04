@@ -7,7 +7,7 @@ import {
 
 export interface ConversationSendDeps {
   manifest: PluginManifest;
-  assertPermission: (manifest: PluginManifest, permission: string) => void;
+  assertPermission: (manifest: PluginManifest, permission: PluginCapabilityPermission) => void;
   // Full session gate for THIS plugin (manifest scope AND operator activation), bound to the plugin by
   // the loader — so conversation.send is confined to activated sessions like every other capability.
   assertSessionActive: (sessionId: string) => void;

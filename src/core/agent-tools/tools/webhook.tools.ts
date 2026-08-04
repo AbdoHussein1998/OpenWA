@@ -2,11 +2,11 @@ import { z } from 'zod';
 import { ApiKeyRole } from '../../../modules/auth/entities/api-key.entity';
 import type { WebhookService } from '../../../modules/webhook/webhook.service';
 import { WebhookResponseDto } from '../../../modules/webhook/dto/webhook.dto';
-import type { ToolDescriptor } from '../tool-descriptor';
+import type { AnyToolDescriptor } from '../tool-descriptor';
 
 const sessionId = z.string().min(1).describe('Session UUID (the session id, not the name)');
 
-export function webhookTools(webhook: WebhookService): ToolDescriptor[] {
+export function webhookTools(webhook: WebhookService): AnyToolDescriptor[] {
   return [
     {
       name: 'WebhooksList',

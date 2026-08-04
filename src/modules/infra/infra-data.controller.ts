@@ -386,7 +386,12 @@ export class InfraDataController {
       for (const importer of TABLE_IMPORTERS) {
         const rows = data.tables[importer.key];
         if (!rows?.length) continue;
-        for (const row of rows) {
+        for (const untypedRow of rows) {
+          // `rows` was read from `data.tables[importer.key]`, so it holds exactly the row type this
+          // descriptor's id/map/skip declare. That correlation is what the erased importer type
+          // cannot carry, and this loop is the one place it is known — so the cast lives here rather
+          // than at each of the three uses below.
+          const row = untypedRow as never;
           const skipWarning = importer.skip?.(row);
           if (skipWarning != null) {
             warnings.push(skipWarning);
@@ -396,7 +401,9 @@ export class InfraDataController {
             await insert(importer.sql, importer.map(row));
             counts[importer.key]++;
           } catch (err) {
-            warnings.push(`Failed to import ${importer.label} ${importer.id(row)}: ${err}`);
+            warnings.push(
+              `Failed to import ${importer.label} ${importer.id(row)}: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
       }

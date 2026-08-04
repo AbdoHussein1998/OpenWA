@@ -3,11 +3,11 @@ import { ApiKeyRole } from '../../../modules/auth/entities/api-key.entity';
 import type { ChatState } from '../../../engine/interfaces/whatsapp-engine.interface';
 import type { SessionService } from '../../../modules/session/session.service';
 import { SessionResponseDto } from '../../../modules/session/dto/session-response.dto';
-import type { ToolDescriptor } from '../tool-descriptor';
+import type { AnyToolDescriptor } from '../tool-descriptor';
 
 const sessionId = z.string().min(1).describe('Session UUID (the session id, not the name)');
 
-export function sessionTools(session: SessionService): ToolDescriptor[] {
+export function sessionTools(session: SessionService): AnyToolDescriptor[] {
   return [
     {
       name: 'SessionFindAll',
