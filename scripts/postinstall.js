@@ -1,7 +1,7 @@
 /**
  * Post-install hook (npm `postinstall`).
  *
- * Four conditional steps, each skipped when its target is absent so the hook is a no-op where the
+ * Five conditional steps, each skipped when its target is absent so the hook is a no-op where the
  * piece is missing (the Docker builder stage copies package*.json long before any source):
  *
  *   1. `npm run dashboard:ci` when dashboard/ exists — the dashboard carries its own lockfile and
@@ -17,6 +17,8 @@
  *      Docker stage runs it again without best-effort, making dependency drift a build failure.
  *   4. `node scripts/patch-wwebjs-status.js --best-effort` when present — the status posting
  *      repairs, gated the same way as step 3.
+ *   5. `node scripts/patch-wwebjs-ready-sync.js --best-effort` when present — the readiness
+ *      marker + hasSynced level-check, gated the same way.
  *
  * Structured like scripts/patch-wwebjs-201832.js: pure planning + injectable spawn, so the spec
  * (scripts/postinstall.spec.js, node:test) exercises every branch without a real npm run.
@@ -63,6 +65,15 @@ function planSteps(root) {
       name: 'whatsapp-web.js status send repair (scripts/patch-wwebjs-status.js --best-effort)',
       command: process.execPath,
       args: [statusPatcher, '--best-effort'],
+      options: { stdio: 'inherit', cwd: root },
+    });
+  }
+  const readySyncPatcher = path.join(root, 'scripts', 'patch-wwebjs-ready-sync.js');
+  if (fs.existsSync(readySyncPatcher)) {
+    steps.push({
+      name: 'whatsapp-web.js ready-sync repair (scripts/patch-wwebjs-ready-sync.js --best-effort)',
+      command: process.execPath,
+      args: [readySyncPatcher, '--best-effort'],
       options: { stdio: 'inherit', cwd: root },
     });
   }

@@ -1233,7 +1233,8 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
   type FakeClient = EventEmitter & {
     info?: { wid?: { user?: string }; pushname?: string };
     getState: jest.Mock;
-    pupPage: { evaluate: jest.Mock };
+    pupPage: { evaluate: jest.Mock; reload?: jest.Mock };
+    eventsAttached?: boolean;
     destroy?: jest.Mock;
     logout?: jest.Mock;
     pupBrowser?: { process?: jest.Mock };
@@ -1336,6 +1337,101 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
 
     client.emit('auth_failure', 'stop test timer');
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  // The patched whatsapp-web.js client carries `eventsAttached`: false until attachEventListeners
+  // resolves. A runtime that reports CONNECTED with the flag still false is exactly the live
+  // incident this guards against — sends work, but every inbound event is lost. Promoting such a
+  // session to READY masks the loss; the probe must refuse it. An UNPATCHED client (flag
+  // undefined) keeps the legacy behaviour — covered by the promotion tests above.
+  it('does not promote while the runtime is connected but the event bridge never attached', async () => {
+    jest.useFakeTimers();
+
+    const adapter = newAdapter();
+    const { client, onReady } = attachFakeClient(adapter, {
+      eventsAttached: false,
+      pupPage: { evaluate: jest.fn().mockResolvedValue(true), reload: jest.fn().mockResolvedValue(undefined) },
+    });
+
+    client.emit('authenticated');
+    await jest.advanceTimersByTimeAsync(2100);
+
+    expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
+    expect(onReady).not.toHaveBeenCalled();
+
+    client.emit('auth_failure', 'stop test timer');
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('reloads the page once — and only once — to reinject a dead event bridge, then promotes when it heals', async () => {
+    jest.useFakeTimers();
+
+    const adapter = newAdapter();
+    const reload = jest.fn().mockResolvedValue(undefined);
+    const { client, onReady } = attachFakeClient(adapter, {
+      eventsAttached: false,
+      pupPage: { evaluate: jest.fn().mockResolvedValue(true), reload },
+    });
+
+    client.emit('authenticated');
+    await jest.advanceTimersByTimeAsync(2100 * 3);
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
+
+    // The reload re-ran the injection and the bridge attached: the next probe promotes normally.
+    client.eventsAttached = true;
+    await jest.advanceTimersByTimeAsync(2100);
+
+    expect(adapter.getStatus()).toBe(EngineStatus.READY);
+    expect(onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('a deadline hit while connected-but-bridge-dead fails WITHOUT clearing the credentials', async () => {
+    jest.useFakeTimers();
+
+    const adapter = newAdapter();
+    const { client, onReady, onStateChanged } = attachFakeClient(adapter, {
+      eventsAttached: false,
+      pupPage: { evaluate: jest.fn().mockResolvedValue(true), reload: jest.fn().mockResolvedValue(undefined) },
+    });
+    const onError = jest.fn();
+    (adapter as unknown as { callbacks: unknown }).callbacks = { onReady, onStateChanged, onError };
+    const clearLocalAuth = jest.fn();
+    (adapter as unknown as { clearLocalAuth: unknown }).clearLocalAuth = clearLocalAuth;
+
+    client.emit('authenticated');
+    await jest.advanceTimersByTimeAsync(91_000);
+
+    // The link itself is healthy — wiping the only copy of the credentials would trade a
+    // restart-fixable fault for a forced re-pair. FAILED with the reason, auth left alone.
+    expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
+    expect(clearLocalAuth).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('event bridge'));
+    expect(onReady).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('ignores a premature ready emitted before the bridge attached, then promotes on the real one', () => {
+    jest.useFakeTimers();
+
+    const adapter = newAdapter();
+    const { client, onReady } = attachFakeClient(adapter, {
+      eventsAttached: false,
+      pupPage: { evaluate: jest.fn().mockResolvedValue(true), reload: jest.fn().mockResolvedValue(undefined) },
+    });
+
+    client.emit('authenticated');
+    // The bare re-emit that races ahead of attachEventListeners (observed live): must not promote.
+    client.emit('ready');
+    expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
+    expect(onReady).not.toHaveBeenCalled();
+
+    // The attach completes and re-emits ready — this one counts.
+    client.eventsAttached = true;
+    client.emit('ready');
+    expect(adapter.getStatus()).toBe(EngineStatus.READY);
+    expect(onReady).toHaveBeenCalledTimes(1);
   });
 
   it('deduplicates the genuine ready event after reconciliation promotes the adapter', async () => {
