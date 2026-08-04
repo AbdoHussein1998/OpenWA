@@ -568,13 +568,16 @@ export class BaileysAdapter implements IWhatsAppEngine {
   // WhatsApp Business only — Baileys rejects these on personal accounts. The label must already
   // exist (use getLabels on an engine that lists them); addChatLabel/removeChatLabel associate it
   // with a chat, they do not create/edit the label definition.
+  // Fold @c.us -> @s.whatsapp.net first: chatModify (which both calls wrap) keys the label
+  // app-state index by the RAW jid, so a neutral @c.us would label a phantom chat the phone never
+  // reads — reported as success. Same class of no-op the deleteForMe/star folds fixed.
   async addLabelToChat(chatId: string, labelId: string): Promise<void> {
     this.ensureReady();
-    await this.sock!.addChatLabel(chatId, labelId);
+    await this.sock!.addChatLabel(this.sessionStore.toEngineJid(chatId), labelId);
   }
   async removeLabelFromChat(chatId: string, labelId: string): Promise<void> {
     this.ensureReady();
-    await this.sock!.removeChatLabel(chatId, labelId);
+    await this.sock!.removeChatLabel(this.sessionStore.toEngineJid(chatId), labelId);
   }
   /**
    * Create or update a label.
