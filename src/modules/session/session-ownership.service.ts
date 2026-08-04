@@ -28,6 +28,8 @@ export class SessionOwnershipService {
   private heartbeat?: ReturnType<typeof setInterval>;
   /** Sessions this process believes it owns, so the heartbeat knows what to renew. */
   private readonly owned = new Set<string>();
+  /** Notified when a renewal proves this process no longer holds sessions it thought it did. */
+  private onLeaseLost?: (sessionIds: string[]) => Promise<unknown> | unknown;
 
   constructor(
     @InjectRepository(Session, 'data')
@@ -147,10 +149,29 @@ export class SessionOwnershipService {
     this.heartbeat = undefined;
   }
 
-  /** Push every held lease out by another TTL. */
+  /**
+   * Register what to do about a session this process has lost.
+   *
+   * Losing a lease is not an abstract bookkeeping event: a peer is now free to claim the session,
+   * and if this process keeps its engine running there are two engines on one WhatsApp account —
+   * the exact outcome the claim exists to prevent. The handler is how the engine gets torn down.
+   */
+  onLeaseLoss(handler: (sessionIds: string[]) => Promise<unknown> | unknown): void {
+    this.onLeaseLost = handler;
+  }
+
+  /**
+   * Push every held lease out by another TTL, and find out whether any were lost.
+   *
+   * A lease can lapse while this process is perfectly healthy — a slow query or a long pause is
+   * enough — after which a peer may legitimately take the session. Renewal is therefore also the
+   * moment to notice, because it is the only regular contact with the row.
+   */
   async renew(): Promise<void> {
     const ids = [...this.owned];
     if (ids.length === 0) return;
+
+    let kept: Set<string>;
     try {
       await this.sessions
         .createQueryBuilder()
@@ -158,12 +179,38 @@ export class SessionOwnershipService {
         .set({ leaseExpiresAt: new Date(Date.now() + this.leaseTtlMs) })
         .where({ id: In(ids), nodeId: this.nodeId })
         .execute();
+      const rows = await this.sessions.find({ where: { id: In(ids), nodeId: this.nodeId }, select: { id: true } });
+      kept = new Set(rows.map(row => row.id));
     } catch (error) {
       // A failed renewal is survivable — the next tick tries again, and the TTL is long enough to
-      // absorb a transient database blip. Throwing here would take down the interval instead.
+      // absorb a transient database blip. Crucially it must NOT be read as having lost anything:
+      // concluding loss from a failed query would tear down every healthy engine on this node the
+      // first time the database hiccuped, which is far worse than a late renewal.
       this.logger.warn('Failed to renew session leases', {
         nodeId: this.nodeId,
         error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    const lost = ids.filter(id => !kept.has(id));
+    if (lost.length === 0) return;
+    for (const id of lost) this.owned.delete(id);
+    this.logger.warn(`Lost the claim on ${lost.length} session(s); another node now holds them`, {
+      nodeId: this.nodeId,
+      sessionIds: lost,
+    });
+    try {
+      await this.onLeaseLost?.(lost);
+    } catch (error) {
+      // Renewal is driven by an interval, so a throwing handler would surface as an unhandled
+      // rejection and could stop the loop entirely. The sessions are already out of `owned`, so the
+      // bookkeeping is consistent either way — what a failure here means is that an engine may
+      // still be running for a session this node no longer owns, which is worth an error rather
+      // than a crash.
+      this.logger.error('Failed to release engines for lost sessions', error instanceof Error ? error.stack : '', {
+        nodeId: this.nodeId,
+        sessionIds: lost,
       });
     }
   }

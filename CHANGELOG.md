@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Existing rows read as unclaimed, so a single-process deployment behaves exactly as before.
 
+  A node that loses a claim stops running the session. A lease can lapse while the process itself is
+  healthy — a slow query is enough — and a peer is then free to claim the session, so an engine left
+  running here would be the second one on that WhatsApp account. Renewal is the regular contact with
+  the row, so it is also where the loss is noticed and the local engine is torn down. A failed
+  renewal is explicitly not a loss: the TTL exists to absorb a database blip, and treating a failed
+  query as lost ownership would stop every healthy engine on the node the first time one occurred.
+
   Bulk-send batches follow the same ownership. The boot reaper marked every `PROCESSING` batch
   `FAILED`, which on a second replica meant declaring a peer's in-flight batches failed while they
   were still sending — the caller told the send failed, the messages going out regardless. A batch
