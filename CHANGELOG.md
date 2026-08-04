@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Status posting on the whatsapp-web.js engine, which current WhatsApp Web had broken outright.**
+  whatsapp-web.js 1.34.7 builds every status message with
+  `window.require('WAWebStatusGatingUtils').canCheckStatusRankingPosterGating()`. That helper no
+  longer exists in current WhatsApp Web builds, so the call threw before the message was sent and
+  took down text, image, video and voice status alike — a `500` on every attempt.
+
+  Confirmed on a live account against the published image with none of this project's newer code
+  present, so it is upstream rather than a regression here. The postinstall patcher now guards the
+  call: it is used when the build still provides it, and falls back to `false` — what
+  `cannotBeRanked` meant before WhatsApp introduced the gating check — when it does not. Text status
+  posts again, verified live.
+
+  **Media status is still failing** for a second and unrelated upstream reason: WhatsApp Web's own
+  bundle throws `Cannot read properties of undefined (reading 'id')` inside
+  `sendStatusMediaMsgAction`. That is inside minified upstream code and is not fixed here.
+
 ### Security
 
 - **Five advisories in the production dependency tree resolved**, all through transitive bumps —

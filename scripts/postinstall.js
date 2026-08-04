@@ -55,6 +55,15 @@ function planSteps(root) {
       options: { stdio: 'inherit', cwd: root },
     });
   }
+  const gatingPatcher = path.join(root, 'scripts', 'patch-wwebjs-status-gating.js');
+  if (fs.existsSync(gatingPatcher)) {
+    steps.push({
+      name: 'whatsapp-web.js status gating guard (scripts/patch-wwebjs-status-gating.js --best-effort)',
+      command: process.execPath,
+      args: [gatingPatcher, '--best-effort'],
+      options: { stdio: 'inherit', cwd: root },
+    });
+  }
   return steps;
 }
 
