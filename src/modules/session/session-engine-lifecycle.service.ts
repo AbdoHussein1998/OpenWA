@@ -663,6 +663,12 @@ export class SessionEngineLifecycle {
       code: lifted.code,
       expiresAt: null,
     });
+    this.eventsGateway.emitSessionRestriction(id, {
+      active: false,
+      kind: lifted.kind,
+      code: lifted.code,
+      expiresAt: null,
+    });
     void this.auditService?.logInfo(AuditAction.SESSION_RESTRICTION_LIFTED, {
       sessionId: id,
       metadata: { kind: lifted.kind, code: lifted.code },

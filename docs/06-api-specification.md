@@ -5868,6 +5868,7 @@ session.status
 session.qr
 session.authenticated
 session.disconnected
+session.restriction
 group.join
 group.leave
 group.update
@@ -5877,7 +5878,7 @@ status.received
 
 A subscribe request whose `events` array contains no recognized name (after filtering) is rejected with `INVALID_EVENTS`. Unknown names mixed with valid ones are silently dropped; the `subscribed` reply echoes only the accepted events.
 
-> `message.failed`, `session.reconnect_loop` and `session.restriction` are webhook-only — they are not subscribable on the socket.
+> `message.failed` and `session.reconnect_loop` are webhook-only — they are not subscribable on the socket.
 
 ### Wildcards and scoping
 

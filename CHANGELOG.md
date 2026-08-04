@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Built under the full TypeScript `strict` family, with per-module test-coverage floors across the codebase.
+- `session.restriction` is now socket-subscribable as well as webhook-delivered, and the dashboard session card picks up a restriction (or its lift) live instead of only on a page reload.
 
 ### Fixed
 
