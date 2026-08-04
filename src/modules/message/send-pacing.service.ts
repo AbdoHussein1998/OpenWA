@@ -73,6 +73,15 @@ const MAX_REFUSAL_KEYS = 1000;
 export class SendPacingService {
   private readonly logger = createLogger('SendPacingService');
   private readonly breakers = new Map<string, BreakerState>();
+  /**
+   * Per-session count of cold GROUP-ADD reachouts used today. Group adds (createGroup/
+   * addParticipants) persist no message row, so `countColdReachoutsToday` — which reads the messages
+   * table — cannot see them; without this tally each add request would get the full daily allowance
+   * afresh, making the cap per-request instead of per-day. In memory like the breaker (the service
+   * doc explains why); it resets by UTC day and on restart, which for an anti-ban budget errs toward
+   * fewer reachouts, never more.
+   */
+  private readonly groupReachoutTally = new Map<string, { dayStartMs: number; count: number }>();
   private readonly refusalSamples = new Map<string, RefusalSample>();
 
   constructor(
@@ -143,17 +152,39 @@ export class SendPacingService {
     const dayStart = startOfUtcDay(new Date());
     const ageDays = Math.floor((dayStart.getTime() - startOfUtcDay(session.createdAt).getTime()) / DAY_MS);
     const allowance = this.allowanceForAge(config.coldSchedule, ageDays);
-    const coldToday = await this.countColdReachoutsToday(sessionId, dayStart);
-    if (coldToday + coldCount <= allowance) return;
+    // Both sources of the day's reachouts: cold chat messages (persisted rows) and prior group adds
+    // (the in-memory tally). Group adds persist nothing, so without the tally they would not count
+    // against themselves and the cap would reset every request.
+    const usedToday =
+      (await this.countColdReachoutsToday(sessionId, dayStart)) + this.groupReachoutsToday(sessionId, dayStart);
+    if (usedToday + coldCount <= allowance) {
+      // Charge the budget now, on the allowed path, so a second add request in the same day sees it.
+      this.addGroupReachouts(sessionId, dayStart, coldCount);
+      return;
+    }
 
     this.refuse('cold_daily_cap', sessionId, secondsUntilNextUtcDay(), {
       reason:
         `Reaching ${coldCount} new contact(s) would exceed the daily allowance of ${allowance} ` +
-        `new conversation(s) for a session ${ageDays} day(s) old (${coldToday} already used)`,
+        `new conversation(s) for a session ${ageDays} day(s) old (${usedToday} already used)`,
       allowance,
-      coldToday,
+      coldToday: usedToday,
       coldCount,
     });
+  }
+
+  /** Cold group-add reachouts charged to this session today (0 once the stored day rolls over). */
+  private groupReachoutsToday(sessionId: string, dayStart: Date): number {
+    const tally = this.groupReachoutTally.get(sessionId);
+    return tally && tally.dayStartMs === dayStart.getTime() ? tally.count : 0;
+  }
+
+  /** Add to today's group-add tally, resetting it first when the stored entry is from an earlier day. */
+  private addGroupReachouts(sessionId: string, dayStart: Date, n: number): void {
+    const dayStartMs = dayStart.getTime();
+    const tally = this.groupReachoutTally.get(sessionId);
+    if (tally && tally.dayStartMs === dayStartMs) tally.count += n;
+    else this.groupReachoutTally.set(sessionId, { dayStartMs, count: n });
   }
 
   /**
@@ -316,7 +347,10 @@ export class SendPacingService {
     const dayStart = startOfUtcDay(new Date());
     const ageDays = Math.floor((dayStart.getTime() - startOfUtcDay(session.createdAt).getTime()) / DAY_MS);
     const allowance = this.allowanceForAge(config.coldSchedule, ageDays);
-    const coldToday = await this.countColdReachoutsToday(sessionId, dayStart);
+    // Group adds share this budget: a day spent adding strangers to groups must leave fewer cold
+    // chat reachouts, so fold the in-memory group tally in alongside the persisted chat count.
+    const coldToday =
+      (await this.countColdReachoutsToday(sessionId, dayStart)) + this.groupReachoutsToday(sessionId, dayStart);
     if (coldToday < allowance) return;
 
     this.refuse('cold_daily_cap', sessionId, secondsUntilNextUtcDay(), {

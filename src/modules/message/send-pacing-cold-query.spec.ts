@@ -210,6 +210,29 @@ describe('group reachouts against a real database', () => {
     await expect(service.assertReachoutAllowed('s1', ['a@c.us'])).rejects.toMatchObject({ status: 429 });
   });
 
+  // The regression this file exists to lock: group adds persist no message row, so the cap must be
+  // charged in memory or every request gets the full allowance afresh (per-request, not per-day).
+  it('accumulates across calls in the same day — the allowance is per-day, not per-request', async () => {
+    await expect(service.assertReachoutAllowed('s1', ['a@c.us', 'b@c.us', 'c@c.us'])).resolves.toBeUndefined();
+    // The allowance (3) is now spent for the day, even though no message row was written.
+    await expect(service.assertReachoutAllowed('s1', ['d@c.us'])).rejects.toMatchObject({ status: 429 });
+  });
+
+  it('charges the chat cold cap too, so group adds leave fewer direct cold reachouts', async () => {
+    await service.assertReachoutAllowed('s1', ['a@c.us', 'b@c.us', 'c@c.us']);
+    // Budget consumed by group adds; a fresh cold direct message must now be refused.
+    await expect(service.assertSendAllowed('s1', 'stranger@c.us')).rejects.toMatchObject({ status: 429 });
+  });
+
+  it('resets the group tally on the UTC day boundary', async () => {
+    await service.assertReachoutAllowed('s1', ['a@c.us', 'b@c.us', 'c@c.us']);
+    await expect(service.assertReachoutAllowed('s1', ['d@c.us'])).rejects.toMatchObject({ status: 429 });
+
+    // Roll into the next UTC day: the tally is keyed by day, so the allowance is fresh.
+    jest.setSystemTime(new Date(NOW.getTime() + DAY_MS));
+    await expect(service.assertReachoutAllowed('s1', ['e@c.us', 'f@c.us', 'g@c.us'])).resolves.toBeUndefined();
+  });
+
   it('is inert for an empty participant list', async () => {
     await addMessage('dm-1@c.us', TODAY);
     await addMessage('dm-2@c.us', TODAY);
