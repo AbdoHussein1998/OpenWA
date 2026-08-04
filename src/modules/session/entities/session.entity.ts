@@ -51,6 +51,27 @@ export class Session {
   @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
   lastActiveAt!: Date | null;
 
+  /**
+   * Which process currently hosts this session's engine, or NULL when nobody does.
+   *
+   * A session's engine lives in exactly one process. Recording the owner is what lets a booting
+   * process tell "my own leftovers, which really are dead" from "another process's live session",
+   * which it previously could not and so reset both.
+   */
+  @Column({ type: 'varchar', length: 190, nullable: true })
+  nodeId!: string | null;
+
+  @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
+  claimedAt!: Date | null;
+
+  /**
+   * When the claim above stops being honoured. A process that dies without releasing leaves a row
+   * pointing at an owner that is gone, so the claim expires rather than requiring a clean shutdown
+   * to recover; a running owner keeps extending it.
+   */
+  @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
+  leaseExpiresAt!: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

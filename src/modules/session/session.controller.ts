@@ -141,7 +141,9 @@ export class SessionController {
       'A credential teardown for the same session name is still in flight (e.g. a prior logout ' +
       'that owns destructive cleanup). Retryable — the body carries `code: ' +
       'SESSION_NAME_TEARDOWN_PENDING`; wait for it to settle and retry. No destructive side ' +
-      'effect runs before this refusal.',
+      'effect runs before this refusal. Also returned when another node currently holds this ' +
+      "session's engine: only the owner may start it, and the claim is refused before any engine " +
+      'is launched, so no second connection to the account is opened.',
   })
   async start(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.start(id);

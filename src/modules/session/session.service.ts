@@ -21,6 +21,7 @@ import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
 import { PresenceStore, type ChatPresence } from './presence-store.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
+import { SessionOwnershipService } from './session-ownership.service';
 import { paginate, ListOptions, resolveListWindow } from '../../common/utils/paginate';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 import { resolveFeatureFlags } from '../../config/feature-flags';
@@ -78,11 +79,21 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     private readonly engineLifecycle: SessionEngineLifecycle,
     @Optional()
     private readonly configService?: ConfigService,
+    // Trailing @Optional, like configService: the running app always provides it, while the
+    // direct-construction unit tests omit it — every use below is `?.`-guarded, so a session simply
+    // behaves as unowned there, which is what a single-process deployment is anyway.
+    @Optional()
+    private readonly ownership?: SessionOwnershipService,
   ) {}
 
   /**
-   * On backend startup, reset all active session statuses to disconnected
-   * because the engines are not running yet after restart
+   * On startup, mark as disconnected the sessions whose engines this process was running, since no
+   * engine survives a restart.
+   *
+   * Scoped to what this process may claim. An active status means "an engine is running somewhere",
+   * and resetting all of them assumed that somewhere was always here — true of a single process,
+   * and wrong beside a live peer, whose sessions would be reported disconnected while they are
+   * serving traffic. A row held by another node with an unexpired lease is therefore left alone.
    */
   async onModuleInit(): Promise<void> {
     const activeStatuses = [
@@ -93,8 +104,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       SessionStatus.ACTION_REQUIRED,
     ];
 
+    const claimable = this.ownership?.claimableWhere() ?? [{}];
     const result = await this.sessionRepository.update(
-      { status: In(activeStatuses) },
+      claimable.map(clause => ({ ...clause, status: In(activeStatuses) })),
       { status: SessionStatus.DISCONNECTED },
     );
 
@@ -102,6 +114,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       this.logger.log(`Reset ${result.affected} session(s) to disconnected on startup`, {
         action: 'startup_reset',
         affected: result.affected,
+        nodeId: this.ownership?.nodeId,
       });
     }
   }
@@ -112,11 +125,18 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // The watchdog owns the probe cadence and failure counting; a session it proves dead comes
     // back through the same disconnect path an engine-reported drop uses.
     this.watchdog.start((id, engine, reason) => this.engineLifecycle.handleEngineDisconnected(id, engine, reason));
+    // Renewal runs regardless of auto-start: a session started through the API later is claimed the
+    // same way and must keep its lease alive.
+    this.ownership?.startHeartbeat();
 
     if (!resolveFeatureFlags(this.configService).autoStartSessions) return;
 
+    // Restricted to sessions this node may claim. Without it every replica scans the same rows and
+    // races to launch the same engines, which is a WhatsApp account being opened twice, not merely
+    // duplicated work.
+    const claimable = this.ownership?.claimableWhere() ?? [{}];
     const sessions = await this.sessionRepository.find({
-      where: { phone: Not(IsNull()), status: SessionStatus.DISCONNECTED },
+      where: claimable.map(clause => ({ ...clause, phone: Not(IsNull()), status: SessionStatus.DISCONNECTED })),
     });
 
     if (sessions.length === 0) return;
@@ -152,8 +172,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // Stop the watchdog FIRST (before any teardown below can hang): no new probe/disconnect handling
     // may start mid-shutdown. stop() is idempotent, so a second onModuleDestroy call stays safe.
     this.watchdog.stop();
+    this.ownership?.stopHeartbeat();
     // Reconnect timers + engine teardown belong to the lifecycle owner.
     await this.engineLifecycle.shutdown();
+    // Released only after the engines are actually down, so a peer never claims a session this
+    // process is still holding open.
+    await this.ownership?.releaseAll();
   }
 
   async create(dto: CreateSessionDto): Promise<Session> {
@@ -242,15 +266,25 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   /** Record removal + engine retirement + credential purge: owned by the lifecycle service. */
   async delete(id: string): Promise<void> {
-    return this.engineLifecycle.delete(id);
+    await this.engineLifecycle.delete(id);
+    await this.ownership?.release(id);
   }
 
   async start(id: string): Promise<Session> {
+    // Claimed before the engine is launched, never after: launching first and discovering the
+    // session belongs elsewhere would already have opened a second connection to the account.
+    if (this.ownership && !(await this.ownership.claim(id))) {
+      throw new ConflictException(`Session ${id} is running on another node`);
+    }
     return this.engineLifecycle.start(id);
   }
 
   async stop(id: string): Promise<Session> {
-    return this.engineLifecycle.stop(id);
+    const session = await this.engineLifecycle.stop(id);
+    // Handed back on the way out so a peer can pick it up immediately rather than waiting for the
+    // lease to lapse. Stop is the deliberate end of this process's ownership.
+    await this.ownership?.release(id);
+    return session;
   }
 
   /** See SessionEngineLifecycle.logout() for the full unlink/502 contract. */

@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sessions record which process owns them.** A session's WhatsApp engine runs in exactly one
+  process, but nothing recorded which, so a booting process reset every active-looking session on
+  the assumption they were all its own leftovers. With one process that is correct. With two it is
+  not: a booting replica reported a live peer's sessions as disconnected, and both replicas raced to
+  auto-start the same sessions — two browsers writing one LocalAuth directory, which is how a
+  session gets corrupted into a forced logout.
+
+  `sessions` gains `nodeId`, `claimedAt` and `leaseExpiresAt`. A process claims a session before
+  starting its engine and refuses with `409` when another node holds a live claim; a boot resets
+  only what it may claim. The claim is a lease rather than a lock, so a process that dies without
+  releasing does not strand its sessions — the claim stops being honoured once unrenewed, and a
+  running owner keeps extending it. `NODE_ID` names the process and defaults to the hostname;
+  `SESSION_LEASE_TTL_MS` and `SESSION_LEASE_HEARTBEAT_MS` tune the rest.
+
+  Existing rows read as unclaimed, so a single-process deployment behaves exactly as before.
+
+  This is ownership only. Request routing, fencing on every lifecycle path, cross-process bulk-batch
+  state and WebSocket fan-out are not done, so **one API instance per session-data volume remains
+  the supported topology** — `docs/13-horizontal-scaling.md` states precisely what is and is not in
+  place.
+
+
 - **Voice status.** `POST /api/sessions/:sessionId/status/send-voice` posts an audio status as a
   voice note on both engines. It carries no caption, because WhatsApp has nowhere to render one on a
   status voice note.
