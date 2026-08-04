@@ -76,7 +76,10 @@ export function labelTools(labels: LabelService): AnyToolDescriptor[] {
           .optional()
           .describe('WhatsApp colour index 0-19; left unchanged when omitted'),
       }),
-      handler: input => labels.upsertLabel(input.sessionId, input.labelId, { name: input.name, color: input.color }),
+      handler: input =>
+        labels
+          .upsertLabel(input.sessionId, input.labelId, { name: input.name, color: input.color })
+          .then(() => ({ success: true })),
     }),
     defineTool({
       name: 'LabelDelete',
@@ -88,7 +91,7 @@ export function labelTools(labels: LabelService): AnyToolDescriptor[] {
       destructive: true,
       requiredRole: ApiKeyRole.OPERATOR,
       inputSchema: z.object({ sessionId, labelId }),
-      handler: input => labels.deleteLabel(input.sessionId, input.labelId),
+      handler: input => labels.deleteLabel(input.sessionId, input.labelId).then(() => ({ success: true })),
     }),
     defineTool({
       name: 'LabelAddToChat',
@@ -97,7 +100,8 @@ export function labelTools(labels: LabelService): AnyToolDescriptor[] {
       sessionScoped: true,
       requiredRole: ApiKeyRole.OPERATOR,
       inputSchema: z.object({ sessionId, chatId, labelId }),
-      handler: input => labels.addLabelToChat(input.sessionId, input.chatId, input.labelId),
+      handler: input =>
+        labels.addLabelToChat(input.sessionId, input.chatId, input.labelId).then(() => ({ success: true })),
     }),
     defineTool({
       name: 'LabelRemoveFromChat',
@@ -108,7 +112,8 @@ export function labelTools(labels: LabelService): AnyToolDescriptor[] {
       sessionScoped: true,
       requiredRole: ApiKeyRole.OPERATOR,
       inputSchema: z.object({ sessionId, chatId, labelId }),
-      handler: input => labels.removeLabelFromChat(input.sessionId, input.chatId, input.labelId),
+      handler: input =>
+        labels.removeLabelFromChat(input.sessionId, input.chatId, input.labelId).then(() => ({ success: true })),
     }),
   ];
 }

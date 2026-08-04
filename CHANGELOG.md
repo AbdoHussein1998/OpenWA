@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The webhook producer enqueues idempotently, and the bundled Redis is pinned `--maxmemory-policy noeviction` so queued jobs are not silently dropped.
 - A media-storage root the app cannot write to is caught at boot with a clear error, instead of failing on the first write (#1066).
 - The bundled `docker-compose.yml` now forwards the `SEND_PACING_*`, `MEDIA_CONVERSION_*`/`FFMPEG_PATH` and session-ownership (`NODE_ID`, `NODE_URL`, lease/sweep) variables — previously these features could not be enabled from `.env` in a compose deployment at all.
+- The four label write tools (`LabelUpsert`, `LabelDelete`, `LabelAddToChat`, `LabelRemoveFromChat`) answered `Internal error` over MCP even though the write had succeeded on WhatsApp, prompting agents to retry a completed operation; they now return `{ success: true }`.
 - Corrected column names in `docs/05-database-design.md`.
 
 ### Security
