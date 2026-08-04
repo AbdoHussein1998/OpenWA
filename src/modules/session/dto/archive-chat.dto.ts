@@ -14,12 +14,12 @@ export class ArchiveChatDto {
   @Matches(/^[^\s@]+@[^\s@]+$/, {
     message: 'chatId must be a valid chat JID in the form localpart@host',
   })
-  chatId: string;
+  chatId!: string;
 
   @ApiProperty({ description: 'true to archive, false to unarchive.' })
   // Read strictly: under the pipe's implicit conversion the string "false" would become boolean
   // true, archiving a chat the caller asked to restore.
   @ToStrictBoolean()
   @IsBoolean()
-  archive: boolean;
+  archive!: boolean;
 }

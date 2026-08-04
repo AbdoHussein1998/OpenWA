@@ -1,6 +1,7 @@
 import { ForbiddenException, HttpException, Logger, UnauthorizedException } from '@nestjs/common';
 import type { HttpAdapterHost } from '@nestjs/core';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { AnySchema } from '@modelcontextprotocol/sdk/server/zod-compat.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import type { ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -106,8 +107,10 @@ function buildServer(
       tool.name,
       {
         description: tool.description,
-        // inputSchema accepts AnySchema (zod v4 $ZodType is compatible)
-        inputSchema: tool.inputSchema as Parameters<typeof server.registerTool>[1]['inputSchema'],
+        // The SDK's InputArgs is inferred from this property. Widening it to the whole
+        // `ZodRawShapeCompat | AnySchema` constraint would collapse the callback type it derives, so
+        // the cast names AnySchema exactly — which zod v4's $ZodType satisfies.
+        inputSchema: tool.inputSchema as AnySchema,
         annotations: {
           readOnlyHint: tool.tier === 'read',
           destructiveHint: tool.destructive ?? false,

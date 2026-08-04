@@ -91,7 +91,7 @@ const EVICTION_MESSAGES: Record<ApiKeyEvictionReason, string> = {
 })
 export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private logger = new Logger('EventsGateway');
 

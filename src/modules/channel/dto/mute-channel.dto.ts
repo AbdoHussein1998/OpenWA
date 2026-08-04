@@ -11,5 +11,5 @@ export class MuteChannelDto {
   // so an unguarded `false` sent as a string would mute instead of unmuting.
   @ToStrictBoolean()
   @IsBoolean()
-  mute: boolean;
+  mute!: boolean;
 }

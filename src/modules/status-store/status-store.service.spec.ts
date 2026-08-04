@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, DeepPartial, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 
 jest.mock('archiver', () => ({ default: jest.fn() }));
@@ -233,10 +233,10 @@ describe('StatusStoreService (ingest / list / getMedia)', () => {
     // from an unexplained omission — and nothing retries it.
     const saveSpy = jest.spyOn(repository, 'save');
     let calls = 0;
-    saveSpy.mockImplementation((row: never) => {
+    saveSpy.mockImplementation((row: DeepPartial<StatusUpdate>) => {
       calls += 1;
       if (calls === 2) return Promise.reject(new Error('db blip')); // the post-write update
-      return Promise.resolve(row);
+      return Promise.resolve(row as DeepPartial<StatusUpdate> & StatusUpdate);
     });
     try {
       const { row } = await service.ingest('sess', {

@@ -76,53 +76,53 @@ export enum AuditSeverity {
 @Entity('audit_logs')
 export class AuditLog {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Index()
   @Column({ type: 'varchar', length: 50 })
-  action: AuditAction;
+  action!: AuditAction;
 
   @Column({ type: 'varchar', length: 10, default: AuditSeverity.INFO })
-  severity: AuditSeverity;
+  severity!: AuditSeverity;
 
   @Index()
   @Column({ type: 'varchar', length: 36, nullable: true })
-  apiKeyId: string | null;
+  apiKeyId!: string | null;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
-  apiKeyName: string | null;
+  apiKeyName!: string | null;
 
   @Index()
   @Column({ type: 'varchar', length: 36, nullable: true })
-  sessionId: string | null;
+  sessionId!: string | null;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
-  sessionName: string | null;
+  sessionName!: string | null;
 
   @Column({ type: 'varchar', length: 45, nullable: true })
-  ipAddress: string | null;
+  ipAddress!: string | null;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
-  userAgent: string | null;
+  userAgent!: string | null;
 
   @Column({ type: 'varchar', length: 10, nullable: true })
-  method: string | null;
+  method!: string | null;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
-  path: string | null;
+  path!: string | null;
 
   @Column({ type: 'int', nullable: true })
-  statusCode: number | null;
+  statusCode!: number | null;
 
   // The "main" database connection is always SQLite (boot config),
   // so we use simple-json regardless of the user's data DB choice.
   @Column({ type: 'simple-json', nullable: true })
-  metadata: Record<string, unknown> | null;
+  metadata!: Record<string, unknown> | null;
 
   @Column({ type: 'text', nullable: true })
-  errorMessage: string | null;
+  errorMessage!: string | null;
 
   @Index()
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 }

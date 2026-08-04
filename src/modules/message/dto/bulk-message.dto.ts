@@ -88,16 +88,16 @@ class BulkMessageContentDto {
 class BulkMessageItemDto {
   @ApiProperty({ description: 'Recipient chat ID', example: '628123456789@c.us' })
   @IsString()
-  chatId: string;
+  chatId!: string;
 
   @ApiProperty({ description: 'Message type', enum: ['text', 'image', 'video', 'audio', 'document'] })
   @IsIn(['text', 'image', 'video', 'audio', 'document'])
-  type: 'text' | 'image' | 'video' | 'audio' | 'document';
+  type!: 'text' | 'image' | 'video' | 'audio' | 'document';
 
   @ApiProperty({ description: 'Message content based on type' })
   @ValidateNested()
   @Type(() => BulkMessageContentDto)
-  content: BulkMessageContentDto;
+  content!: BulkMessageContentDto;
 
   @ApiPropertyOptional({ description: 'Variables for template substitution' })
   @IsOptional()
@@ -141,7 +141,7 @@ export class SendBulkMessageDto {
   @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => BulkMessageItemDto)
-  messages: BulkMessageItemDto[];
+  messages!: BulkMessageItemDto[];
 
   @ApiPropertyOptional({ description: 'Batch processing options' })
   @IsOptional()
@@ -152,17 +152,17 @@ export class SendBulkMessageDto {
 
 export class BulkMessageResponseDto {
   @ApiProperty()
-  batchId: string;
+  batchId!: string;
 
   @ApiProperty()
-  status: string;
+  status!: string;
 
   @ApiProperty()
-  totalMessages: number;
+  totalMessages!: number;
 
   @ApiPropertyOptional()
   estimatedCompletionTime?: string;
 
   @ApiProperty()
-  statusUrl: string;
+  statusUrl!: string;
 }

@@ -8,7 +8,7 @@ export class CreateChannelDto {
   // Bounds a runaway payload rather than mirroring a protocol limit; WhatsApp's own editor stops
   // well short of this.
   @MaxLength(100)
-  name: string;
+  name!: string;
 
   @ApiPropertyOptional({ description: 'Channel description', example: 'Release notes and downtime notices' })
   @IsOptional()

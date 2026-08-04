@@ -37,7 +37,7 @@ export class CreateGroupDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(GROUP_NAME_MAX_LENGTH)
-  name: string;
+  name!: string;
 
   @ApiProperty({
     description: 'Participant WhatsApp IDs (e.g. 628123456789@c.us)',
@@ -48,7 +48,7 @@ export class CreateGroupDto {
   @ArrayNotEmpty()
   @ArrayMaxSize(GROUP_PARTICIPANTS_MAX)
   @IsString({ each: true })
-  participants: string[];
+  participants!: string[];
 }
 
 export class ParticipantsDto {
@@ -61,7 +61,7 @@ export class ParticipantsDto {
   @ArrayNotEmpty()
   @ArrayMaxSize(GROUP_PARTICIPANTS_MAX)
   @IsString({ each: true })
-  participants: string[];
+  participants!: string[];
 }
 
 export class GroupSubjectDto {
@@ -69,7 +69,7 @@ export class GroupSubjectDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(GROUP_NAME_MAX_LENGTH)
-  subject: string;
+  subject!: string;
 }
 
 export class GroupDescriptionDto {
@@ -79,7 +79,7 @@ export class GroupDescriptionDto {
   })
   @IsString()
   @MaxLength(GROUP_DESCRIPTION_MAX_LENGTH)
-  description: string;
+  description!: string;
 }
 
 export class JoinGroupDto {
@@ -90,7 +90,7 @@ export class JoinGroupDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(128)
-  inviteCode: string;
+  inviteCode!: string;
 }
 
 /**

@@ -4,7 +4,7 @@ import { messageTools } from './tools/message.tools';
 import { contactTools } from './tools/contact.tools';
 import { groupTools } from './tools/group.tools';
 import { webhookTools } from './tools/webhook.tools';
-import type { ToolDescriptor } from './tool-descriptor';
+import type { AnyToolDescriptor } from './tool-descriptor';
 
 // Registry-level invariant (not a per-tool enumeration): EVERY sessionScoped tool must require a
 // non-empty sessionId. tool-invoker only passes sessionId into the allowedSessions fence when it is a
@@ -13,7 +13,7 @@ import type { ToolDescriptor } from './tool-descriptor';
 // This catches a FUTURE tool authored with z.string().optional() — no test edit needed when one is added.
 describe('agent-tool registry: every sessionScoped tool requires a non-empty sessionId', () => {
   // Handlers are never invoked here; stub services are fine — we only inspect the schema/flags.
-  const allTools: ToolDescriptor[] = [
+  const allTools: AnyToolDescriptor[] = [
     ...sessionTools({} as never),
     ...messageTools({} as never),
     ...contactTools({} as never),

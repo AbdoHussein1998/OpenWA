@@ -405,7 +405,9 @@ export class DockerService implements OnModuleInit {
       this.logger.log(`Created and started container: ${spec.name}`);
       return true;
     } catch (error) {
-      this.logger.error(`Failed to create service ${profile}: ${error instanceof Error ? error.message : error}`);
+      this.logger.error(
+        `Failed to create service ${profile}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return false;
     }
   }

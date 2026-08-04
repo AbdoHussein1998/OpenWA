@@ -29,7 +29,7 @@ export class CustomLinkPreviewDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(2048)
-  url: string;
+  url!: string;
 
   @ApiProperty({
     description: 'Required: WhatsApp will not render a preview without a title.',
@@ -39,7 +39,7 @@ export class CustomLinkPreviewDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(256)
-  title: string;
+  title!: string;
 
   @ApiPropertyOptional({ description: 'Preview description', example: 'Read the announcement.', maxLength: 1024 })
   @IsOptional()
@@ -55,7 +55,7 @@ export class SendTextMessageDto {
   })
   @IsString()
   @IsNotEmpty()
-  chatId: string;
+  chatId!: string;
 
   @ApiProperty({
     description: 'Text message content',
@@ -65,7 +65,7 @@ export class SendTextMessageDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(MESSAGE_TEXT_MAX_LENGTH)
-  text: string;
+  text!: string;
 
   @ApiPropertyOptional({ description: MENTIONS_DESCRIPTION, example: ['628123456789@c.us'], type: [String] })
   @IsOptional()
@@ -111,7 +111,7 @@ export class SendMediaMessageDto {
   })
   @IsString()
   @IsNotEmpty()
-  chatId: string;
+  chatId!: string;
 
   @ApiPropertyOptional({
     description: 'Media URL (http/https)',
@@ -194,11 +194,11 @@ export class MessageResponseDto {
       'not come online since the send stays at `sent` too.',
     example: 'true_628123456789@c.us_3EB0123456789',
   })
-  messageId: string;
+  messageId!: string;
 
   @ApiProperty({
     description: 'Unix timestamp (seconds) at which the gateway accepted the message for sending.',
     example: 1706868000,
   })
-  timestamp: number;
+  timestamp!: number;
 }

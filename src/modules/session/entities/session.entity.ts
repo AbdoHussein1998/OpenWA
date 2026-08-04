@@ -17,45 +17,45 @@ export enum SessionStatus {
 @Entity('sessions')
 export class Session {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ type: 'varchar', length: 100, unique: true })
-  name: string;
+  name!: string;
 
   @Column({
     type: 'varchar',
     length: 50,
     default: SessionStatus.CREATED,
   })
-  status: SessionStatus;
+  status!: SessionStatus;
 
   @Column({ type: 'varchar', length: 20, nullable: true })
-  phone: string | null;
+  phone!: string | null;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
-  pushName: string | null;
+  pushName!: string | null;
 
   @Column({ type: jsonColumnType(), default: '{}' })
-  config: Record<string, unknown>;
+  config!: Record<string, unknown>;
 
   // Phase 3: Proxy per session
   @Column({ type: 'varchar', length: 255, nullable: true })
-  proxyUrl: string | null;
+  proxyUrl!: string | null;
 
   @Column({ type: 'varchar', length: 10, nullable: true })
-  proxyType: 'http' | 'https' | 'socks4' | 'socks5' | null;
+  proxyType!: 'http' | 'https' | 'socks4' | 'socks5' | null;
 
   @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
-  connectedAt: Date | null;
+  connectedAt!: Date | null;
 
   @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
-  lastActiveAt: Date | null;
+  lastActiveAt!: Date | null;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 
   /**
    * Transient (non-persisted) human-readable reason for the most recent terminal

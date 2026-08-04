@@ -9,7 +9,7 @@ export class UpsertContactDto {
   @IsString()
   @MinLength(1)
   @MaxLength(ADDRESSBOOK_NAME_MAX_LENGTH)
-  firstName: string;
+  firstName!: string;
 
   @ApiPropertyOptional({
     description: "The contact's last name. Omit for a single-name contact — WhatsApp allows those.",
