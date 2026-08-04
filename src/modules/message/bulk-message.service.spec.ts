@@ -224,6 +224,15 @@ describe('sanitizeBatchError', () => {
     const result = sanitizeBatchError(new Error('Session is not active'));
     expect(result).toEqual({ code: 'SEND_FAILED', message: 'Session is not active' });
   });
+
+  it('keeps the pacing code, so a policy 429 is distinguishable from an engine refusal', () => {
+    const refusal = new HttpException(
+      { statusCode: 429, message: 'Daily send allowance of 20 reached', code: 'SEND_PACING_LIMITED' },
+      429,
+    );
+    const result = sanitizeBatchError(refusal);
+    expect(result).toEqual({ code: 'SEND_PACING_LIMITED', message: 'Daily send allowance of 20 reached' });
+  });
 });
 
 describe('BulkMessageService.processBatch', () => {

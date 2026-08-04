@@ -1188,6 +1188,20 @@ describe('MessageService', () => {
         }),
       );
     });
+
+    it('gates the forward against pacing by its destination chat', async () => {
+      // ForwardMessageDto has no `chatId` — the gate must fall back to `toChatId`, or forwards skip
+      // the cold-reachout rule entirely while their persisted row still drains the cold budget.
+      const { assertSendAllowed } = (service as unknown as { pacing: { assertSendAllowed: jest.Mock } }).pacing;
+
+      await service.forward('sess-1', {
+        fromChatId: 'from@c.us',
+        toChatId: 'to@c.us',
+        messageId: 'wa-msg-to-fwd',
+      });
+
+      expect(assertSendAllowed).toHaveBeenCalledWith('sess-1', 'to@c.us');
+    });
   });
 
   // ── saveIncomingMessage ───────────────────────────────────────────
