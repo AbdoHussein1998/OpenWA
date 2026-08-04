@@ -14,7 +14,7 @@
 | **Tool registry (`ToolDescriptor`)** | ✅ Implemented | `src/core/agent-tools/tool-descriptor.ts` |
 | **Tool invoker (auth → validate → service)** | ✅ Implemented | `src/core/agent-tools/tool-invoker.ts` |
 | **Registry service** | ✅ Implemented | `src/core/agent-tools/tool-registry.service.ts` |
-| **Curated tool tables (~39 tools)** | ✅ Implemented | `src/core/agent-tools/tools/*.tools.ts` |
+| **Curated tool tables (49 tools)** | ✅ Implemented | `src/core/agent-tools/tools/*.tools.ts` |
 | **MCP transport adapter** | ✅ Implemented | `src/modules/mcp/mcp.server.ts` |
 | **Opt-in module gate** | ✅ Implemented | `src/modules/mcp/mcp.module.ts`, `src/app.module.ts` |
 | **Per-key rate limiter** | ✅ Implemented | `src/modules/mcp/mcp-rate-limit.ts` |
@@ -125,6 +125,14 @@ declares a `tier` (`read` | `write`) and, for writes, a required role.
 | **Contact** | list, get, check-number, resolve-phone, profile-picture | block, unblock |
 | **Group** | list, get, invite-code | create, add participants, set subject, set description |
 | **Webhook** | list, get (read-only) | — |
+| **Label** | list, get, chats for a label, labels on a chat | upsert, delete, add to chat, remove from chat |
+
+> **Labels split across the engines**, and each tool's description says which way. Every label
+> *read* needs whatsapp-web.js — Baileys exposes no label query at all. Editing a label (upsert,
+> delete) needs Baileys — whatsapp-web.js cannot change a label. Only tagging and untagging a chat
+> works on both. An agent told this can pick the right call; one that is not will read the `501` as
+> a transient failure and retry something that cannot succeed on that engine. Labels are a WhatsApp
+> Business feature throughout.
 
 **Deliberately excluded from the surface** (not exposed as tools): session lifecycle
 (create/delete/start/stop/logout/force-kill), chat delete, bulk send, message delete, message edit,
