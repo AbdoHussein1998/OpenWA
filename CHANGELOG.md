@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Fixed
+
+- **Voice notes sent through the Baileys engine now carry a waveform.** Baileys draws the amplitude
+  bars from `audio-decode`, which it declares as an optional peer dependency and imports at send
+  time. It was never installed, so that import threw on every voice note, was swallowed by a
+  debug-level catch, and each one went out with a flat bar — a silent failure with no signal
+  anywhere above `debug`, on a send that otherwise succeeded.
+
+  Installing it is the upstream-supported path, at the major version Baileys itself asks for. That
+  detail matters: the newest release is a major ahead, installs cleanly and resolves fine, and would
+  quietly leave the declared peer range unmet. A spec now checks the dependency is declared,
+  resolvable, and on that major, since the failure it prevents is invisible at runtime.
+
+  whatsapp-web.js was never affected — it generates the waveform in the browser page.
+
 
 - **Labels are reachable from an agent.** They had five REST endpoints and no tools at all, so an
   agent could read and write contacts, groups, messages and webhooks but could not see a label, let
