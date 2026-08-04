@@ -837,6 +837,18 @@ export interface SendVideoStatusRequest {
   caption?: string;
 }
 
+/**
+ * A voice status carries no caption — WhatsApp has nowhere to render one on a status voice note.
+ *
+ * `audio.mimetype` defaults to `audio/ogg; codecs=opus`, which is the only format WhatsApp plays as a
+ * status voice note. Neither engine transcodes, so produce those bytes with `media.convertVoice`.
+ */
+export interface SendVoiceStatusRequest {
+  audio: StatusMediaInput;
+  /** Recipient JIDs. Required on the Baileys engine (absent/empty → 400); omit on whatsapp-web.js, which broadcasts instead. */
+  recipients?: string[];
+}
+
 // ── Health ────────────────────────────────────────────────────────
 
 export interface HealthResponse {

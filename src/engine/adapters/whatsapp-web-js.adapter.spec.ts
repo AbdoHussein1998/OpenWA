@@ -5916,3 +5916,45 @@ describe('WhatsAppWebJsAdapter custom link preview', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * `sendAudioAsVoice` is the whole difference between a status voice note and a status audio file:
+ * inside the page it becomes `isPtt`, which selects the mic bubble. Dropping it would still send the
+ * audio and still succeed, so nothing but this assertion would notice.
+ */
+describe('WhatsAppWebJsAdapter voice status', () => {
+  const readyWith = (sendMessage: jest.Mock): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = { sendMessage };
+    return adapter;
+  };
+
+  it('posts to status@broadcast as a voice note', async () => {
+    const sendMessage = jest.fn().mockResolvedValue({ id: { _serialized: 'S1' }, timestamp: 1700000000 });
+
+    await readyWith(sendMessage).postVoiceStatus(
+      { mimetype: 'audio/ogg; codecs=opus', data: Buffer.from('audio').toString('base64') },
+      { recipients: [] },
+    );
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [chatId, , options] = sendMessage.mock.calls[0] as [string, unknown, { sendAudioAsVoice?: boolean }];
+    expect(chatId).toBe('status@broadcast');
+    expect(options.sendAudioAsVoice).toBe(true);
+  });
+
+  // An image or video status must not acquire the flag: it is audio-only, and the shared media path
+  // is what both go through.
+  it('does not set the voice flag for an image status', async () => {
+    const sendMessage = jest.fn().mockResolvedValue({ id: { _serialized: 'S2' }, timestamp: 1700000000 });
+
+    await readyWith(sendMessage).postImageStatus(
+      { mimetype: 'image/png', data: Buffer.from('img').toString('base64') },
+      { recipients: [] },
+    );
+
+    const [, , options] = sendMessage.mock.calls[0] as [string, unknown, { sendAudioAsVoice?: boolean }];
+    expect(options.sendAudioAsVoice).toBeUndefined();
+  });
+});

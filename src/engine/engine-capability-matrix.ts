@@ -233,6 +233,7 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   postImageStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   postTextStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   postVideoStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  postVoiceStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   promoteParticipants: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },

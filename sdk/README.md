@@ -33,7 +33,7 @@ All five SDKs expose the same fluent resource surface:
 | `labels`   | list, get, forChat, addToChat, removeFromChat _(WhatsApp Business)_                                                                                                                    |
 | `channels` | list, get, messages, subscribe, unsubscribe _(Newsletters)_                                                                                                                            |
 | `catalog`  | info, products, product, sendProduct, sendCatalog _(WhatsApp Business)_                                                                                                                |
-| `status`   | list, fromContact, media, sendText, sendImage, sendVideo, delete _(Stories)_                                                                                                            |
+| `status`   | list, fromContact, media, sendText, sendImage, sendVideo, sendVoice, delete _(Stories)_                                                                                                            |
 | `search`   | search _(Operator)_                                                                                                                                                                  |
 | `templates`| list, get, create, update, delete                                                                                                                                                     |
 | `profile`  | setProfileName, setProfileStatus, setProfilePicture _(OPERATOR)_                                                                                                                       |

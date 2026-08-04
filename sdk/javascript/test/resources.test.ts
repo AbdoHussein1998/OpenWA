@@ -243,6 +243,16 @@ describe('StatusResource — nested media bodies', () => {
     expect(t.lastCall!.body).toEqual({ video: { url: 'http://vid' }, recipients: ['a@c.us'] });
   });
 
+  // A voice status wraps its media under `audio` and carries no caption at all.
+  it('sendVoice forwards the audio wrapper to send-voice', async () => {
+    const t = new MockTransport().on('POST', /\/status\/send-voice$/, {
+      body: { statusId: 's3', timestamp: '2025-01-01T00:00:00.000Z', expiresAt: '2025-01-02T00:00:00.000Z' },
+    });
+    await client(t).status.sendVoice('s', { audio: { base64: 'T2dnUw==' }, recipients: ['a@c.us'] });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/status/send-voice');
+    expect(t.lastCall!.body).toEqual({ audio: { base64: 'T2dnUw==' }, recipients: ['a@c.us'] });
+  });
+
   it('votePoll posts the option texts', async () => {
     const t = new MockTransport().on('POST', /\/messages\/vote-poll$/, { body: { success: true } });
     await client(t).messages.votePoll('s', { chatId: 'c1', pollMessageId: 'p1', options: ['Pizza'] });

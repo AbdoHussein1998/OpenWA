@@ -115,6 +115,7 @@ func TestRouting(t *testing.T) {
 		{"Status.SendText", func(c *Client) { c.Status.SendText(ctx, "s1", SendTextStatusRequest{}) }, "POST", "/api/sessions/s1/status/send-text"},
 		{"Status.SendImage", func(c *Client) { c.Status.SendImage(ctx, "s1", SendImageStatusRequest{}) }, "POST", "/api/sessions/s1/status/send-image"},
 		{"Status.SendVideo", func(c *Client) { c.Status.SendVideo(ctx, "s1", SendVideoStatusRequest{}) }, "POST", "/api/sessions/s1/status/send-video"},
+		{"Status.SendVoice", func(c *Client) { c.Status.SendVoice(ctx, "s1", SendVoiceStatusRequest{}) }, "POST", "/api/sessions/s1/status/send-voice"},
 		{"Status.Delete", func(c *Client) { c.Status.Delete(ctx, "s1", "st1") }, "DELETE", "/api/sessions/s1/status/st1"},
 
 		{"Labels.List", func(c *Client) { c.Labels.List(ctx, "s1") }, "GET", "/api/sessions/s1/labels"},

@@ -99,3 +99,37 @@ export class SendVideoStatusDto {
   @Matches(/^\d+@(c\.us|lid)$/, { each: true, message: 'Invalid recipient JID' })
   recipients?: string[];
 }
+
+/**
+ * A voice status carries no caption: WhatsApp has nowhere to render one on a status voice note.
+ */
+export class SendVoiceStatusDto {
+  @ApiProperty({
+    description:
+      'Audio source (URL or base64). WhatsApp plays a status voice note only as Ogg/Opus, and neither ' +
+      'engine transcodes — use the media conversion endpoint to produce it. The mimetype defaults to ' +
+      "'audio/ogg; codecs=opus'.",
+    type: StatusMediaInput,
+  })
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => StatusMediaInput)
+  audio!: StatusMediaInput;
+
+  @ApiPropertyOptional({
+    description:
+      'Recipient JIDs (0–256), @c.us or @lid. Required on the Baileys engine (it posts to exactly this ' +
+      "allow-list); ignored by whatsapp-web.js, which broadcasts to the account's status-privacy " +
+      'audience — omit it there.',
+    type: String,
+    isArray: true,
+    example: ['628123456789@c.us'],
+    maxItems: 256,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(256)
+  @IsString({ each: true })
+  @Matches(/^\d+@(c\.us|lid)$/, { each: true, message: 'Invalid recipient JID' })
+  recipients?: string[];
+}

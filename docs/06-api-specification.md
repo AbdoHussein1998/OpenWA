@@ -3606,7 +3606,7 @@ Get all contact status updates (stories) visible to the session, read from the s
 }
 ```
 
-The controller wraps the store array in `{ statuses }`, ordered newest-first. `type` is one of `text | image | video`; `caption`, `backgroundColor`, `font` are optional. `mediaUrl` is present only when the status carried media that the store kept (see the media endpoint below) — it is a same-origin path into this API, not an external WhatsApp CDN link. `timestamp` and `expiresAt` serialize to ISO strings (these are `Date` values, not the epoch-number convention used by message timestamps).
+The controller wraps the store array in `{ statuses }`, ordered newest-first. `type` is one of `text | image | video | voice` (`voice` was added with the send-voice endpoint below; before that anything that was not an image or a video read back as `text`); `caption`, `backgroundColor`, `font` are optional. `mediaUrl` is present only when the status carried media that the store kept (see the media endpoint below) — it is a same-origin path into this API, not an external WhatsApp CDN link. `timestamp` and `expiresAt` serialize to ISO strings (these are `Date` values, not the epoch-number convention used by message timestamps).
 
 **Errors:** `401` missing/invalid API key, or key not scoped to this session
 
@@ -3797,6 +3797,42 @@ Returns the engine `StatusResult` directly. POST default status is `201`.
 **Recipient JIDs:** `@c.us` (regular phone) recipients are reliable. `@lid` (privacy-id) recipients are best-effort and unverified — prefer `@c.us` where the phone number is known. **Sender-side caveat:** the posting account's own phone may show a "waiting for this status update" notice; recipients view it normally.
 
 **Errors:** `400` validation failure (unknown body field, an empty media wrapper, a JID not matching `@c.us`/`@lid`, more than 256 recipients, or a caption over 1024 chars) · `401` missing/invalid API key · `403` key lacks `OPERATOR` role · `404` session not found / not connected
+
+#### POST /api/sessions/:sessionId/status/send-voice
+
+Post an audio status (story) as a **voice note**, from a URL or base64 payload. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience.
+
+> **Format matters.** WhatsApp plays a status voice note only when it is Ogg/Opus, and neither engine transcodes — bytes are sent as supplied. Convert first via `POST /api/sessions/:sessionId/media/convert/voice` (§6.4.15) and post the `base64` it returns. Sending another format produces a bubble that will not play.
+
+**Auth:** API key (OPERATOR)
+
+**Path parameters**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| sessionId | string | WhatsApp session identifier |
+
+**Request body** — `SendVoiceStatusDto`
+
+| Field | Type | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| audio | object (`StatusMediaInput`) | yes | validated nested object; one of `url`/`base64` must be present — an empty `{}` is rejected with `400` | Media source wrapper |
+| audio.url | string | no | must be a non-empty string whenever `base64` is absent **or** `url` is present at all | Media source URL |
+| audio.base64 | string | no | must be a non-empty string whenever `url` is absent **or** `base64` is present at all | Base64-encoded media data |
+| audio.mimetype | string | no | — | Media MIME type; if omitted the service defaults to `audio/ogg; codecs=opus` |
+| recipients | string[] | no | 0–256 items, each matching `^\d+@(c\.us\|lid)$` | JIDs permitted to view the status (`statusJidList`). Required in practice on Baileys; ignored by whatsapp-web.js |
+
+There is **no `caption`**: WhatsApp has nowhere to render one on a status voice note.
+
+```json
+{ "audio": { "base64": "T2dnUwACAAAA..." }, "recipients": ["6281234567890@c.us"] }
+```
+
+**Response** `201` — the engine `StatusResult`, identical in shape to the image/video variants.
+
+**Read-back:** a voice status is listed with `"type": "voice"`. That member was added with this endpoint; before it, anything that was not an image or a video was reported as `text`.
+
+**Errors:** `400` validation failure, or neither `url` nor `base64` supplied · `401` missing/invalid API key · `403` key lacks `OPERATOR` role · `404` session not found / not connected · `413` base64 media exceeds `MEDIA_DOWNLOAD_MAX_BYTES`
 
 #### DELETE /api/sessions/:sessionId/status/:statusId
 

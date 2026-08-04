@@ -659,6 +659,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
   postVideoStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
     return this.statusOps.postVideoStatus(media, options);
   }
+
+  postVoiceStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
+    return this.statusOps.postVoiceStatus(media, options);
+  }
   async deleteStatus(statusId: string): Promise<void> {
     return this.statusOps.deleteStatus(statusId);
   }

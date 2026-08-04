@@ -825,6 +825,19 @@ class SendVideoStatusRequest(TypedDict, total=False):
     caption: str
 
 
+class SendVoiceStatusRequest(TypedDict, total=False):
+    """Post an audio status as a voice note.
+
+    No caption: WhatsApp has nowhere to render one on a status voice note. ``audio.mimetype``
+    defaults to ``audio/ogg; codecs=opus``, the only format WhatsApp plays as one — neither engine
+    transcodes, so produce those bytes with ``media.convert_voice``.
+    """
+
+    audio: StatusMediaInput
+    #: Required on the Baileys engine (absent/empty -> 400); omit on whatsapp-web.js.
+    recipients: list[str]
+
+
 # ── Health ────────────────────────────────────────────────────────
 
 

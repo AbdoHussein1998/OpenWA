@@ -78,3 +78,14 @@ type SendVideoStatusRequest struct {
 	Recipients []string         `json:"recipients,omitempty"`
 	Caption    string           `json:"caption,omitempty"`
 }
+
+// SendVoiceStatusRequest posts an audio status as a voice note. It carries no
+// caption: WhatsApp has nowhere to render one on a status voice note.
+//
+// Audio.Mimetype defaults to "audio/ogg; codecs=opus", the only format WhatsApp
+// plays as a status voice note. Neither engine transcodes — produce those bytes
+// with MediaService.ConvertVoice.
+type SendVoiceStatusRequest struct {
+	Audio      StatusMediaInput `json:"audio"`
+	Recipients []string         `json:"recipients,omitempty"`
+}

@@ -38,17 +38,27 @@ export class BaileysStatus {
     return this.postMediaStatus('video', media, options);
   }
 
+  postVoiceStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
+    return this.postMediaStatus('voice', media, options);
+  }
+
   private async postMediaStatus(
-    kind: 'image' | 'video',
+    kind: 'image' | 'video' | 'voice',
     media: MediaInput,
     options: StatusPostOptions,
   ): Promise<StatusResult> {
     this.host.ensureReady();
     const { data, mimetype } = await resolveMediaBuffer(media);
+    // A voice status carries no caption: WhatsApp has nowhere to render one on a status voice note,
+    // and `ptt` is what makes it a voice note rather than an audio file. Baileys reads that same flag
+    // to decide a status may take a background colour, so the colour `postStatus` already forwards
+    // applies here for free.
     const content: AnyMessageContent =
       kind === 'image'
         ? { image: data, caption: options.caption, mimetype }
-        : { video: data, caption: options.caption, mimetype };
+        : kind === 'video'
+          ? { video: data, caption: options.caption, mimetype }
+          : { audio: data, mimetype, ptt: true };
     return this.postStatus(content, options);
   }
 

@@ -4708,3 +4708,65 @@ describe('BaileysAdapter custom link preview', () => {
     expect(sentContent().linkPreview).not.toHaveProperty('description');
   });
 });
+
+/**
+ * A status voice note differs from a status audio file by one flag, and Baileys applies no
+ * validation: `{ audio, ptt }` is copied into the proto as given. So the shape of the content this
+ * builds is the whole behaviour, and it is invisible at runtime — a wrong flag still sends.
+ */
+describe('BaileysAdapter voice status', () => {
+  beforeEach(() => {
+    fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    fakeSock.resetEmitter();
+    jest.clearAllMocks();
+    fakeSock.sendMessage.mockResolvedValue({ key: { id: 'S1' }, messageTimestamp: 1700000006 });
+  });
+
+  const ready = async (): Promise<BaileysAdapter> => {
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    fakeSock.fire('connection.update', { connection: 'open' });
+    return adapter;
+  };
+
+  it('sends audio with ptt set, to the status broadcast, for exactly the recipients given', async () => {
+    const adapter = await ready();
+
+    await adapter.postVoiceStatus(
+      { mimetype: 'audio/ogg; codecs=opus', data: Buffer.from('audio').toString('base64') },
+      { recipients: ['628111@c.us'] },
+    );
+
+    const [chatId, content, options] = fakeSock.sendMessage.mock.calls[0] as [
+      string,
+      { audio?: unknown; ptt?: boolean; caption?: string },
+      { statusJidList?: string[] },
+    ];
+    expect(chatId).toBe('status@broadcast');
+    expect(content.ptt).toBe(true);
+    expect(content.audio).toBeDefined();
+    expect(options.statusJidList).toEqual(['628111@s.whatsapp.net']);
+  });
+
+  // WhatsApp has nowhere to render a caption on a status voice note.
+  it('carries no caption', async () => {
+    const adapter = await ready();
+
+    await adapter.postVoiceStatus(
+      { mimetype: 'audio/ogg; codecs=opus', data: Buffer.from('audio').toString('base64'), caption: 'ignored' },
+      { recipients: ['628111@c.us'], caption: 'also ignored' },
+    );
+
+    const [, content] = fakeSock.sendMessage.mock.calls[0] as [string, { caption?: string }];
+    expect(content.caption).toBeUndefined();
+  });
+
+  // Baileys posts to exactly statusJidList, so an empty one would publish to nobody.
+  it('still refuses an empty recipients list', async () => {
+    const adapter = await ready();
+
+    await expect(
+      adapter.postVoiceStatus({ mimetype: 'audio/ogg; codecs=opus', data: 'QUJD' }, { recipients: [] }),
+    ).rejects.toThrow(/recipients is required/);
+  });
+});

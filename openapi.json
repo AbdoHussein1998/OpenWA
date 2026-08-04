@@ -5398,6 +5398,46 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/status/send-voice": {
+      "post": {
+        "operationId": "StatusController_sendVoiceStatus",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendVoiceStatusDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Voice status posted. WhatsApp plays a status voice note only as Ogg/Opus and neither engine transcodes, so convert first via POST /media/convert/voice. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience."
+          },
+          "400": {
+            "description": "Neither url nor base64 provided, or the post was blocked by a plugin."
+          },
+          "413": {
+            "description": "Base64 media exceeds MEDIA_DOWNLOAD_MAX_BYTES."
+          }
+        },
+        "summary": "Post an audio status as a voice note",
+        "tags": [
+          "status"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/status/{statusId}": {
       "delete": {
         "operationId": "StatusController_deleteStatus",
@@ -9143,6 +9183,33 @@
         },
         "required": [
           "video"
+        ]
+      },
+      "SendVoiceStatusDto": {
+        "type": "object",
+        "properties": {
+          "audio": {
+            "description": "Audio source (URL or base64). WhatsApp plays a status voice note only as Ogg/Opus, and neither engine transcodes — use the media conversion endpoint to produce it. The mimetype defaults to 'audio/ogg; codecs=opus'.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StatusMediaInput"
+              }
+            ]
+          },
+          "recipients": {
+            "description": "Recipient JIDs (0–256), @c.us or @lid. Required on the Baileys engine (it posts to exactly this allow-list); ignored by whatsapp-web.js, which broadcasts to the account's status-privacy audience — omit it there.",
+            "example": [
+              "628123456789@c.us"
+            ],
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "audio"
         ]
       },
       "ConvertMediaDto": {

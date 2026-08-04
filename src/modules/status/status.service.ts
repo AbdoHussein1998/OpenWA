@@ -142,6 +142,39 @@ export class StatusService {
     return engine.postVideoStatus(this.guardGatedMedia(gated.media), gated.options);
   }
 
+  /**
+   * Post an audio status as a voice note.
+   *
+   * The mimetype defaults to Ogg/Opus because that is the only thing WhatsApp plays as a status
+   * voice note, and neither engine transcodes — the media conversion endpoints produce it. A caller
+   * that supplies another type is taken at its word; the result is an unplayable bubble, exactly as
+   * it is for a voice message.
+   *
+   * There is no caption: WhatsApp has nowhere to render one on a status voice note.
+   */
+  async postVoiceStatus(
+    sessionId: string,
+    media: { url?: string; base64?: string; mimetype?: string } | undefined,
+    options: StatusPostOptions,
+  ): Promise<StatusResult> {
+    const base64 = stripBase64DataUri(media?.base64);
+    const url = media?.url;
+    const mimetype = media?.mimetype;
+    if (!url && !base64) {
+      throw new BadRequestException('Either url or base64 must be provided');
+    }
+    assertBase64WithinMediaCap(base64);
+    const engine = this.engines.require(
+      sessionId,
+      () => new NotFoundException(`Session ${sessionId} not found or not connected`),
+    );
+    const gated = await this.gate(sessionId, 'status-voice', {
+      media: { mimetype: mimetype ?? 'audio/ogg; codecs=opus', data: base64 || url || '' },
+      options,
+    });
+    return engine.postVoiceStatus(this.guardGatedMedia(gated.media), gated.options);
+  }
+
   async deleteStatus(sessionId: string, statusId: string): Promise<void> {
     const engine = this.engines.require(
       sessionId,

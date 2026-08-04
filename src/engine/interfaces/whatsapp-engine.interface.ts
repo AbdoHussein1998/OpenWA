@@ -339,7 +339,12 @@ export interface Status {
     name?: string;
     pushName?: string;
   };
-  type: 'text' | 'image' | 'video';
+  /**
+   * `voice` covers an audio status posted as a voice note (PTT). It was added alongside voice status
+   * posting; before that a voice status read back as `text`, since anything that was not an image or
+   * a video collapsed to it.
+   */
+  type: 'text' | 'image' | 'video' | 'voice';
   caption?: string;
   mediaUrl?: string;
   /** Downloaded media bytes for an image/video status, when the engine fetched them (see `capInboundMediaFor`). */
@@ -1007,6 +1012,11 @@ export interface IWhatsAppEngine {
   postTextStatus(text: string, options: StatusPostOptions): Promise<StatusResult>;
   postImageStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult>;
   postVideoStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult>;
+  /**
+   * Post an audio status as a voice note. WhatsApp plays a status voice note only for Ogg/Opus, and
+   * neither engine transcodes — the media conversion endpoints exist to produce it.
+   */
+  postVoiceStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult>;
   deleteStatus(statusId: string): Promise<void>;
 
   // Catalog (Phase 3) - WhatsApp Business only

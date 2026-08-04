@@ -516,6 +516,7 @@ class TestStatus:
         backend = MockBackend()
         backend.on("POST", "/status/send-image", body={"statusId": "s1"})
         backend.on("POST", "/status/send-video", body={"statusId": "s2"})
+        backend.on("POST", "/status/send-voice", body={"statusId": "s3"})
         client = make_client(backend)
         # Server requires a nested {image|video:{...}} body, not flat media fields,
         # plus a required recipients list.
@@ -523,6 +524,11 @@ class TestStatus:
         assert backend.calls[-1].body == {"image": {"url": "http://img"}, "recipients": ["a@c.us"], "caption": "hi"}
         client.status.send_video("s", {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]})
         assert backend.calls[-1].body == {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]}
+        # A voice status takes an `audio` wrapper and carries no caption — WhatsApp has nowhere to
+        # render one on a status voice note.
+        client.status.send_voice("s", {"audio": {"base64": "T2dnUw=="}, "recipients": ["a@c.us"]})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/status/send-voice"
+        assert backend.calls[-1].body == {"audio": {"base64": "T2dnUw=="}, "recipients": ["a@c.us"]}
 
     def test_vote_poll_posts_option_texts(self):
         backend = MockBackend().on("POST", "/messages/vote-poll", body={"success": True})
