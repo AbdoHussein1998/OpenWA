@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Send pacing accounting:** forwards now pass through the cold-reachout gate (they were ungated while still draining the budget), replying to someone who wrote first today no longer spends the cold budget, and a pacing 429 inside a bulk batch is recorded as `SEND_PACING_LIMITED` instead of a generic `SEND_FAILED`.
 - **Multi-node: a session claim could outlive its engine and pin the session to one node forever.** A failed start, a logout, a force-kill or an exhausted reconnect kept the ownership claim, and the heartbeat renewed it indefinitely — the session could not be started on any peer and the takeover sweep never saw it. Claims are now released on every teardown path, and the heartbeat only renews claims that still cover a live engine, an in-flight start or a pending reconnect. Starting a nonexistent session also answers 404 again instead of a misleading 409 "running on another node".
 - Corrected column names in `docs/05-database-design.md`.
+- Documentation refresh: capability-matrix and MCP tool counts, the `sessions` ownership columns and the `automation_rules` table in the database doc (both now covered by the schema-accuracy gate), the socket-subscribable event list, and precise wording for send-pacing scope and failover engine-overlap.
 
 ### Security
 
