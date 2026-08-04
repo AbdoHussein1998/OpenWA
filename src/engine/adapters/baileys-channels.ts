@@ -1,6 +1,7 @@
 import type { WASocket } from '@whiskeysockets/baileys';
 import { Channel } from '../interfaces/whatsapp-engine.interface';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
+import { mapServerRefusal } from './baileys-groups';
 
 /**
  * Channel-domain operations extracted from BaileysAdapter. The adapter keeps the public
@@ -40,18 +41,20 @@ export class BaileysChannels {
 
   async createChannel(name: string, description?: string): Promise<Channel> {
     this.host.ensureReady();
-    const meta = await this.sock().newsletterCreate(name, description);
+    const meta = await mapServerRefusal('Creating the channel', () => this.sock().newsletterCreate(name, description));
     return this.toChannel(meta);
   }
 
   async deleteChannel(channelId: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().newsletterDelete(channelId);
+    await mapServerRefusal('Deleting the channel', () => this.sock().newsletterDelete(channelId));
   }
 
   async muteChannel(channelId: string, mute: boolean): Promise<void> {
     this.host.ensureReady();
-    await (mute ? this.sock().newsletterMute(channelId) : this.sock().newsletterUnmute(channelId));
+    await mapServerRefusal(mute ? 'Muting the channel' : 'Unmuting the channel', () =>
+      mute ? this.sock().newsletterMute(channelId) : this.sock().newsletterUnmute(channelId),
+    );
   }
 
   async unsubscribeFromChannel(channelId: string): Promise<void> {

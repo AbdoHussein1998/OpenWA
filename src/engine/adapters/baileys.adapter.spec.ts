@@ -44,6 +44,8 @@ class FakeSock extends EventEmitter {
   public groupAcceptInvite = jest.fn();
   public groupSettingUpdate = jest.fn().mockResolvedValue(undefined);
   public groupToggleEphemeral = jest.fn().mockResolvedValue(undefined);
+  public groupGetInviteInfo = jest.fn();
+  public groupMemberAddMode = jest.fn().mockResolvedValue(undefined);
   public profilePictureUrl = jest.fn();
   public updateProfileName = jest.fn().mockResolvedValue(undefined);
   public updateProfileStatus = jest.fn().mockResolvedValue(undefined);
@@ -138,6 +140,7 @@ import { MessageNotFoundError } from '../../common/errors/message-not-found.erro
 import { CallNotFoundError } from '../../common/errors/call-not-found.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
+import { GroupNotFoundError } from '../../common/errors/group-not-found.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
 
@@ -2988,6 +2991,81 @@ describe('BaileysAdapter group management', () => {
     await expect(adapter.joinGroupViaInviteCode('CODE123')).rejects.toBe(connectionClosed);
   });
 
+  it('getGroupJoinInfo maps the preview fields, neutralizing ids', async () => {
+    fakeSock.groupGetInviteInfo.mockResolvedValue({
+      id: '120363000@g.us',
+      subject: 'Preview me',
+      desc: 'About us',
+      owner: '628111@s.whatsapp.net',
+      creation: 1720000000,
+      size: 12,
+    });
+    const adapter = await ready();
+    await expect(adapter.getGroupJoinInfo('CODE123')).resolves.toEqual({
+      id: '120363000@g.us',
+      name: 'Preview me',
+      description: 'About us',
+      owner: '628111@c.us',
+      createdAt: 1720000000,
+      participantCount: 12,
+    });
+  });
+
+  it('getGroupJoinInfo maps a refused invite to GroupNotFoundError (404), not a raw Boom 500', async () => {
+    // The vendored extractGroupMetadata throws a Boom carrying the WA code for an invalid/expired
+    // invite; whatsapp-web.js answers the same cause with a 404, and the route documents 404.
+    fakeSock.groupGetInviteInfo.mockRejectedValue(Object.assign(new Error('item-not-found'), { data: 404 }));
+    const adapter = await ready();
+    await expect(adapter.getGroupJoinInfo('BAD')).rejects.toBeInstanceOf(GroupNotFoundError);
+  });
+
+  it('getGroupJoinInfo lets a transport death propagate — a dead socket is not a bad invite', async () => {
+    const connectionClosed = Object.assign(new Error('Connection Closed'), { output: { statusCode: 428 } });
+    fakeSock.groupGetInviteInfo.mockRejectedValue(connectionClosed);
+    const adapter = await ready();
+    await expect(adapter.getGroupJoinInfo('CODE123')).rejects.toBe(connectionClosed);
+  });
+
+  // The raw Boom used to escape as a 500 on every admin-refused group write, while the controller
+  // documents 403 and the whatsapp-web.js adapter answers 403 for the same causes.
+  it.each([
+    ['setGroupSubject', (a: BaileysAdapter) => a.setGroupSubject('123-456@g.us', 'X'), 'groupUpdateSubject'],
+    [
+      'setGroupDescription',
+      (a: BaileysAdapter) => a.setGroupDescription('123-456@g.us', 'X'),
+      'groupUpdateDescription',
+    ],
+    [
+      'setGroupMessagesAdminsOnly',
+      (a: BaileysAdapter) => a.setGroupMessagesAdminsOnly('123-456@g.us', true),
+      'groupSettingUpdate',
+    ],
+    [
+      'setGroupInfoAdminsOnly',
+      (a: BaileysAdapter) => a.setGroupInfoAdminsOnly('123-456@g.us', true),
+      'groupSettingUpdate',
+    ],
+    ['deleteGroupPicture', (a: BaileysAdapter) => a.deleteGroupPicture('123-456@g.us'), 'removeProfilePicture'],
+    [
+      'setGroupMemberAddMode',
+      (a: BaileysAdapter) => a.setGroupMemberAddMode('123-456@g.us', 'admins'),
+      'groupMemberAddMode',
+    ],
+  ])('%s maps an admin-refused write to EngineRefusedError (403)', async (_name, call, sockMethod) => {
+    (fakeSock as unknown as Record<string, jest.Mock>)[sockMethod].mockRejectedValueOnce(
+      Object.assign(new Error('not-authorized'), { data: 401 }),
+    );
+    const adapter = await ready();
+    await expect(call(adapter)).rejects.toBeInstanceOf(EngineRefusedError);
+  });
+
+  it('a transport death on a group write propagates untouched — not folded into a 403', async () => {
+    const connectionClosed = Object.assign(new Error('Connection Closed'), { output: { statusCode: 428 } });
+    fakeSock.groupUpdateSubject.mockRejectedValueOnce(connectionClosed);
+    const adapter = await ready();
+    await expect(adapter.setGroupSubject('123-456@g.us', 'X')).rejects.toBe(connectionClosed);
+  });
+
   it('addParticipants maps the per-participant [{status, jid}] array — a partial refusal does not throw', async () => {
     fakeSock.groupParticipantsUpdate.mockResolvedValueOnce([
       { status: '200', jid: '628111@s.whatsapp.net', content: {} },
@@ -4556,6 +4634,19 @@ describe('BaileysAdapter channel administration', () => {
 
     await adapter.muteChannel(CHANNEL, false);
     expect(fakeSock.newsletterUnmute).toHaveBeenCalledWith(CHANNEL);
+  });
+
+  // The raw Boom from executeWMexQuery used to escape as a 500 on every refused channel write.
+  it.each([
+    ['createChannel', (a: BaileysAdapter) => a.createChannel('X'), 'newsletterCreate'],
+    ['deleteChannel', (a: BaileysAdapter) => a.deleteChannel(CHANNEL), 'newsletterDelete'],
+    ['muteChannel', (a: BaileysAdapter) => a.muteChannel(CHANNEL, true), 'newsletterMute'],
+  ])('%s maps a server refusal to EngineRefusedError (403)', async (_name, call, sockMethod) => {
+    (fakeSock as unknown as Record<string, jest.Mock>)[sockMethod].mockRejectedValueOnce(
+      Object.assign(new Error('not-authorized'), { data: 401 }),
+    );
+    const adapter = await readyAdapter();
+    await expect(call(adapter)).rejects.toBeInstanceOf(EngineRefusedError);
   });
 });
 
