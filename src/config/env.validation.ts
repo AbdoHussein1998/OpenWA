@@ -246,6 +246,10 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     // Read with `=== 'true'`, so a typo leaves sends unpaced — the silent failure this whole
     // feature exists to avoid, and invisible without this check.
     'SEND_PACING_ENABLED',
+    // Opt-in feature flags read with `=== 'true'`: a typo silently leaves the feature OFF, so the
+    // conversion/archive endpoints answer as if nothing was configured. Same class as the above.
+    'MEDIA_CONVERSION_ENABLED',
+    'CHAT_MEDIA_ARCHIVE_ENABLED',
   ]) {
     checkBool(key);
   }

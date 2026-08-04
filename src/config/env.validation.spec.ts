@@ -158,6 +158,19 @@ describe('validateEnv', () => {
     expect(() => validateEnv({})).not.toThrow();
   });
 
+  it.each(['MEDIA_CONVERSION_ENABLED', 'CHAT_MEDIA_ARCHIVE_ENABLED'])(
+    'rejects a %s typo instead of silently leaving the feature off',
+    key => {
+      // Both are read at boot with `=== 'true'`, so a typo silently disables the feature and the
+      // endpoints answer as if it was never configured — the same silent-off class as SEND_PACING.
+      expect(() => validateEnv({ [key]: 'ture' })).toThrow(new RegExp(key));
+      expect(() => validateEnv({ [key]: 'True' })).toThrow(new RegExp(key));
+      expect(() => validateEnv({ [key]: 'true' })).not.toThrow();
+      expect(() => validateEnv({ [key]: 'false' })).not.toThrow();
+      expect(() => validateEnv({ [key]: '' })).not.toThrow();
+    },
+  );
+
   it('rejects a SEARCH_PROVIDER typo instead of silently falling back to auto', () => {
     // A bogus / typo value must fail fast at boot rather than silently selecting the default provider.
     expect(() => validateEnv({ SEARCH_PROVIDER: 'bogus' })).toThrow(/SEARCH_PROVIDER/);
