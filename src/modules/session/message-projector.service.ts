@@ -15,6 +15,7 @@ import { isUniqueConstraintError } from '../../common/utils/unique-constraint.ut
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { StatusStoreService } from '../status-store/status-store.service';
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
+import { AutomationRulesService } from '../automation/automation-rules.service';
 import { buildIncomingStatus } from '../status-store/incoming-status';
 import type { StatusUpdate } from '../status-store/entities/status-update.entity';
 import {
@@ -105,6 +106,9 @@ export class MessageProjector {
     // predates the archive). Absent simply means inbound media is not archived.
     @Optional()
     private readonly chatMediaArchive?: ChatMediaArchiveService,
+    // Optional for the same reason. Absent simply means no autoreply rules are evaluated.
+    @Optional()
+    private readonly automationRules?: AutomationRulesService,
   ) {
     this.mutationProjector = new MessageMutationProjector(
       this.messageRepository,
@@ -329,6 +333,9 @@ export class MessageProjector {
 
     // Dispatch to webhooks with potentially modified message
     void this.webhookService.dispatch(id, 'message.received', finalMessage);
+    // Autoreply rules ride the same at-most-once dispatch (the insert oracle above dedupes engine
+    // re-fires) and stay fail-open like the webhook: a broken rule must never break the receive path.
+    void this.automationRules?.evaluateInbound(id, finalMessage).catch(() => undefined);
     // Emit real-time event to WebSocket clients
     this.eventsGateway.emitMessage(id, finalMessage);
   }

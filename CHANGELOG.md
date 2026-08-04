@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Autoreply automation rules.** Per-session single-message rules under
+  `POST|GET|PUT|DELETE /api/sessions/:sessionId/automation-rules`: when an inbound message matches a
+  rule's conditions — the same filter format (and evaluator) webhook filters use — the gateway
+  replies into the chat with the rule's text. Rules evaluate in creation order, first match wins,
+  and the reply flows through the ordinary send path, so send pacing and plugin vetoes apply to it
+  like any other outbound message. Three guards bound reply loops: rules never answer the
+  account's own messages, messages older than five minutes get no automated answer (a reconnect
+  never burst-replies the offline backlog), and a per-chat `cooldownSeconds` (default 60)
+  rate-bounds a rule after it fires. Evaluation is fire-and-forget off the receive path and
+  deduplicated per message. Two read-only
+  agent tools (`AutomationRuleFindAll`, `AutomationRuleFindOne`) expose the rules to MCP callers;
+  as operator-level configuration the module is not part of the SDK surface.
+
 ### Fixed
 
 - **Status posting on the whatsapp-web.js engine, which current WhatsApp Web had broken outright.**

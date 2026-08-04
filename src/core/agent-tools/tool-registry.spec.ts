@@ -89,11 +89,13 @@ describe('v1 tool surface snapshot', () => {
       'LabelDelete',
       'LabelAddToChat',
       'LabelRemoveFromChat',
+      'AutomationRuleFindAll',
+      'AutomationRuleFindOne',
     ].sort();
 
     const actualNames = [...allAgentTools({} as never)].map(t => t.name).sort();
 
     expect(actualNames).toEqual(expected);
-    expect(expected).toHaveLength(49);
+    expect(expected).toHaveLength(51);
   });
 });

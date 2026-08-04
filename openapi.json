@@ -1504,6 +1504,205 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/automation-rules": {
+      "post": {
+        "operationId": "AutomationRuleController_create",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAutomationRuleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Rule created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationRuleResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid rule (bad conditions, over-limit text)."
+          }
+        },
+        "summary": "Create an autoreply rule",
+        "tags": [
+          "automation"
+        ]
+      },
+      "get": {
+        "operationId": "AutomationRuleController_findAll",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rules in evaluation order: creation time, id as the same-second tiebreak."
+          }
+        },
+        "summary": "List the session’s autoreply rules",
+        "tags": [
+          "automation"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/automation-rules/{ruleId}": {
+      "get": {
+        "operationId": "AutomationRuleController_findOne",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ruleId",
+            "required": true,
+            "in": "path",
+            "description": "Rule ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationRuleResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such rule in this session."
+          }
+        },
+        "summary": "Get one autoreply rule",
+        "tags": [
+          "automation"
+        ]
+      },
+      "put": {
+        "operationId": "AutomationRuleController_update",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ruleId",
+            "required": true,
+            "in": "path",
+            "description": "Rule ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAutomationRuleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationRuleResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such rule in this session."
+          }
+        },
+        "summary": "Update an autoreply rule",
+        "tags": [
+          "automation"
+        ]
+      },
+      "delete": {
+        "operationId": "AutomationRuleController_remove",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ruleId",
+            "required": true,
+            "in": "path",
+            "description": "Rule ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Rule deleted."
+          },
+          "404": {
+            "description": "No such rule in this session."
+          }
+        },
+        "summary": "Delete an autoreply rule",
+        "tags": [
+          "automation"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/messages": {
       "get": {
         "operationId": "MessageController_getMessages",
@@ -7879,6 +8078,118 @@
           "retryCount": {
             "type": "number",
             "description": "Retry count"
+          }
+        }
+      },
+      "CreateAutomationRuleDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name for the rule",
+            "example": "Greet new enquiries",
+            "maxLength": 100
+          },
+          "replyText": {
+            "type": "string",
+            "description": "Text sent back into the chat when the rule matches",
+            "example": "Thanks for reaching out — we reply within the hour.",
+            "maxLength": 4096
+          },
+          "conditions": {
+            "type": "object",
+            "description": "Match conditions in the webhook filter format (message family: sender, recipient, body, type, isGroup, fromMe, hasMedia, mentions). All conditions must match (AND). Omitted or empty means the rule matches every inbound message."
+          },
+          "cooldownSeconds": {
+            "type": "number",
+            "description": "Quiet period per chat, in seconds: after the rule replies in a chat it stays silent there for this long (default 60, 0 disables). This is the guard against two auto-repliers answering each other forever, so disable it knowingly.",
+            "default": 60,
+            "minimum": 0,
+            "maximum": 86400
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the rule is active",
+            "default": true
+          }
+        },
+        "required": [
+          "name",
+          "replyText"
+        ]
+      },
+      "AutomationRuleResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "conditions": {
+            "type": "object",
+            "description": "Match conditions in the webhook filter format (message family: sender, recipient, body, type, isGroup, fromMe, hasMedia, mentions). All conditions must match (AND). Omitted or empty means the rule matches every inbound message.",
+            "nullable": true
+          },
+          "replyText": {
+            "type": "string"
+          },
+          "cooldownSeconds": {
+            "type": "number"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "name",
+          "enabled",
+          "replyText",
+          "cooldownSeconds",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "UpdateAutomationRuleDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name for the rule",
+            "maxLength": 100
+          },
+          "replyText": {
+            "type": "string",
+            "description": "Text sent back into the chat when the rule matches",
+            "maxLength": 4096
+          },
+          "conditions": {
+            "type": "object",
+            "description": "Match conditions in the webhook filter format (message family: sender, recipient, body, type, isGroup, fromMe, hasMedia, mentions). All conditions must match (AND). Omitted or empty means the rule matches every inbound message."
+          },
+          "cooldownSeconds": {
+            "type": "number",
+            "description": "Quiet period per chat, in seconds: after the rule replies in a chat it stays silent there for this long (default 60, 0 disables). This is the guard against two auto-repliers answering each other forever, so disable it knowingly.",
+            "minimum": 0,
+            "maximum": 86400
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the rule is active"
           }
         }
       },

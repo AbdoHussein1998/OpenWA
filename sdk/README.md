@@ -42,8 +42,9 @@ All five SDKs expose the same fluent resource surface:
 | `health`   | check, live, ready                                                                                                                                                                     |
 
 > ⚠️ Endpoints requiring an `OPERATOR`-level API key are noted in the inline
-> docs. Operator-only modules (`docker`, `metrics`, `infra`, `plugins`, `mcp`)
-> are intentionally **not** exposed in the SDK; all user-facing resources are.
+> docs. Operator-only modules (`docker`, `metrics`, `infra`, `plugins`, `mcp`,
+> `automation`) are intentionally **not** exposed in the SDK; all user-facing
+> resources are.
 
 ## JavaScript / TypeScript
 

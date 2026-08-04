@@ -251,6 +251,12 @@
         "lines": 86,
         "statements": 85
       },
+      "./src/modules/automation/": {
+        "branches": 60,
+        "functions": 55,
+        "lines": 75,
+        "statements": 70
+      },
       "./src/modules/chat-media/": {
         "branches": 78,
         "functions": 81,
