@@ -35,7 +35,7 @@ describe('LabelService label editing', () => {
     return new LabelService(engines);
   };
 
-  it('refuses an empty body — nothing to write, and an unused id would create a nameless label', async () => {
+  it('refuses an empty body — nothing to write, and an unused id would create a nameless label', () => {
     const upsertLabel = jest.fn();
     expect(() => makeService({ upsertLabel }).upsertLabel('s1', 'l1', {})).toThrow(BadRequestException);
     expect(upsertLabel).not.toHaveBeenCalled();
