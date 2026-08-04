@@ -399,6 +399,26 @@ export default () => ({
     })(),
   },
 
+  // Session ownership across processes. A session's engine runs in exactly one process; these
+  // record which, so a second process booting beside a live one does not disturb its sessions.
+  session: {
+    // Stable across restarts by design — a restarted process must recognise its own leftover rows
+    // in order to reset them. Defaults to the hostname, which is the container or host boundary.
+    nodeId: process.env.NODE_ID || '',
+    // How long a claim is honoured without renewal (default 60s). This is the worst-case delay
+    // before a peer may take over from a process that died without releasing.
+    leaseTtlMs: (() => {
+      const n = parseInt(process.env.SESSION_LEASE_TTL_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60_000;
+    })(),
+    // Renewal cadence (default 20s). Comfortably under the TTL so a single missed tick — a slow
+    // query, a brief database blip — never costs a live process its sessions.
+    leaseHeartbeatMs: (() => {
+      const n = parseInt(process.env.SESSION_LEASE_HEARTBEAT_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 20_000;
+    })(),
+  },
+
   // Server-side media conversion (opt-in): transcodes caller-supplied audio and video into the
   // shapes WhatsApp clients actually play, by running the ffmpeg binary. Nothing is converted
   // implicitly — only the explicit conversion endpoints use this.

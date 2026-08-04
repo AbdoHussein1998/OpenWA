@@ -1,20 +1,29 @@
 # 13 - Horizontal Scaling Guide
 
-> ## ⚠️ DESIGN REFERENCE ONLY — NOT IMPLEMENTED
+> ## ⚠️ PARTIALLY IMPLEMENTED — STILL DEPLOY `replicas: 1`
 >
-> **OpenWA is currently a single-process, single-instance application.** Live WhatsApp
-> engine state (browser + WebSocket + reconnect/error state) lives in an in-memory `Map`
-> in `EngineRegistry`; there is **no** DB-backed session registry, **no** node-claim/lease,
-> and **no** Socket.IO Redis adapter.
+> **Supported topology remains exactly one API instance per session-data volume.** Do not
+> run the multi-replica examples below yet.
 >
-> **Supported topology:** exactly **one** API instance per session-data volume. Running
-> multiple replicas against a shared session volume — as the multi-node examples below
-> describe — will cause **two browsers to write the same WhatsApp LocalAuth directory and
-> corrupt the session** (forced logout / ban), especially with `AUTO_START_SESSIONS=true`.
+> **What now exists.** Sessions carry an owner (`nodeId`) and a renewed lease
+> (`leaseExpiresAt`). A process claims a session before starting its engine and refuses
+> when another node holds a live claim, so two replicas can no longer both launch the same
+> session — which is what corrupted the shared LocalAuth directory. A booting process also
+> resets only the sessions it may claim, instead of reporting a live peer's sessions as
+> disconnected. Claims are released on a clean shutdown and expire otherwise, so failover
+> does not depend on one. `NODE_ID` names the process; it defaults to the hostname and must
+> be stable across restarts.
 >
-> Everything in this guide (session-claim, node affinity, `replicas: 3`) is a **future
-> design sketch**, retained for planning. Until it is implemented, deploy with
-> **`replicas: 1`** for the OpenWA API service.
+> **What does not exist yet, and is why one replica is still the answer.** Live engine state
+> (browser + WebSocket + reconnect/error state) still lives in an in-memory `Map` in
+> `EngineRegistry`, and there is **no request routing** — a call that lands on a replica
+> which does not own the session cannot serve it. Not every lifecycle path is fenced.
+> `BulkMessageService` keeps batch state in process and its boot reaper does not distinguish
+> a peer's in-flight batches from its own. There is **no** Socket.IO Redis adapter, so a
+> WebSocket client connected to one replica does not receive events raised on another.
+>
+> Everything below (node affinity, `replicas: 3`) remains a **design sketch** until those
+> land.
 
 This guide explains a *proposed* design for deploying OpenWA in a horizontally scaled environment for high availability and increased capacity.
 

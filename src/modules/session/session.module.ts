@@ -6,6 +6,7 @@ import { SessionService } from './session.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { SessionLidResolver } from './session-lid-resolver.service';
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
+import { SessionOwnershipService } from './session-ownership.service';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
@@ -28,6 +29,7 @@ import { ChatMediaModule } from '../chat-media/chat-media.module';
     PresenceStore,
     SessionLidResolver,
     SessionLivenessWatchdog,
+    SessionOwnershipService,
     MessageProjector,
   ],
   exports: [SessionService, MessageProjector],

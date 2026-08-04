@@ -23,6 +23,9 @@ describe('SessionController — create() response contract', () => {
     proxyType: 'http',
     connectedAt: null,
     lastActiveAt: null,
+    nodeId: null,
+    claimedAt: null,
+    leaseExpiresAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
   };
@@ -106,6 +109,9 @@ describe('SessionController — logout() audit + error forwarding contract', () 
     proxyType: null,
     connectedAt: null,
     lastActiveAt: null,
+    nodeId: null,
+    claimedAt: null,
+    leaseExpiresAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
   };

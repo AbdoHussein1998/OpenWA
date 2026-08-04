@@ -68,6 +68,9 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
     proxyType: null,
     connectedAt: null,
     lastActiveAt: null,
+    nodeId: null,
+    claimedAt: null,
+    leaseExpiresAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -5221,9 +5224,12 @@ describe('SessionService', () => {
 
       await service.onModuleInit();
 
-      expect(repository.update).toHaveBeenCalledWith(expect.objectContaining({ status: expect.anything() as string }), {
-        status: SessionStatus.DISCONNECTED,
-      });
+      // The `where` is now a list of OR clauses (one per way a session can be claimable), which for
+      // a process with no ownership service is the single unrestricted clause it always was.
+      expect(repository.update).toHaveBeenCalledWith(
+        [expect.objectContaining({ status: expect.anything() as string })],
+        { status: SessionStatus.DISCONNECTED },
+      );
     });
 
     it('treats ACTION_REQUIRED as an active status that gets reset on startup', async () => {
@@ -5234,8 +5240,8 @@ describe('SessionService', () => {
       // The reset targets the active-status set via In(...) — ACTION_REQUIRED must be a member, or a
       // session waiting on operator action would survive a restart looking resumable while the engine
       // that could observe the action is gone.
-      const calls = (repository.update as jest.Mock).mock.calls as Array<[{ status: { value: unknown } }]>;
-      const where = calls[0][0];
+      const calls = (repository.update as jest.Mock).mock.calls as Array<[Array<{ status: { value: unknown } }>]>;
+      const where = calls[0][0][0];
       expect(where.status.value).toEqual(expect.arrayContaining([SessionStatus.ACTION_REQUIRED]));
     });
   });
