@@ -78,6 +78,7 @@
     "@whiskeysockets/baileys": "7.0.0-rc13",
     "adm-zip": "^0.6.0",
     "archiver": "^8.0.0",
+    "audio-decode": "^2.2.3",
     "better-sqlite3": "^12.11.1",
     "bullmq": "^5.81.2",
     "class-transformer": "^0.5.1",
