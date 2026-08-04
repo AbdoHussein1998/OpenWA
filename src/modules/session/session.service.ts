@@ -129,7 +129,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // Leaving ours running would put two engines on one WhatsApp account — the thing the claim
     // exists to prevent — so the engine goes down. stopOrphanEngines is the right verb: it tears
     // down locally and leaves the row alone, because the row is no longer ours to write.
-    this.ownership?.onLeaseLoss(ids => this.engineLifecycle.stopOrphanEngines(ids));
+    // The teardown report is not consulted here: losing a claim is not a request anyone is waiting
+    // on, and stopOrphanEngines already logs what it could not stop.
+    this.ownership?.onLeaseLoss(async ids => void (await this.engineLifecycle.stopOrphanEngines(ids)));
     // Renewal runs regardless of auto-start: a session started through the API later is claimed the
     // same way and must keep its lease alive.
     this.ownership?.startHeartbeat();
