@@ -41,3 +41,16 @@ export type AnyToolDescriptor = Omit<ToolDescriptor, 'inputSchema' | 'handler'> 
   inputSchema: z.ZodType;
   handler: (input: never, apiKey: ApiKey) => Promise<unknown>;
 };
+
+/**
+ * Declare one tool, tying its handler to its own schema.
+ *
+ * Annotating a list as `ToolDescriptor[]` cannot do this: it pins `I` to `unknown` for every entry,
+ * so each tool's schema and handler are only ever checked against `unknown` and never against each
+ * other. Inferring `I` per tool here means a handler that reads a field its schema does not declare
+ * is a compile error, and the handler's parameter no longer has to be written out by hand — it is
+ * whatever the schema produces, so the two cannot drift apart.
+ */
+export function defineTool<I>(descriptor: ToolDescriptor<I>): AnyToolDescriptor {
+  return descriptor;
+}

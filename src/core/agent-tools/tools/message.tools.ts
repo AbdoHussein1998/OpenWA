@@ -8,13 +8,13 @@ import {
   LOCATION_TEXT_MAX_LENGTH,
   REACTION_EMOJI_MAX_LENGTH,
 } from '../../../modules/message/dto/message-actions.dto';
-import type { AnyToolDescriptor } from '../tool-descriptor';
+import { defineTool, type AnyToolDescriptor } from '../tool-descriptor';
 
 const sessionId = z.string().min(1).describe('Session UUID (the session id, not the name)');
 
 export function messageTools(message: MessageService): AnyToolDescriptor[] {
   return [
-    {
+    defineTool({
       name: 'MessageList',
       description:
         'List persisted messages for a session, optionally filtered by chatId or sender. Reads from the local DB.',
@@ -27,15 +27,15 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         limit: z.number().int().min(1).max(100).optional(),
         offset: z.number().int().min(0).optional(),
       }),
-      handler: (input: { sessionId: string; chatId?: string; from?: string; limit?: number; offset?: number }) =>
+      handler: input =>
         message.getMessages(input.sessionId, {
           chatId: input.chatId,
           from: input.from,
           limit: input.limit,
           offset: input.offset,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageHistory',
       description:
         'Fetch live chat history from WhatsApp for a specific chat. Bypasses the local DB — useful for messages that arrived before the gateway started.',
@@ -54,10 +54,10 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         includeMedia: z.boolean().optional().describe('Download media as base64 (slower)'),
         deep: z.boolean().optional().describe('Raise limit ceiling to 2000 for reaching further back in history'),
       }),
-      handler: (input: { sessionId: string; chatId: string; limit?: number; includeMedia?: boolean; deep?: boolean }) =>
+      handler: input =>
         message.getChatHistory(input.sessionId, input.chatId, input.limit, input.includeMedia, input.deep),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageGetReactions',
       description: 'Get reactions for a specific message, including which contacts sent which emoji.',
       tier: 'read',
@@ -67,10 +67,9 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         chatId: z.string().describe('Chat JID containing the message'),
         messageId: z.string().describe('Message ID to get reactions for'),
       }),
-      handler: (input: { sessionId: string; chatId: string; messageId: string }) =>
-        message.getMessageReactions(input.sessionId, input.chatId, input.messageId),
-    },
-    {
+      handler: input => message.getMessageReactions(input.sessionId, input.chatId, input.messageId),
+    }),
+    defineTool({
       name: 'MessageSendText',
       description: 'Send a plain text message to a chat or group. Requires OPERATOR role.',
       tier: 'write',
@@ -88,14 +87,14 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
               'unset means the engine default, and the engines differ.',
           ),
       }),
-      handler: (input: { sessionId: string; chatId: string; text: string; linkPreview?: boolean }) =>
+      handler: input =>
         message.sendText(input.sessionId, {
           chatId: input.chatId,
           text: input.text,
           ...(input.linkPreview === undefined ? {} : { linkPreview: input.linkPreview }),
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageSendImage',
       description: 'Send an image message via URL or base64. Requires OPERATOR role.',
       tier: 'write',
@@ -110,15 +109,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
       }),
-      handler: (input: {
-        sessionId: string;
-        chatId: string;
-        url?: string;
-        base64?: string;
-        mimetype?: string;
-        filename?: string;
-        caption?: string;
-      }) =>
+      handler: input =>
         message.sendImage(input.sessionId, {
           chatId: input.chatId,
           url: input.url,
@@ -127,8 +118,8 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           filename: input.filename,
           caption: input.caption,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageSendVideo',
       description: 'Send a video message via URL or base64. Requires OPERATOR role.',
       tier: 'write',
@@ -143,15 +134,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
       }),
-      handler: (input: {
-        sessionId: string;
-        chatId: string;
-        url?: string;
-        base64?: string;
-        mimetype?: string;
-        filename?: string;
-        caption?: string;
-      }) =>
+      handler: input =>
         message.sendVideo(input.sessionId, {
           chatId: input.chatId,
           url: input.url,
@@ -160,8 +143,8 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           filename: input.filename,
           caption: input.caption,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageSendAudio',
       description: 'Send an audio/voice message via URL or base64. Requires OPERATOR role.',
       tier: 'write',
@@ -177,16 +160,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         caption: z.string().max(1024).optional(),
         ptt: z.boolean().optional().describe('Send as a WhatsApp voice note (PTT)'),
       }),
-      handler: (input: {
-        sessionId: string;
-        chatId: string;
-        url?: string;
-        base64?: string;
-        mimetype?: string;
-        filename?: string;
-        caption?: string;
-        ptt?: boolean;
-      }) =>
+      handler: input =>
         message.sendAudio(input.sessionId, {
           chatId: input.chatId,
           url: input.url,
@@ -196,8 +170,8 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           caption: input.caption,
           ptt: input.ptt,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageSendDocument',
       description: 'Send a document/file message via URL or base64. Requires OPERATOR role.',
       tier: 'write',
@@ -212,15 +186,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
       }),
-      handler: (input: {
-        sessionId: string;
-        chatId: string;
-        url?: string;
-        base64?: string;
-        mimetype?: string;
-        filename?: string;
-        caption?: string;
-      }) =>
+      handler: input =>
         message.sendDocument(input.sessionId, {
           chatId: input.chatId,
           url: input.url,
@@ -229,8 +195,8 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           filename: input.filename,
           caption: input.caption,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageSendLocation',
       description: 'Send a location pin message. Requires OPERATOR role.',
       tier: 'write',
@@ -244,14 +210,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         description: z.string().max(LOCATION_TEXT_MAX_LENGTH).optional().describe('Location label/description'),
         address: z.string().max(LOCATION_TEXT_MAX_LENGTH).optional().describe('Street address'),
       }),
-      handler: (input: {
-        sessionId: string;
-        chatId: string;
-        latitude: number;
-        longitude: number;
-        description?: string;
-        address?: string;
-      }) =>
+      handler: input =>
         message.sendLocation(input.sessionId, {
           chatId: input.chatId,
           latitude: input.latitude,
@@ -259,8 +218,8 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           description: input.description,
           address: input.address,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageSendContact',
       description: 'Send a contact card message. Requires OPERATOR role.',
       tier: 'write',
@@ -276,14 +235,14 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           .max(CONTACT_NUMBER_MAX_LENGTH)
           .describe('Phone number of the contact to share'),
       }),
-      handler: (input: { sessionId: string; chatId: string; contactName: string; contactNumber: string }) =>
+      handler: input =>
         message.sendContact(input.sessionId, {
           chatId: input.chatId,
           contactName: input.contactName,
           contactNumber: input.contactNumber,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageSendSticker',
       description: 'Send a sticker message via URL or base64. Requires OPERATOR role.',
       tier: 'write',
@@ -298,15 +257,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
       }),
-      handler: (input: {
-        sessionId: string;
-        chatId: string;
-        url?: string;
-        base64?: string;
-        mimetype?: string;
-        filename?: string;
-        caption?: string;
-      }) =>
+      handler: input =>
         message.sendSticker(input.sessionId, {
           chatId: input.chatId,
           url: input.url,
@@ -315,8 +266,8 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           filename: input.filename,
           caption: input.caption,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageSendTemplate',
       description:
         'Render a stored text template and send it as a text message. Provide either templateId or templateName. Requires OPERATOR role.',
@@ -333,21 +284,15 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           .optional()
           .describe('Variables to substitute into {{placeholder}} tokens'),
       }),
-      handler: (input: {
-        sessionId: string;
-        chatId: string;
-        templateId?: string;
-        templateName?: string;
-        vars?: Record<string, string>;
-      }) =>
+      handler: input =>
         message.sendTemplate(input.sessionId, {
           chatId: input.chatId,
           templateId: input.templateId,
           templateName: input.templateName,
           vars: input.vars,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageReply',
       description: 'Reply to a specific message (quoted reply). Requires OPERATOR role.',
       tier: 'write',
@@ -359,14 +304,14 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         quotedMessageId: z.string().describe('ID of the message to quote/reply to'),
         text: z.string().min(1).max(MESSAGE_TEXT_MAX_LENGTH).describe('Reply text content'),
       }),
-      handler: (input: { sessionId: string; chatId: string; quotedMessageId: string; text: string }) =>
+      handler: input =>
         message.reply(input.sessionId, {
           chatId: input.chatId,
           quotedMessageId: input.quotedMessageId,
           text: input.text,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageForward',
       description: 'Forward a message from one chat to another. Requires OPERATOR role.',
       tier: 'write',
@@ -378,14 +323,14 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         toChatId: z.string().describe('Destination chat JID'),
         messageId: z.string().describe('ID of the message to forward'),
       }),
-      handler: (input: { sessionId: string; fromChatId: string; toChatId: string; messageId: string }) =>
+      handler: input =>
         message.forward(input.sessionId, {
           fromChatId: input.fromChatId,
           toChatId: input.toChatId,
           messageId: input.messageId,
         }),
-    },
-    {
+    }),
+    defineTool({
       name: 'MessageReact',
       description:
         'Add or remove a reaction emoji on a message. Send empty string emoji to remove. Requires OPERATOR role.',
@@ -401,10 +346,10 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           .max(REACTION_EMOJI_MAX_LENGTH)
           .describe('Emoji to react with. Empty string removes the reaction.'),
       }),
-      handler: (input: { sessionId: string; chatId: string; messageId: string; emoji: string }) =>
+      handler: input =>
         message
           .reactToMessage(input.sessionId, { chatId: input.chatId, messageId: input.messageId, emoji: input.emoji })
           .then(() => ({ success: true })),
-    },
+    }),
   ];
 }
