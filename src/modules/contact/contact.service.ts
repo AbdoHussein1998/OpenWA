@@ -113,11 +113,19 @@ export class ContactService {
    * phone-based id.
    */
   private assertAddressable(contactId: string): void {
-    if (parseWaId(contactId).kind === 'lid') {
+    const kind = parseWaId(contactId).kind;
+    // Allow-list rather than deny-list: only a user id (or a bare number, which parses as
+    // `unknown`) names a phone. A group/newsletter/broadcast/status id also carries digits that
+    // whatsapp-web.js would happily store as a phone number for a contact that does not exist.
+    if (kind === 'user' || kind === 'unknown') return;
+    if (kind === 'lid') {
       throw new BadRequestException(
         `Contact ${contactId} is a privacy id (@lid) with no known phone number; the addressbook is keyed by phone number, so pass a phone-based contact id instead`,
       );
     }
+    throw new BadRequestException(
+      `Contact ${contactId} does not name a person; the addressbook is keyed by phone number, so pass a phone-based contact id instead`,
+    );
   }
 
   upsertContact(sessionId: string, contactId: string, firstName: string, lastName?: string) {

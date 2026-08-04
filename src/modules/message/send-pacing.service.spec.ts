@@ -495,7 +495,13 @@ describe('SendPacingService cold-reachout cap', () => {
 
     await expect(service.assertSendAllowed('s1', 'known@c.us')).resolves.toBeUndefined();
 
-    expect(exists).toHaveBeenCalledWith({ where: { sessionId: 's1', chatId: 'known@c.us' } });
+    // Probed under both user-id dialects: stored rows may carry either spelling.
+    expect(exists).toHaveBeenCalledWith({
+      where: [
+        { sessionId: 's1', chatId: 'known@c.us' },
+        { sessionId: 's1', chatId: 'known@s.whatsapp.net' },
+      ],
+    });
   });
 
   it("allows a cold reachout while the day's allowance remains", async () => {

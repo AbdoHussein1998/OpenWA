@@ -487,6 +487,14 @@ export class BaileysEvents {
    * `rejectCall` arriving afterwards should report not-found instead of acting on a dead call.
    */
   private reportCallOutcome(call: WACallEvent): void {
+    // `terminate` publishes no outcome (see above) but DOES end the call — drop the handle so a
+    // rejectCall arriving afterwards reports not-found instead of acting on a dead call. The other
+    // unmapped statuses (ringing/preaccept/transport/relaylatency) are chatter on a call that is
+    // still live and must stay rejectable.
+    if (call.status === 'terminate') {
+      this.liveCalls.delete(call.id);
+      return;
+    }
     const outcome = CALL_OUTCOMES[call.status];
     if (!outcome) return;
 

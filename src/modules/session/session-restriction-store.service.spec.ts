@@ -54,10 +54,32 @@ describe('SessionRestrictionStore', () => {
     // Announcing a re-report would be noise, but serving a stale expiry from the API would be wrong,
     // so the stored entry refreshes even when the caller is told nothing changed.
     it('refreshes the stored expiry without announcing it', () => {
-      store.set('s1', timelock({ expiresAt: 1000 }));
+      // Future timestamps: an already-passed expiry reads as no restriction at all.
+      const first = Date.now() + 60_000;
+      const refreshed = Date.now() + 120_000;
+      store.set('s1', timelock({ expiresAt: first }));
 
-      expect(store.set('s1', timelock({ expiresAt: 9999 }))).toBe(false);
-      expect(store.get('s1')?.expiresAt).toBe(9999);
+      expect(store.set('s1', timelock({ expiresAt: refreshed }))).toBe(false);
+      expect(store.get('s1')?.expiresAt).toBe(refreshed);
+    });
+  });
+
+  describe('expiry', () => {
+    it('stops reporting a restriction whose stated end has passed, without a lift signal', () => {
+      store.set('s1', timelock({ expiresAt: Date.now() - 1000 }));
+
+      expect(store.get('s1')).toBeUndefined();
+      expect(store.attachTo(sessionRow('s1')).restriction).toBeNull();
+      // Still stored: set/clear own the lift signal, and the next engine report self-heals the map.
+      expect(store.size()).toBe(1);
+    });
+
+    it('keeps reporting one that has not expired, or that states no end', () => {
+      store.set('s1', timelock({ expiresAt: Date.now() + 60_000 }));
+      store.set('s2', timelock());
+
+      expect(store.get('s1')?.kind).toBe('reachout_timelock');
+      expect(store.attachTo(sessionRow('s2')).restriction?.kind).toBe('reachout_timelock');
     });
   });
 
@@ -132,9 +154,10 @@ describe('SessionRestrictionStore', () => {
 
   describe('the read projection', () => {
     it('attaches the restriction in force', () => {
-      store.set('s1', timelock({ expiresAt: 1234 }));
+      const expiresAt = Date.now() + 60_000;
+      store.set('s1', timelock({ expiresAt }));
 
-      expect(store.attachTo(sessionRow('s1')).restriction).toEqual(timelock({ expiresAt: 1234 }));
+      expect(store.attachTo(sessionRow('s1')).restriction).toEqual(timelock({ expiresAt }));
     });
 
     it('attaches null when there is none, so the field is always present', () => {

@@ -40,7 +40,20 @@ export class SessionRestrictionStore {
 
   /** The restriction in force, if any. `attachTo` is the projection; this is the raw read. */
   get(sessionId: string): AccountRestriction | undefined {
-    return this.restrictions.get(sessionId);
+    return this.inForce(sessionId);
+  }
+
+  /**
+   * The stored restriction, unless its stated end has passed — an expired timelock must not keep
+   * badging the session until the next reconnect happens to clear it. Read-side only: the entry
+   * stays stored (set/clear own the lift signal, and the engine re-report self-heals the map), it
+   * just stops being reported.
+   */
+  private inForce(sessionId: string): AccountRestriction | undefined {
+    const restriction = this.restrictions.get(sessionId);
+    if (!restriction) return undefined;
+    if (restriction.expiresAt != null && restriction.expiresAt <= Date.now()) return undefined;
+    return restriction;
   }
 
   /**
@@ -79,7 +92,7 @@ export class SessionRestrictionStore {
    * is cleared by its own path rather than by whatever status the session happens to carry.
    */
   attachTo(session: Session): Session {
-    session.restriction = this.restrictions.get(session.id) ?? null;
+    session.restriction = this.inForce(session.id) ?? null;
     return session;
   }
 }

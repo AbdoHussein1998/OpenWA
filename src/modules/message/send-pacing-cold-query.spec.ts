@@ -137,6 +137,18 @@ describe('cold-reachout counting against a real database', () => {
     await expect(service.assertSendAllowed('s1', 'stranger@c.us')).rejects.toMatchObject({ status: 429 });
   });
 
+  // Stored rows carry either user-id dialect (inbound neutralized to @c.us, outbound the caller's
+  // raw form) — byte-exact probing misread a known contact addressed the other way as cold.
+  it('matches history across user-id dialects, so a known contact is never misread as cold', async () => {
+    await addMessage('628555@s.whatsapp.net', YESTERDAY);
+    await addMessage('cold-1@c.us', TODAY);
+    await addMessage('cold-2@c.us', TODAY);
+    await addMessage('cold-3@c.us', TODAY);
+
+    // The budget of three is spent, but the @c.us spelling of a known contact stays warm.
+    await expect(service.assertSendAllowed('s1', '628555@c.us')).resolves.toBeUndefined();
+  });
+
   it("forgets yesterday's reachouts when the UTC day rolls over", async () => {
     await addMessage('y1@c.us', YESTERDAY);
     await addMessage('y2@c.us', YESTERDAY);
@@ -210,6 +222,15 @@ describe('group reachouts against a real database', () => {
     // Five participants, but only three are strangers — exactly the allowance.
     await expect(
       service.assertReachoutAllowed('s1', ['known-1@c.us', 'known-2@c.us', 'a@c.us', 'b@c.us', 'c@c.us']),
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not charge for a contact known under the other user-id dialect', async () => {
+    await addMessage('628555@s.whatsapp.net', YESTERDAY);
+
+    // Four participants, but the dialect twin is known — three strangers, exactly the allowance.
+    await expect(
+      service.assertReachoutAllowed('s1', ['628555@c.us', 'a@c.us', 'b@c.us', 'c@c.us']),
     ).resolves.toBeUndefined();
   });
 

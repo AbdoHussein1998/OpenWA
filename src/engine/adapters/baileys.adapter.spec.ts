@@ -4772,6 +4772,22 @@ describe('BaileysAdapter call outcomes', () => {
     },
   );
 
+  // `terminate` publishes no outcome, but it DOES end the call: the live handle must go with it,
+  // or a later outcome/reject acts on a call that is already over until the TTL happens to expire.
+  it('terminate drops the live call, so a later outcome for the same id is ignored', async () => {
+    const onCallOutcome = jest.fn();
+    await ringing({ onCall: jest.fn(), onCallOutcome });
+
+    fakeSock.fire('call', [
+      { id: CALL_ID, from: CALLER, chatId: CALLER, status: 'terminate', offline: false, date: new Date() },
+    ]);
+    fakeSock.fire('call', [
+      { id: CALL_ID, from: CALLER, chatId: CALLER, status: 'reject', offline: false, date: new Date() },
+    ]);
+
+    expect(onCallOutcome).not.toHaveBeenCalled();
+  });
+
   // WhatsApp replays signalling for calls that ended while the session was disconnected. Announcing
   // those would report last week's declined call as if it had just happened.
   it('drops an offline-replayed outcome', async () => {

@@ -5050,7 +5050,7 @@
           "400": {
             "description": "Session not started, or validation failed"
           },
-          "422": {
+          "403": {
             "description": "The engine refused — channel creation may be disabled for this account"
           }
         },
@@ -5203,7 +5203,7 @@
           "400": {
             "description": "Session not started"
           },
-          "422": {
+          "403": {
             "description": "The engine refused — not found, or this account does not own it"
           }
         },
@@ -5254,7 +5254,7 @@
           "400": {
             "description": "Session not started, or validation failed"
           },
-          "422": {
+          "403": {
             "description": "The engine refused"
           }
         },

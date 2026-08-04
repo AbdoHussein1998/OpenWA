@@ -35,6 +35,12 @@ describe('LabelService label editing', () => {
     return new LabelService(engines);
   };
 
+  it('refuses an empty body — nothing to write, and an unused id would create a nameless label', async () => {
+    const upsertLabel = jest.fn();
+    expect(() => makeService({ upsertLabel }).upsertLabel('s1', 'l1', {})).toThrow(BadRequestException);
+    expect(upsertLabel).not.toHaveBeenCalled();
+  });
+
   it('sends the path id as the label id', async () => {
     const upsertLabel = jest.fn().mockResolvedValue(undefined);
     await makeService({ upsertLabel }).upsertLabel('s1', 'l1', { name: 'VIP' });

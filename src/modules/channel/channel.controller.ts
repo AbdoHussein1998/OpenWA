@@ -75,7 +75,7 @@ export class ChannelController {
   @ApiBody({ type: CreateChannelDto })
   @ApiResponse({ status: 201, description: 'The created channel' })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
-  @ApiResponse({ status: 422, description: 'The engine refused — channel creation may be disabled for this account' })
+  @ApiResponse({ status: 403, description: 'The engine refused — channel creation may be disabled for this account' })
   async create(@Param('sessionId') sessionId: string, @Body() dto: CreateChannelDto) {
     return this.channelService.createChannel(sessionId, dto.name, dto.description);
   }
@@ -94,7 +94,7 @@ export class ChannelController {
   @ApiParam({ name: 'channelId', description: 'Channel ID' })
   @ApiResponse({ status: 200, description: 'Channel deleted' })
   @ApiResponse({ status: 400, description: 'Session not started' })
-  @ApiResponse({ status: 422, description: 'The engine refused — not found, or this account does not own it' })
+  @ApiResponse({ status: 403, description: 'The engine refused — not found, or this account does not own it' })
   async remove(
     @Param('sessionId') sessionId: string,
     @Param('channelId') channelId: string,
@@ -115,7 +115,7 @@ export class ChannelController {
   @ApiBody({ type: MuteChannelDto })
   @ApiResponse({ status: 200, description: 'Channel muted or unmuted' })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
-  @ApiResponse({ status: 422, description: 'The engine refused' })
+  @ApiResponse({ status: 403, description: 'The engine refused' })
   async mute(
     @Param('sessionId') sessionId: string,
     @Param('channelId') channelId: string,
