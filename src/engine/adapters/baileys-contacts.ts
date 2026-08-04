@@ -20,6 +20,8 @@ export interface BaileysContactsHost {
   listChats(): ChatSummary[];
   /** The chat's last known message (the handle readMessages/chatModify need), or null when none. */
   lastMessage(chatId: string): { key: WAMessageKey; timestamp: number } | null;
+  /** Fold a neutral @c.us id to the engine @s.whatsapp.net form used as the app-state index key. */
+  toEngineJid(jid: string): string;
 }
 
 export class BaileysContacts {
@@ -49,7 +51,11 @@ export class BaileysContacts {
     // Baileys addresses the entry by JID, unlike whatsapp-web.js which wants a bare phone number.
     // saveOnPrimaryAddressbook stays false to match the wwjs default (syncToAddressbook=false):
     // writing through to the device addressbook is a heavier action than saving the contact.
-    await this.sock().addOrEditContact(contactId, {
+    // Fold the neutral @c.us the API speaks to the engine @s.whatsapp.net: addOrEditContact ->
+    // chatModify keys the addressbook app-state patch by the raw jid (no jidNormalizedUser, unlike
+    // the send path), so a raw @c.us index would land under a key WhatsApp never reads and the
+    // write would silently target nothing while the endpoint reports success.
+    await this.sock().addOrEditContact(this.host.toEngineJid(contactId), {
       firstName,
       fullName,
       saveOnPrimaryAddressbook: false,
@@ -58,7 +64,8 @@ export class BaileysContacts {
 
   async deleteContact(contactId: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().removeContact(contactId);
+    // Same app-state key fold as upsertContact — a raw @c.us removal targets a phantom entry.
+    await this.sock().removeContact(this.host.toEngineJid(contactId));
   }
 
   async blockContact(contactId: string): Promise<void> {
@@ -135,7 +142,7 @@ export class BaileysContacts {
     }
     await this.sock().chatModify(
       { markRead: false, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      chatId,
+      this.host.toEngineJid(chatId),
     );
     return true;
   }
@@ -148,7 +155,7 @@ export class BaileysContacts {
     }
     await this.sock().chatModify(
       { clear: true, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      chatId,
+      this.host.toEngineJid(chatId),
     );
     return true;
   }
@@ -161,7 +168,7 @@ export class BaileysContacts {
     }
     await this.sock().chatModify(
       { archive, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      chatId,
+      this.host.toEngineJid(chatId),
     );
     return true;
   }
@@ -174,7 +181,7 @@ export class BaileysContacts {
     }
     await this.sock().chatModify(
       { delete: true, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      chatId,
+      this.host.toEngineJid(chatId),
     );
     return true;
   }

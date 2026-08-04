@@ -170,6 +170,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       resolvePhone: contactId => this.sessionStore.resolvePhone(contactId),
       listChats: () => this.sessionStore.listChats(),
       lastMessage: chatId => this.sessionStore.lastMessage(chatId),
+      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
     });
     this.statusOps = new BaileysStatus({
       ensureReady: () => this.ensureReady(),
