@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Voice status.** `POST /api/sessions/:sessionId/status/send-voice` posts an audio status as a
+  voice note on both engines. It carries no caption, because WhatsApp has nowhere to render one on a
+  status voice note.
+
+  On whatsapp-web.js the send sets `sendAudioAsVoice`, which becomes `isPtt` in the page and is the
+  only thing separating a voice-note bubble from an audio file; on Baileys the content is
+  `{ audio, ptt: true }`, and because Baileys keys its coloured-status handling off exactly that
+  combination, `backgroundColor` applies here as it does for a text status.
+
+  Neither engine transcodes, and WhatsApp plays a status voice note only as Ogg/Opus, so the
+  mimetype defaults to it and the media conversion endpoint is what produces the bytes.
+
+  `Status.type` gains a `voice` member. Before this, the read-back mapped only images and videos and
+  collapsed everything else to `text`, so an incoming voice status was reported as a text status —
+  one with audio attached and a type saying otherwise. Existing values are unchanged; clients that
+  switch on `type` should treat an unrecognised value as they already treat any other.
+
+
 - **Server-side media conversion, and `ffmpeg` in the image.** WhatsApp renders a playable
   voice-note bubble only for Ogg/Opus. Nothing in the pipeline transcoded, so posting MP3 bytes to
   `send-audio` with `ptt: true` sent them as they were — labelled `audio/ogg; codecs=opus`, because
