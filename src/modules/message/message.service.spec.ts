@@ -200,6 +200,42 @@ describe('MessageService', () => {
       expect(mockEngine.sendTextMessage).toHaveBeenCalledWith('628123456789@c.us', 'hi');
     });
 
+    it('threads a caller-supplied preview through to the engine', async () => {
+      const input = {
+        chatId: '628123456789@c.us',
+        text: 'see https://example.com',
+        customLinkPreview: { url: 'https://example.com', title: 'Example', description: 'A site' },
+      };
+      (hookManager.execute as jest.Mock).mockResolvedValueOnce({
+        continue: true,
+        data: { sessionId: 'sess-1', input, type: 'text' },
+      });
+
+      await service.sendText('sess-1', input);
+
+      expect(mockEngine.sendTextMessage).toHaveBeenCalledWith(
+        '628123456789@c.us',
+        'see https://example.com',
+        undefined,
+        { customPreview: { url: 'https://example.com', title: 'Example', description: 'A site' } },
+      );
+    });
+
+    // Suppressing the preview and supplying one are opposite requests; guessing which was meant
+    // would send a message the caller did not ask for either way.
+    it('refuses a suppression combined with a supplied preview, before reaching the engine', async () => {
+      await expect(
+        service.sendText('sess-1', {
+          chatId: '628123456789@c.us',
+          text: 'hi',
+          linkPreview: false,
+          customLinkPreview: { url: 'https://example.com', title: 'Example' },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(mockEngine.sendTextMessage).not.toHaveBeenCalled();
+    });
+
     it('should save outgoing message as pending before sending, then update to sent', async () => {
       await service.sendText('sess-1', {
         chatId: '628123456789@c.us',

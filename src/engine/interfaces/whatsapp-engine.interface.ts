@@ -259,6 +259,20 @@ export interface GroupJoinInfo {
   participantCount?: number;
 }
 
+/**
+ * A caller-supplied link preview, used instead of fetching one.
+ *
+ * Nothing is fetched for these: the caller states the metadata, so the gateway makes no outbound
+ * request at all — which also means a preview can be attached for a URL this server could not reach.
+ */
+export interface CustomLinkPreview {
+  /** The URL as it appears in the message text; WhatsApp anchors the preview to it. */
+  url: string;
+  /** Required — WhatsApp will not render a preview without one. */
+  title: string;
+  description?: string;
+}
+
 export interface ContactCard {
   name: string;
   number: string;
@@ -786,7 +800,7 @@ export interface IWhatsAppEngine {
     chatId: string,
     text: string,
     mentions?: string[],
-    options?: { linkPreview?: boolean },
+    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
   ): Promise<MessageResult>;
   sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
   sendVideoMessage(chatId: string, media: MediaInput): Promise<MessageResult>;

@@ -103,6 +103,15 @@ class GroupJoinInfo(TypedDict, total=False):
     participantCount: int
 
 
+class CustomLinkPreview(TypedDict, total=False):
+    """A caller-supplied link preview. Nothing is fetched for these."""
+
+    url: str
+    # Required -- WhatsApp will not render a preview without a title.
+    title: str
+    description: str
+
+
 # ── Session ───────────────────────────────────────────────────────
 
 
@@ -196,6 +205,10 @@ class SendTextRequest(TypedDict, total=False):
     # engine default, and the engines differ -- whatsapp-web.js asks WhatsApp Web to build a preview,
     # Baileys builds none unless its optional generator is installed.
     linkPreview: bool
+    # Attach a preview you supply yourself instead of one fetched from the URL. Nothing is fetched,
+    # so this works even for a URL the gateway cannot reach. Baileys only -- whatsapp-web.js takes a
+    # boolean and answers 501. Cannot be combined with linkPreview=False.
+    customLinkPreview: CustomLinkPreview
 
 
 class SendMediaRequest(TypedDict, total=False):

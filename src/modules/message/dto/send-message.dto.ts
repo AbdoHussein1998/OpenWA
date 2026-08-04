@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ValidateNested,
   IsString,
   IsNotEmpty,
   IsOptional,
@@ -10,6 +11,7 @@ import {
   ArrayMaxSize,
   IsBoolean,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ToStrictBoolean } from '../../../common/utils/strict-boolean';
 
 const MENTIONS_DESCRIPTION =
@@ -18,6 +20,33 @@ const MENTIONS_DESCRIPTION =
 // Single source of truth for the text-body cap, shared with the agent-tool input schemas
 // (src/core/agent-tools/tools/message.tools.ts) so MCP and REST enforce the same limit.
 export const MESSAGE_TEXT_MAX_LENGTH = 4096;
+
+export class CustomLinkPreviewDto {
+  @ApiProperty({
+    description: 'The URL as it appears in the message text — WhatsApp anchors the preview to it.',
+    example: 'https://example.com/launch',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2048)
+  url: string;
+
+  @ApiProperty({
+    description: 'Required: WhatsApp will not render a preview without a title.',
+    example: 'We just launched',
+    maxLength: 256,
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(256)
+  title: string;
+
+  @ApiPropertyOptional({ description: 'Preview description', example: 'Read the announcement.', maxLength: 1024 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  description?: string;
+}
 
 export class SendTextMessageDto {
   @ApiProperty({
@@ -60,6 +89,19 @@ export class SendTextMessageDto {
   @IsOptional()
   @IsBoolean()
   linkPreview?: boolean;
+
+  @ApiPropertyOptional({
+    type: CustomLinkPreviewDto,
+    description:
+      'Attach a preview you supply yourself, instead of one fetched from the URL. Nothing is ' +
+      'fetched for these, so a preview can be attached even for a URL this server cannot reach. ' +
+      '**Baileys only** — whatsapp-web.js takes a boolean and answers `501`. Cannot be combined ' +
+      'with `linkPreview: false`, which asks for the opposite.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CustomLinkPreviewDto)
+  customLinkPreview?: CustomLinkPreviewDto;
 }
 
 export class SendMediaMessageDto {

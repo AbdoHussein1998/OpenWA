@@ -1,5 +1,6 @@
 import { MessageMedia, MessageTypes, type Client, type Message } from 'whatsapp-web.js';
 import {
+  CustomLinkPreview,
   IncomingMessage,
   LocationInput,
   ContactCard,
@@ -18,6 +19,7 @@ import { chatKind, userPart } from '../identity/wa-id';
 import { chatHistoryMediaBudgetBytes, coerceDeclaredSize, ingestMediaBudgetBytes } from './inbound-media-cap';
 import { buildIncomingMessageBase } from './message-mapper';
 import { buildVCard } from './vcard';
+import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -270,7 +272,7 @@ export class WwebjsMessaging {
     chatId: string,
     text: string,
     mentions?: string[],
-    options?: { linkPreview?: boolean },
+    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
   ): Promise<MessageResult> {
     this.host.ensureReady();
     // wwebjs accepts neutral `<phone>@c.us` WIDs directly as mentionedJidList, so no de-normalization
@@ -280,6 +282,12 @@ export class WwebjsMessaging {
     // `linkPreview === false ? undefined : true` (Client.js:1458), so passing `true` is identical to
     // passing nothing — sending it anyway would add an options object to every plain send for no
     // change in behaviour.
+    // whatsapp-web.js takes a BOOLEAN only (index.d.ts:1547) — there is no way to hand it title,
+    // description or a thumbnail. Silently dropping the caller's preview would send a message that
+    // looks nothing like what they asked for, so it refuses instead.
+    if (options?.customPreview) {
+      throw new EngineNotSupportedError('sendTextMessage(customPreview)');
+    }
     const sendOptions: { mentions?: string[]; linkPreview?: boolean } = {};
     if (mentions?.length) sendOptions.mentions = mentions;
     if (options?.linkPreview === false) sendOptions.linkPreview = false;

@@ -194,6 +194,12 @@ export interface SendTextRequest {
    * Baileys builds none unless its optional generator is installed.
    */
   linkPreview?: boolean;
+  /**
+   * Attach a preview you supply yourself instead of one fetched from the URL. Nothing is fetched, so
+   * this works even for a URL the gateway cannot reach. **Baileys only** — whatsapp-web.js takes a
+   * boolean and answers 501. Cannot be combined with `linkPreview: false`.
+   */
+  customLinkPreview?: { url: string; title: string; description?: string };
 }
 
 export interface SendMediaRequest {

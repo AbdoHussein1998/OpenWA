@@ -39,6 +39,14 @@ type MuteChannelRequest struct {
 	Mute bool `json:"mute"`
 }
 
+// CustomLinkPreview is a caller-supplied link preview. Nothing is fetched for these.
+type CustomLinkPreview struct {
+	URL string `json:"url"`
+	// Title is required — WhatsApp will not render a preview without one.
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+}
+
 // UpsertLabelRequest is a label create-or-update body. The id travels in the path, because WhatsApp
 // keys the write on it.
 type UpsertLabelRequest struct {
