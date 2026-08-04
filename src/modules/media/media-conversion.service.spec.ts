@@ -156,4 +156,34 @@ describe('MediaConversionService', () => {
       await expect(service.convertToVoice({ base64: 'AAAA' })).rejects.toBeInstanceOf(TypeError);
     });
   });
+
+  describe('concurrency gate', () => {
+    // The rate limiter caps admission per second, not how many long-running ffmpeg processes stack
+    // up while each runs toward its timeout — that bound lives here.
+    it('bounds concurrent ffmpeg runs and answers 503 past the queue instead of stacking processes', async () => {
+      // concurrency 1 → queue depth 4: five simultaneous requests fill the gate, the sixth is refused.
+      const service = new MediaConversionService(config({ 'mediaConversion.concurrency': 1 }));
+      let release!: () => void;
+      runFfmpeg.mockImplementation(
+        () =>
+          new Promise<Buffer>(resolve => {
+            release = () => resolve(Buffer.from('x'));
+          }),
+      );
+
+      const inflight = Array.from({ length: 5 }, () => service.convertToVoice({ base64: 'AAAA' }));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(runFfmpeg).toHaveBeenCalledTimes(1);
+
+      await expect(service.convertToVoice({ base64: 'AAAA' })).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      // Drain: release each run in turn so every parked task completes and nothing leaks.
+      for (let i = 0; i < 5; i++) {
+        release();
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      await Promise.all(inflight);
+      expect(runFfmpeg).toHaveBeenCalledTimes(5);
+    });
+  });
 });

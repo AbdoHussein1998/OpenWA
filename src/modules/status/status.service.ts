@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { StatusStoreService } from '../status-store/status-store.service';
-import { StorageService } from '../../common/storage/storage.service';
+import { StorageService, isMissingObjectError } from '../../common/storage/storage.service';
 import type { Status, StatusResult, StatusPostOptions } from '../../engine/interfaces/whatsapp-engine.interface';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from '../message/media-cap.util';
 import { HookManager, applySendingGate } from '../../core/hooks';
@@ -79,8 +79,9 @@ export class StatusService {
       return { buffer, mimetype };
     } catch (error) {
       // The row outlived its file: purgeExpired (or a concurrent delete) removed it between the
-      // DB read and this read. That's "gone", not a server fault — surface a 404.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // DB read and this read. That's "gone", not a server fault — surface a 404. The helper covers
+      // both backends: the local ENOENT and the codeless NoSuchKey/NotFound an S3 miss raises.
+      if (isMissingObjectError(error)) {
         throw new NotFoundException('Status media not found or expired');
       }
       throw error;

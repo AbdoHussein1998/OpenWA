@@ -111,7 +111,17 @@ describe('StatusService media validation and selection', () => {
       await expect(service.getStatusMedia('sess', 'w1')).rejects.toBeInstanceOf(NotFoundException);
     });
 
-    it('rethrows non-ENOENT storage errors unchanged', async () => {
+    it('maps an S3 NoSuchKey (codeless, name-only) to NotFoundException like the local ENOENT', async () => {
+      // The S3 backend reports a miss with a `.name` and no `.code` at all — retention/lifecycle
+      // rules make the row-outlived-file race most likely exactly there.
+      store.getMedia.mockResolvedValue({ path: 'statuses/sess/gone.jpg', mimetype: 'image/jpeg' });
+      const noSuchKey = Object.assign(new Error('The specified key does not exist.'), { name: 'NoSuchKey' });
+      storageService.getFile.mockRejectedValue(noSuchKey);
+
+      await expect(service.getStatusMedia('sess', 'w1')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rethrows non-missing-object storage errors unchanged', async () => {
       store.getMedia.mockResolvedValue({ path: 'statuses/sess/x.jpg', mimetype: 'image/jpeg' });
       storageService.getFile.mockRejectedValue(new Error('S3 unavailable'));
 

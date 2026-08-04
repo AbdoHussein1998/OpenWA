@@ -22,7 +22,7 @@ import { resolveFeatureFlags } from '../../config/feature-flags';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
-import { StorageService } from '../../common/storage/storage.service';
+import { StorageService, isMissingObjectError } from '../../common/storage/storage.service';
 
 export interface GetMessagesOptions {
   chatId?: string;
@@ -49,22 +49,6 @@ const INERT_MEDIA_MIMETYPE =
 /** The declared mimetype when it is safe to echo back, else inert octet-stream. */
 function inertMimetype(mimetype: string): string {
   return INERT_MEDIA_MIMETYPE.test(mimetype) ? mimetype : 'application/octet-stream';
-}
-
-/**
- * True when a storage read failed because the object is simply not there.
- *
- * Both backends must be covered, and they report it differently: the local backend raises a POSIX
- * `ENOENT` (a `.code`), while S3 raises `NoSuchKey`/`NotFound`, which carries a `.name` and no
- * `.code` at all — `getS3File` rethrows that original error when the local read-through also misses
- * (storage.service.ts:448-459). Checking only `.code` therefore turned a missing S3 object into a
- * 500 on the one backend where retention and bucket lifecycle rules make it most likely.
- */
-function isMissingObjectError(error: unknown): boolean {
-  const e = error as { code?: string; name?: string; $metadata?: { httpStatusCode?: number } };
-  return (
-    e?.code === 'ENOENT' || e?.name === 'NoSuchKey' || e?.name === 'NotFound' || e?.$metadata?.httpStatusCode === 404
-  );
 }
 
 /**
