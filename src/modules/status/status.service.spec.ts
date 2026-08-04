@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { StatusService } from './status.service';
+import { StatusController } from './status.controller';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { StatusStoreService } from '../status-store/status-store.service';
@@ -7,7 +8,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { HookManager } from '../../core/hooks';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { SendImageStatusDto, SendVideoStatusDto } from './dto/send-media-status.dto';
+import { SendImageStatusDto, SendVideoStatusDto, SendVoiceStatusDto } from './dto/send-media-status.dto';
 import { SendPacingService } from '../message/send-pacing.service';
 
 describe('StatusService media validation and selection', () => {
@@ -15,6 +16,7 @@ describe('StatusService media validation and selection', () => {
     postTextStatus: jest.fn().mockResolvedValue({ id: 'text-status' }),
     postImageStatus: jest.fn().mockResolvedValue({ id: 'image-status' }),
     postVideoStatus: jest.fn().mockResolvedValue({ id: 'video-status' }),
+    postVoiceStatus: jest.fn().mockResolvedValue({ id: 'voice-status' }),
   };
   const engines = new EngineRegistry();
   // Both ids the tests below post from; the store-only paths ('sess') never reach the engine.
@@ -117,6 +119,73 @@ describe('StatusService media validation and selection', () => {
 
     expect(engine.postImageStatus).toHaveBeenCalledWith(expect.objectContaining({ data: 'QUJD' }), expect.anything());
     expect(engine.postVideoStatus).toHaveBeenCalledWith(expect.objectContaining({ data: 'QUJD' }), expect.anything());
+  });
+
+  describe('voice status', () => {
+    // Ogg/Opus is the only thing WhatsApp plays as a status voice note, and neither engine
+    // transcodes — so the default has to be that, not a generic audio type.
+    it('defaults the mimetype to Ogg/Opus when the caller omits it', async () => {
+      await service.postVoiceStatus('s1', { base64: 'QUJD' }, { recipients: ['1@c.us'] });
+
+      expect(engine.postVoiceStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ mimetype: 'audio/ogg; codecs=opus', data: 'QUJD' }),
+        expect.anything(),
+      );
+    });
+
+    it('takes a caller-supplied mimetype at its word', async () => {
+      await service.postVoiceStatus('s1', { base64: 'QUJD', mimetype: 'audio/mpeg' }, { recipients: ['1@c.us'] });
+
+      expect(engine.postVoiceStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ mimetype: 'audio/mpeg' }),
+        expect.anything(),
+      );
+    });
+
+    it('rejects a body carrying neither url nor base64', async () => {
+      await expect(service.postVoiceStatus('s1', {}, { recipients: ['1@c.us'] })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    /**
+     * `guardGatedMedia` re-checks the cap after the plugin gate, so an oversized payload is refused
+     * either way. What the early check buys is that it is refused BEFORE plugins run — so the
+     * assertion is that no plugin was handed 50 MiB of audio, not merely that a 413 came back.
+     */
+    it('refuses oversized base64 before the plugin gate sees it', async () => {
+      const oversized = Buffer.alloc(51 * 1024 * 1024).toString('base64');
+      hookManager.execute.mockClear();
+
+      await expect(
+        service.postVoiceStatus('s1', { base64: oversized }, { recipients: ['1@c.us'] }),
+      ).rejects.toBeInstanceOf(PayloadTooLargeException);
+
+      expect(hookManager.execute).not.toHaveBeenCalled();
+    });
+
+    /**
+     * WhatsApp has nowhere to render a caption on a status voice note, so the request body carries
+     * none — and the controller must not invent one. This matters on whatsapp-web.js specifically:
+     * its status path forwards `caption` whenever it is defined, so a caption arriving here would be
+     * sent rather than ignored.
+     */
+    it('forwards no caption, even when the body carries an unmodelled one', async () => {
+      const controller = new StatusController(service);
+
+      await controller.sendVoiceStatus(
+        's1',
+        plainToInstance(SendVoiceStatusDto, {
+          audio: { base64: 'QUJD' },
+          recipients: ['1@c.us'],
+          caption: 'not part of the contract',
+        } as object),
+      );
+
+      const [, options] = engine.postVoiceStatus.mock.calls.at(-1) as [unknown, { caption?: string }];
+      expect(options.caption).toBeUndefined();
+      expect(options).toMatchObject({ recipients: ['1@c.us'] });
+    });
   });
 
   it('strips a data-URI prefix before handing base64 bytes to either engine path', async () => {

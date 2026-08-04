@@ -1644,6 +1644,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.statuses.postVideoStatus(media, options);
   }
 
+  postVoiceStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
+    return this.statuses.postVoiceStatus(media, options);
+  }
+
   deleteStatus(statusId: string): Promise<void> {
     return this.statuses.deleteStatus(statusId);
   }
