@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Voice notes on the Baileys engine now carry a waveform.**
 - The webhook producer enqueues idempotently, and the bundled Redis is pinned `--maxmemory-policy noeviction` so queued jobs are not silently dropped.
 - A media-storage root the app cannot write to is caught at boot with a clear error, instead of failing on the first write (#1066).
+- The bundled `docker-compose.yml` now forwards the `SEND_PACING_*`, `MEDIA_CONVERSION_*`/`FFMPEG_PATH` and session-ownership (`NODE_ID`, `NODE_URL`, lease/sweep) variables — previously these features could not be enabled from `.env` in a compose deployment at all.
 - Corrected column names in `docs/05-database-design.md`.
 
 ### Security
@@ -366,6 +367,7 @@ The session-lifecycle security hardening release: lifecycle and logout operation
 ## [0.10.3] - 2026-07-21
 
 > ⚠️ **Two behaviour changes on already-released surfaces.**
+>
 > 1. **Boolean and numeric request fields are read strictly.** `1`/`0`/`yes`/`no` or a blank number now returns `400`; real JSON booleans/numbers, `"true"`/`"false"`, and numeric strings such as `"5"` still work.
 > 2. **Status posts now pass the `message:sending` plugin gate.** A broadly-blocking plugin will now block status posts, and the gate `input` for a status post carries no `chatId`.
 
