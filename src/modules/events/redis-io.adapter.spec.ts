@@ -10,6 +10,7 @@ const redisInstances: FakeRedis[] = [];
 class FakeRedis {
   readonly handlers: Record<string, (err: Error) => void> = {};
   quit = jest.fn().mockResolvedValue('OK');
+  disconnect = jest.fn();
   constructor(public readonly opts?: unknown) {
     redisInstances.push(this);
   }
@@ -32,7 +33,7 @@ jest.mock('@socket.io/redis-adapter', () => ({
   createAdapter: (pub: unknown, sub: unknown) => createAdapterMock(pub, sub),
 }));
 
-import { RedisIoAdapter, isWsRedisEnabled, wsRedisOptions } from './redis-io.adapter';
+import { RedisIoAdapter, isWsRedisEnabled, wsRedisOptions, WS_REDIS_QUIT_TIMEOUT_MS } from './redis-io.adapter';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import type { Server } from 'socket.io';
 
@@ -152,8 +153,40 @@ describe('RedisIoAdapter', () => {
 
         expect(pub.quit).toHaveBeenCalledTimes(1);
         expect(sub.quit).toHaveBeenCalledTimes(1);
+        // Always release the socket, so a clean quit still can't leave the reconnect timer alive.
+        expect(pub.disconnect).toHaveBeenCalledTimes(1);
+        expect(sub.disconnect).toHaveBeenCalledTimes(1);
         expect(closeSpy).toHaveBeenCalledWith(server);
       } finally {
+        createSpy.mockRestore();
+        closeSpy.mockRestore();
+      }
+    });
+
+    it('does not hang when quit() never resolves (Redis down at shutdown), then force-disconnects', async () => {
+      jest.useFakeTimers();
+      process.env.REDIS_ENABLED = 'true';
+      const { server } = fakeServer();
+      const createSpy = withBaseServer(server);
+      const closeSpy = jest.spyOn(IoAdapter.prototype, 'close').mockResolvedValue(undefined);
+      try {
+        const adapter = new RedisIoAdapter({} as never);
+        adapter.createIOServer(2785);
+        const [pub, sub] = redisInstances;
+        // The exact outage shape: quit() queued to the offline queue, never settles.
+        pub.quit.mockReturnValue(new Promise(() => undefined));
+        sub.quit.mockReturnValue(new Promise(() => undefined));
+
+        const closed = adapter.close(server);
+        // Drive the per-client deadline; without it the await would block forever.
+        await jest.advanceTimersByTimeAsync(WS_REDIS_QUIT_TIMEOUT_MS + 10);
+        await expect(closed).resolves.toBeUndefined();
+
+        expect(pub.disconnect).toHaveBeenCalledTimes(1);
+        expect(sub.disconnect).toHaveBeenCalledTimes(1);
+        expect(closeSpy).toHaveBeenCalledWith(server);
+      } finally {
+        jest.useRealTimers();
         createSpy.mockRestore();
         closeSpy.mockRestore();
       }
