@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Labels are reachable from an agent.** They had five REST endpoints and no tools at all, so an
+  agent could read and write contacts, groups, messages and webhooks but could not see a label, let
+  alone tag a chat with one. Eight tools close that.
+
+  Each description states which engine supports it, because labels split almost exactly down the
+  middle: every read needs whatsapp-web.js, since Baileys exposes no label query; editing a label
+  needs Baileys, since whatsapp-web.js cannot change one; only tagging and untagging a chat works on
+  both. Left unsaid, an agent reads the `501` as a transient failure and retries a call that cannot
+  succeed on that engine.
+
+
 - **Sessions record which process owns them.** A session's WhatsApp engine runs in exactly one
   process, but nothing recorded which, so a booting process reset every active-looking session on
   the assumption they were all its own leftovers. With one process that is correct. With two it is

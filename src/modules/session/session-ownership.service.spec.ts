@@ -15,7 +15,7 @@ describe('SessionOwnershipService', () => {
 
   const nodeConfig = (nodeId: string, leaseTtlMs = 60_000) =>
     ({
-      get: (key: string) => ({ 'session.nodeId': nodeId, 'session.leaseTtlMs': leaseTtlMs })[key as string],
+      get: (key: string) => ({ 'session.nodeId': nodeId, 'session.leaseTtlMs': leaseTtlMs })[key],
     }) as never;
 
   const service = (nodeId: string, leaseTtlMs?: number): SessionOwnershipService =>

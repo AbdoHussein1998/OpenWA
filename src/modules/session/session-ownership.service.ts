@@ -8,6 +8,19 @@ import { createLogger } from '../../common/services/logger.service';
 import { DateTransformer } from '../../common/transformers/date.transformer';
 
 /**
+ * Bind a lease timestamp the way the column stores it.
+ *
+ * Raw SQL bypasses the column's transformer, and the stored form is not a Date on every dialect —
+ * SQLite keeps an ISO string — so an untransformed parameter compares against the wrong
+ * representation and the clause silently never matches.
+ */
+function leaseParam(at: Date): string | Date {
+  // `to` is declared to accept a nullable Date and so returns a nullable union; a real Date always
+  // comes back as one of the two stored forms.
+  return (DateTransformer.to(at) as string | Date | null) ?? at;
+}
+
+/**
  * Who currently hosts each session's engine.
  *
  * A session's engine runs in exactly one process. Nothing recorded which, so a booting process had
@@ -29,7 +42,7 @@ export class SessionOwnershipService {
   /** Sessions this process believes it owns, so the heartbeat knows what to renew. */
   private readonly owned = new Set<string>();
   /** Notified when a renewal proves this process no longer holds sessions it thought it did. */
-  private onLeaseLost?: (sessionIds: string[]) => Promise<unknown> | unknown;
+  private onLeaseLost?: (sessionIds: string[]) => Promise<void> | void;
 
   constructor(
     @InjectRepository(Session, 'data')
@@ -91,14 +104,11 @@ export class SessionOwnershipService {
       .update(Session)
       .set({ nodeId: this.nodeId, claimedAt: now, leaseExpiresAt: new Date(now.getTime() + this.leaseTtlMs) })
       .where('id = :id', { id: sessionId })
-      // `now` goes through the column's own transformer. Raw SQL bypasses it, and the stored form
-      // is not a Date on every dialect — SQLite keeps an ISO string — so an untransformed parameter
-      // compares against the wrong representation and the clause silently never matches. That would
-      // not fail loudly: expired claims would simply never be taken over, stranding every session a
-      // crashed process was holding.
+      // Without leaseParam this clause would silently never match, so an expired claim would never
+      // be taken over — stranding every session a crashed process was holding.
       .andWhere('("nodeId" IS NULL OR "nodeId" = :me OR "leaseExpiresAt" < :now)', {
         me: this.nodeId,
-        now: DateTransformer.to(now),
+        now: leaseParam(now),
       })
       .execute();
 
@@ -156,7 +166,7 @@ export class SessionOwnershipService {
    * and if this process keeps its engine running there are two engines on one WhatsApp account —
    * the exact outcome the claim exists to prevent. The handler is how the engine gets torn down.
    */
-  onLeaseLoss(handler: (sessionIds: string[]) => Promise<unknown> | unknown): void {
+  onLeaseLoss(handler: (sessionIds: string[]) => Promise<void> | void): void {
     this.onLeaseLost = handler;
   }
 
@@ -232,7 +242,7 @@ export class SessionOwnershipService {
       .createQueryBuilder('session')
       .select('session.id', 'id')
       .where('"nodeId" IS NOT NULL AND "nodeId" <> :me', { me: this.nodeId })
-      .andWhere('"leaseExpiresAt" > :now', { now: DateTransformer.to(now) })
+      .andWhere('"leaseExpiresAt" > :now', { now: leaseParam(now) })
       .getRawMany<{ id: string }>();
     return rows.map(row => row.id);
   }
