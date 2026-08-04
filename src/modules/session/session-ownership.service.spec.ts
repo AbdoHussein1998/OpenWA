@@ -140,6 +140,32 @@ describe('SessionOwnershipService', () => {
     });
   });
 
+  describe('releasing a lapsed foreign claim', () => {
+    // A deliberate teardown of a session whose crashed owner's lease expired must actually leave it
+    // down. A row still naming the dead node reads as an abandoned orphan, and the takeover sweep
+    // would adopt and restart the session the operator just stopped.
+    it('clears a claim whose holder is gone and its lease has lapsed', async () => {
+      const session = await seed({ nodeId: 'dead-node', leaseExpiresAt: new Date(Date.now() - 1000) });
+
+      await service('node-b').release(session.id);
+
+      const stored = await sessions.findOneByOrFail({ id: session.id });
+      expect(stored.nodeId).toBeNull();
+      expect(stored.leaseExpiresAt).toBeNull();
+    });
+
+    it('leaves a LIVE peer claim untouched — releasing it would strand a running engine', async () => {
+      const liveExpiry = new Date(Date.now() + 600_000);
+      const session = await seed({ nodeId: 'peer-node', leaseExpiresAt: liveExpiry });
+
+      await service('node-b').release(session.id);
+
+      const stored = await sessions.findOneByOrFail({ id: session.id });
+      expect(stored.nodeId).toBe('peer-node');
+      expect(stored.leaseExpiresAt!.getTime()).toBe(liveExpiry.getTime());
+    });
+  });
+
   describe('renewing', () => {
     it('pushes the expiry out, so a busy node does not lose what it is running', async () => {
       const session = await seed();

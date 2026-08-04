@@ -149,6 +149,24 @@ describe('cold-reachout counting against a real database', () => {
     await expect(service.assertSendAllowed('s1', '628555@c.us')).resolves.toBeUndefined();
   });
 
+  // The per-send probe and the daily aggregate must agree about who is a stranger, or the aggregate
+  // over-counts and refuses legitimate sends a slot or more early.
+  it('counts a contact reached under either dialect once, and not at all when known before today', async () => {
+    // Known since yesterday under the engine spelling; today's outgoing uses the neutral one.
+    await addMessage('628555@s.whatsapp.net', YESTERDAY);
+    await addMessage('628555@c.us', TODAY);
+    // The same stranger written to under both spellings today is ONE cold reachout, not two.
+    await addMessage('628777@c.us', TODAY);
+    await addMessage('628777@s.whatsapp.net', TODAY);
+    await addMessage('cold-2@c.us', TODAY);
+
+    // Two of three used (the warm contact counted zero, the double-spelled stranger counted once).
+    await expect(service.assertSendAllowed('s1', 'stranger@c.us')).resolves.toBeUndefined();
+
+    await addMessage('cold-3@c.us', TODAY);
+    await expect(service.assertSendAllowed('s1', 'stranger@c.us')).rejects.toMatchObject({ status: 429 });
+  });
+
   it("forgets yesterday's reachouts when the UTC day rolls over", async () => {
     await addMessage('y1@c.us', YESTERDAY);
     await addMessage('y2@c.us', YESTERDAY);

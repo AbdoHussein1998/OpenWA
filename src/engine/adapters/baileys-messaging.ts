@@ -96,13 +96,18 @@ export class BaileysMessaging {
       getUrlInfo: (text: string) => generateSafeLinkPreview(text),
     };
     // `linkPreview: null` is Baileys' explicit "no preview": with the key absent it instead calls the
-    // configured generator (Utils/messages.js:279-281). Suppressing therefore also skips that call —
-    // which today fails anyway, since the generator dynamically imports an optional package this
-    // project does not install, and the failure is swallowed with a warn on every URL-bearing send.
+    // configured generator (Utils/messages.js:279-281), which for us means a blocking outbound fetch
+    // of every URL in the text (up to 3s each, no cache) before the message can go out.
+    //
+    // Previews are therefore OPT-IN on this engine: only `linkPreview: true` leaves the key absent.
+    // That keeps the documented engine default ("Baileys builds none") true, and keeps a bulk
+    // campaign whose template carries a slow or dead URL from stalling on every single message.
+    // getUrlInfo above is still passed unconditionally, so the library's vulnerable generator stays
+    // unreachable on the paths that do generate.
     const content = {
       text,
       ...this.withMentions(mentions),
-      ...(sendOptions?.linkPreview === false ? { linkPreview: null } : {}),
+      ...(sendOptions?.linkPreview === true ? {} : { linkPreview: null }),
       // A caller-supplied preview short-circuits generation entirely: with the key present Baileys
       // never calls getUrlInfo, so nothing is fetched and the metadata is used verbatim.
       ...(sendOptions?.customPreview

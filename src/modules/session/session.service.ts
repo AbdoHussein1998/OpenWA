@@ -304,8 +304,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   async stop(id: string): Promise<Session> {
     const session = await this.engineLifecycle.stop(id);
     // Handed back on the way out so a peer can pick it up immediately rather than waiting for the
-    // lease to lapse. Stop is the deliberate end of this process's ownership.
-    await this.ownership?.release(id);
+    // lease to lapse. Stop is the deliberate end of this process's ownership — but a start() that
+    // began before this stop and is still mid-launch owns the claim now, so the same
+    // engine-liveness guard the failure paths use applies here: releasing under an in-flight start
+    // would leave a live engine on an unclaimed row that no heartbeat renews and any peer may
+    // start a second time.
+    await this.releaseUnlessEngineActive(id);
     return session;
   }
 
@@ -314,7 +318,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     try {
       const session = await this.engineLifecycle.logout(id);
       // Torn down locally on the 200 path — hand the claim back the way stop() does.
-      await this.ownership?.release(id);
+      await this.releaseUnlessEngineActive(id);
       return session;
     } catch (error) {
       // The 502-incomplete path tears the engine down too, and a "not started" refusal never had
@@ -327,7 +331,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   async forceKill(id: string): Promise<Session> {
     try {
       const session = await this.engineLifecycle.forceKill(id);
-      await this.ownership?.release(id);
+      await this.releaseUnlessEngineActive(id);
       return session;
     } catch (error) {
       await this.releaseUnlessEngineActive(id);

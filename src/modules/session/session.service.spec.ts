@@ -1110,10 +1110,27 @@ describe('SessionService', () => {
 
       expect(ownership.release).toHaveBeenCalledWith('sess-uuid-1');
     });
+
+    // A stop() that lands while a start() is mid-launch must NOT hand the claim back: the start
+    // holds it, and its engine is about to register. Releasing here left a live engine on an
+    // unclaimed row — no heartbeat renewed it, and any peer would start the account a second time.
+    it.each([
+      ['stop', (s: SessionService) => s.stop('sess-uuid-1')],
+      ['logout', (s: SessionService) => s.logout('sess-uuid-1')],
+      ['forceKill', (s: SessionService) => s.forceKill('sess-uuid-1')],
+    ])('%s() keeps the claim when a concurrent start still holds the session here', async (verb, call) => {
+      const ownership = withOwnership();
+      jest.spyOn(lifecycle, verb as 'stop' | 'logout' | 'forceKill').mockResolvedValue(createMockSession());
+      jest.spyOn(lifecycle, 'isEngineActive').mockReturnValue(true);
+
+      await call(service);
+
+      expect(ownership.release).not.toHaveBeenCalled();
+    });
   });
 
   describe('isEngineActive', () => {
-    it('is live for a registered engine, an in-flight start, or reconnect state — dead otherwise', () => {
+    it('is live for a registered engine, an in-flight start, or a pending reconnect — dead otherwise', () => {
       const intern = lifecycle as unknown as {
         engines: { set: (id: string, e: unknown) => void; delete: (id: string) => void };
         initializingSessions: Set<string>;
@@ -1129,11 +1146,34 @@ describe('SessionService', () => {
       expect(lifecycle.isEngineActive('x')).toBe(true);
       intern.initializingSessions.delete('x');
 
+      // An attempt counted but not yet armed (decideReconnect increments before setTimeout).
       intern.reconnectStates.set('x', { attempts: 1, timer: null });
       expect(lifecycle.isEngineActive('x')).toBe(true);
-      intern.reconnectStates.delete('x');
 
+      // An armed timer, attempts reset by a successful READY.
+      intern.reconnectStates.set('x', { attempts: 0, timer: setTimeout(() => undefined, 60_000) });
+      expect(lifecycle.isEngineActive('x')).toBe(true);
+      clearTimeout((intern.reconnectStates.get('x') as { timer: NodeJS.Timeout }).timer);
+
+      // The dormant entry start() arms up front: a start that then FAILED leaves nothing that will
+      // ever register an engine, so counting it as liveness pinned the claim to this node forever.
+      intern.reconnectStates.set('x', { attempts: 0, timer: null });
       expect(lifecycle.isEngineActive('x')).toBe(false);
+
+      intern.reconnectStates.delete('x');
+      expect(lifecycle.isEngineActive('x')).toBe(false);
+    });
+
+    it('a failed start leaves no reconnect state behind', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      mockEngine.initialize.mockRejectedValue(new Error('engine init failed'));
+
+      await expect(service.start('sess-uuid-1')).rejects.toThrow('engine init failed');
+
+      const intern = lifecycle as unknown as { reconnectStates: Map<string, unknown> };
+      expect(intern.reconnectStates.has('sess-uuid-1')).toBe(false);
+      expect(lifecycle.isEngineActive('sess-uuid-1')).toBe(false);
     });
   });
 

@@ -1178,7 +1178,11 @@ describe('BaileysAdapter messaging', () => {
     fakeSock.sendMessage.mockResolvedValue({ key: { id: 'OUT1' }, messageTimestamp: 1700000001 });
     const adapter = await readyAdapter();
     const res = await adapter.sendTextMessage('628111@s.whatsapp.net', 'hello');
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', { text: 'hello' }, safeSendOptions());
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '628111@s.whatsapp.net',
+      { text: 'hello', linkPreview: null },
+      safeSendOptions(),
+    );
     expect(res).toEqual({ id: 'OUT1', timestamp: 1700000001 });
   });
 
@@ -1217,7 +1221,11 @@ describe('BaileysAdapter messaging', () => {
     const adapter = await readyAdapter();
     await adapter.sendTextMessage('628111@c.us', 'hello');
     expect(fakeSock.signalRepository.lidMapping.getLIDForPN).toHaveBeenCalledWith('628111@s.whatsapp.net');
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('484848@lid', { text: 'hello' }, safeSendOptions());
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '484848@lid',
+      { text: 'hello', linkPreview: null },
+      safeSendOptions(),
+    );
   });
 
   it('sendTextMessage keeps the phone jid when no LID mapping is known', async () => {
@@ -1225,7 +1233,11 @@ describe('BaileysAdapter messaging', () => {
     fakeSock.signalRepository = { lidMapping: { getLIDForPN: jest.fn().mockResolvedValue(null) } };
     const adapter = await readyAdapter();
     await adapter.sendTextMessage('628111@c.us', 'hello');
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@c.us', { text: 'hello' }, safeSendOptions());
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '628111@c.us',
+      { text: 'hello', linkPreview: null },
+      safeSendOptions(),
+    );
   });
 
   it('sendTextMessage honors the chat disappearing timer when one is cached (#473)', async () => {
@@ -1235,7 +1247,7 @@ describe('BaileysAdapter messaging', () => {
     await adapter.sendTextMessage('628111@s.whatsapp.net', 'hello');
     expect(fakeSock.sendMessage).toHaveBeenCalledWith(
       '628111@s.whatsapp.net',
-      { text: 'hello' },
+      { text: 'hello', linkPreview: null },
       // The disappearing timer still rides on the same options object the generator now shares.
       expect.objectContaining({ ephemeralExpiration: 604800, getUrlInfo: expect.any(Function) as unknown }) as unknown,
     );
@@ -1247,7 +1259,7 @@ describe('BaileysAdapter messaging', () => {
     await adapter.sendTextMessage('120@g.us', 'hi @62811', ['62811@c.us']);
     expect(fakeSock.sendMessage).toHaveBeenCalledWith(
       '120@g.us',
-      { text: 'hi @62811', mentions: ['62811@s.whatsapp.net'] },
+      { text: 'hi @62811', mentions: ['62811@s.whatsapp.net'], linkPreview: null },
       safeSendOptions(),
     );
   });
@@ -1256,7 +1268,11 @@ describe('BaileysAdapter messaging', () => {
     fakeSock.sendMessage.mockResolvedValue({ key: { id: 'OUT1' }, messageTimestamp: 1700000001 });
     const adapter = await readyAdapter();
     await adapter.sendTextMessage('120@g.us', 'plain', []);
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('120@g.us', { text: 'plain' }, safeSendOptions());
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '120@g.us',
+      { text: 'plain', linkPreview: null },
+      safeSendOptions(),
+    );
   });
 
   it('getNumberId resolves via onWhatsApp and returns a NEUTRAL jid (never @s.whatsapp.net)', async () => {
@@ -4871,12 +4887,17 @@ describe('BaileysAdapter link preview', () => {
     expect(sentContent()).not.toHaveProperty('linkPreview');
   });
 
-  it('leaves the key out for a plain send', async () => {
+  // Previews are OPT-IN on this engine: generation means a blocking outbound fetch per URL before
+  // the message can go out (a bulk campaign carrying a slow URL would stall on every message), and
+  // the documented engine default is that Baileys builds none.
+  it('suppresses generation for a plain send, and for a send that says nothing about previews', async () => {
     const adapter = await readyAdapter();
 
     await adapter.sendTextMessage('628111@c.us', 'hi');
+    expect(sentContent().linkPreview).toBeNull();
 
-    expect(sentContent()).not.toHaveProperty('linkPreview');
+    await adapter.sendTextMessage('628111@c.us', 'see https://example.com');
+    expect(sentContent().linkPreview).toBeNull();
   });
 });
 

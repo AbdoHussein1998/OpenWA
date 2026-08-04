@@ -36,6 +36,7 @@ import { IngressEvent } from '../integration/entities/ingress-event.entity';
 import { WebhookDeliveryFailure } from '../webhook/entities/webhook-delivery-failure.entity';
 import { IntegrationDeliveryFailure } from '../integration/entities/integration-delivery-failure.entity';
 import { StatusUpdate } from '../status-store/entities/status-update.entity';
+import { AutomationRule } from '../automation/entities/automation-rule.entity';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 
 describe('InfraDataController.importData round-trips export-data (no silent message/batch loss)', () => {
@@ -835,6 +836,7 @@ describe('InfraDataController.importData status_updates + runtime reconciliation
         WebhookDeliveryFailure,
         IntegrationDeliveryFailure,
         StatusUpdate,
+        AutomationRule,
       ],
       synchronize: true,
     });
@@ -860,6 +862,40 @@ describe('InfraDataController.importData status_updates + runtime reconciliation
         lastActiveAt: null,
       }),
     );
+
+  // automation_rules FKs sessions ON DELETE CASCADE, so the import's `DELETE FROM sessions` takes
+  // every rule with it — on SQLite too, where better-sqlite3 enforces foreign keys. Without export +
+  // re-insert the documented backup/restore silently destroyed every autoreply rule.
+  it('exports and restores automation_rules, which the session wipe would otherwise cascade away', async () => {
+    await seedSession('s1');
+    const ruleRepo = ds.getRepository(AutomationRule);
+    await ruleRepo.save(
+      ruleRepo.create({
+        id: 'rule-1',
+        sessionId: 's1',
+        name: 'office hours',
+        enabled: true,
+        conditions: { bodyContains: ['hello'] } as never,
+        replyText: 'We are closed',
+        cooldownSeconds: 120,
+      }),
+    );
+
+    const controller = build();
+    const dump = await controller.exportData();
+    expect(dump.counts.automationRules).toBe(1);
+    expect(dump.skippedTables).toEqual([]);
+
+    const res = await controller.importData({ tables: dump.tables });
+
+    expect(res.imported).toBe(true);
+    expect(res.counts.automationRules).toBe(1);
+    const restored = await ruleRepo.findOneByOrFail({ id: 'rule-1' });
+    expect(restored.replyText).toBe('We are closed');
+    expect(restored.cooldownSeconds).toBe(120);
+    expect(restored.enabled).toBe(true);
+    expect(restored.conditions).toEqual({ bodyContains: ['hello'] });
+  });
 
   it('exports and restores status_updates (the table the docs promise is covered)', async () => {
     await seedSession('s1');

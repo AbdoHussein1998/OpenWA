@@ -220,6 +220,10 @@ export class SessionEngineControls {
           await this.fences.teardownEngineSafely(id, orphan, e => e.forceDestroy(), 'force-destroy');
           await this.host.updateStatus(id, SessionStatus.FAILED).catch(() => undefined);
         }
+        // Drop the reconnect state this start() armed up front: no engine was registered, so
+        // nothing will ever fire it, and leaving it behind is dead state a later liveness check
+        // would have to reason about. A retry builds its own.
+        this.host.cancelReconnect(id);
         throw err;
       }
 

@@ -5,12 +5,13 @@ import { StorageService, isMissingObjectError } from '../../common/storage/stora
 import type { Status, StatusResult, StatusPostOptions } from '../../engine/interfaces/whatsapp-engine.interface';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from '../message/media-cap.util';
 import { HookManager, applySendingGate } from '../../core/hooks';
-import { SendPacingService } from '../message/send-pacing.service';
+import { SendPacingService, countsTowardSendBreaker } from '../message/send-pacing.service';
 
-/** Stored status media is only ever an image or video; a sender-declared mimetype outside that is
- * served as inert octet-stream so the media endpoint can't be turned into active content (HTML/JS)
- * on the API origin. */
-const SAFE_STATUS_MIMETYPE = /^(image|video)\//;
+/** Stored status media is only ever an image, a video or a voice note; a sender-declared mimetype
+ * outside that is served as inert octet-stream so the media endpoint can't be turned into active
+ * content (HTML/JS) on the API origin. Audio belongs here because a voice status is a first-class
+ * status type — without it the dashboard's audio player is handed an octet-stream it cannot play. */
+const SAFE_STATUS_MIMETYPE = /^(image|video|audio)\//;
 
 @Injectable()
 export class StatusService {
@@ -92,7 +93,9 @@ export class StatusService {
    * Report the engine post's outcome to the pacing breaker, exactly as the chat send path does
    * (message.service failSend/persistSentState): the engine was asked, so a refusal counts toward
    * the failure streak and an accept resets it. The pre-engine pacing/plugin gate runs OUTSIDE this
-   * wrapper, so a policy refusal never feeds the breaker — only a genuine engine refusal does.
+   * wrapper, so a policy refusal never feeds the breaker — and neither do the client-fault checks
+   * the adapters run inside the call (Baileys refuses a status with no recipients, a media URL can
+   * be SSRF-blocked): those say nothing about the account's standing. See countsTowardSendBreaker.
    */
   private async recordedPost(sessionId: string, post: () => Promise<StatusResult>): Promise<StatusResult> {
     try {
@@ -100,7 +103,9 @@ export class StatusService {
       this.pacing.recordSendSuccess(sessionId);
       return result;
     } catch (error) {
-      this.pacing.recordSendFailure(sessionId);
+      if (countsTowardSendBreaker(error)) {
+        this.pacing.recordSendFailure(sessionId);
+      }
       throw error;
     }
   }

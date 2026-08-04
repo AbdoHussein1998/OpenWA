@@ -1,5 +1,14 @@
-import { HttpException } from '@nestjs/common';
-import { SendPacingService, SEND_PACING_LIMITED } from './send-pacing.service';
+import {
+  BadRequestException,
+  HttpException,
+  InternalServerErrorException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { SendPacingService, SEND_PACING_LIMITED, countsTowardSendBreaker } from './send-pacing.service';
+import { EngineRefusedError } from '../../common/errors/engine-refused.error';
+import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
+import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { computeSendPacingConfig, type SendPacingConfig } from './send-pacing.config';
 import { getSendPacingRefusals, resetSendPacingRefusals } from '../../common/metrics/send-pacing-metrics';
 import { MessageDirection, type Message } from './entities/message.entity';
@@ -567,5 +576,29 @@ describe('SendPacingService cold-reachout cap', () => {
 
     expect(getSendPacingRefusals().get('cold_daily_cap')).toBe(1);
     expect(auditCall(audit.logWarn)[1].metadata).toMatchObject({ rule: 'cold_daily_cap' });
+  });
+});
+
+// The breaker exists to notice that WHATSAPP is refusing this account's sends. Adapters also raise
+// client-fault and engine-state errors from inside the same engine call, and counting those let a
+// client sending malformed requests open the breaker on a perfectly healthy session — 429ing every
+// send, including unrelated ones, for the whole cooldown.
+describe('countsTowardSendBreaker', () => {
+  it.each([
+    ['an SSRF-blocked media URL', new SsrfBlockedError('Host resolves to 169.254.169.254')],
+    ['a capability this engine lacks (501)', new EngineNotSupportedError('customLinkPreview')],
+    ['a disconnected engine (503)', new ServiceUnavailableException('engine not connected')],
+    ['a malformed request (400)', new BadRequestException('recipients is required')],
+    ['an unknown message id (404)', new NotFoundException('message not found')],
+  ])('does not count %s', (_label, error) => {
+    expect(countsTowardSendBreaker(error)).toBe(false);
+  });
+
+  it.each([
+    ['a WhatsApp refusal (403 EngineRefusedError)', new EngineRefusedError('not allowed to send here')],
+    ['a raw engine error', new Error('ack error 500')],
+    ['a server-side fault', new InternalServerErrorException('boom')],
+  ])('counts %s', (_label, error) => {
+    expect(countsTowardSendBreaker(error)).toBe(true);
   });
 });

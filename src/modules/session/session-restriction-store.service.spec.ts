@@ -70,8 +70,10 @@ describe('SessionRestrictionStore', () => {
 
       expect(store.get('s1')).toBeUndefined();
       expect(store.attachTo(sessionRow('s1')).restriction).toBeNull();
-      // Still stored: set/clear own the lift signal, and the next engine report self-heals the map.
-      expect(store.size()).toBe(1);
+      // Reported as not-restricted everywhere reads happen — including the count that feeds the
+      // gauge, which would otherwise claim a restriction the API no longer serves. The entry itself
+      // stays stored: set/clear own the lift signal, and the next engine report self-heals the map.
+      expect(store.size()).toBe(0);
     });
 
     it('keeps reporting one that has not expired, or that states no end', () => {

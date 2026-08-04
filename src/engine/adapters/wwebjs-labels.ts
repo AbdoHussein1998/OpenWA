@@ -3,6 +3,7 @@ import { Label, ChatSummary } from '../interfaces/whatsapp-engine.interface';
 import { GroupChat, BusinessClient } from '../types/whatsapp-web-js.types';
 import { isChannelJid, chatKind } from '../identity/wa-id';
 import { ChatLabelsUnsupportedError } from '../../common/errors/chat-labels-unsupported.error';
+import { LabelNotFoundError } from '../../common/errors/label-not-found.error';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -39,7 +40,20 @@ export class WwebjsLabels {
    */
   async getChatsByLabel(labelId: string): Promise<ChatSummary[]> {
     this.host.ensureReady();
-    const chats = await (this.client() as unknown as BusinessClient).getChatsByLabelId(labelId);
+    // The upstream page code dereferences the label without checking it exists, so an unknown id —
+    // and every id on a personal (non-Business) account, whose label collection is empty — throws a
+    // page-side TypeError that would surface as an opaque 500. A label that is not there is a 404,
+    // the same answer getLabelById gives.
+    let chats: Awaited<ReturnType<BusinessClient['getChatsByLabelId']>>;
+    try {
+      chats = await (this.client() as unknown as BusinessClient).getChatsByLabelId(labelId);
+    } catch (error) {
+      this.host.logger.debug('getChatsByLabelId rejected; treating the label as not found', {
+        labelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new LabelNotFoundError(labelId);
+    }
     const summaries: ChatSummary[] = [];
     for (const chat of chats ?? []) {
       // The library builds this list via getChatById per label item and yields UNDEFINED entries

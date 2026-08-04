@@ -87,6 +87,12 @@ export class WwebjsChannels {
    */
   async muteChannel(channelId: string, mute: boolean): Promise<void> {
     this.host.ensureReady();
+    // getChatById resolves — and will happily CREATE — an ordinary 1:1/group chat for a non-channel
+    // id, and Chat carries mute()/unmute() too: without this check a mistyped id muted a real
+    // conversation forever (an undefined expiry means "no end date" upstream) and reported success.
+    if (!channelId.endsWith('@newsletter')) {
+      throw new ChannelNotFoundError(channelId);
+    }
     const chat = (await this.client().getChatById(channelId)) as unknown as {
       mute?: () => Promise<boolean>;
       unmute?: () => Promise<boolean>;

@@ -130,14 +130,24 @@ export class SessionOwnershipService {
     return claimed;
   }
 
-  /** Give a session up, so a peer can take it without waiting for the lease to lapse. */
+  /**
+   * Give a session up, so a peer can take it without waiting for the lease to lapse.
+   *
+   * Clears a LAPSED foreign claim too, on the same predicate `claim()` uses. A deliberate teardown
+   * (stop/logout/delete) of a session whose crashed owner's lease has expired must actually leave
+   * it down: a row still naming the dead node reads as an abandoned orphan to the takeover sweep,
+   * which would adopt and restart the session the operator just stopped. A LIVE foreign claim is
+   * left alone — releasing that would strand a peer's running engine.
+   */
   async release(sessionId: string): Promise<void> {
+    const now = new Date();
     this.owned.delete(sessionId);
     await this.sessions
       .createQueryBuilder()
       .update(Session)
       .set({ nodeId: null, claimedAt: null, leaseExpiresAt: null, nodeUrl: null })
-      .where('id = :id AND "nodeId" = :me', { id: sessionId, me: this.nodeId })
+      .where('id = :id', { id: sessionId })
+      .andWhere('("nodeId" = :me OR "leaseExpiresAt" < :now)', { me: this.nodeId, now: leaseParam(now) })
       .execute();
   }
 

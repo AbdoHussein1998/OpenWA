@@ -11,7 +11,7 @@ import { Reflector } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
 import { Repository } from 'typeorm';
-import { EMPTY, Observable } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import type { Request, Response } from 'express';
 import { Session } from './entities/session.entity';
 import { SessionOwnershipService } from './session-ownership.service';
@@ -99,8 +99,12 @@ export class SessionProxyInterceptor implements NestInterceptor {
     if (!owner.nodeUrl) return next.handle();
 
     await this.forward(request, context.switchToHttp().getResponse<Response>(), owner.nodeId, owner.nodeUrl);
-    // The response has been written; complete without emitting so nothing downstream re-answers it.
-    return EMPTY;
+    // The response has been written and ended here. Emit undefined rather than completing empty:
+    // Nest resolves an interceptor's observable with `lastValueFrom`, which REJECTS on an empty one
+    // (EmptyError) — every successful forward then travelled the unknown-exception path and logged
+    // an ERROR stack, for a request that had in fact succeeded. Emitting leaves the already-sent
+    // response untouched (verified end-to-end in session-proxy.e2e-spec).
+    return of(undefined);
   }
 
   private sessionIdOf(context: ExecutionContext, request: Request): string | undefined {

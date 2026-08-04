@@ -34,8 +34,21 @@ export class SessionRestrictionStore {
   set(sessionId: string, restriction: AccountRestriction): boolean {
     const previous = this.restrictions.get(sessionId);
     this.restrictions.set(sessionId, restriction);
-    setRestrictedSessionCount(this.restrictions.size);
+    this.publishCount();
     return previous?.kind !== restriction.kind || previous?.code !== restriction.code;
+  }
+
+  /**
+   * Publish what the API would actually report: entries whose stated end has passed are no longer
+   * served, so counting them would leave the gauge claiming a session is restricted while every
+   * read says it is not.
+   */
+  private publishCount(): void {
+    let inForce = 0;
+    for (const sessionId of this.restrictions.keys()) {
+      if (this.inForce(sessionId)) inForce++;
+    }
+    setRestrictedSessionCount(inForce);
   }
 
   /** The restriction in force, if any. `attachTo` is the projection; this is the raw read. */
@@ -63,7 +76,7 @@ export class SessionRestrictionStore {
   clear(sessionId: string): AccountRestriction | undefined {
     const previous = this.restrictions.get(sessionId);
     this.restrictions.delete(sessionId);
-    setRestrictedSessionCount(this.restrictions.size);
+    this.publishCount();
     return previous;
   }
 
@@ -81,9 +94,13 @@ export class SessionRestrictionStore {
     return this.clear(sessionId);
   }
 
-  /** How many sessions are restricted right now. */
+  /** How many sessions are restricted right now — expired entries excluded, as reads are. */
   size(): number {
-    return this.restrictions.size;
+    let inForce = 0;
+    for (const sessionId of this.restrictions.keys()) {
+      if (this.inForce(sessionId)) inForce++;
+    }
+    return inForce;
   }
 
   /**
