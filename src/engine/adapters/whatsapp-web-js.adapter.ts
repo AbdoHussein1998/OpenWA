@@ -41,6 +41,7 @@ import {
   ChatState,
   LabelInput,
   GroupEvent,
+  CustomLinkPreview,
   GroupJoinInfo,
   IncomingCallEvent,
   AccountRestriction,
@@ -1340,7 +1341,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     chatId: string,
     text: string,
     mentions?: string[],
-    options?: { linkPreview?: boolean },
+    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
   ): Promise<MessageResult> {
     return this.messaging.sendTextMessage(chatId, text, mentions, options);
   }

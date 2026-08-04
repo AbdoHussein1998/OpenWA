@@ -1302,6 +1302,7 @@ Send a plain text message.
 | text | string | Yes | non-empty, max 4096 | Message text |
 | mentions | string[] | No | array of WIDs | WIDs to @mention (e.g. `["62811@c.us"]`). See **Mentions** below |
 | linkPreview | boolean | No | — | `false` suppresses the URL preview. See **Link previews** below |
+| customLinkPreview | object | No | `{ url, title, description? }` | Attach a preview you supply. **Baileys only.** See **Link previews** below |
 
 ```json
 { "chatId": "628123456789@c.us", "text": "Hello from OpenWA!" }
@@ -1318,11 +1319,23 @@ the two engines genuinely differ:
 | | whatsapp-web.js | Baileys |
 | --- | --- | --- |
 | `linkPreview: false` | no preview | no preview |
-| unset / `true` | asks WhatsApp Web to build a preview in-page | **no preview** — its generator is an optional package this gateway does not install |
+| unset / `true` | asks WhatsApp Web to build a preview in-page | the gateway fetches the page itself and builds one |
+| `customLinkPreview` | `501` — the library takes a boolean only, with no way to pass a title | preview attached verbatim, nothing fetched |
 
-So `true` does not force a preview onto Baileys; it only declines to suppress one. Sending `false` on
-Baileys additionally skips a generator call that currently fails and is swallowed with a warning on
-every message containing a URL.
+**How Baileys previews are generated.** Not with the library's own generator. That one delegates to
+`link-preview-js`, which carries an unfixed SSRF advisory
+([GHSA-4gp8-rjrq-ch6q](https://github.com/advisories/GHSA-4gp8-rjrq-ch6q), CWE-918 — "IPv6 and
+internal loopback attacks", no patched release). Since the URL comes from message text, an attacker
+influences what this server fetches, so the gateway supplies its own generator instead: it fetches
+through the same SSRF guard used elsewhere, which validates the destination **and pins the
+connection to the vetted address**, closing the DNS-rebinding window a validate-then-delegate
+approach would leave open. `WEBHOOK_SSRF_PROTECT` and `SSRF_ALLOWED_HOSTS` apply, so a deployment
+that intentionally allows an internal host keeps that behaviour. A refused, slow or broken site
+yields no preview — never a failed send.
+
+`customLinkPreview` fetches **nothing at all**, so it works for URLs this server cannot reach, and it
+cannot be combined with `linkPreview: false` — that asks for the opposite, and the request is
+rejected with `400` rather than guessing which half was meant.
 
 > whatsapp-web.js's own documentation notes the flag "has no effect on multi-device accounts". Its
 > code does act on the flag, but that caveat is upstream's and is repeated here rather than

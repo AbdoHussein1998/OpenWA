@@ -5897,3 +5897,22 @@ describe('WhatsAppWebJsAdapter link preview', () => {
     expect(sentOptions(sendMessage)).toEqual({ mentions: ['628@c.us'], linkPreview: false });
   });
 });
+
+// whatsapp-web.js takes a boolean only — there is no way to hand it a title or description. Silently
+// dropping the caller's preview would send a message that looks nothing like what they asked for.
+describe('WhatsAppWebJsAdapter custom link preview', () => {
+  it('refuses a caller-supplied preview rather than ignoring it', async () => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    const sendMessage = jest.fn();
+    (adapter as unknown as { client: unknown }).client = { sendMessage };
+
+    await expect(
+      adapter.sendTextMessage('c@c.us', 'hi', undefined, {
+        customPreview: { url: 'https://example.com', title: 'Example' },
+      }),
+    ).rejects.toThrow(/customPreview/);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+});

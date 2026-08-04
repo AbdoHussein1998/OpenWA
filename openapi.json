@@ -7759,6 +7759,32 @@
           }
         }
       },
+      "CustomLinkPreviewDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL as it appears in the message text — WhatsApp anchors the preview to it.",
+            "example": "https://example.com/launch"
+          },
+          "title": {
+            "type": "string",
+            "description": "Required: WhatsApp will not render a preview without a title.",
+            "example": "We just launched",
+            "maxLength": 256
+          },
+          "description": {
+            "type": "string",
+            "description": "Preview description",
+            "example": "Read the announcement.",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "url",
+          "title"
+        ]
+      },
       "SendTextMessageDto": {
         "type": "object",
         "properties": {
@@ -7787,6 +7813,14 @@
             "type": "boolean",
             "description": "Set `false` to suppress the URL preview. Guaranteed only in that direction: leaving it unset means whatever the engine does by default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a preview, while Baileys builds none unless its optional preview generator is installed. Sending `true` therefore does not force a preview on Baileys.",
             "example": false
+          },
+          "customLinkPreview": {
+            "description": "Attach a preview you supply yourself, instead of one fetched from the URL. Nothing is fetched for these, so a preview can be attached even for a URL this server cannot reach. **Baileys only** — whatsapp-web.js takes a boolean and answers `501`. Cannot be combined with `linkPreview: false`, which asks for the opposite.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CustomLinkPreviewDto"
+              }
+            ]
           }
         },
         "required": [

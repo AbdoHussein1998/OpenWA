@@ -19,6 +19,10 @@ type SendTextRequest struct {
 	// means the engine default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a
 	// preview, Baileys builds none unless its optional generator is installed.
 	LinkPreview *bool `json:"linkPreview,omitempty"`
+	// CustomLinkPreview attaches a preview you supply instead of one fetched from the URL. Nothing is
+	// fetched, so it works even for a URL the gateway cannot reach. Baileys only — whatsapp-web.js
+	// takes a boolean and answers 501. Cannot be combined with LinkPreview=false.
+	CustomLinkPreview *CustomLinkPreview `json:"customLinkPreview,omitempty"`
 }
 
 // SendMediaRequest sends image/video/document/sticker media. Provide exactly

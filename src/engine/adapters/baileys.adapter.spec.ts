@@ -169,6 +169,15 @@ const newAdapter = (): BaileysAdapter =>
 
 const noopCallbacks = (over: Partial<EngineEventCallbacks> = {}): EngineEventCallbacks => over;
 
+/**
+ * Every text send now carries send-options, because that is how the SSRF-safe preview generator
+ * replaces the library's own (see safe-link-preview.ts). Matching on the shape rather than
+ * `expect.anything()` keeps the assertion honest: the options object disappearing would mean
+ * Baileys' vulnerable generator became reachable again.
+ */
+const safeSendOptions = (): unknown =>
+  expect.objectContaining({ getUrlInfo: expect.any(Function) as unknown }) as unknown;
+
 function firstEditedMessage(callback: jest.Mock): EditedMessage {
   const calls = callback.mock.calls as Array<[EditedMessage]>;
   const first = calls[0];
@@ -1166,7 +1175,7 @@ describe('BaileysAdapter messaging', () => {
     fakeSock.sendMessage.mockResolvedValue({ key: { id: 'OUT1' }, messageTimestamp: 1700000001 });
     const adapter = await readyAdapter();
     const res = await adapter.sendTextMessage('628111@s.whatsapp.net', 'hello');
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', { text: 'hello' });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', { text: 'hello' }, safeSendOptions());
     expect(res).toEqual({ id: 'OUT1', timestamp: 1700000001 });
   });
 
@@ -1205,7 +1214,7 @@ describe('BaileysAdapter messaging', () => {
     const adapter = await readyAdapter();
     await adapter.sendTextMessage('628111@c.us', 'hello');
     expect(fakeSock.signalRepository.lidMapping.getLIDForPN).toHaveBeenCalledWith('628111@s.whatsapp.net');
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('484848@lid', { text: 'hello' });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('484848@lid', { text: 'hello' }, safeSendOptions());
   });
 
   it('sendTextMessage keeps the phone jid when no LID mapping is known', async () => {
@@ -1213,7 +1222,7 @@ describe('BaileysAdapter messaging', () => {
     fakeSock.signalRepository = { lidMapping: { getLIDForPN: jest.fn().mockResolvedValue(null) } };
     const adapter = await readyAdapter();
     await adapter.sendTextMessage('628111@c.us', 'hello');
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@c.us', { text: 'hello' });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@c.us', { text: 'hello' }, safeSendOptions());
   });
 
   it('sendTextMessage honors the chat disappearing timer when one is cached (#473)', async () => {
@@ -1224,7 +1233,8 @@ describe('BaileysAdapter messaging', () => {
     expect(fakeSock.sendMessage).toHaveBeenCalledWith(
       '628111@s.whatsapp.net',
       { text: 'hello' },
-      { ephemeralExpiration: 604800 },
+      // The disappearing timer still rides on the same options object the generator now shares.
+      expect.objectContaining({ ephemeralExpiration: 604800, getUrlInfo: expect.any(Function) as unknown }) as unknown,
     );
   });
 
@@ -1232,17 +1242,18 @@ describe('BaileysAdapter messaging', () => {
     fakeSock.sendMessage.mockResolvedValue({ key: { id: 'OUT1' }, messageTimestamp: 1700000001 });
     const adapter = await readyAdapter();
     await adapter.sendTextMessage('120@g.us', 'hi @62811', ['62811@c.us']);
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('120@g.us', {
-      text: 'hi @62811',
-      mentions: ['62811@s.whatsapp.net'],
-    });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '120@g.us',
+      { text: 'hi @62811', mentions: ['62811@s.whatsapp.net'] },
+      safeSendOptions(),
+    );
   });
 
   it('sendTextMessage omits the mentions key when none are given (no behavior change)', async () => {
     fakeSock.sendMessage.mockResolvedValue({ key: { id: 'OUT1' }, messageTimestamp: 1700000001 });
     const adapter = await readyAdapter();
     await adapter.sendTextMessage('120@g.us', 'plain', []);
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('120@g.us', { text: 'plain' });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('120@g.us', { text: 'plain' }, safeSendOptions());
   });
 
   it('getNumberId resolves via onWhatsApp and returns a NEUTRAL jid (never @s.whatsapp.net)', async () => {
@@ -4648,5 +4659,52 @@ describe('BaileysAdapter link preview', () => {
     await adapter.sendTextMessage('628111@c.us', 'hi');
 
     expect(sentContent()).not.toHaveProperty('linkPreview');
+  });
+});
+
+// A caller-supplied preview short-circuits generation: with the key present Baileys never calls
+// getUrlInfo, so nothing is fetched and a preview can be attached for a URL this server cannot reach.
+describe('BaileysAdapter custom link preview', () => {
+  beforeEach(() => {
+    fakeSock.user = undefined;
+    fakeSock.resetEmitter();
+    jest.clearAllMocks();
+  });
+
+  const readyAdapter = async () => {
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({}));
+    fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
+    fakeSock.fire('connection.update', { connection: 'open' });
+    fakeSock.sendMessage.mockResolvedValue({ key: { id: 'M1' }, messageTimestamp: 1 });
+    return adapter;
+  };
+
+  const sentContent = (): Record<string, unknown> =>
+    (fakeSock.sendMessage.mock.calls[0] as [string, Record<string, unknown>])[1];
+
+  it('maps the supplied metadata into the shape WhatsApp expects', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.sendTextMessage('628111@c.us', 'see https://example.com', undefined, {
+      customPreview: { url: 'https://example.com', title: 'Example', description: 'A site' },
+    });
+
+    expect(sentContent().linkPreview).toEqual({
+      'matched-text': 'https://example.com',
+      'canonical-url': 'https://example.com',
+      title: 'Example',
+      description: 'A site',
+    });
+  });
+
+  it('omits a description that was not supplied', async () => {
+    const adapter = await readyAdapter();
+
+    await adapter.sendTextMessage('628111@c.us', 'x', undefined, {
+      customPreview: { url: 'https://example.com', title: 'Example' },
+    });
+
+    expect(sentContent().linkPreview).not.toHaveProperty('description');
   });
 });

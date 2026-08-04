@@ -109,6 +109,11 @@ export class MessageService {
   ) {}
 
   async sendText(sessionId: string, dto: SendTextMessageDto): Promise<MessageResponseDto> {
+    // Asking to suppress the preview AND to attach one is a contradiction, and guessing which half
+    // the caller meant would send a message they did not ask for either way.
+    if (dto.linkPreview === false && dto.customLinkPreview) {
+      throw new BadRequestException('linkPreview: false cannot be combined with customLinkPreview');
+    }
     const finalDto = await this.applySendingGate(sessionId, 'text', dto);
 
     const engine = this.getEngine(sessionId);
@@ -129,9 +134,12 @@ export class MessageService {
       // nor a preview choice keeps its two-argument shape, and one with mentions alone keeps its
       // three — trailing `undefined`s would be harmless to the engines but would rewrite the call
       // shape of every existing send for no behavioural gain.
-      const { linkPreview } = finalDto;
-      if (linkPreview !== undefined) {
-        result = await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions, { linkPreview });
+      const { linkPreview, customLinkPreview } = finalDto;
+      if (linkPreview !== undefined || customLinkPreview) {
+        result = await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions, {
+          ...(linkPreview === undefined ? {} : { linkPreview }),
+          ...(customLinkPreview ? { customPreview: customLinkPreview } : {}),
+        });
       } else if (finalDto.mentions?.length) {
         result = await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions);
       } else {

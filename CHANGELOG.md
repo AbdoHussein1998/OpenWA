@@ -24,6 +24,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Link previews on Baileys, generated safely — and `customLinkPreview` for supplying your own.**
+
+  Baileys produced no previews at all before this. Its own generator delegates to `link-preview-js`,
+  an optional peer this project does not install, so every message containing a URL quietly attempted
+  to load it, threw, and was swallowed with a warning.
+
+  Installing that package was the obvious fix and is the wrong one: it carries an **unfixed** SSRF
+  advisory ([GHSA-4gp8-rjrq-ch6q](https://github.com/advisories/GHSA-4gp8-rjrq-ch6q), CWE-918 — "IPv6
+  and internal loopback attacks", no patched release), and the URL being fetched comes from message
+  text, so an attacker chooses the destination. Guarding in front of it would still leave a
+  DNS-rebinding window, because the package re-resolves when it fetches.
+
+  So the gateway generates previews itself, through the SSRF guard it already uses elsewhere — which
+  validates the destination **and pins the connection to the vetted address**. No new dependency, no
+  code under advisory, and `WEBHOOK_SSRF_PROTECT` / `SSRF_ALLOWED_HOSTS` govern it like every other
+  outbound fetch. Non-http schemes never reach the fetch layer, non-document responses are not read,
+  the body is size-capped, and any failure yields no preview rather than a failed send.
+
+  `customLinkPreview` (`{ url, title, description? }`) attaches a preview you supply, fetching
+  nothing — so it works for URLs this server cannot reach. Baileys only: whatsapp-web.js takes a
+  boolean and has nowhere to put a title, so it answers `501` rather than silently sending a message
+  that looks nothing like what was asked for. Combining it with `linkPreview: false` is a `400`.
+
 - **`linkPreview` on `send-text`**, in all five SDKs and the MCP tool. Sending `false` suppresses the
   URL preview on both engines.
 

@@ -3,15 +3,16 @@ package com.rmyndharis.openwa.model;
 import java.util.List;
 
 /** Request body for sending a text message. */
-public record SendTextRequest(String chatId, String text, List<String> mentions, Boolean linkPreview) {
+public record SendTextRequest(
+    String chatId, String text, List<String> mentions, Boolean linkPreview, CustomLinkPreview customLinkPreview) {
     /** Back-compatible constructor without mentions. */
     public SendTextRequest(String chatId, String text) {
-        this(chatId, text, null, null);
+        this(chatId, text, null, null, null);
     }
 
     /** Back-compatible constructor without a link-preview choice. */
     public SendTextRequest(String chatId, String text, List<String> mentions) {
-        this(chatId, text, mentions, null);
+        this(chatId, text, mentions, null, null);
     }
 
     public static Builder builder() {
@@ -23,6 +24,7 @@ public record SendTextRequest(String chatId, String text, List<String> mentions,
         private String text;
         private List<String> mentions;
         private Boolean linkPreview;
+        private CustomLinkPreview customLinkPreview;
 
         public Builder chatId(String v) {
             this.chatId = v;
@@ -51,8 +53,17 @@ public record SendTextRequest(String chatId, String text, List<String> mentions,
             return this;
         }
 
+        /**
+         * Attach a preview you supply instead of one fetched from the URL. Baileys only; cannot be
+         * combined with {@code linkPreview(false)}.
+         */
+        public Builder customLinkPreview(CustomLinkPreview v) {
+            this.customLinkPreview = v;
+            return this;
+        }
+
         public SendTextRequest build() {
-            return new SendTextRequest(chatId, text, mentions, linkPreview);
+            return new SendTextRequest(chatId, text, mentions, linkPreview, customLinkPreview);
         }
     }
 }

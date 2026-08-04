@@ -25,6 +25,7 @@ import {
   IncomingMessage,
   IWhatsAppEngine,
   Label,
+  CustomLinkPreview,
   GroupJoinInfo,
   LabelInput,
   LocationInput,
@@ -285,7 +286,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
     chatId: string,
     text: string,
     mentions?: string[],
-    options?: { linkPreview?: boolean },
+    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
   ): Promise<MessageResult> {
     return this.messaging.sendTextMessage(chatId, text, mentions, options);
   }

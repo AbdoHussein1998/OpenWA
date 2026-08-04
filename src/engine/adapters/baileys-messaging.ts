@@ -1,6 +1,8 @@
 import type * as BaileysLib from '@whiskeysockets/baileys';
 import type { AnyMessageContent, MiscMessageGenerationOptions, WAMessage, WASocket } from '@whiskeysockets/baileys';
+import { generateSafeLinkPreview } from './safe-link-preview';
 import {
+  CustomLinkPreview,
   ChatState,
   ContactCard,
   EngineEventCallbacks,
@@ -81,11 +83,18 @@ export class BaileysMessaging {
     chatId: string,
     text: string,
     mentions?: string[],
-    sendOptions?: { linkPreview?: boolean },
+    sendOptions?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
   ): Promise<MessageResult> {
     this.host.ensureReady();
     const jid = await this.toDeliverableJid(chatId);
-    const options = this.withEphemeral(jid);
+    // Baileys spreads the caller's options LAST (messages-send.js:1086), so `getUrlInfo` here
+    // replaces its hardcoded one — which delegates to a package carrying an unfixed SSRF advisory
+    // (see safe-link-preview.ts). Passed on every text send so that generator is never reachable,
+    // not only when a preview was asked for.
+    const options = {
+      ...(this.withEphemeral(jid) ?? {}),
+      getUrlInfo: (text: string) => generateSafeLinkPreview(text),
+    };
     // `linkPreview: null` is Baileys' explicit "no preview": with the key absent it instead calls the
     // configured generator (Utils/messages.js:279-281). Suppressing therefore also skips that call —
     // which today fails anyway, since the generator dynamically imports an optional package this
@@ -94,10 +103,20 @@ export class BaileysMessaging {
       text,
       ...this.withMentions(mentions),
       ...(sendOptions?.linkPreview === false ? { linkPreview: null } : {}),
+      // A caller-supplied preview short-circuits generation entirely: with the key present Baileys
+      // never calls getUrlInfo, so nothing is fetched and the metadata is used verbatim.
+      ...(sendOptions?.customPreview
+        ? {
+            linkPreview: {
+              'matched-text': sendOptions.customPreview.url,
+              'canonical-url': sendOptions.customPreview.url,
+              title: sendOptions.customPreview.title,
+              ...(sendOptions.customPreview.description ? { description: sendOptions.customPreview.description } : {}),
+            },
+          }
+        : {}),
     };
-    const sent = options
-      ? await this.sock().sendMessage(jid, content, options)
-      : await this.sock().sendMessage(jid, content);
+    const sent = await this.sock().sendMessage(jid, content, options);
     if (sent) {
       void this.host.putStoredMessage(sent)?.catch(err =>
         this.host.logger.warn('Failed to persist sent message to store', {
