@@ -1,7 +1,7 @@
 /**
  * Post-install hook (npm `postinstall`).
  *
- * Three conditional steps, each skipped when its target is absent so the hook is a no-op where the
+ * Four conditional steps, each skipped when its target is absent so the hook is a no-op where the
  * piece is missing (the Docker builder stage copies package*.json long before any source):
  *
  *   1. `npm run dashboard:ci` when dashboard/ exists — the dashboard carries its own lockfile and
@@ -15,6 +15,8 @@
  *      tree — which must never be waved through. So a non-zero status here is propagated as-is.
  *   3. `node scripts/patch-wwebjs-newsletter-preview.js --best-effort` when present. The production
  *      Docker stage runs it again without best-effort, making dependency drift a build failure.
+ *   4. `node scripts/patch-wwebjs-status.js --best-effort` when present — the status posting
+ *      repairs, gated the same way as step 3.
  *
  * Structured like scripts/patch-wwebjs-201832.js: pure planning + injectable spawn, so the spec
  * (scripts/postinstall.spec.js, node:test) exercises every branch without a real npm run.
@@ -55,12 +57,12 @@ function planSteps(root) {
       options: { stdio: 'inherit', cwd: root },
     });
   }
-  const gatingPatcher = path.join(root, 'scripts', 'patch-wwebjs-status-gating.js');
-  if (fs.existsSync(gatingPatcher)) {
+  const statusPatcher = path.join(root, 'scripts', 'patch-wwebjs-status.js');
+  if (fs.existsSync(statusPatcher)) {
     steps.push({
-      name: 'whatsapp-web.js status gating guard (scripts/patch-wwebjs-status-gating.js --best-effort)',
+      name: 'whatsapp-web.js status send repair (scripts/patch-wwebjs-status.js --best-effort)',
       command: process.execPath,
-      args: [gatingPatcher, '--best-effort'],
+      args: [statusPatcher, '--best-effort'],
       options: { stdio: 'inherit', cwd: root },
     });
   }

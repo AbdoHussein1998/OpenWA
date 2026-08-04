@@ -21,9 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cannotBeRanked` meant before WhatsApp introduced the gating check — when it does not. Text status
   posts again, verified live.
 
-  **Media status is still failing** for a second and unrelated upstream reason: WhatsApp Web's own
-  bundle throws `Cannot read properties of undefined (reading 'id')` inside
-  `sendStatusMediaMsgAction`. That is inside minified upstream code and is not fixed here.
+  Media status was failing for a second and unrelated upstream reason: `sendStatusMediaMsgAction`
+  no longer accepts the positional `(msg, mediaUpdate)` call whatsapp-web.js 1.34.7 makes, so
+  WhatsApp Web's own bundle threw `Cannot read properties of undefined (reading 'id')`. The same
+  patcher (`scripts/patch-wwebjs-status.js`, formerly `patch-wwebjs-status-gating.js`) now also
+  rewrites that call to the current single-options-object signature, adopting the open upstream
+  fix (wwebjs/whatsapp-web.js#201816). Image, video and voice status post again, verified live.
+  The patcher also now runs in the production image build, which previously shipped without the
+  gating guard.
 
 ### Security
 
