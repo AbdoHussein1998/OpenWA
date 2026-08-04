@@ -14,8 +14,12 @@ import type { Session } from './entities/session.entity';
  * would vacuously approve.
  */
 describe('SessionProxyInterceptor', () => {
+  // A real UUID: the interceptor refuses to route malformed ids (they cannot name a session, and a
+  // raw uuid-column lookup on Postgres would 500 before the route pipe could answer 400).
+  const SID = '3f8d1c2a-4b6e-4f0d-9a7c-2e5b8d1f6a3c';
+
   const row = (over: Partial<Session> = {}): Partial<Session> => ({
-    id: 'sess-1',
+    id: SID,
     nodeId: 'peer-node',
     nodeUrl: 'http://127.0.0.1:9',
     leaseExpiresAt: new Date(Date.now() + 60_000),
@@ -28,13 +32,14 @@ describe('SessionProxyInterceptor', () => {
     method: string;
     originalUrl: string;
     body?: unknown;
+    socket?: { remoteAddress?: string };
   };
 
   const request = (over: Partial<Req> = {}): Req => ({
     headers: { 'x-api-key': 'k-123', 'content-type': 'application/json' },
-    params: { sessionId: 'sess-1' },
+    params: { sessionId: SID },
     method: 'GET',
-    originalUrl: '/api/sessions/sess-1/messages?limit=5',
+    originalUrl: `/api/sessions/${SID}/messages?limit=5`,
     ...over,
   });
 
@@ -87,8 +92,31 @@ describe('SessionProxyInterceptor', () => {
       expect(findOne).not.toHaveBeenCalled();
     });
 
-    it('never forwards a forwarded request (loop guard), even when the owner looks remote', async () => {
+    // The hop marker is client-settable: honoring it blindly would let any authenticated caller
+    // force local execution on a non-owner (a stop() here writes DISCONNECTED while the owner's
+    // engine stays up). The refusal doubles as the loop guard — a marked request is never
+    // forwarded again, it is answered with a retryable conflict instead.
+    it('refuses (409) a request already marked forwarded that lands on a live non-owner', async () => {
       const req = request({ headers: { [FORWARDED_HEADER]: 'peer-node', 'x-api-key': 'k' } });
+      const { interceptor, context, next, handle } = build({ req });
+      await expect(interceptor.intercept(context, next)).rejects.toMatchObject({ status: 409 });
+      expect(handle).not.toHaveBeenCalled();
+    });
+
+    it('executes a forwarded request locally when this node hosts (or may host) the session', async () => {
+      const req = request({ headers: { [FORWARDED_HEADER]: 'peer-node', 'x-api-key': 'k' } });
+      const owned = build({ req, row: row({ nodeId: 'me' }) });
+      expect(await ranLocally(await owned.interceptor.intercept(owned.context, owned.next))).toBe(true);
+
+      const unowned = build({
+        req: request({ headers: { [FORWARDED_HEADER]: 'peer-node', 'x-api-key': 'k' } }),
+        row: row({ nodeId: null }),
+      });
+      expect(await ranLocally(await unowned.interceptor.intercept(unowned.context, unowned.next))).toBe(true);
+    });
+
+    it('skips routing for a malformed id — the route pipe answers 400, not a raw uuid-column query', async () => {
+      const req = request({ params: { sessionId: 'not-a-uuid' } });
       const { interceptor, context, next, findOne } = build({ req });
       expect(await ranLocally(await interceptor.intercept(context, next))).toBe(true);
       expect(findOne).not.toHaveBeenCalled();
@@ -101,12 +129,12 @@ describe('SessionProxyInterceptor', () => {
     });
 
     it('reads :id only on @SessionScoped controllers', async () => {
-      const req = request({ params: { id: 'sess-1' } });
+      const req = request({ params: { id: SID } });
       const scoped = build({ req, sessionScoped: true, row: row({ nodeId: 'me' }) });
       expect(await ranLocally(await scoped.interceptor.intercept(scoped.context, scoped.next))).toBe(true);
       expect(scoped.findOne).toHaveBeenCalled();
 
-      const unscoped = build({ req: request({ params: { id: 'sess-1' } }), sessionScoped: false });
+      const unscoped = build({ req: request({ params: { id: SID } }), sessionScoped: false });
       expect(await ranLocally(await unscoped.interceptor.intercept(unscoped.context, unscoped.next))).toBe(true);
       expect(unscoped.findOne).not.toHaveBeenCalled();
     });
@@ -154,7 +182,7 @@ describe('SessionProxyInterceptor', () => {
     it('relays method, path, query, body and auth to the owner, and the owner’s answer back', async () => {
       const req = request({
         method: 'POST',
-        originalUrl: '/api/sessions/sess-1/messages/send-text?trace=1',
+        originalUrl: `/api/sessions/${SID}/messages/send-text?trace=1`,
         body: { chatId: '628@c.us', text: 'halo' },
       });
       const { interceptor, context, next, handle, res } = build({ req, row: row({ nodeUrl: serverUrl }) });
@@ -166,7 +194,7 @@ describe('SessionProxyInterceptor', () => {
 
       expect(seen).toHaveLength(1);
       expect(seen[0].method).toBe('POST');
-      expect(seen[0].url).toBe('/api/sessions/sess-1/messages/send-text?trace=1');
+      expect(seen[0].url).toBe(`/api/sessions/${SID}/messages/send-text?trace=1`);
       expect(seen[0].headers['x-api-key']).toBe('k-123');
       expect(seen[0].headers[FORWARDED_HEADER]).toBe('me');
       expect(JSON.parse(seen[0].body)).toEqual({ chatId: '628@c.us', text: 'halo' });
@@ -186,6 +214,28 @@ describe('SessionProxyInterceptor', () => {
 
       expect(seen[0].method).toBe('GET');
       expect(seen[0].body).toBe('');
+    });
+
+    // Without the chain the owner sees every forwarded call as coming from THIS node — an
+    // allowedIps-restricted key 401s on every forwarded request, and the per-IP throttler pools
+    // all forwarded traffic into one bucket.
+    it('appends the observed peer to x-forwarded-for so the owner can resolve the real client', async () => {
+      const direct = build({
+        req: request({ socket: { remoteAddress: '::ffff:203.0.113.7' } }),
+        row: row({ nodeUrl: serverUrl }),
+      });
+      await direct.interceptor.intercept(direct.context, direct.next);
+      expect(seen[0].headers['x-forwarded-for']).toBe('203.0.113.7');
+
+      const chained = build({
+        req: request({
+          headers: { 'x-api-key': 'k-123', 'x-forwarded-for': '198.51.100.9' },
+          socket: { remoteAddress: '10.0.0.4' },
+        }),
+        row: row({ nodeUrl: serverUrl }),
+      });
+      await chained.interceptor.intercept(chained.context, chained.next);
+      expect(seen[1].headers['x-forwarded-for']).toBe('198.51.100.9, 10.0.0.4');
     });
 
     it('an unreachable owner answers 503 with the owner named, never a hang or a crash', async () => {
