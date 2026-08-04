@@ -5706,6 +5706,77 @@ Request body and errors are identical to the voice endpoint.
 same `MEDIA_CONVERSION_MAX_OUTPUT_BYTES` cap (default 50 MiB) — and a client posting it onward is
 still bound by `BODY_SIZE_LIMIT` (default 25 MiB) on that next request.
 
+### 6.4.16 Automation rules (autoreply)
+
+Single-message autoreply rules, managed under `/api/sessions/:sessionId/automation-rules`
+(`AutomationRuleController`). Every route requires an API key with **OPERATOR** role or higher.
+
+When an inbound message arrives, the session's enabled rules are evaluated in order — creation
+time, `id` as the same-second tiebreak — and the **first** rule whose `conditions` match replies
+into the chat with its `replyText`. The reply goes through the ordinary send path, so send pacing
+and plugin vetoes apply to it like any other outbound message. Evaluation is fire-and-forget off
+the receive path and runs at most once per message (engine re-fires are deduplicated).
+
+`conditions` uses the **webhook filter format** (`message` family — see 6.4.8): a flat AND list of
+conditions over `sender`, `recipient`, `body`, `type`, `isGroup`, `fromMe`, `hasMedia`, `mentions`.
+Omitted or empty conditions match every inbound message.
+
+Loop safety: a rule never answers the account's own (`fromMe`) messages, messages older than
+5 minutes get no automated answer (so a reconnect never burst-replies the offline-queued backlog),
+and `cooldownSeconds` (default 60, `0` disables, max 86400) keeps the rule quiet per chat after it
+fires. Be clear about what this guarantees: the cooldown **rate-bounds** an
+autoreply-vs-autoreply exchange with another bot, it does not terminate one — and
+`cooldownSeconds: 0` removes that bound entirely, so disable it only for rules whose conditions
+cannot match another bot's replies. The cooldown state is in-process: it resets on restart.
+
+#### POST /api/sessions/:sessionId/automation-rules
+
+Create a rule. **Auth:** API key (OPERATOR)
+
+**Request body**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| name | string | yes | Display name, max 100 chars. |
+| replyText | string | yes | Reply content, max 4096 chars (the send-text limit). |
+| conditions | object | no | Webhook-filter conditions (`message` family). Omitted = match all. |
+| cooldownSeconds | number | no | Per-chat quiet period, 0–86400. Default `60`. |
+| enabled | boolean | no | Default `true`. |
+
+**Response** `201`
+
+```json
+{
+  "id": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+  "sessionId": "0d7a2a4e-...",
+  "name": "Greet new enquiries",
+  "enabled": true,
+  "conditions": { "conditions": [{ "field": "body", "operator": "contains", "value": "price" }] },
+  "replyText": "Thanks for reaching out — we reply within the hour.",
+  "cooldownSeconds": 60,
+  "createdAt": "2026-08-04T10:00:00.000Z",
+  "updatedAt": "2026-08-04T10:00:00.000Z"
+}
+```
+
+`400` — invalid conditions (unknown field/operator, over-limit values) or over-limit text.
+
+#### GET /api/sessions/:sessionId/automation-rules
+
+List the session's rules in evaluation order. **Auth:** API key (OPERATOR) · **Response** `200` — array of the shape above.
+
+#### GET /api/sessions/:sessionId/automation-rules/:ruleId
+
+Get one rule. **Auth:** API key (OPERATOR) · `200` or `404` when the rule does not belong to the session.
+
+#### PUT /api/sessions/:sessionId/automation-rules/:ruleId
+
+Partial update (any subset of the create fields). **Auth:** API key (OPERATOR) · `200` or `404`.
+
+#### DELETE /api/sessions/:sessionId/automation-rules/:ruleId
+
+Delete a rule. **Auth:** API key (OPERATOR) · **Response** `204`.
+
 ## 6.5 Real-time API (WebSocket)
 
 Live events are delivered over a **Socket.IO** connection (not a raw WebSocket). The server mounts a single Socket.IO namespace, **`/events`**, on the same port as the REST API. There are no REST routes in this module.

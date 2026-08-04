@@ -11,6 +11,7 @@ import { WebhookService } from '../webhook/webhook.service';
 import { HookManager } from '../../core/hooks';
 import { StatusStoreService } from '../status-store/status-store.service';
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
+import { AutomationRulesService } from '../automation/automation-rules.service';
 import { SessionLidResolver } from './session-lid-resolver.service';
 import type { IncomingMessage, IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 
@@ -213,6 +214,7 @@ describe('MessageProjector (inbound projection)', () => {
   let statusStore: { ingest: jest.Mock };
   let lidResolver: { resolveSenderPhone: jest.Mock };
   let chatMediaArchive: { archive: jest.Mock };
+  let automationRules: { evaluateInbound: jest.Mock };
 
   const SESSION_ID = 'session-1';
 
@@ -253,6 +255,7 @@ describe('MessageProjector (inbound projection)', () => {
     statusStore = { ingest: jest.fn().mockResolvedValue({ row: {}, created: false }) };
     lidResolver = { resolveSenderPhone: jest.fn().mockResolvedValue(null) };
     chatMediaArchive = { archive: jest.fn().mockResolvedValue(null) };
+    automationRules = { evaluateInbound: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -269,6 +272,7 @@ describe('MessageProjector (inbound projection)', () => {
         { provide: SessionLidResolver, useValue: lidResolver },
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: ChatMediaArchiveService, useValue: chatMediaArchive },
+        { provide: AutomationRulesService, useValue: automationRules },
       ],
     }).compile();
 
@@ -387,6 +391,35 @@ describe('MessageProjector (inbound projection)', () => {
         const engine = makeEngine();
         engines.set(SESSION_ID, engine);
         chatMediaArchive.archive.mockRejectedValueOnce(new Error('bucket unreachable'));
+
+        projector.handleInboundMessage(SESSION_ID, engine, makeIncoming());
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(webhookService.dispatch).toHaveBeenCalledWith(SESSION_ID, 'message.received', expect.anything());
+        expect(eventsGateway.emitMessage).toHaveBeenCalledWith(SESSION_ID, expect.anything());
+      });
+    });
+
+    describe('automation rules', () => {
+      it('hands the dispatched message to the rule evaluator', async () => {
+        const engine = makeEngine();
+        engines.set(SESSION_ID, engine);
+
+        projector.handleInboundMessage(SESSION_ID, engine, makeIncoming());
+        await new Promise(resolve => setImmediate(resolve));
+
+        // The hook-final message, same object the webhook dispatch gets — rule conditions must see
+        // exactly what a filtered message.received webhook would have seen.
+        expect(automationRules.evaluateInbound).toHaveBeenCalledWith(
+          SESSION_ID,
+          expect.objectContaining({ chatId: '15550001111@c.us' }),
+        );
+      });
+
+      it('keeps delivering when rule evaluation rejects — a broken rule must never break the receive path', async () => {
+        const engine = makeEngine();
+        engines.set(SESSION_ID, engine);
+        automationRules.evaluateInbound.mockRejectedValueOnce(new Error('rules table gone'));
 
         projector.handleInboundMessage(SESSION_ID, engine, makeIncoming());
         await new Promise(resolve => setImmediate(resolve));

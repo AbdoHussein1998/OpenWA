@@ -192,6 +192,7 @@ authoritative gate. Current policy:
 | `src/engine/identity/`      | 85%      | 95%       | 94%   | 93%        |
 | `src/modules/audit/`        | 59%      | 45%       | 72%   | 68%        |
 | `src/modules/auth/`         | 75%      | 85%       | 86%   | 85%        |
+| `src/modules/automation/`   | 60%      | 55%       | 75%   | 70%        |
 | `src/modules/chat-media/`   | 78%      | 81%       | 92%   | 90%        |
 | `src/modules/contact/`      | 25%      | 48%       | 44%   | 43%        |
 | `src/modules/docker/`       | 26%      | 52%       | 37%   | 38%        |
