@@ -20,6 +20,7 @@ import { chatHistoryMediaBudgetBytes, coerceDeclaredSize, ingestMediaBudgetBytes
 import { buildIncomingMessageBase } from './message-mapper';
 import { buildVCard } from './vcard';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
+import { RecipientUnreachableError } from '../../common/errors/recipient-unreachable.error';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -240,6 +241,11 @@ export class WwebjsMessaging {
    * — the signature of a contact whose cached/resolved id is stale (typically a `@c.us` for a contact
    * that has since migrated to `@lid`) — drop the mapping, re-resolve once, and retry only if the
    * fresh id differs, so a genuinely unreachable recipient surfaces its error instead of looping.
+   *
+   * When re-resolution cannot help, the recipient is unreachable rather than stale, and the raw
+   * `No LID for user` is replaced with {@link RecipientUnreachableError} (400). The bare page-side
+   * Error carries no status and no recipient, so letting it through produced an opaque 500 for what
+   * is really a caller-visible fact the gateway already established: `getNumberId` returned null.
    */
   private async sendResolved<T>(chatId: string, send: (to: string) => Promise<T>): Promise<T> {
     const to = await this.resolveSendId(chatId);
@@ -255,7 +261,7 @@ export class WwebjsMessaging {
       this.resolvedSendIds.delete(chatId);
       const fresh = await this.resolveSendId(chatId);
       if (fresh === to) {
-        throw err;
+        throw new RecipientUnreachableError(chatId);
       }
       // The first send threw, but wwjs can throw after the message is already on the wire — so this
       // retry may produce a duplicate. Log it: without this the second copy is invisible.
@@ -264,7 +270,16 @@ export class WwebjsMessaging {
         staleId: to,
         freshId: fresh,
       });
-      return send(fresh);
+      try {
+        return await send(fresh);
+      } catch (retryErr) {
+        // The re-resolved id is no better than the stale one — same unreachable recipient, and the
+        // raw error would 500 exactly as the first one did.
+        if (isNoLidForUserError(retryErr)) {
+          throw new RecipientUnreachableError(chatId);
+        }
+        throw retryErr;
+      }
     }
   }
 

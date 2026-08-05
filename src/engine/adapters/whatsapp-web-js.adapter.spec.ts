@@ -23,6 +23,7 @@ import { MessageNotFoundError } from '../../common/errors/message-not-found.erro
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { ChannelMediaNotSupportedError } from '../../common/errors/channel-media-not-supported.error';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
+import { RecipientUnreachableError } from '../../common/errors/recipient-unreachable.error';
 import { EditedMessage, EngineStatus, GroupEvent, IncomingCallEvent } from '../interfaces/whatsapp-engine.interface';
 import { CallNotFoundError } from '../../common/errors/call-not-found.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
@@ -3658,12 +3659,29 @@ describe('LID resolution for individual sends (#573 — WhatsApp @c.us → @lid 
     expect(res.id).toBe('OUT1');
   });
 
-  it('does not retry when re-resolution yields the same id (no pointless second send)', async () => {
+  // An unreachable recipient is a caller-visible fact, not a server fault: getNumberId already
+  // returned null. The bare page-side `No LID for user` carries no status, so letting it through
+  // surfaced as `500 Internal server error` with nothing to act on (#1068).
+  it('does not retry when re-resolution yields the same id, and reports a 400 (no pointless second send)', async () => {
     const getNumberId = jest.fn().mockResolvedValue(null); // unresolvable → fallback stays @c.us
     const sendMessage = jest.fn().mockRejectedValue(new Error('No LID for user'));
     const adapter = ready({ getNumberId, sendMessage });
-    await expect(adapter.sendTextMessage('628@c.us', 'x')).rejects.toThrow('No LID for user');
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    await expect(adapter.sendTextMessage('628@c.us', 'x')).rejects.toBeInstanceOf(RecipientUnreachableError);
+    await expect(adapter.sendTextMessage('628@c.us', 'x')).rejects.toMatchObject({ status: 400 });
+    // The raw engine wording must not reach the caller — it named neither the recipient nor the cause.
+    await expect(adapter.sendTextMessage('628@c.us', 'x')).rejects.not.toThrow('No LID for user');
+    expect(sendMessage).toHaveBeenCalledTimes(3); // one per attempt above, never a retry within one
+  });
+
+  it('reports a 400 when the RETRY against a re-resolved id is also unreachable', async () => {
+    const getNumberId = jest
+      .fn()
+      .mockResolvedValueOnce({ _serialized: '628@c.us' })
+      .mockResolvedValueOnce({ _serialized: '999@lid' });
+    const sendMessage = jest.fn().mockRejectedValue(new Error('No LID for user'));
+    const adapter = ready({ getNumberId, sendMessage });
+    await expect(adapter.sendTextMessage('628@c.us', 'x')).rejects.toBeInstanceOf(RecipientUnreachableError);
+    expect(sendMessage).toHaveBeenCalledTimes(2); // original + the one re-resolved retry
   });
 
   it('does not retry on a non-LID send error', async () => {
