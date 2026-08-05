@@ -7,21 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-08-05
+
 ### Added
 
-- **Plugins can ask for a link preview.** `ConversationSendEnvelope` gained `linkPreview`, forwarded to the engine on a plain text send. Since 0.14.0 made Baileys previews opt-in, a plugin relaying a URL had no way to restore the preview card the REST API can already request — most visibly for a bot whose reply *is* a bare link. Ignored on media, location and quoted sends, whose engine paths take no preview option.
+- **Plugins can ask for a link preview** — `ConversationSendEnvelope` gained `linkPreview`, forwarded on a plain text send (ignored on media, location and quoted sends); since 0.14.0 made Baileys previews opt-in, a plugin relaying a URL had no way to restore the card.
 
 ### Fixed
 
 - **Swagger "Try it out" called `http://localhost:2785` instead of the host that served the docs**, failing with `Failed to fetch` anywhere else — a relative server is now listed first, so it resolves to the serving origin.
-- **Sending to a number WhatsApp cannot resolve returned `500`** on the whatsapp-web.js engine — it now answers `400` naming the recipient and both possible causes. Callers that retried the old 500 should treat this as terminal.
+- **Sending to a number WhatsApp cannot resolve returned `500`** on the whatsapp-web.js engine — it now answers a terminal `400` naming the recipient and both possible causes, so callers that retried the old 500 should stop.
 - **Swagger "Try it out" on `send-text` always returned `400`** — the sampled body paired `linkPreview: false` with a `customLinkPreview`, which the endpoint rejects; the operation now ships explicit request-body examples.
 - **Swagger "Try it out" on the media routes uploaded the literal string `"string"`** — the sampled body carried both `url` and `base64`, and base64 wins; each route now ships an explicit example with a single media source.
 - **A malformed `mentions` entry returned an undiagnosable `500`** — only type and length were checked, so junk reached WhatsApp Web's WID parser; entries are now validated as individual WIDs (`@c.us`, `@s.whatsapp.net`, `@lid`) and rejected with a `400`.
-
-### Documentation
-
-- Documentation corrected where it understated the MCP surface: the tool count is 51 rather than ~39 (README and the architecture diagram), labels and automation-rule reads ship by default instead of being planned, and the Session row lists both presence tools.
+- **Documentation understated the MCP surface** — the tool count is 51 rather than ~39 (README and the architecture diagram), labels and automation-rule reads ship by default instead of being planned, and the Session row lists both presence tools.
 
 ## [0.14.0] - 2026-08-05
 
