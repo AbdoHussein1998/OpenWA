@@ -2,7 +2,7 @@ import http from 'http';
 import { AddressInfo } from 'net';
 import { of, lastValueFrom } from 'rxjs';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
-import { SessionProxyInterceptor, FORWARDED_HEADER } from './session-proxy.interceptor';
+import { SessionProxyInterceptor, FORWARDED_HEADER, forwardTarget } from './session-proxy.interceptor';
 import type { Session } from './entities/session.entity';
 
 /**
@@ -221,6 +221,33 @@ describe('SessionProxyInterceptor', () => {
     // Without the chain the owner sees every forwarded call as coming from THIS node — an
     // allowedIps-restricted key 401s on every forwarded request, and the per-IP throttler pools
     // all forwarded traffic into one bucket.
+    // End-to-end proof of the absolute-form vector: a raw HTTP request whose target names another
+    // origin must still be forwarded to the OWNER, never to the origin the caller chose — otherwise
+    // the caller receives the attacker origin's response with their own API key already spent on it.
+    it('forwards to the owner even when the caller supplies an absolute-form request target', async () => {
+      const attacker = http.createServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ stolenBy: 'attacker' }));
+      });
+      await new Promise<void>(resolve => attacker.listen(0, '127.0.0.1', resolve));
+      const attackerPort = (attacker.address() as AddressInfo).port;
+
+      try {
+        const req = request({ originalUrl: `http://127.0.0.1:${attackerPort}/api/sessions/${SID}` });
+        const { interceptor, context, next, res } = build({ req, row: row({ nodeUrl: serverUrl }) });
+
+        await interceptor.intercept(context, next);
+
+        // The owner answered, not the attacker's origin.
+        expect(seen).toHaveLength(1);
+        expect(seen[0].url).toBe(`/api/sessions/${SID}`);
+        const sentBody = (res.send.mock.calls[0] as [Buffer])[0];
+        expect(JSON.parse(String(sentBody))).toEqual({ servedBy: 'the-owner' });
+      } finally {
+        await new Promise<void>(resolve => attacker.close(() => resolve()));
+      }
+    });
+
     it('appends the observed peer to x-forwarded-for so the owner can resolve the real client', async () => {
       const direct = build({
         req: request({ socket: { remoteAddress: '::ffff:203.0.113.7' } }),
@@ -254,5 +281,33 @@ describe('SessionProxyInterceptor', () => {
       expect(errorBody.message).toContain('peer-node');
       expect(handle).not.toHaveBeenCalled();
     });
+  });
+});
+
+// The request target is caller-controlled: HTTP/1.1's absolute form is matched by Express and left
+// verbatim in `req.originalUrl`, and resolving that against a base DISCARDS the base. Forwarding it
+// would aim this node at an attacker's origin and hand over the caller's API key with the request.
+describe('forwardTarget', () => {
+  const OWNER = 'http://10.0.0.5:2785';
+
+  it('keeps path and query, on the owner origin', () => {
+    expect(forwardTarget('/api/sessions/s1/messages?limit=5', OWNER)).toBe(
+      'http://10.0.0.5:2785/api/sessions/s1/messages?limit=5',
+    );
+  });
+
+  it.each([
+    ['absolute form', 'http://attacker.tld/api/sessions/s1'],
+    ['absolute form, https', 'https://attacker.tld/api/sessions/s1'],
+    ['protocol-relative', '//attacker.tld/api/sessions/s1'],
+    ['absolute form with credentials and port', 'http://user:pw@attacker.tld:9999/api/sessions/s1'],
+  ])('never leaves the owner origin for a %s target', (_label, originalUrl) => {
+    const target = new URL(forwardTarget(originalUrl, OWNER));
+    expect(target.origin).toBe('http://10.0.0.5:2785');
+    expect(target.pathname).toBe('/api/sessions/s1');
+  });
+
+  it('carries the owner base path when one is configured', () => {
+    expect(forwardTarget('/api/sessions/s1', 'http://10.0.0.5:2785/')).toBe('http://10.0.0.5:2785/api/sessions/s1');
   });
 });

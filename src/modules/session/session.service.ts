@@ -276,8 +276,29 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   /** Record removal + engine retirement + credential purge: owned by the lifecycle service. */
   async delete(id: string): Promise<void> {
+    // Guarded at the call site rather than inside an always-awaited helper: without ownership there
+    // is nothing to check, and awaiting anything at all here would push the lifecycle call a
+    // microtask later — enough for an in-flight start to reach engine.initialize() before the
+    // retirement lands, which the pre-initialize retirement race deliberately prevents.
+    if (this.ownership) await this.assertNotHeldElsewhere(id);
     await this.engineLifecycle.delete(id);
     await this.ownership?.release(id);
+  }
+
+  /**
+   * Refuse a lifecycle write for a session a LIVE peer is running.
+   *
+   * start() is fenced by the claim itself, and logout/force-kill require a local engine, so they
+   * cannot act on a peer's session. stop() and delete() can: neither needs an engine here, so
+   * without this a request landing on the wrong node — routine when ownership is configured but
+   * request routing is not — writes DISCONNECTED over a peer's live session, or deletes its row and
+   * credentials outright, while the peer's engine keeps running. A LAPSED claim is not fenced: the
+   * holder may be gone, and taking over is exactly what the claim rule allows.
+   */
+  private async assertNotHeldElsewhere(id: string): Promise<void> {
+    if (await this.ownership?.isHeldByOtherNode(id)) {
+      throw new ConflictException(`Session ${id} is running on another node`);
+    }
   }
 
   async start(id: string): Promise<Session> {
@@ -302,6 +323,8 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   async stop(id: string): Promise<Session> {
+    // Call-site guarded — see delete().
+    if (this.ownership) await this.assertNotHeldElsewhere(id);
     const session = await this.engineLifecycle.stop(id);
     // Handed back on the way out so a peer can pick it up immediately rather than waiting for the
     // lease to lapse. Stop is the deliberate end of this process's ownership — but a start() that
