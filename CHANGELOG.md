@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Plugins can ask for a link preview.** `ConversationSendEnvelope` gained `linkPreview`, forwarded to the engine on a plain text send. Since 0.14.0 made Baileys previews opt-in, a plugin relaying a URL had no way to restore the preview card the REST API can already request — most visibly for a bot whose reply *is* a bare link. Ignored on media, location and quoted sends, whose engine paths take no preview option.
+
 ### Fixed
 
 - **Swagger "Try it out" called `http://localhost:2785` instead of the host that served the docs**, failing with `Failed to fetch` anywhere else — a relative server is now listed first, so it resolves to the serving origin.

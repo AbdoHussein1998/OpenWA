@@ -18,7 +18,7 @@ export interface ConversationSendDeps {
   // synchronously inside sendText/reply. 'message:sent' is emitted later by SessionEngineLifecycle's
   // engine callback (onMessageCreate), outside this call's async scope, so seeding it here would be a no-op.
   runGuarded: <T>(events: string[], run: () => Promise<T>) => Promise<T>;
-  sendText: (sessionId: string, opts: { chatId: string; text: string }) => Promise<unknown>;
+  sendText: (sessionId: string, opts: { chatId: string; text: string; linkPreview?: boolean }) => Promise<unknown>;
   reply: (sessionId: string, opts: { chatId: string; quotedMessageId: string; text: string }) => Promise<unknown>;
   // Media send by URL. The loader binds this to the per-type MessageService media methods
   // (sendImage/sendVideo/sendAudio/sendDocument) — the facade stays DTO-agnostic.
@@ -93,7 +93,14 @@ export function buildConversationSendFacade(deps: ConversationSendDeps) {
         if (env.replyTo) {
           return deps.reply(sessionId, { chatId, quotedMessageId: env.replyTo, text: env.text ?? '' });
         }
-        return deps.sendText(sessionId, { chatId, text: env.text ?? '' });
+        // Forwarded only when the plugin actually expressed a choice: MessageService widens the engine
+        // call whenever the key is present, so a blanket `linkPreview: undefined` would rewrite the call
+        // shape of every plugin send that never asked for a preview.
+        return deps.sendText(sessionId, {
+          chatId,
+          text: env.text ?? '',
+          ...(env.linkPreview === undefined ? {} : { linkPreview: env.linkPreview }),
+        });
       });
     },
   };
