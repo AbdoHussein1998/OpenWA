@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sending to a number WhatsApp cannot resolve returned `500`** on the whatsapp-web.js engine — it now answers `400` naming the recipient and both possible causes. Callers that retried the old 500 should treat this as terminal.
 - **Swagger "Try it out" on `send-text` always returned `400`** — the sampled body paired `linkPreview: false` with a `customLinkPreview`, which the endpoint rejects; the operation now ships explicit request-body examples.
 - **Swagger "Try it out" on the media routes uploaded the literal string `"string"`** — the sampled body carried both `url` and `base64`, and base64 wins; each route now ships an explicit example with a single media source.
+- **A malformed `mentions` entry returned an undiagnosable `500`** — only type and length were checked, so junk reached WhatsApp Web's WID parser; entries are now validated as individual WIDs (`@c.us`, `@s.whatsapp.net`, `@lid`) and rejected with a `400`.
 
 ## [0.14.0] - 2026-08-05
 
