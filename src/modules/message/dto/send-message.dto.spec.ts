@@ -1,6 +1,16 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { SendTextMessageDto, SendMediaMessageDto, SEND_TEXT_BODY_EXAMPLES } from './send-message.dto';
+import {
+  SendTextMessageDto,
+  SendMediaMessageDto,
+  SendAudioMessageDto,
+  SEND_TEXT_BODY_EXAMPLES,
+  SEND_IMAGE_BODY_EXAMPLES,
+  SEND_VIDEO_BODY_EXAMPLES,
+  SEND_AUDIO_BODY_EXAMPLES,
+  SEND_DOCUMENT_BODY_EXAMPLES,
+  SEND_STICKER_BODY_EXAMPLES,
+} from './send-message.dto';
 
 // Mirror the global ValidationPipe (main.ts): whitelist + forbidNonWhitelisted strip/reject unknown props.
 const validateDto = (cls: new () => object, obj: unknown) =>
@@ -68,6 +78,40 @@ describe('SEND_TEXT_BODY_EXAMPLES', () => {
   it.each(entries)('%s does not combine linkPreview:false with customLinkPreview', (_name, example) => {
     const value = example.value as { linkPreview?: boolean; customLinkPreview?: unknown };
     expect(value.linkPreview === false && value.customLinkPreview !== undefined).toBe(false);
+  });
+});
+
+// These are what Swagger UI pre-fills into "Try it out", so a caller who changes nothing submits them
+// verbatim. Left to the schema sampler the body carried `url` and `base64: "string"` together, and
+// base64 wins in buildMediaInput — so Execute uploaded four characters of garbage (#1068). Every
+// example must stay submittable as-is, which is what stops a new optional field from recreating that.
+describe('media route body examples', () => {
+  const suites: Array<[string, new () => object, Record<string, { value: unknown }>]> = [
+    ['send-image', SendMediaMessageDto, SEND_IMAGE_BODY_EXAMPLES],
+    ['send-video', SendMediaMessageDto, SEND_VIDEO_BODY_EXAMPLES],
+    ['send-audio', SendAudioMessageDto, SEND_AUDIO_BODY_EXAMPLES],
+    ['send-document', SendMediaMessageDto, SEND_DOCUMENT_BODY_EXAMPLES],
+    ['send-sticker', SendMediaMessageDto, SEND_STICKER_BODY_EXAMPLES],
+  ];
+
+  it.each(suites)('%s declares at least one example', (_route, _cls, examples) => {
+    expect(Object.keys(examples).length).toBeGreaterThan(0);
+  });
+
+  it.each(suites)('%s examples all pass DTO validation', async (_route, cls, examples) => {
+    for (const [name, example] of Object.entries(examples)) {
+      const errors = await validateDto(cls, example.value);
+      expect({ name, errors: errors.map(e => e.property) }).toEqual({ name, errors: [] });
+    }
+  });
+
+  // buildMediaInput prefers base64 over url, so an example carrying both would send the base64 —
+  // and no short placeholder is real media. Exactly one source per example, never both.
+  it.each(suites)('%s examples carry exactly one media source', (_route, _cls, examples) => {
+    for (const [name, example] of Object.entries(examples)) {
+      const v = example.value as { url?: string; base64?: string };
+      expect({ name, sources: [v.url, v.base64].filter(Boolean).length }).toEqual({ name, sources: 1 });
+    }
   });
 });
 

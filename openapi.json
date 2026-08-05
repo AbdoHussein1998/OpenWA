@@ -1902,6 +1902,16 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendMediaMessageDto"
+              },
+              "examples": {
+                "fromUrl": {
+                  "summary": "Fetch the media from a URL",
+                  "value": {
+                    "chatId": "628123456789@c.us",
+                    "url": "https://example.com/image.jpg",
+                    "caption": "Check out this image!"
+                  }
+                }
               }
             }
           }
@@ -1947,6 +1957,15 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendMediaMessageDto"
+              },
+              "examples": {
+                "fromUrl": {
+                  "summary": "Fetch the media from a URL",
+                  "value": {
+                    "chatId": "628123456789@c.us",
+                    "url": "https://example.com/video.mp4"
+                  }
+                }
               }
             }
           }
@@ -1992,6 +2011,16 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendAudioMessageDto"
+              },
+              "examples": {
+                "fromUrl": {
+                  "summary": "Fetch the media from a URL",
+                  "value": {
+                    "chatId": "628123456789@c.us",
+                    "url": "https://example.com/audio.ogg",
+                    "ptt": true
+                  }
+                }
               }
             }
           }
@@ -2037,6 +2066,16 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendMediaMessageDto"
+              },
+              "examples": {
+                "fromUrl": {
+                  "summary": "Fetch the media from a URL",
+                  "value": {
+                    "chatId": "628123456789@c.us",
+                    "url": "https://example.com/report.pdf",
+                    "filename": "report.pdf"
+                  }
+                }
               }
             }
           }
@@ -2166,6 +2205,15 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendMediaMessageDto"
+              },
+              "examples": {
+                "fromUrl": {
+                  "summary": "Fetch the media from a URL",
+                  "value": {
+                    "chatId": "628123456789@c.us",
+                    "url": "https://example.com/sticker.png"
+                  }
+                }
               }
             }
           }

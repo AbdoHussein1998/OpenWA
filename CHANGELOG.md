@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Swagger "Try it out" called `http://localhost:2785` instead of the host that served the docs**, failing with `Failed to fetch` anywhere else — a relative server is now listed first, so it resolves to the serving origin.
 - **Sending to a number WhatsApp cannot resolve returned `500`** on the whatsapp-web.js engine — it now answers `400` naming the recipient and both possible causes. Callers that retried the old 500 should treat this as terminal.
 - **Swagger "Try it out" on `send-text` always returned `400`** — the sampled body paired `linkPreview: false` with a `customLinkPreview`, which the endpoint rejects; the operation now ships explicit request-body examples.
+- **Swagger "Try it out" on the media routes uploaded the literal string `"string"`** — the sampled body carried both `url` and `base64`, and base64 wins; each route now ships an explicit example with a single media source.
 
 ## [0.14.0] - 2026-08-05
 

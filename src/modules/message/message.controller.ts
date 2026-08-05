@@ -9,6 +9,11 @@ import {
   SendAudioMessageDto,
   MessageResponseDto,
   SEND_TEXT_BODY_EXAMPLES,
+  SEND_IMAGE_BODY_EXAMPLES,
+  SEND_VIDEO_BODY_EXAMPLES,
+  SEND_AUDIO_BODY_EXAMPLES,
+  SEND_DOCUMENT_BODY_EXAMPLES,
+  SEND_STICKER_BODY_EXAMPLES,
 } from './dto';
 import { SendTemplateMessageDto } from './dto/send-template.dto';
 import { SendBulkMessageDto, BulkMessageResponseDto } from './dto/bulk-message.dto';
@@ -114,6 +119,9 @@ export class MessageController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Send an image message' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  // Without an explicit example Swagger UI samples `url` AND `base64` into the body, and base64 wins
+  // in buildMediaInput — so Execute uploaded the literal string "string" instead of the URL (#1068).
+  @ApiBody({ type: SendMediaMessageDto, examples: SEND_IMAGE_BODY_EXAMPLES })
   @ApiResponse({
     status: 201,
     description: 'Image sent',
@@ -134,6 +142,7 @@ export class MessageController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Send a video message' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiBody({ type: SendMediaMessageDto, examples: SEND_VIDEO_BODY_EXAMPLES })
   @ApiResponse({
     status: 201,
     description: 'Video sent',
@@ -154,6 +163,7 @@ export class MessageController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Send an audio/voice message' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiBody({ type: SendAudioMessageDto, examples: SEND_AUDIO_BODY_EXAMPLES })
   @ApiResponse({
     status: 201,
     description: 'Audio sent',
@@ -174,6 +184,7 @@ export class MessageController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Send a document/file' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiBody({ type: SendMediaMessageDto, examples: SEND_DOCUMENT_BODY_EXAMPLES })
   @ApiResponse({
     status: 201,
     description: 'Document sent',
@@ -222,6 +233,7 @@ export class MessageController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Send a sticker message' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiBody({ type: SendMediaMessageDto, examples: SEND_STICKER_BODY_EXAMPLES })
   @ApiResponse({
     status: 201,
     description: 'Sticker sent',
