@@ -125,7 +125,10 @@ export class BaileysEvents {
   /** Live incoming calls by call id, holding the raw `from` JID sock.rejectCall() needs — the
    *  call event is long gone by the time a reject arrives, so it must be cached at event time.
    *  Readonly reference, owned here; the adapter's lifecycle clears it on teardown. */
-  readonly liveCalls = new Map<string, { callFrom: string; expiresAt: number }>();
+  readonly liveCalls = new Map<
+    string,
+    { callFrom: string; expiresAt: number; from: string; isVideo: boolean; isGroup: boolean }
+  >();
 
   constructor(private readonly host: BaileysEventsHost) {}
 
@@ -453,7 +456,12 @@ export class BaileysEvents {
       // same call-id, so a single call can reach this loop more than once. Cache first and emit
       // only for an id not already live, otherwise one call surfaces as several `call.received`
       // events.
-      if (!this.cacheLiveCall(call.id, call.from)) {
+      const published = {
+        from: this.host.toNeutralJid(call.callerPn ?? call.from),
+        isVideo: call.isVideo === true,
+        isGroup: call.isGroup === true,
+      };
+      if (!this.cacheLiveCall(call.id, call.from, published)) {
         continue;
       }
       const payload: IncomingCallEvent = {
@@ -574,7 +582,11 @@ export class BaileysEvents {
    * once per call rather than once per upstream offer tag. A repeat offer still refreshes the
    * entry, so a long-ringing call stays rejectable for a full TTL from the most recent signal.
    */
-  private cacheLiveCall(callId: string, callFrom: string): boolean {
+  private cacheLiveCall(
+    callId: string,
+    callFrom: string,
+    published: { from: string; isVideo: boolean; isGroup: boolean },
+  ): boolean {
     const now = Date.now();
     for (const [id, entry] of this.liveCalls) {
       if (entry.expiresAt <= now) {
@@ -582,7 +594,10 @@ export class BaileysEvents {
       }
     }
     const isNewCall = !this.liveCalls.has(callId);
-    this.liveCalls.set(callId, { callFrom, expiresAt: now + BaileysEvents.LIVE_CALL_TTL_MS });
+    // The published identity is cached alongside the raw JID so a rejection issued through the API
+    // can report the same shape the engine-observed outcomes do — the call event itself is long
+    // gone by then.
+    this.liveCalls.set(callId, { callFrom, expiresAt: now + BaileysEvents.LIVE_CALL_TTL_MS, ...published });
     return isNewCall;
   }
 
@@ -602,6 +617,18 @@ export class BaileysEvents {
       throw new EngineNotReadyError('Cannot reject a call before the engine is initialized.');
     }
     await sock.rejectCall(callId, entry.callFrom);
+    // A rejection made HERE produces no inbound `reject` signal to observe, so without this the
+    // one outcome the caller definitely knows about — the one they asked for — was the only one
+    // never published. Emitted only after the socket accepted it, and the entry is already evicted,
+    // so a server echo arriving later cannot publish a second time.
+    this.host.getOnCallOutcome()?.({
+      callId,
+      from: entry.from,
+      outcome: 'rejected',
+      isVideo: entry.isVideo,
+      isGroup: entry.isGroup,
+      timestamp: Math.floor(Date.now() / 1000),
+    });
   }
 
   /**

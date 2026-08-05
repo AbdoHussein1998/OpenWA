@@ -44,6 +44,8 @@ export interface BaileysMessagingHost {
   putStoredMessage(msg: WAMessage): Promise<void> | undefined;
   /** Look up a previously-seen message from the store (the reply/forward/react/delete handle). */
   getStoredMessage(messageId: string): Promise<WAMessage | null> | undefined;
+  /** Remember a lid<->phone pair the socket resolved, so later reads do not have to ask again. */
+  recordLidMapping(lid: string, pn: string): void;
   /** The currently-registered onMessageCreate callback, if any (assigned at initialize()). */
   getOnMessageCreate(): EngineEventCallbacks['onMessageCreate'];
   /** Map a WAMessage to its neutral shape (the adapter's inbound mapper). */
@@ -368,6 +370,11 @@ export class BaileysMessaging {
     try {
       const pn = this.host.toEngineJid(chatId);
       const lid = await this.sock().signalRepository?.lidMapping?.getLIDForPN(pn);
+      // Record what the socket just told us. This resolution is the one place a cold contact's lid
+      // becomes known before any message arrives, and without writing it back the session store
+      // still believes the two ids are unrelated — which makes an ownership check comparing the
+      // stored key's lid against a phone-dialect chatId reject a message that IS in that chat.
+      if (lid) this.host.recordLidMapping(lid, pn);
       return lid ?? chatId;
     } catch {
       return chatId; // resolution is best-effort; an unmapped contact sends to the PN as before
