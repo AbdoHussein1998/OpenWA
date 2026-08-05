@@ -291,6 +291,24 @@ export class SessionOwnershipService {
    * For operations that can only act on this process's own engines and would otherwise report
    * success over work they never touched.
    */
+  /**
+   * Whether ONE session is held by another node on a live lease.
+   *
+   * The scoped counterpart of {@link heldByOtherNodes}, for the lifecycle verbs that act on a single
+   * id: they only need this answer, and scanning every claim to get it would grow with the whole
+   * deployment. A LAPSED foreign claim reads false — the holder may be gone, and taking over is
+   * exactly what the claim rule allows.
+   */
+  async isHeldByOtherNode(sessionId: string, now = new Date()): Promise<boolean> {
+    const count = await this.sessions
+      .createQueryBuilder('session')
+      .where('id = :id', { id: sessionId })
+      .andWhere('"nodeId" IS NOT NULL AND "nodeId" <> :me', { me: this.nodeId })
+      .andWhere('"leaseExpiresAt" > :now', { now: leaseParam(now) })
+      .getCount();
+    return count > 0;
+  }
+
   async heldByOtherNodes(now = new Date()): Promise<string[]> {
     const rows = await this.sessions
       .createQueryBuilder('session')

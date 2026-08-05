@@ -29,6 +29,23 @@ const RELAYED_RESPONSE_HEADERS = ['content-type', 'content-disposition', 'x-cont
 export const FORWARDED_HEADER = 'x-openwa-forwarded';
 
 /**
+ * The URL to forward to: ALWAYS the owner's origin, carrying only the request's path and query.
+ *
+ * The request target is caller-controlled. HTTP/1.1 allows the absolute form
+ * (`GET http://elsewhere/api/sessions/x HTTP/1.1`), Express matches the route for it, and
+ * `req.originalUrl` then holds that absolute URI — where `new URL(originalUrl, base)` DISCARDS the
+ * base entirely. Resolving that way would let an authenticated caller aim this node's forwarder at
+ * any origin they choose and receive the response, with the credentials of the call attached: a
+ * server-side request forgery that also exfiltrates the API key. Rebuilding from the owner's base
+ * makes the origin structurally un-influenceable rather than merely validated.
+ */
+export function forwardTarget(originalUrl: string, ownerNodeUrl: string): string {
+  const base = new URL(ownerNodeUrl);
+  const requested = new URL(originalUrl, base);
+  return new URL(`${requested.pathname}${requested.search}`, base).toString();
+}
+
+/**
  * Routes a session-scoped request to the node hosting the session's engine.
  *
  * The ownership lease records WHERE each session runs; this is the piece that acts on it: a request
@@ -123,7 +140,7 @@ export class SessionProxyInterceptor implements NestInterceptor {
     ownerNodeId: string,
     ownerNodeUrl: string,
   ): Promise<void> {
-    const target = new URL(request.originalUrl, ownerNodeUrl).toString();
+    const target = forwardTarget(request.originalUrl, ownerNodeUrl);
     const timeoutMs = this.configService?.get<number>('session.proxyTimeoutMs', 60_000) ?? 60_000;
 
     const headers: Record<string, string> = { [FORWARDED_HEADER]: this.ownership?.nodeId ?? '1' };

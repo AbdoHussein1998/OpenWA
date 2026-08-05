@@ -1034,7 +1034,7 @@ describe('SessionService', () => {
   // ── ownership claim lifecycle (multi-node) ────────────────────────
 
   describe('ownership release', () => {
-    type OwnershipStub = { claim: jest.Mock; release: jest.Mock };
+    type OwnershipStub = { claim: jest.Mock; release: jest.Mock; isHeldByOtherNode: jest.Mock };
 
     // The trailing @Optional constructor dep the DI module deliberately omits; poked onto the
     // instance like the other white-box seams in this file.
@@ -1042,6 +1042,8 @@ describe('SessionService', () => {
       const ownership: OwnershipStub = {
         claim: jest.fn().mockResolvedValue(claimResult),
         release: jest.fn().mockResolvedValue(undefined),
+        // No live peer holds it unless a test says so — the single-node answer.
+        isHeldByOtherNode: jest.fn().mockResolvedValue(false),
       };
       Object.assign(service as unknown as Record<string, unknown>, { ownership });
       return ownership;
@@ -1068,6 +1070,41 @@ describe('SessionService', () => {
       // Releasing here would invite a peer to open a second connection to the account.
       expect(ownership.release).not.toHaveBeenCalled();
     });
+
+    // start() is fenced by the claim, and logout/force-kill need a local engine — but stop() and
+    // delete() need neither, so a request landing on a non-owner (routine when ownership is
+    // configured and request routing is not) wrote DISCONNECTED over a peer's live session, or
+    // deleted its row and credentials, while the peer's engine kept running.
+    it.each([
+      ['stop', (s: SessionService) => s.stop('sess-uuid-1'), 'stop' as const],
+      ['delete', (s: SessionService) => s.delete('sess-uuid-1'), 'delete' as const],
+    ])('%s() refuses a session a LIVE peer holds, without touching the lifecycle', async (_verb, call, method) => {
+      const ownership = withOwnership();
+      Object.assign(ownership, { isHeldByOtherNode: jest.fn().mockResolvedValue(true) });
+      const lifecycleSpy = jest.spyOn(lifecycle, method).mockResolvedValue(createMockSession());
+
+      await expect(call(service)).rejects.toBeInstanceOf(ConflictException);
+
+      expect(lifecycleSpy).not.toHaveBeenCalled();
+      expect(ownership.release).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['stop', (s: SessionService) => s.stop('sess-uuid-1'), 'stop' as const],
+      ['delete', (s: SessionService) => s.delete('sess-uuid-1'), 'delete' as const],
+    ])(
+      '%s() proceeds when the foreign claim has LAPSED — taking over is what the rule allows',
+      async (_v, call, method) => {
+        const ownership = withOwnership();
+        Object.assign(ownership, { isHeldByOtherNode: jest.fn().mockResolvedValue(false) });
+        const lifecycleSpy = jest.spyOn(lifecycle, method).mockResolvedValue(createMockSession());
+        jest.spyOn(lifecycle, 'isEngineActive').mockReturnValue(false);
+
+        await call(service);
+
+        expect(lifecycleSpy).toHaveBeenCalledWith('sess-uuid-1');
+      },
+    );
 
     it('start() answers 404, not 409, when the claim matched nothing because the session does not exist', async () => {
       withOwnership(false);

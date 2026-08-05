@@ -350,6 +350,22 @@ describe('SessionOwnershipService', () => {
    * Drives an operator-facing warning during a data import: this process can only stop its own
    * engines, so a session running elsewhere has to be named rather than quietly counted as handled.
    */
+  describe('is one session held elsewhere', () => {
+    it('is true only for a LIVE foreign claim', async () => {
+      const live = await seed({ nodeId: 'peer', leaseExpiresAt: new Date(Date.now() + 60_000) });
+      const lapsed = await seed({ nodeId: 'peer', leaseExpiresAt: new Date(Date.now() - 1000) });
+      const mine = await seed({ nodeId: 'node-a', leaseExpiresAt: new Date(Date.now() + 60_000) });
+      const free = await seed();
+      const nodeA = service('node-a');
+
+      await expect(nodeA.isHeldByOtherNode(live.id)).resolves.toBe(true);
+      // A lapsed holder may be gone — taking over is exactly what the claim rule allows.
+      await expect(nodeA.isHeldByOtherNode(lapsed.id)).resolves.toBe(false);
+      await expect(nodeA.isHeldByOtherNode(mine.id)).resolves.toBe(false);
+      await expect(nodeA.isHeldByOtherNode(free.id)).resolves.toBe(false);
+    });
+  });
+
   describe('sessions held elsewhere', () => {
     it('names sessions another node holds on a live lease', async () => {
       const mine = await seed();
