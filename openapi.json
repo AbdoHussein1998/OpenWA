@@ -7206,8 +7206,12 @@
   ],
   "servers": [
     {
+      "url": "/",
+      "description": "This instance (the origin serving these docs)"
+    },
+    {
       "url": "http://{host}:{port}",
-      "description": "OpenWA instance",
+      "description": "Another instance (set host and port)",
       "variables": {
         "host": {
           "default": "localhost"
