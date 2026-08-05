@@ -115,6 +115,55 @@ describe('media route body examples', () => {
   });
 });
 
+// Nothing checked the shape before, so a malformed entry reached WhatsApp Web's createWid and threw
+// from the minified bundle as `Error: t: t` — the caller got a 500 that named neither the field nor
+// the value (#1068). These cases are the contract: what an individual WID looks like, and what does not.
+describe('mentions WID shape', () => {
+  const accepted: Array<[string, string]> = [
+    ['phone @c.us (the documented form)', '628123456789@c.us'],
+    ['raw protocol @s.whatsapp.net (the #156 workaround)', '628123456789@s.whatsapp.net'],
+    ['privacy id @lid (phone genuinely unknown)', '148004841455867@lid'],
+    ['multi-device suffix', '628123456789:12@c.us'],
+  ];
+
+  const rejected: Array<[string, string]> = [
+    ['bare number, no domain', '628123456789'],
+    ['garbage', 'not-a-wid!!'],
+    ['empty string', ''],
+    ['group id (mentions is the participant list, not groupMentions)', '120363000000000000@g.us'],
+    ['status pseudo-JID', 'status@broadcast'],
+    ['unknown domain', '628123456789@example.com'],
+  ];
+
+  it.each(accepted)('accepts %s', async (_label, wid) => {
+    const errors = await validateDto(SendTextMessageDto, { chatId: 'g@g.us', text: 'hi', mentions: [wid] });
+    expect(errors).toHaveLength(0);
+  });
+
+  it.each(rejected)('rejects %s', async (_label, wid) => {
+    const errors = await validateDto(SendTextMessageDto, { chatId: 'g@g.us', text: 'hi', mentions: [wid] });
+    expect(errors.map(e => e.property)).toEqual(['mentions']);
+  });
+
+  it('rejects a bad entry even when another entry is valid', async () => {
+    const errors = await validateDto(SendTextMessageDto, {
+      chatId: 'g@g.us',
+      text: 'hi',
+      mentions: ['628123456789@c.us', 'not-a-wid!!'],
+    });
+    expect(errors.map(e => e.property)).toEqual(['mentions']);
+  });
+
+  it('applies to media captions too', async () => {
+    const errors = await validateDto(SendMediaMessageDto, {
+      chatId: 'g@g.us',
+      url: 'https://example.com/a.jpg',
+      mentions: ['not-a-wid!!'],
+    });
+    expect(errors.map(e => e.property)).toEqual(['mentions']);
+  });
+});
+
 describe('SendMediaMessageDto mentions', () => {
   it('accepts an optional array of mention WIDs', async () => {
     const errors = await validateDto(SendMediaMessageDto, {

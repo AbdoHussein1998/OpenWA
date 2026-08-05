@@ -10,8 +10,10 @@ import {
   IsArray,
   ArrayMaxSize,
   IsBoolean,
+  Validate,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsMentionWidConstraint } from './is-mention-wid.validator';
 import { ToStrictBoolean } from '../../../common/utils/strict-boolean';
 
 const MENTIONS_DESCRIPTION =
@@ -73,6 +75,7 @@ export class SendTextMessageDto {
   @ArrayMaxSize(1024)
   @IsString({ each: true })
   @MaxLength(64, { each: true })
+  @Validate(IsMentionWidConstraint, { each: true })
   mentions?: string[];
 
   @ApiPropertyOptional({
@@ -191,6 +194,7 @@ export class SendMediaMessageDto {
   @ArrayMaxSize(1024)
   @IsString({ each: true })
   @MaxLength(64, { each: true })
+  @Validate(IsMentionWidConstraint, { each: true })
   mentions?: string[];
 }
 
