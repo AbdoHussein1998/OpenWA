@@ -155,6 +155,10 @@ services:
       # "true", so a blank forward (nothing set) keeps the default off. Without this line the value in
       # .env never reaches the container and the flag silently does nothing.
       - AUTO_START_SESSIONS=${AUTO_START_SESSIONS:-}
+      # Fetching status@broadcast immediately after a fresh pairing can make affected accounts lose
+      # the companion at WhatsApp Web's first scheduled reload. Disabled by default; live statuses
+      # still arrive normally. Opt in only after validating the account.
+      - STATUS_SEED_ON_READY=${STATUS_SEED_ON_READY:-false}
       # Session ownership / multi-node routing (see the "Session ownership" section of .env.example
       # and docs/13). NODE_ID must be STABLE across restarts: the app default (the container
       # hostname) changes on every recreate, making the new container a "new node" that has to wait
