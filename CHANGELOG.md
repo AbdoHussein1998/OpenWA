@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Built under the full TypeScript `strict` family, with per-module test-coverage floors across the codebase.
 - `session.restriction` is now socket-subscribable as well as webhook-delivered, and the dashboard session card picks up a restriction (or its lift) live instead of only on a page reload.
+- Eager status backfill on session ready is now opt-in (`STATUS_SEED_ON_READY`, default off): the immediate `status@broadcast` read could make some freshly paired whatsapp-web.js accounts lose the companion at WhatsApp Web's first scheduled reload. Live status events are unaffected. Thanks @duckvhuynh.
 
 ### Fixed
 
