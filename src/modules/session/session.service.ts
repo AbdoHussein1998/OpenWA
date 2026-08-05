@@ -276,10 +276,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   /** Record removal + engine retirement + credential purge: owned by the lifecycle service. */
   async delete(id: string): Promise<void> {
-    // Guarded at the call site rather than inside an always-awaited helper: without ownership there
-    // is nothing to check, and awaiting anything at all here would push the lifecycle call a
-    // microtask later — enough for an in-flight start to reach engine.initialize() before the
-    // retirement lands, which the pre-initialize retirement race deliberately prevents.
+    // Set the tearing-down mark SYNCHRONOUSLY, before the ownership fence's awaited query. The
+    // pre-initialize retirement race needs this mark visible to an in-flight start()'s
+    // post-INITIALIZING check by the time that write settles; awaiting anything first — the fence's
+    // COUNT, or delete()'s own requireSession — would let the mark land after that window. A mark
+    // left behind when the fence refuses (409) is harmless and is cleared by the next start().
+    this.engineLifecycle.markStopping(id);
     if (this.ownership) await this.assertNotHeldElsewhere(id);
     await this.engineLifecycle.delete(id);
     await this.ownership?.release(id);
@@ -323,7 +325,8 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   async stop(id: string): Promise<Session> {
-    // Call-site guarded — see delete().
+    // Synchronous stop-mark before the awaited fence — see delete() for why.
+    this.engineLifecycle.markStopping(id);
     if (this.ownership) await this.assertNotHeldElsewhere(id);
     const session = await this.engineLifecycle.stop(id);
     // Handed back on the way out so a peer can pick it up immediately rather than waiting for the

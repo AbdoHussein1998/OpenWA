@@ -6110,6 +6110,19 @@ describe('WhatsAppWebJsAdapter raw-id extraction hardening', () => {
     expect(result[0].id).toBe('628111@c.us');
   });
 
+  // getNumberId returns a raw page-context Wid; on a WA Web build that renamed _serialized to $1,
+  // reading only _serialized made every number resolve to null — and checkNumberExists then reports
+  // every contact as unregistered.
+  it('getNumberId reads $1 on a renamed build, and checkNumberExists follows', async () => {
+    const renamed = readyAdapter({ getNumberId: jest.fn().mockResolvedValue({ $1: '628111@c.us' }) });
+    await expect(renamed.getNumberId('628111')).resolves.toBe('628111@c.us');
+    await expect(renamed.checkNumberExists('628111')).resolves.toBe(true);
+
+    const missing = readyAdapter({ getNumberId: jest.fn().mockResolvedValue(null) });
+    await expect(missing.getNumberId('628111')).resolves.toBeNull();
+    await expect(missing.checkNumberExists('628111')).resolves.toBe(false);
+  });
+
   it('getSubscribedChannels reads $1 on a renamed build, never the literal "undefined"', async () => {
     const getChannels = jest.fn().mockResolvedValue([{ id: { $1: '120363@newsletter' }, name: 'Renamed' }]);
 

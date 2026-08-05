@@ -456,7 +456,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "A credential teardown for the same session name is still in flight. Retryable — the body carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; wait for it to settle and retry. No destructive side effect runs before this refusal."
+            "description": "A credential teardown for the same session name is still in flight (retryable — the body carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; wait for it to settle and retry), OR another node currently holds this session's live engine and deleting it here would strip a session the owner is running. No destructive side effect runs before either refusal."
           }
         },
         "summary": "Delete a session",
@@ -533,6 +533,9 @@
           },
           "404": {
             "description": "Session not found"
+          },
+          "409": {
+            "description": "Another node currently holds this session's live engine (multi-node deployments): stopping it here would report the session down while the owner keeps running it, so the request is refused. Retry against the owning node, or once its lease has lapsed."
           }
         },
         "summary": "Stop a session and disconnect WhatsApp",

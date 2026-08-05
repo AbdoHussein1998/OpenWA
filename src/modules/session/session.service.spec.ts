@@ -1164,6 +1164,26 @@ describe('SessionService', () => {
 
       expect(ownership.release).not.toHaveBeenCalled();
     });
+
+    // The pre-initialize retirement race needs the stop-mark set SYNCHRONOUSLY at entry — before
+    // the ownership fence's awaited query, and before the lifecycle's own first await — or an
+    // in-flight start() can reach engine.initialize() on the engine being retired. Prove the mark
+    // lands synchronously even when the fence is a promise that never settles.
+    it.each([
+      ['stop', (s: SessionService) => s.stop('sess-uuid-1')],
+      ['delete', (s: SessionService) => s.delete('sess-uuid-1')],
+    ])('%s() sets the stop mark synchronously, before the awaited ownership fence', (_verb, call) => {
+      const ownership = withOwnership();
+      // A fence that never resolves: if the mark depended on it, it would never be set.
+      ownership.isHeldByOtherNode.mockReturnValue(new Promise<boolean>(() => undefined));
+      const stopping = (lifecycle as unknown as { stoppingSessions: Set<string> }).stoppingSessions;
+      expect(stopping.has('sess-uuid-1')).toBe(false);
+
+      void call(service); // do NOT await — the fence never settles
+
+      // Synchronously, on the same tick, the mark must already be set.
+      expect(stopping.has('sess-uuid-1')).toBe(true);
+    });
   });
 
   describe('isEngineActive', () => {

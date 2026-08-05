@@ -402,6 +402,21 @@ export class SessionEngineLifecycle {
   }
 
   /**
+   * Set the tearing-down mark synchronously, before any awaited work a retiring control performs.
+   *
+   * The pre-initialize retirement race turns on this mark being visible to initializeEngine's
+   * post-INITIALIZING check (line ~507) by the time that awaited DB write settles. stop()/delete()
+   * both add the mark internally, but only AFTER their own first await (requireSession /
+   * awaitPendingTeardown), and the ownership fence added another await ahead of them — so the mark
+   * could land after the window it guards. Exposing it lets SessionService set it at true entry,
+   * with nothing awaited in between; a mark left behind by a request that then refuses (a 409) is
+   * harmless and is cleared by the next start(), which is what the mark is designed for.
+   */
+  markStopping(id: string): void {
+    this.stoppingSessions.add(id);
+  }
+
+  /**
    * True while this process still has anything alive for the session: a registered engine, an
    * in-flight start(), or reconnect state whose armed/executing attempt will re-register one.
    * The ownership heartbeat consults this so a claim that no longer covers an engine stops being

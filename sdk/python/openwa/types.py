@@ -201,9 +201,9 @@ class SendTextRequest(TypedDict, total=False):
     text: str
     # WIDs to @mention (e.g. ["62811@c.us"]). The text must also contain the @<number> token.
     mentions: list[str]
-    # Set False to suppress the URL preview. Guaranteed only in that direction: unset means the
-    # engine default, and the engines differ -- whatsapp-web.js asks WhatsApp Web to build a preview,
-    # preview by default; on Baileys a preview is OPT-IN and needs True (it costs an outbound fetch).
+    # Controls the URL preview. False suppresses it on both engines. Otherwise the engines differ:
+    # whatsapp-web.js builds one in-page by default, while on Baileys a preview is OPT-IN -- it needs
+    # True, because generating one is a blocking outbound fetch per URL.
     linkPreview: bool
     # Attach a preview you supply yourself instead of one fetched from the URL. Nothing is fetched,
     # so this works even for a URL the gateway cannot reach. Baileys only -- whatsapp-web.js takes a
@@ -714,7 +714,7 @@ class StatusRecord(TypedDict, total=False):
     expiresAt: str
 
 
-# Result of a status POST (``send-text``/``send-image``/``send-video``). Mirrors the backend
+# Result of a status POST (``send-text``/``send-image``/``send-video``/``send-voice``). Mirrors the backend
 # ``StatusResult``, which is deliberately NOT ``Status``: the acknowledgement carries the id and
 # timing only, with no contact or media. ``statusId`` is the handle ``delete()`` takes.
 class StatusResult(TypedDict, total=False):
@@ -836,6 +836,8 @@ class SendVoiceStatusRequest(TypedDict, total=False):
     audio: StatusMediaInput
     #: Required on the Baileys engine (absent/empty -> 400); omit on whatsapp-web.js.
     recipients: list[str]
+    #: Background colour as "#RRGGBB", behind the voice-note bubble. Baileys only; wwjs ignores it.
+    backgroundColor: str
 
 
 # ── Health ────────────────────────────────────────────────────────

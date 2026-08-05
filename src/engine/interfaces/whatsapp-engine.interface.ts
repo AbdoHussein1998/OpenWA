@@ -362,9 +362,9 @@ export interface StatusPostOptions {
    * whatsapp-web.js, which broadcasts to the account's status-privacy audience.
    */
   recipients?: string[];
-  /** Hex background colour (#RRGGBB). Text status only. */
+  /** Hex background colour (#RRGGBB). Honoured on text and voice statuses (Baileys engine). */
   backgroundColor?: string;
-  /** Font index. Text status only. */
+  /** Font index. Honoured on text and voice statuses (Baileys engine). */
   font?: number;
   /** Caption. Image/video status only. */
   caption?: string;
@@ -795,11 +795,9 @@ export interface IWhatsAppEngine {
   /**
    * Send text.
    *
-   * `linkPreview: false` suppresses the URL preview on BOTH engines. Leaving it unset means "whatever
-   * the engine does by default", and the two differ: whatsapp-web.js asks WhatsApp Web to build a
-   * preview in-page, while Baileys builds none unless its optional preview generator is installed.
-   * The parameter is therefore only guaranteed in its suppressing direction, and is documented as
-   * such rather than pretending at symmetry.
+   * `linkPreview: false` suppresses the URL preview on BOTH engines. Otherwise the two differ:
+   * whatsapp-web.js builds one in-page by default, while on Baileys a preview is OPT-IN — only
+   * `linkPreview: true` produces one, because generating it is a blocking outbound fetch per URL.
    */
   sendTextMessage(
     chatId: string,

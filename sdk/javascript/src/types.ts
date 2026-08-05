@@ -189,9 +189,9 @@ export interface SendTextRequest {
   /** WIDs to @mention (e.g. `["62811@c.us"]`). The text must also contain the `@<number>` token. */
   mentions?: string[];
   /**
-   * Set `false` to suppress the URL preview. Guaranteed only in that direction: unset means the
-   * engine default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a preview,
-   * preview by default; on Baileys a preview is OPT-IN and needs `true` (it costs an outbound fetch).
+   * Controls the URL preview. `false` suppresses it on both engines. Otherwise the engines differ:
+   * whatsapp-web.js builds one in-page by default, while on Baileys a preview is OPT-IN — it needs
+   * `true`, because generating one is a blocking outbound fetch per URL.
    */
   linkPreview?: boolean;
   /**
@@ -792,7 +792,7 @@ export interface StatusRecord {
 }
 
 /**
- * Result of a status POST (`send-text`/`send-image`/`send-video`).
+ * Result of a status POST (`send-text`/`send-image`/`send-video`/`send-voice`).
  * Mirrors the backend `StatusResult` exactly.
  */
 export interface StatusResult {
@@ -847,6 +847,8 @@ export interface SendVoiceStatusRequest {
   audio: StatusMediaInput;
   /** Recipient JIDs. Required on the Baileys engine (absent/empty → 400); omit on whatsapp-web.js, which broadcasts instead. */
   recipients?: string[];
+  /** Background colour as `#RRGGBB`, rendered behind the voice-note bubble. Baileys only; whatsapp-web.js ignores it. */
+  backgroundColor?: string;
 }
 
 // ── Health ────────────────────────────────────────────────────────
