@@ -365,7 +365,8 @@ export class MessageController {
     status: 404,
     description:
       'Nothing archived for this message — archiving was off when it arrived, the message carries no ' +
-      'media, the media was above the archive cap, or retention has since cleared it.',
+      'media, the media was above the archive cap, retention has since cleared it, or the message ' +
+      'was sent BY this account (only inbound media is archived).',
   })
   async getChatMedia(
     @Param('sessionId') sessionId: string,

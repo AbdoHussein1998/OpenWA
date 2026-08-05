@@ -267,6 +267,42 @@ describe('SessionProxyInterceptor', () => {
       expect(seen[1].headers['x-forwarded-for']).toBe('198.51.100.9, 10.0.0.4');
     });
 
+    // A forwarded 429 comes from the OWNER's counters; without relaying its throttle headers the
+    // client is told to back off with no indication of for how long.
+    it('relays the owner’s throttle headers to the client', async () => {
+      const throttling = http.createServer((_req, res) => {
+        res.writeHead(429, {
+          'content-type': 'application/json',
+          'Retry-After-short': '7',
+          'X-RateLimit-Remaining-short': '0',
+        });
+        res.end(JSON.stringify({ statusCode: 429 }));
+      });
+      await new Promise<void>(resolve => throttling.listen(0, '127.0.0.1', resolve));
+      const url = `http://127.0.0.1:${(throttling.address() as AddressInfo).port}`;
+
+      try {
+        const { interceptor, context, next, res } = build({ row: row({ nodeUrl: url }) });
+        await interceptor.intercept(context, next);
+
+        expect(res.status).toHaveBeenCalledWith(429);
+        expect(res.setHeader).toHaveBeenCalledWith('retry-after-short', '7');
+        expect(res.setHeader).toHaveBeenCalledWith('x-ratelimit-remaining-short', '0');
+      } finally {
+        await new Promise<void>(resolve => throttling.close(() => resolve()));
+      }
+    });
+
+    // A NODE_URL that is not a usable absolute URL is an unreachable owner, not a server fault on a
+    // request that had nothing wrong with it.
+    it('answers 503, not 500, when the owner’s recorded URL is unusable', async () => {
+      const { interceptor, context, next, res } = build({ row: row({ nodeUrl: 'node-a:2785' }) });
+
+      await interceptor.intercept(context, next);
+
+      expect(res.status).toHaveBeenCalledWith(503);
+    });
+
     it('an unreachable owner answers 503 with the owner named, never a hang or a crash', async () => {
       const { interceptor, context, next, handle, res } = build({
         row: row({ nodeUrl: 'http://127.0.0.1:1' }),

@@ -206,8 +206,47 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'WEBHOOK_MAX_PAYLOAD_BYTES',
     // 0 would refuse every request carrying a body (a self-DoS), so the budget is positive-only.
     'INFLIGHT_BODY_BUDGET_BYTES',
+    // Media conversion: each is read with a `> 0` guard that silently falls back to the default,
+    // so a typo or a 0 quietly means "the default" instead of what the operator wrote.
+    'MEDIA_CONVERSION_TIMEOUT_MS',
+    'MEDIA_CONVERSION_MAX_OUTPUT_BYTES',
+    'MEDIA_CONVERSION_CONCURRENCY',
+    // Session ownership leases, same fall-back-silently reasoning.
+    'SESSION_LEASE_TTL_MS',
+    'SESSION_LEASE_HEARTBEAT_MS',
+    'SESSION_TAKEOVER_SWEEP_MS',
+    'SESSION_PROXY_TIMEOUT_MS',
   ]) {
     checkPositiveInt(key);
+  }
+
+  // A heartbeat that does not fit inside the lease renews too late to matter: the claim lapses
+  // between ticks, peers adopt sessions from a perfectly healthy node, and nothing in the logs says
+  // why. The defaults must be substituted for whatever is unset — validating only the key the
+  // operator happened to set would let a lone oversized heartbeat through.
+  const leaseTtlMs = Number(str('SESSION_LEASE_TTL_MS') ?? '60000');
+  const heartbeatMs = Number(str('SESSION_LEASE_HEARTBEAT_MS') ?? '20000');
+  if (Number.isInteger(leaseTtlMs) && Number.isInteger(heartbeatMs) && heartbeatMs * 2 > leaseTtlMs) {
+    errors.push(
+      `SESSION_LEASE_HEARTBEAT_MS (${heartbeatMs}) must be at most half of SESSION_LEASE_TTL_MS (${leaseTtlMs}) ` +
+        'so a renewal that is late or fails once still lands inside the lease',
+    );
+  }
+
+  // The forwarder builds an absolute URL from this; a value without a scheme parses as something
+  // unusable (`localhost:2785` reads as the scheme `localhost:`) and only fails at the first
+  // forward, as a 500 on a request that had nothing wrong with it.
+  const nodeUrl = str('NODE_URL');
+  if (nodeUrl) {
+    let parsed: URL | undefined;
+    try {
+      parsed = new URL(nodeUrl);
+    } catch {
+      parsed = undefined;
+    }
+    if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+      errors.push(`NODE_URL must be an absolute http(s) URL (got "${nodeUrl}")`);
+    }
   }
 
   // Boolean feature flags read at module-eval time (app.module.ts) with a bare `=== 'true'` /

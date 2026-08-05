@@ -438,6 +438,17 @@ export default () => ({
     })(),
   },
 
+  // Autoreply rules
+  automation: {
+    // Max rules per session. Every inbound message is evaluated against every rule of its session,
+    // so an unbounded count turns each message into unbounded work. Creating a NEW rule above the
+    // cap is rejected with 400; existing ones are grandfathered. Default 32; 0 disables the cap.
+    maxPerSession: (() => {
+      const n = parseInt(process.env.AUTOMATION_MAX_PER_SESSION ?? '', 10);
+      return Number.isFinite(n) && n >= 0 ? n : 32;
+    })(),
+  },
+
   // Server-side media conversion (opt-in): transcodes caller-supplied audio and video into the
   // shapes WhatsApp clients actually play, by running the ffmpeg binary. Nothing is converted
   // implicitly — only the explicit conversion endpoints use this.

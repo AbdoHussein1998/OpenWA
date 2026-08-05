@@ -1,6 +1,9 @@
 package openwa
 
-import "net/url"
+import (
+	"encoding/json"
+	"net/url"
+)
 
 // MessageResponse is the acknowledgement for a sent message.
 type MessageResponse struct {
@@ -15,9 +18,9 @@ type SendTextRequest struct {
 	// Mentions lists WIDs to @mention (e.g. ["62811@c.us"]). The text must
 	// also contain the @<number> token.
 	Mentions []string `json:"mentions,omitempty"`
-	// LinkPreview set to false suppresses the URL preview. Guaranteed only in that direction: nil
-	// means the engine default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a
-	// preview, Baileys builds none unless its optional generator is installed.
+	// LinkPreview controls the URL preview. False suppresses it on both engines. Otherwise the
+	// engines differ: whatsapp-web.js builds one in-page by default, while on Baileys a preview is
+	// OPT-IN — it needs true, because generating one is a blocking outbound fetch per URL.
 	LinkPreview *bool `json:"linkPreview,omitempty"`
 	// CustomLinkPreview attaches a preview you supply instead of one fetched from the URL. Nothing is
 	// fetched, so it works even for a URL the gateway cannot reach. Baileys only — whatsapp-web.js
@@ -358,9 +361,24 @@ type StarMessageRequest struct {
 }
 
 // VotePollRequest casts a vote on a poll. Options are option TEXTS, not ids —
-// no engine surfaces stable per-option ids. An empty slice clears the vote.
+// no engine surfaces stable per-option ids. An empty (or nil) slice clears the vote.
 type VotePollRequest struct {
 	ChatID        string   `json:"chatId"`
 	PollMessageID string   `json:"pollMessageId"`
 	Options       []string `json:"options"`
+}
+
+// MarshalJSON encodes a nil Options as `[]` rather than `null`.
+//
+// Clearing a vote is exactly the zero-value case, and the API requires the field to be an array:
+// `null` fails validation with a 400, so the one thing the zero value should express was the one
+// thing it could not. Omitting the field would fail the same way, which is why there is no
+// `omitempty` here.
+func (r VotePollRequest) MarshalJSON() ([]byte, error) {
+	type alias VotePollRequest
+	out := alias(r)
+	if out.Options == nil {
+		out.Options = []string{}
+	}
+	return json.Marshal(out)
 }

@@ -43,7 +43,11 @@ export class MediaController {
   })
   @ApiResponse({ status: 400, description: 'Neither url nor base64 given, or ffmpeg refused the input.' })
   @ApiResponse({ status: 413, description: 'The supplied media is above the media size cap.' })
-  @ApiResponse({ status: 503, description: 'Conversion is disabled, or the ffmpeg binary is not runnable.' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'Conversion is disabled, the ffmpeg binary is not runnable, or the conversion queue is saturated — retry shortly.',
+  })
   async convertVoice(@Body() dto: ConvertMediaDto) {
     return this.mediaConversion.convertToVoice(dto);
   }
@@ -60,7 +64,11 @@ export class MediaController {
   })
   @ApiResponse({ status: 400, description: 'Neither url nor base64 given, or ffmpeg refused the input.' })
   @ApiResponse({ status: 413, description: 'The supplied media is above the media size cap.' })
-  @ApiResponse({ status: 503, description: 'Conversion is disabled, or the ffmpeg binary is not runnable.' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'Conversion is disabled, the ffmpeg binary is not runnable, or the conversion queue is saturated — retry shortly.',
+  })
   async convertVideo(@Body() dto: ConvertMediaDto) {
     return this.mediaConversion.convertToVideo(dto);
   }

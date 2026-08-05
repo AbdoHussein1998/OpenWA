@@ -106,8 +106,10 @@ export class SendPacingService {
    * addParticipants) persist no message row, so `countColdReachoutsToday` — which reads the messages
    * table — cannot see them; without this tally each add request would get the full daily allowance
    * afresh, making the cap per-request instead of per-day. In memory like the breaker (the service
-   * doc explains why); it resets by UTC day and on restart, which for an anti-ban budget errs toward
-   * fewer reachouts, never more.
+   * doc explains why); it resets by UTC day, and also on restart — which for this half of the budget
+   * means a restart FORGETS what was already spent and hands out the allowance again. That errs
+   * toward more reachouts, not fewer, and is the one place this feature is not restart-proof: the
+   * chat half is counted from the messages table and is.
    */
   private readonly groupReachoutTally = new Map<string, { dayStartMs: number; count: number }>();
   private readonly refusalSamples = new Map<string, RefusalSample>();
@@ -486,6 +488,13 @@ function dialectVariants(chatId: string): string[] {
   }
   if (lower.endsWith('@s.whatsapp.net')) {
     return [chatId, chatId.slice(0, chatId.length - '@s.whatsapp.net'.length) + '@c.us'];
+  }
+  // A bare number is a user id with the suffix left off — the group-participant endpoints accept
+  // one and the engines qualify it themselves, so the history probe has to look under both
+  // spellings too or a contact the account already knows is charged as a stranger.
+  if (/^\d{5,}$/.test(chatId.trim())) {
+    const digits = chatId.trim();
+    return [digits, `${digits}@c.us`, `${digits}@s.whatsapp.net`];
   }
   return [chatId];
 }

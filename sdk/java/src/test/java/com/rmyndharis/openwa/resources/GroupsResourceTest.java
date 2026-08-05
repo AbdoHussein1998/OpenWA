@@ -118,6 +118,18 @@ class GroupsResourceTest {
         assertTrue(tx.lastRequest().body().contains("AbCdEfGhIjKl"));
     }
 
+    // The record gained a fourth component (memberAddMode); callers written against the previous
+    // three-component constructor must keep compiling, and omitting the new setting must mean
+    // "leave it alone" rather than sending a null.
+    @Test
+    void threeComponentConstructorStillWorksAndOmitsMemberAddMode() {
+        tx.respond(200, "{\"success\":true}");
+        GroupSettings legacy = new GroupSettings(true, false, 604800);
+        assertEquals(null, legacy.memberAddMode());
+        client.groups.updateGroupSettings("s", "g@g.us", legacy);
+        assertEquals(false, tx.lastRequest().body().contains("memberAddMode"));
+    }
+
     @Test
     void getGroupSettingsHitsSettingsPath() {
         tx.respond(200, "{\"announce\":true,\"locked\":false,\"ephemeralSeconds\":604800}");

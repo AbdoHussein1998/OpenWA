@@ -191,7 +191,7 @@ export interface SendTextRequest {
   /**
    * Set `false` to suppress the URL preview. Guaranteed only in that direction: unset means the
    * engine default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a preview,
-   * Baileys builds none unless its optional generator is installed.
+   * preview by default; on Baileys a preview is OPT-IN and needs `true` (it costs an outbound fetch).
    */
   linkPreview?: boolean;
   /**

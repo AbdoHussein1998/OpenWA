@@ -118,7 +118,10 @@ export class StatusController {
   })
   @ApiResponse({ status: 413, description: 'Base64 media exceeds MEDIA_DOWNLOAD_MAX_BYTES.' })
   async sendVoiceStatus(@Param('sessionId') sessionId: string, @Body() dto: SendVoiceStatusDto) {
-    return this.statusService.postVoiceStatus(sessionId, dto.audio, { recipients: dto.recipients });
+    return this.statusService.postVoiceStatus(sessionId, dto.audio, {
+      recipients: dto.recipients,
+      backgroundColor: dto.backgroundColor,
+    });
   }
 
   @Delete(':statusId')

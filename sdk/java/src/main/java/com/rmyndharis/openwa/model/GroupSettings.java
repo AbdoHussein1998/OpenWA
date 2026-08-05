@@ -8,6 +8,14 @@ package com.rmyndharis.openwa.model;
  * engine.
  */
 public record GroupSettings(Boolean announce, Boolean locked, Integer ephemeralSeconds, String memberAddMode) {
+    /**
+     * Back-compat constructor for callers written against the three-component record, before
+     * {@code memberAddMode} existed. Leaves that setting untouched, which is what omitting it means.
+     */
+    public GroupSettings(Boolean announce, Boolean locked, Integer ephemeralSeconds) {
+        this(announce, locked, ephemeralSeconds, null);
+    }
+
     public static Builder builder() {
         return new Builder();
     }

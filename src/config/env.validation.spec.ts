@@ -296,4 +296,33 @@ describe('validateEnv', () => {
     // Unset falls through to the default path (configuration.ts) — the boot-loop fix.
     expect(() => validateEnv({ DATABASE_TYPE: 'sqlite' })).not.toThrow();
   });
+
+  // A renewal that does not fit inside the lease renews too late to matter: the claim lapses between
+  // ticks and peers adopt sessions from a healthy node, with nothing in the logs saying why.
+  it('rejects a lease heartbeat that does not comfortably fit inside the TTL', () => {
+    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '60000', SESSION_LEASE_HEARTBEAT_MS: '50000' })).toThrow(
+      /at most half/,
+    );
+    // The defaults stand in for whatever is unset, so a lone oversized heartbeat cannot slip past.
+    expect(() => validateEnv({ SESSION_LEASE_HEARTBEAT_MS: '45000' })).toThrow(/at most half/);
+    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '20000' })).toThrow(/at most half/);
+    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '120000', SESSION_LEASE_HEARTBEAT_MS: '30000' })).not.toThrow();
+    expect(() => validateEnv({})).not.toThrow();
+  });
+
+  // The forwarder builds an absolute URL from NODE_URL; a scheme-less value only fails at the first
+  // forward, as a 500 on a request that had nothing wrong with it.
+  it('rejects a NODE_URL that is not an absolute http(s) URL', () => {
+    expect(() => validateEnv({ NODE_URL: 'localhost:2785' })).toThrow(/absolute http/);
+    expect(() => validateEnv({ NODE_URL: '10.0.0.5:2785' })).toThrow(/absolute http/);
+    expect(() => validateEnv({ NODE_URL: 'ftp://10.0.0.5' })).toThrow(/absolute http/);
+    expect(() => validateEnv({ NODE_URL: 'http://10.0.0.5:2785' })).not.toThrow();
+    expect(() => validateEnv({ NODE_URL: 'https://node-a.internal' })).not.toThrow();
+  });
+
+  it('rejects a non-positive media-conversion knob instead of silently using the default', () => {
+    expect(() => validateEnv({ MEDIA_CONVERSION_CONCURRENCY: '0' })).toThrow(/positive integer/);
+    expect(() => validateEnv({ MEDIA_CONVERSION_TIMEOUT_MS: 'abc' })).toThrow(/positive integer/);
+    expect(() => validateEnv({ MEDIA_CONVERSION_MAX_OUTPUT_BYTES: '52428800' })).not.toThrow();
+  });
 });
