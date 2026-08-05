@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Swagger "Try it out" called `http://localhost:2785` instead of the host that served the docs**, failing with `Failed to fetch` anywhere else — a relative server is now listed first, so it resolves to the serving origin.
 
+### Documentation
+
+- Documentation corrected where it understated the MCP surface: the tool count is 51 rather than ~39 (README and the architecture diagram), labels and automation-rule reads ship by default instead of being planned, and the Session row lists both presence tools.
+
 ## [0.14.0] - 2026-08-05
 
 ### Added
