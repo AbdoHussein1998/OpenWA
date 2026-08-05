@@ -22,3 +22,16 @@
 # future brace-expansion advisory rather than widening this list.
 CVE-2026-14257
 CVE-2026-69152
+
+# CVE-2026-69192 — ip-address SSRF-adjacent parsing flaw, fixed upstream in 10.3.1.
+#
+# Same shape as the two above: the only copy in the image is the one bundled inside the npm CLI
+# (/usr/local/lib/node_modules/npm/node_modules/ip-address, 10.2.0 in npm 12.0.2 — the newest
+# release, and what the Dockerfile installs). npm is not on the request path, so reaching it means
+# an operator running an npm command inside the container.
+#
+# The application tree is independently above the fix: package-lock.json resolves the sole
+# node_modules/ip-address at 10.4.0, and the root `overrides` entry pins `ip-address` to ^10.4.0 so
+# it cannot regress below it — the same invariant the brace-expansion note describes, which is what
+# keeps an ID-level ignore honest. Drop this entry once npm ships a bundle with ip-address >= 10.3.1.
+CVE-2026-69192
