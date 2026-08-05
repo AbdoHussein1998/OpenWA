@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Swagger "Try it out" on the media routes uploaded the literal string `"string"`** — the sampled body carried both `url` and `base64`, and base64 wins; each route now ships an explicit example with a single media source.
 - **A malformed `mentions` entry returned an undiagnosable `500`** — only type and length were checked, so junk reached WhatsApp Web's WID parser; entries are now validated as individual WIDs (`@c.us`, `@s.whatsapp.net`, `@lid`) and rejected with a `400`.
 
+### Documentation
+
+- Documentation corrected where it understated the MCP surface: the tool count is 51 rather than ~39 (README and the architecture diagram), labels and automation-rule reads ship by default instead of being planned, and the Session row lists both presence tools.
+
 ## [0.14.0] - 2026-08-05
 
 ### Added

@@ -26,7 +26,7 @@
 | **OAuth 2.1 (public exposure)**   | 🔜 Planned     | Static API key is used today (suitable for self-hosted/internal)        |
 | **Agent-action audit provenance** | 🔜 Planned     | Mark audited actions as agent-initiated                                 |
 | **Env-tunable rate limits**       | ✅ Implemented | `MCP_RATE_LIMIT_MAX` / `MCP_RATE_LIMIT_WINDOW_MS`                       |
-| **Additional tool domains**       | 🔜 Planned     | labels / templates / channels / catalog / status as an opt-in expansion |
+| **Additional tool domains**       | 🔜 Planned     | templates / channels / catalog / status (labels/automation now ship)    |
 
 ---
 
@@ -81,7 +81,7 @@ flowchart TB
 flowchart LR
     Client[MCP client] -->|POST /mcp| Adapter
     subgraph Core["src/core/agent-tools (SDK-free)"]
-        Registry[ToolRegistryService<br/>~39 ToolDescriptors]
+        Registry[ToolRegistryService<br/>51 ToolDescriptors]
         Invoker[invokeTool<br/>auth → validate → handler]
     end
     subgraph Adapter["src/modules/mcp (SDK, opt-in)"]
@@ -120,7 +120,7 @@ declares a `tier` (`read` | `write`) and, for writes, a required role.
 
 | Domain         | Read tools                                              | Write tools                                                                                   |
 | -------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| **Session**    | list, get, chats, stats                                 | mark read/unread, typing                                                                      |
+| **Session**    | list, get, chats, stats, presence                       | mark read/unread, typing, subscribe presence                                                  |
 | **Message**    | list, history, reactions                                | send text/image/video/audio/document/location/contact/sticker/template, reply, forward, react |
 | **Contact**    | list, get, check-number, resolve-phone, profile-picture | block, unblock                                                                                |
 | **Group**      | list, get, invite-code                                  | create, add participants, set subject, set description                                        |
@@ -244,8 +244,8 @@ Guidelines:
   intended for self-hosted/internal use).
 - **Agent-action audit provenance** — record that an audited action was agent-initiated
   and by which key.
-- **Expansion-pack tool domains** — labels, templates, channels, catalog, and status are
-  not in the default surface yet.
+- **Expansion-pack tool domains** — templates, channels, catalog, and status are not in the
+  default surface yet. Labels and automation-rule reads already are.
 - **Stateful MCP sessions / SSE reconnect, prompts, elicitation** — out of scope; the
   transport is intentionally stateless.
 
