@@ -1,8 +1,10 @@
 import { type Client } from 'whatsapp-web.js';
-import { Label } from '../interfaces/whatsapp-engine.interface';
+import { Label, ChatSummary } from '../interfaces/whatsapp-engine.interface';
 import { GroupChat, BusinessClient } from '../types/whatsapp-web-js.types';
-import { isChannelJid } from '../identity/wa-id';
+import { isChannelJid, chatKind } from '../identity/wa-id';
 import { ChatLabelsUnsupportedError } from '../../common/errors/chat-labels-unsupported.error';
+import { LabelNotFoundError } from '../../common/errors/label-not-found.error';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -30,6 +32,51 @@ export class WwebjsLabels {
       name: String(label.name),
       hexColor: String(label.hexColor),
     }));
+  }
+
+  /**
+   * Every chat carrying a label. Mapped to the neutral ChatSummary here rather than returned raw,
+   * for the same reason getChats does it: no whatsapp-web.js type may cross the engine boundary.
+   * Entries without a serialized id are skipped rather than failing the whole request.
+   */
+  async getChatsByLabel(labelId: string): Promise<ChatSummary[]> {
+    this.host.ensureReady();
+    // The upstream page code dereferences the label without checking it exists, so an unknown id —
+    // and every id on a personal (non-Business) account, whose label collection is empty — throws a
+    // page-side TypeError that would surface as an opaque 500. A label that is not there is a 404,
+    // the same answer getLabelById gives.
+    let chats: Awaited<ReturnType<BusinessClient['getChatsByLabelId']>>;
+    try {
+      chats = await (this.client() as unknown as BusinessClient).getChatsByLabelId(labelId);
+    } catch (error) {
+      // Same split the group read makes: a dead page is a 503, not "no such label".
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'getChatsByLabel');
+        throw new EngineTransportError(`Transport died while listing chats for label ${labelId}`);
+      }
+      this.host.logger.debug('getChatsByLabelId rejected; treating the label as not found', {
+        labelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new LabelNotFoundError(labelId);
+    }
+    const summaries: ChatSummary[] = [];
+    for (const chat of chats ?? []) {
+      // The library builds this list via getChatById per label item and yields UNDEFINED entries
+      // for chats that no longer resolve (Client.js getChatsByLabelId → ChatFactory) — the whole
+      // entry, not just the id, so the optional chain must start at the entry itself.
+      const id = chat?.id?._serialized;
+      if (!id) continue;
+      summaries.push({
+        id,
+        name: chat.name || id,
+        isGroup: Boolean(chat.isGroup),
+        kind: chatKind(id),
+        unreadCount: chat.unreadCount || 0,
+        timestamp: chat.timestamp || 0,
+      });
+    }
+    return summaries;
   }
 
   async getLabelById(labelId: string): Promise<Label | null> {

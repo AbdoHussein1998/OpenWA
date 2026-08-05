@@ -26,13 +26,85 @@ export class WwebjsChannels {
       return [];
     }
     return channels.map((ch: WwjsChannelData) => ({
-      id: String(typeof ch.id === 'object' ? ch.id._serialized : ch.id),
+      // Read `$1` before giving up (#747: WA Web's minifier renamed the serialized property), and
+      // never String() the object branch — that manufactures the literal "undefined" as an id.
+      id: (typeof ch.id === 'object' ? (ch.id._serialized ?? ch.id.$1) : String(ch.id)) || '',
       name: String(ch.name || ''),
       description: ch.description ? String(ch.description) : undefined,
       inviteCode: ch.inviteCode ? String(ch.inviteCode) : undefined,
       subscriberCount: ch.subscriberCount ? Number(ch.subscriberCount) : undefined,
       verified: ch.verified ? Boolean(ch.verified) : undefined,
     }));
+  }
+
+  /**
+   * Create a channel.
+   *
+   * whatsapp-web.js signals failure by RETURNING A STRING ('CreateChannelError: …') rather than
+   * throwing — both when channel creation is disabled for the account and when the server refuses
+   * (Client.js:2474-2510). Left unchecked that string would be treated as a successful result and
+   * mapped into a Channel with undefined everything, so it is turned into a refusal here.
+   */
+  async createChannel(name: string, description?: string): Promise<Channel> {
+    this.host.ensureReady();
+    const result = await (this.client() as unknown as BusinessClient).createChannel(
+      name,
+      description === undefined ? {} : { description },
+    );
+    if (typeof result === 'string' || !result?.nid) {
+      throw new EngineRefusedError(typeof result === 'string' ? result : `Failed to create the channel '${name}'`);
+    }
+    // The nid crosses the puppeteer boundary as a raw page-context Wid, exactly the object class
+    // WA Web's minifier rename hits (#747): read `$1` before giving up, and never String() an
+    // absent id — a channel with the literal id "undefined" is unusable for every follow-up call.
+    const channelId = result.nid._serialized ?? result.nid.$1;
+    if (!channelId) {
+      throw new EngineRefusedError(`Channel '${name}' was created but its id was unreadable — refusing to return it`);
+    }
+    return {
+      id: String(channelId),
+      name: String(result.title ?? name),
+      ...(description === undefined ? {} : { description }),
+      // The library hands back a full invite LINK; the neutral shape carries the code, which is what
+      // subscribeToChannel takes.
+      ...(result.inviteLink ? { inviteCode: result.inviteLink.split('/').pop() } : {}),
+    };
+  }
+
+  /** Delete a channel. `false` means the channel was not found or the server refused. */
+  async deleteChannel(channelId: string): Promise<void> {
+    this.host.ensureReady();
+    const ok = await (this.client() as unknown as BusinessClient).deleteChannel(channelId);
+    if (!ok) {
+      throw new EngineRefusedError(`Failed to delete channel ${channelId}`);
+    }
+  }
+
+  /**
+   * Mute or unmute a channel. Reached through the Chat model rather than the client: whatsapp-web.js
+   * puts mute on the Channel structure, and `getChatById` yields one for a `@newsletter` id
+   * (ChatFactory.create → isChannel). Both return false rather than throwing when refused.
+   */
+  async muteChannel(channelId: string, mute: boolean): Promise<void> {
+    this.host.ensureReady();
+    // getChatById resolves — and will happily CREATE — an ordinary 1:1/group chat for a non-channel
+    // id, and Chat carries mute()/unmute() too: without this check a mistyped id muted a real
+    // conversation forever (an undefined expiry means "no end date" upstream) and reported success.
+    if (!channelId.endsWith('@newsletter')) {
+      throw new ChannelNotFoundError(channelId);
+    }
+    const chat = (await this.client().getChatById(channelId)) as unknown as {
+      mute?: () => Promise<boolean>;
+      unmute?: () => Promise<boolean>;
+    } | null;
+    const act = mute ? chat?.mute : chat?.unmute;
+    if (!act) {
+      throw new ChannelNotFoundError(channelId);
+    }
+    const ok = await act.call(chat);
+    if (!ok) {
+      throw new EngineRefusedError(`Failed to ${mute ? 'mute' : 'unmute'} channel ${channelId}`);
+    }
   }
 
   async getChannelById(channelId: string): Promise<Channel | null> {

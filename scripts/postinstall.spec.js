@@ -17,11 +17,17 @@ const { planSteps, failureReason, run } = require('./postinstall.js');
 
 const OK = { status: 0, signal: null, error: null };
 
-/** Bare temp dir optionally holding a dashboard/ and/or the patch script. */
-function makeRoot({ dashboard = false, patcher = false, previewPatcher = false } = {}) {
+/** Bare temp dir optionally holding a dashboard/ and/or the patch scripts. */
+function makeRoot({
+  dashboard = false,
+  patcher = false,
+  previewPatcher = false,
+  statusPatcher = false,
+  readySyncPatcher = false,
+} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openwa-postinstall-'));
   if (dashboard) fs.mkdirSync(path.join(root, 'dashboard'));
-  if (patcher || previewPatcher) {
+  if (patcher || previewPatcher || statusPatcher || readySyncPatcher) {
     fs.mkdirSync(path.join(root, 'scripts'));
   }
   if (patcher) {
@@ -29,6 +35,12 @@ function makeRoot({ dashboard = false, patcher = false, previewPatcher = false }
   }
   if (previewPatcher) {
     fs.writeFileSync(path.join(root, 'scripts', 'patch-wwebjs-newsletter-preview.js'), '// stub\n');
+  }
+  if (statusPatcher) {
+    fs.writeFileSync(path.join(root, 'scripts', 'patch-wwebjs-status.js'), '// stub\n');
+  }
+  if (readySyncPatcher) {
+    fs.writeFileSync(path.join(root, 'scripts', 'patch-wwebjs-ready-sync.js'), '// stub\n');
   }
   return root;
 }
@@ -79,12 +91,32 @@ test('planSteps: both present plans dashboard first, patcher second', () => {
   assert.equal(steps[1].command, process.execPath);
 });
 
-test('planSteps: dashboard and both patchers run in stable order', () => {
-  const steps = planSteps(makeRoot({ dashboard: true, patcher: true, previewPatcher: true }));
-  assert.equal(steps.length, 3);
+test('planSteps: status patcher plans its own best-effort repair', () => {
+  const steps = planSteps(makeRoot({ statusPatcher: true }));
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].command, process.execPath);
+  assert.match(steps[0].args[0], /patch-wwebjs-status\.js$/);
+  assert.deepEqual(steps[0].args.slice(1), ['--best-effort']);
+});
+
+test('planSteps: ready-sync patcher plans its own best-effort repair', () => {
+  const steps = planSteps(makeRoot({ readySyncPatcher: true }));
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].command, process.execPath);
+  assert.match(steps[0].args[0], /patch-wwebjs-ready-sync\.js$/);
+  assert.deepEqual(steps[0].args.slice(1), ['--best-effort']);
+});
+
+test('planSteps: dashboard and all patchers run in stable order', () => {
+  const steps = planSteps(
+    makeRoot({ dashboard: true, patcher: true, previewPatcher: true, statusPatcher: true, readySyncPatcher: true }),
+  );
+  assert.equal(steps.length, 5);
   assert.equal(steps[0].command, 'npm run dashboard:ci');
   assert.match(steps[1].args[0], /patch-wwebjs-201832\.js$/);
   assert.match(steps[2].args[0], /patch-wwebjs-newsletter-preview\.js$/);
+  assert.match(steps[3].args[0], /patch-wwebjs-status\.js$/);
+  assert.match(steps[4].args[0], /patch-wwebjs-ready-sync\.js$/);
 });
 
 test('run: nothing to do exits 0 and never spawns', () => {

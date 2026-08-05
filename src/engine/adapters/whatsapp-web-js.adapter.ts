@@ -21,6 +21,7 @@ import {
   Contact,
   Group,
   GroupInfo,
+  GroupMemberAddMode,
   ParticipantOperationResult,
   LocationInput,
   PollInput,
@@ -38,9 +39,14 @@ import {
   PaginatedProducts,
   ChatSummary,
   ChatState,
+  LabelInput,
   GroupEvent,
+  CustomLinkPreview,
+  GroupJoinInfo,
   IncomingCallEvent,
+  AccountRestriction,
 } from '../interfaces/whatsapp-engine.interface';
+import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { resolveWebVersionPin } from '../wa-web-version';
 import { resolveAuthTimeoutMs } from '../engine-init-timeout';
 import { killOrphanedChromiumProcesses, removeStaleSingletonFiles } from './chromium-profile-hygiene';
@@ -113,6 +119,21 @@ export interface WhatsAppWebJsConfig {
 const READY_RECONCILE_INTERVAL_MS = 2000;
 const READY_RECONCILE_TIMEOUT_MS = 90_000;
 
+// WhatsApp Web states that mean WhatsApp has judged the account or its egress, mapped to the neutral
+// restriction kinds. This is the ONLY channel the library offers: there is no dedicated event, error
+// type or cause code for account standing (whatsapp-web.js 1.34.7), just a `WAState` string on the
+// `disconnected` event.
+//
+// Deliberately only three of the twelve states. UNPAIRED/UNPAIRED_IDLE and LOGOUT are unlinks,
+// CONFLICT is another device taking over, DEPRECATED_VERSION is our own client being too old, and
+// TIMEOUT is a fault — none is a statement about the account's standing, and reporting them as
+// restrictions would be exactly the false positive that makes the signal worthless to act on.
+const WA_STATE_RESTRICTIONS: Readonly<Record<string, AccountRestriction['kind']>> = {
+  TOS_BLOCK: 'tos_block',
+  SMB_TOS_BLOCK: 'tos_block',
+  PROXYBLOCK: 'proxy_block',
+};
+
 // Onboarding-modal watcher (#982). A freshly-linked account shows a "What's new on WhatsApp Web"
 // modal with a Continue button that must be acknowledged, or WhatsApp unlinks the companion ~5m
 // later (surfacing as disconnected: LOGOUT). whatsapp-web.js exposes no API for this (#3550 open),
@@ -164,6 +185,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   private readyReconcileTimer: ReturnType<typeof setTimeout> | null = null;
   private readyReconcileStartedAt = 0;
   private readyReconcileProbeInFlight = false;
+  // What the last reconcile probe observed, driving the bridge-dead self-heal and the deadline
+  // decision (a CONNECTED session must never have its credentials wiped).
+  private lastProbeStateConnected = false;
+  private readyReconcileReloadAttempted = false;
   // Onboarding-modal watcher handle (#982). Self-rescheduling setTimeout so a hung probe can't stall
   // the loop; cleared on teardown exactly like readyReconcileTimer.
   private onboardingWatcherTimer: ReturnType<typeof setTimeout> | null = null;
@@ -536,6 +561,22 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     });
 
     this.client.on('ready', () => {
+      // whatsapp-web.js can emit `ready` BEFORE its message listeners are attached: its post-auth
+      // callback runs once per hasSynced trigger, and any run that finds `window.WWebJS` already
+      // defined skips the attach and bare-emits `ready` — including while the first run's attach is
+      // still in flight (observed live). Promoting on that premature emit binds READY to a session
+      // whose inbound bridge may never come up. The patched client's `eventsAttached` flag
+      // (scripts/patch-wwebjs-ready-sync.js) distinguishes the cases: `false` → ignore this emit
+      // and let the attach's own completion re-emit `ready` (it always does), with the readiness
+      // reconciliation as the backstop when the attach failed instead. `undefined` (unpatched
+      // tree) keeps the legacy behaviour.
+      if ((this.client as Client & { eventsAttached?: boolean }).eventsAttached === false) {
+        this.logger.warn('Ignoring premature ready: the message event bridge is not attached yet', {
+          sessionId: this.config.sessionId,
+          action: 'premature_ready_ignored',
+        });
+        return;
+      }
       this.markReadyFromClientInfo();
     });
 
@@ -590,6 +631,13 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         );
       }
       this.setStatus(EngineStatus.DISCONNECTED);
+      // Report the account judgement BEFORE the disconnect so a consumer reacting to the disconnect
+      // already knows why it happened. Only the state token is passed through — the adapter draws no
+      // conclusion about recoverability from it and leaves the reconnect decision exactly as it was.
+      const restriction = WA_STATE_RESTRICTIONS[reason];
+      if (restriction) {
+        this.callbacks.onAccountRestriction?.({ kind: restriction, code: reason });
+      }
       this.callbacks.onDisconnected?.(reason);
     });
 
@@ -601,6 +649,54 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // through onError (FAILED, no reconnect) rather than onDisconnected (reconnect).
       this.callbacks.onError?.(message ? `Authentication failed: ${message}` : 'Authentication failed');
     });
+  }
+
+  /**
+   * whatsapp-web.js exposes no way to observe another party's presence: WAWebPresenceChatAction
+   * offers only sendPresenceAvailable/sendPresenceUnavailable, which publish the ACCOUNT's own
+   * presence, and the library surfaces no presence event at all.
+   *
+   * Declared here inline rather than in a delegate on purpose. The parity gate reads method bodies
+   * off the prototype, so a throw hidden behind a delegate call is invisible to it and the
+   * `not-available` matrix row would go unverified; inline, the gate checks it.
+   */
+  createChannel(name: string, description?: string): Promise<Channel> {
+    return this.channels.createChannel(name, description);
+  }
+
+  deleteChannel(channelId: string): Promise<void> {
+    return this.channels.deleteChannel(channelId);
+  }
+
+  muteChannel(channelId: string, mute: boolean): Promise<void> {
+    return this.channels.muteChannel(channelId, mute);
+  }
+
+  getChatsByLabel(labelId: string): Promise<ChatSummary[]> {
+    return this.labels.getChatsByLabel(labelId);
+  }
+
+  /**
+   * whatsapp-web.js 1.34.7 can read labels and assign them, but cannot create, rename, recolour or
+   * delete one — `index.d.ts` exposes getLabels / getLabelById / getChatLabels / getChatsByLabelId /
+   * addOrRemoveLabels and nothing that edits the label itself.
+   *
+   * Inline rather than delegated so the parity gate, which reads bodies off the prototype, can
+   * verify the matrix row (see docs/29).
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
+  async upsertLabel(_label: LabelInput): Promise<void> {
+    throw new EngineNotSupportedError('upsertLabel');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
+  async deleteLabel(_labelId: string): Promise<void> {
+    throw new EngineNotSupportedError('deleteLabel');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
+  async subscribeToPresence(_chatId: string): Promise<void> {
+    throw new EngineNotSupportedError('subscribeToPresence');
   }
 
   /**
@@ -817,6 +913,29 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // Deadline checked at the TOP of every tick (not after the probe) so a slow/hung getState() — a
       // wedged page can make it never resolve, the very #251/#273 condition — can't defeat the 90s ceiling.
       if (Date.now() - this.readyReconcileStartedAt >= READY_RECONCILE_TIMEOUT_MS) {
+        // A CONNECTED page whose event bridge never attached (even after the one-shot reload) is a
+        // different animal from a stuck-after-QR session: the link and the credentials are fine,
+        // only this browser instance is broken. Wiping the only copy of the credentials would trade
+        // a restart-fixable fault for a forced re-pair — fail loudly and keep the auth instead.
+        const bridgeDead =
+          this.lastProbeStateConnected &&
+          (this.client as (Client & { eventsAttached?: boolean }) | null)?.eventsAttached === false;
+        if (bridgeDead) {
+          this.logger.error(
+            'WhatsApp Web stayed connected but its event bridge never attached within the readiness ' +
+              'deadline — inbound messages would be silently lost, so the session is marked failed. ' +
+              'The saved credentials were kept; restart the session to relaunch the browser.',
+            undefined,
+            { sessionId: this.config.sessionId, action: 'ready_reconcile_bridge_dead' },
+          );
+          this.clearReadyReconcile();
+          this.setStatus(EngineStatus.FAILED);
+          this.callbacks.onError?.(
+            'WhatsApp Web is connected but its event bridge never attached, so inbound messages would be ' +
+              'lost. The saved session was kept — restart the session to relaunch the browser.',
+          );
+          return;
+        }
         this.logger.warn(
           'Timed out waiting for WhatsApp Web runtime readiness after authentication — the saved session ' +
             'is stuck after the QR scan (usually the auto-selected WhatsApp Web build is incompatible). ' +
@@ -846,6 +965,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           if (ready && this.client && this.status === EngineStatus.AUTHENTICATING) {
             this.logger.warn('WhatsApp Web ready event was missed; reconciling from connected runtime state');
             this.markReadyFromClientInfo();
+          } else if (this.status === EngineStatus.AUTHENTICATING) {
+            this.maybeReloadDeadBridge();
           }
         })
         .catch(error => this.logger.debug('Ready reconciliation probe failed', { error: String(error) }))
@@ -865,6 +986,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     }
     this.readyReconcileStartedAt = 0;
     this.readyReconcileProbeInFlight = false;
+    this.lastProbeStateConnected = false;
+    this.readyReconcileReloadAttempted = false;
   }
 
   /**
@@ -1062,14 +1185,48 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   private async isClientRuntimeReady(): Promise<boolean> {
     if (!this.client) return false;
-    if ((await this.client.getState()) !== WAState.CONNECTED) return false;
+    const connected = (await this.client.getState()) === WAState.CONNECTED;
+    this.lastProbeStateConnected = connected;
+    if (!connected) return false;
     if (!this.client.info?.wid?.user) return false;
+
+    // The patched whatsapp-web.js client (scripts/patch-wwebjs-ready-sync.js) reports whether
+    // attachEventListeners resolved. `false` means the page->Node message bridge is dead even
+    // though the page reports CONNECTED — promoting that session to READY masks the loss of every
+    // inbound event (the live incident this exists for). `undefined` is an unpatched tree: keep
+    // the legacy checks rather than refusing readiness a tree cannot ever signal.
+    if ((this.client as Client & { eventsAttached?: boolean }).eventsAttached === false) return false;
 
     const page = (this.client as unknown as { pupPage?: { evaluate: <T>(fn: () => T) => Promise<T> } }).pupPage;
     const hasWWebJS = await page?.evaluate(
       () => typeof (window as unknown as { WWebJS?: unknown }).WWebJS !== 'undefined',
     );
     return hasWWebJS === true;
+  }
+
+  /**
+   * One-shot self-heal for a CONNECTED page whose event bridge never attached: reload the page.
+   * whatsapp-web.js re-runs its injection on every `framenavigated`, and a fresh page walks the
+   * whole auth->synced->attach pipeline again (with the level-check patch closing the missed-edge
+   * race), so a reload is the cheapest full reinjection that keeps the saved session intact.
+   */
+  private maybeReloadDeadBridge(): void {
+    if (this.readyReconcileReloadAttempted) return;
+    if (!this.client || !this.lastProbeStateConnected) return;
+    const client = this.client as Client & { eventsAttached?: boolean };
+    if (client.eventsAttached !== false) return;
+    this.readyReconcileReloadAttempted = true;
+    this.logger.warn('WhatsApp Web is connected but its event bridge never attached; reloading the page to reinject', {
+      sessionId: this.config.sessionId,
+      action: 'event_bridge_reload',
+    });
+    const page = (client as unknown as { pupPage?: { reload?: () => Promise<unknown> } }).pupPage;
+    void page?.reload?.()?.catch((error: unknown) =>
+      this.logger.warn('Event-bridge reload failed', {
+        sessionId: this.config.sessionId,
+        error: String(error),
+      }),
+    );
   }
 
   private setStatus(status: EngineStatus): void {
@@ -1261,8 +1418,13 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.pushName;
   }
 
-  sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult> {
-    return this.messaging.sendTextMessage(chatId, text, mentions);
+  sendTextMessage(
+    chatId: string,
+    text: string,
+    mentions?: string[],
+    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
+  ): Promise<MessageResult> {
+    return this.messaging.sendTextMessage(chatId, text, mentions, options);
   }
 
   sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
@@ -1433,6 +1595,22 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   }
 
   // Delete Message
+  starMessage(chatId: string, messageId: string, star: boolean): Promise<void> {
+    return this.messaging.starMessage(chatId, messageId, star);
+  }
+
+  pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {
+    return this.messaging.pinMessage(chatId, messageId, durationSeconds);
+  }
+
+  votePoll(chatId: string, pollMessageId: string, options: string[]): Promise<void> {
+    return this.messaging.votePoll(chatId, pollMessageId, options);
+  }
+
+  unpinMessage(chatId: string, messageId: string): Promise<void> {
+    return this.messaging.unpinMessage(chatId, messageId);
+  }
+
   deleteMessage(chatId: string, messageId: string, forEveryone: boolean = true): Promise<void> {
     return this.messaging.deleteMessage(chatId, messageId, forEveryone);
   }
@@ -1450,6 +1628,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   // Block Contact
   blockContact(contactId: string): Promise<void> {
     return this.contacts.blockContact(contactId);
+  }
+
+  upsertContact(contactId: string, firstName: string, lastName?: string): Promise<void> {
+    return this.contacts.upsertContact(contactId, firstName, lastName);
+  }
+
+  deleteContact(contactId: string): Promise<void> {
+    return this.contacts.deleteContact(contactId);
   }
 
   // Unblock Contact
@@ -1482,6 +1668,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   }
 
   // Join Group via Invite Code
+  getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo> {
+    return this.groups.getGroupJoinInfo(inviteCode);
+  }
+
   joinGroupViaInviteCode(inviteCode: string): Promise<string> {
     return this.groups.joinGroupViaInviteCode(inviteCode);
   }
@@ -1494,6 +1684,18 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   // Set "only admins can edit group info" (locked/restrict)
   setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
     return this.groups.setGroupInfoAdminsOnly(groupId, adminsOnly);
+  }
+
+  setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void> {
+    return this.groups.setGroupMemberAddMode(groupId, mode);
+  }
+
+  setGroupPicture(groupId: string, media: MediaInput): Promise<void> {
+    return this.groups.setGroupPicture(groupId, media);
+  }
+
+  deleteGroupPicture(groupId: string): Promise<void> {
+    return this.groups.deleteGroupPicture(groupId);
   }
 
   setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
@@ -1521,6 +1723,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   postVideoStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
     return this.statuses.postVideoStatus(media, options);
+  }
+
+  postVoiceStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
+    return this.statuses.postVoiceStatus(media, options);
   }
 
   deleteStatus(statusId: string): Promise<void> {
@@ -1559,6 +1765,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   sendSeen(chatId: string): Promise<boolean> {
     return this.chats.sendSeen(chatId);
+  }
+
+  archiveChat(chatId: string, archive: boolean): Promise<boolean> {
+    return this.chats.archiveChat(chatId, archive);
+  }
+
+  clearChatMessages(chatId: string): Promise<boolean> {
+    return this.chats.clearChatMessages(chatId);
   }
 
   markUnread(chatId: string): Promise<boolean> {

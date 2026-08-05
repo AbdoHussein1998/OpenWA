@@ -160,6 +160,19 @@
   white-space: nowrap;
 }
 
+/* Mirrors .error-text, in warning rather than error: a restriction is WhatsApp limiting the account,
+   not the gateway failing. --warning is :root-only and inherited by both themes, the same way
+   --error is, so it needs no dark-mode override. */
+.sessions-page .info-value.restriction-text {
+  color: var(--warning);
+  font-weight: 500;
+  max-width: 60%;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sessions-page .card-actions {
   display: flex;
   gap: 0.5rem;

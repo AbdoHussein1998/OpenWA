@@ -45,7 +45,21 @@ const SESSION_STALE_ENGINE: Session = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
-const SESSIONS = [SESSION_QR, SESSION_STALE_ENGINE];
+// A reachout timelock leaves the account fully connected — `ready` plus a restriction is the normal
+// shape, and the card must show it there. A restriction hidden behind a failed/disconnected status
+// (the rule `lastError` follows) would be invisible in exactly the case that matters.
+const SESSION_TIMELOCKED: Session = {
+  id: 'sess-limited-1',
+  name: 'limited-bot',
+  status: 'ready',
+  engineLoaded: true,
+  phone: '15550001111',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  restriction: { kind: 'reachout_timelock', code: 'BIZ_QUALITY', expiresAt: '2026-08-04T09:00:00.000Z' },
+};
+
+const SESSIONS = [SESSION_QR, SESSION_STALE_ENGINE, SESSION_TIMELOCKED];
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -291,4 +305,29 @@ test('stopping a session dismisses its own open QR modal', async () => {
     // instead of failing fast. Reduce to a boolean first.
     assert.ok(!screen.queryByRole('dialog'), 'the QR modal stayed open after its session stopped');
   });
+});
+
+test('a restricted session shows the restriction on its card, even while it is ready', async () => {
+  const { screen, within } = rtl;
+  resetFetchCalls();
+  renderSessions();
+
+  const card = (await screen.findByText('limited-bot')).closest('.session-card') as HTMLElement;
+
+  within(card).getByText('Restriction');
+  const value = within(card).getByText('New chats blocked');
+  // The raw engine token and the expiry ride in the tooltip: `code` is searchable but not readable,
+  // so it must not become the visible label.
+  assert.match(value.getAttribute('title') ?? '', /BIZ_QUALITY/);
+  assert.match(value.getAttribute('title') ?? '', /until/);
+});
+
+test('an unrestricted session shows no restriction row', async () => {
+  const { screen, within } = rtl;
+  resetFetchCalls();
+  renderSessions();
+
+  const card = (await screen.findByText('stale-engine')).closest('.session-card') as HTMLElement;
+
+  assert.equal(within(card).queryByText('Restriction'), null);
 });

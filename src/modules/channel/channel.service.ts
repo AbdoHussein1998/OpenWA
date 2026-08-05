@@ -41,6 +41,21 @@ export class ChannelService {
     return this.getEngine(sessionId).getChannelMessages(channelId, safeLimit);
   }
 
+  /** Create a channel. The account owns it, which is what makes deleting it possible later. */
+  createChannel(sessionId: string, name: string, description?: string) {
+    return this.getEngine(sessionId).createChannel(name, description);
+  }
+
+  /** Delete a channel this account owns. Irreversible, and its subscribers lose it. */
+  deleteChannel(sessionId: string, channelId: string) {
+    return this.getEngine(sessionId).deleteChannel(channelId);
+  }
+
+  /** Mute or unmute a channel's notifications. Subscription is untouched either way. */
+  muteChannel(sessionId: string, channelId: string, mute: boolean) {
+    return this.getEngine(sessionId).muteChannel(channelId, mute);
+  }
+
   subscribeToChannel(sessionId: string, inviteCode: string) {
     return this.getEngine(sessionId).subscribeToChannel(inviteCode);
   }

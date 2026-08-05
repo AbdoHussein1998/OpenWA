@@ -170,6 +170,7 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'WEBHOOK_DISPATCH_MAX_QUEUED',
     'STATS_CACHE_TTL_MS', // 0 = memo disabled
     'WEBHOOK_MAX_PER_SESSION', // 0 = unlimited
+    'AUTOMATION_MAX_PER_SESSION', // 0 = unlimited
     'WEBHOOK_MEDIA_INLINE_MAX_BYTES', // 0 = never inline media
   ]) {
     checkNonNegativeInt(key);
@@ -206,8 +207,55 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'WEBHOOK_MAX_PAYLOAD_BYTES',
     // 0 would refuse every request carrying a body (a self-DoS), so the budget is positive-only.
     'INFLIGHT_BODY_BUDGET_BYTES',
+    // Media conversion: each is read with a `> 0` guard that silently falls back to the default,
+    // so a typo or a 0 quietly means "the default" instead of what the operator wrote.
+    'MEDIA_CONVERSION_TIMEOUT_MS',
+    'MEDIA_CONVERSION_MAX_OUTPUT_BYTES',
+    'MEDIA_CONVERSION_CONCURRENCY',
+    // Session ownership leases, same fall-back-silently reasoning.
+    'SESSION_LEASE_TTL_MS',
+    'SESSION_LEASE_HEARTBEAT_MS',
+    'SESSION_TAKEOVER_SWEEP_MS',
+    'SESSION_PROXY_TIMEOUT_MS',
   ]) {
     checkPositiveInt(key);
+  }
+
+  // A heartbeat that does not fit inside the lease renews too late to matter: the claim lapses
+  // between ticks, peers adopt sessions from a perfectly healthy node, and nothing in the logs says
+  // why. The defaults must be substituted for whatever is unset — validating only the key the
+  // operator happened to set would let a lone oversized heartbeat through.
+  const leaseTtlMs = Number(str('SESSION_LEASE_TTL_MS') ?? '60000');
+  const heartbeatMs = Number(str('SESSION_LEASE_HEARTBEAT_MS') ?? '20000');
+  // Strictly LESS than half: at exactly half, two renewals span the whole TTL, so a single missed
+  // renewal lands on the expiry instant — a tie that any scheduling jitter turns into a lapse. A
+  // margin below half is what lets one late or failed renewal still land inside the lease.
+  if (Number.isInteger(leaseTtlMs) && Number.isInteger(heartbeatMs) && heartbeatMs * 2 >= leaseTtlMs) {
+    errors.push(
+      `SESSION_LEASE_HEARTBEAT_MS (${heartbeatMs}) must be less than half of SESSION_LEASE_TTL_MS (${leaseTtlMs}) ` +
+        'so a renewal that is late or fails once still lands inside the lease',
+    );
+  }
+
+  // The forwarder builds an absolute URL from this; a value without a scheme parses as something
+  // unusable (`localhost:2785` reads as the scheme `localhost:`) and only fails at the first
+  // forward, as a 500 on a request that had nothing wrong with it. Embedded credentials
+  // (`http://user:pw@host`) parse fine here but undici's fetch rejects them outright — every
+  // forward would 503 permanently, with the credentials sitting in sessions.nodeUrl — so refuse
+  // those at boot too rather than let them reach the DB and the first forward.
+  const nodeUrl = str('NODE_URL');
+  if (nodeUrl) {
+    let parsed: URL | undefined;
+    try {
+      parsed = new URL(nodeUrl);
+    } catch {
+      parsed = undefined;
+    }
+    if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+      errors.push(`NODE_URL must be an absolute http(s) URL (got "${nodeUrl}")`);
+    } else if (parsed.username || parsed.password) {
+      errors.push('NODE_URL must not embed credentials — the forwarder cannot send a URL with a userinfo component');
+    }
   }
 
   // Boolean feature flags read at module-eval time (app.module.ts) with a bare `=== 'true'` /
@@ -243,6 +291,13 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     // Read by the SSRF guard's redirect loop with `=== 'true'`: a typo silently keeps the secure
     // default, but an accidental 'true'-ish string is not the flag the operator meant to audit.
     'PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS',
+    // Read with `=== 'true'`, so a typo leaves sends unpaced — the silent failure this whole
+    // feature exists to avoid, and invisible without this check.
+    'SEND_PACING_ENABLED',
+    // Opt-in feature flags read with `=== 'true'`: a typo silently leaves the feature OFF, so the
+    // conversion/archive endpoints answer as if nothing was configured. Same class as the above.
+    'MEDIA_CONVERSION_ENABLED',
+    'CHAT_MEDIA_ARCHIVE_ENABLED',
   ]) {
     checkBool(key);
   }

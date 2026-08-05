@@ -158,6 +158,19 @@ describe('validateEnv', () => {
     expect(() => validateEnv({})).not.toThrow();
   });
 
+  it.each(['MEDIA_CONVERSION_ENABLED', 'CHAT_MEDIA_ARCHIVE_ENABLED'])(
+    'rejects a %s typo instead of silently leaving the feature off',
+    key => {
+      // Both are read at boot with `=== 'true'`, so a typo silently disables the feature and the
+      // endpoints answer as if it was never configured — the same silent-off class as SEND_PACING.
+      expect(() => validateEnv({ [key]: 'ture' })).toThrow(new RegExp(key));
+      expect(() => validateEnv({ [key]: 'True' })).toThrow(new RegExp(key));
+      expect(() => validateEnv({ [key]: 'true' })).not.toThrow();
+      expect(() => validateEnv({ [key]: 'false' })).not.toThrow();
+      expect(() => validateEnv({ [key]: '' })).not.toThrow();
+    },
+  );
+
   it('rejects a SEARCH_PROVIDER typo instead of silently falling back to auto', () => {
     // A bogus / typo value must fail fast at boot rather than silently selecting the default provider.
     expect(() => validateEnv({ SEARCH_PROVIDER: 'bogus' })).toThrow(/SEARCH_PROVIDER/);
@@ -282,5 +295,40 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ DATABASE_TYPE: 'sqlite', DATABASE_NAME: './data/openwa.sqlite' })).not.toThrow();
     // Unset falls through to the default path (configuration.ts) — the boot-loop fix.
     expect(() => validateEnv({ DATABASE_TYPE: 'sqlite' })).not.toThrow();
+  });
+
+  // A renewal that does not fit inside the lease renews too late to matter: the claim lapses between
+  // ticks and peers adopt sessions from a healthy node, with nothing in the logs saying why.
+  it('rejects a lease heartbeat that does not comfortably fit inside the TTL', () => {
+    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '60000', SESSION_LEASE_HEARTBEAT_MS: '50000' })).toThrow(
+      /less than half/,
+    );
+    // The defaults stand in for whatever is unset, so a lone oversized heartbeat cannot slip past.
+    expect(() => validateEnv({ SESSION_LEASE_HEARTBEAT_MS: '45000' })).toThrow(/less than half/);
+    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '20000' })).toThrow(/less than half/);
+    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '120000', SESSION_LEASE_HEARTBEAT_MS: '30000' })).not.toThrow();
+    // Exactly half is rejected too: a single missed renewal then lands on the expiry instant.
+    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '60000', SESSION_LEASE_HEARTBEAT_MS: '30000' })).toThrow(
+      /less than half/,
+    );
+    expect(() => validateEnv({})).not.toThrow();
+  });
+
+  // The forwarder builds an absolute URL from NODE_URL; a scheme-less value only fails at the first
+  // forward, as a 500 on a request that had nothing wrong with it.
+  it('rejects a NODE_URL that is not an absolute http(s) URL', () => {
+    expect(() => validateEnv({ NODE_URL: 'localhost:2785' })).toThrow(/absolute http/);
+    expect(() => validateEnv({ NODE_URL: '10.0.0.5:2785' })).toThrow(/absolute http/);
+    expect(() => validateEnv({ NODE_URL: 'ftp://10.0.0.5' })).toThrow(/absolute http/);
+    // Embedded credentials parse as a valid URL but undici's fetch refuses them, so reject at boot.
+    expect(() => validateEnv({ NODE_URL: 'http://user:pw@10.0.0.5:2785' })).toThrow(/must not embed credentials/);
+    expect(() => validateEnv({ NODE_URL: 'http://10.0.0.5:2785' })).not.toThrow();
+    expect(() => validateEnv({ NODE_URL: 'https://node-a.internal' })).not.toThrow();
+  });
+
+  it('rejects a non-positive media-conversion knob instead of silently using the default', () => {
+    expect(() => validateEnv({ MEDIA_CONVERSION_CONCURRENCY: '0' })).toThrow(/positive integer/);
+    expect(() => validateEnv({ MEDIA_CONVERSION_TIMEOUT_MS: 'abc' })).toThrow(/positive integer/);
+    expect(() => validateEnv({ MEDIA_CONVERSION_MAX_OUTPUT_BYTES: '52428800' })).not.toThrow();
   });
 });

@@ -5,6 +5,9 @@ import {
   EngineEventCallbacks,
   GroupEvent,
   IncomingCallEvent,
+  ParticipantPresence,
+  PresenceState,
+  CallOutcome,
   IncomingMessage,
   ReactionEvent,
   RevokedMessage,
@@ -39,6 +42,37 @@ import { createSilentLogger } from './baileys-logger';
  * `rejectCall` as a thin forwarder (it is a public IWhatsAppEngine method), injecting this
  * narrow host surface via closures so the delegate never touches lifecycle state directly.
  */
+/**
+ * The call statuses that mean something to a consumer. Everything else Baileys emits — `ringing`,
+ * `preaccept`, `transport`, `relaylatency` — is transport chatter, and `terminate` is ambiguous
+ * (see reportCallOutcome), so neither is mapped.
+ */
+const CALL_OUTCOMES: Readonly<Partial<Record<string, CallOutcome>>> = {
+  accept: 'accepted',
+  reject: 'rejected',
+  timeout: 'missed',
+};
+
+/** The slice of Baileys' PresenceData this adapter reads. */
+interface RawPresence {
+  lastKnownPresence?: PresenceState;
+  lastSeen?: number;
+  groupOnlineCount?: number;
+}
+
+/**
+ * The states Baileys can report. Checked rather than trusted: the value crosses a library boundary
+ * and lands straight in a public webhook payload, so an unknown state added upstream must be dropped
+ * here rather than published as if this gateway understood it.
+ */
+const PRESENCE_STATES: ReadonlySet<PresenceState> = new Set<PresenceState>([
+  'available',
+  'unavailable',
+  'composing',
+  'recording',
+  'paused',
+]);
+
 export interface BaileysEventsHost {
   /** Live socket handle for media re-upload requests (inbound media download). */
   getSocket(): WASocket;
@@ -77,6 +111,10 @@ export interface BaileysEventsHost {
   getOnGroupEvent(): EngineEventCallbacks['onGroupEvent'];
   /** The currently-registered onCall callback, if any (assigned at initialize()). */
   getOnCall(): EngineEventCallbacks['onCall'];
+  /** The currently-registered onPresenceUpdate callback, if any (assigned at initialize()). */
+  getOnPresenceUpdate(): EngineEventCallbacks['onPresenceUpdate'];
+  /** The currently-registered onCallOutcome callback, if any (assigned at initialize()). */
+  getOnCallOutcome(): EngineEventCallbacks['onCallOutcome'];
 }
 
 export class BaileysEvents {
@@ -87,7 +125,10 @@ export class BaileysEvents {
   /** Live incoming calls by call id, holding the raw `from` JID sock.rejectCall() needs — the
    *  call event is long gone by the time a reject arrives, so it must be cached at event time.
    *  Readonly reference, owned here; the adapter's lifecycle clears it on teardown. */
-  readonly liveCalls = new Map<string, { callFrom: string; expiresAt: number }>();
+  readonly liveCalls = new Map<
+    string,
+    { callFrom: string; expiresAt: number; from: string; isVideo: boolean; isGroup: boolean }
+  >();
 
   constructor(private readonly host: BaileysEventsHost) {}
 
@@ -384,7 +425,14 @@ export class BaileysEvents {
    */
   handleCallEvents(calls: WACallEvent[]): void {
     for (const call of Array.isArray(calls) ? calls : []) {
-      if (!call || call.status !== 'offer' || !call.id || !call.from) {
+      if (!call || !call.id || !call.from) {
+        continue;
+      }
+      // An ended call takes its own path and returns. It must never fall through to the offer
+      // handling below: a declined call arriving there would be published as a fresh incoming call
+      // and, with auto-reject enabled, answered as one.
+      if (call.status !== 'offer') {
+        this.reportCallOutcome(call);
         continue;
       }
       // Baileys replays offers for calls missed while disconnected with offline: true
@@ -408,7 +456,12 @@ export class BaileysEvents {
       // same call-id, so a single call can reach this loop more than once. Cache first and emit
       // only for an id not already live, otherwise one call surfaces as several `call.received`
       // events.
-      if (!this.cacheLiveCall(call.id, call.from)) {
+      const published = {
+        from: this.host.toNeutralJid(call.callerPn ?? call.from),
+        isVideo: call.isVideo === true,
+        isGroup: call.isGroup === true,
+      };
+      if (!this.cacheLiveCall(call.id, call.from, published)) {
         continue;
       }
       const payload: IncomingCallEvent = {
@@ -430,6 +483,96 @@ export class BaileysEvents {
   }
 
   /**
+   * Publish the end of a ringing call.
+   *
+   * Only the three statuses that mean something to a consumer are mapped. WhatsApp also sends
+   * `ringing`, `preaccept`, `transport` and `relaylatency` — transport-level chatter with no
+   * user-visible meaning — and `terminate`, which covers both a caller hanging up before the call
+   * was answered and either side ending an answered one, with nothing in the event to tell them
+   * apart. Publishing `terminate` as an outcome would therefore be wrong roughly half the time.
+   *
+   * The cached live-call handle is dropped here rather than left to expire: the call is over, and a
+   * `rejectCall` arriving afterwards should report not-found instead of acting on a dead call.
+   */
+  private reportCallOutcome(call: WACallEvent): void {
+    // `terminate` publishes no outcome (see above) but DOES end the call — drop the handle so a
+    // rejectCall arriving afterwards reports not-found instead of acting on a dead call. The other
+    // unmapped statuses (ringing/preaccept/transport/relaylatency) are chatter on a call that is
+    // still live and must stay rejectable.
+    if (call.status === 'terminate') {
+      this.liveCalls.delete(call.id);
+      return;
+    }
+    const outcome = CALL_OUTCOMES[call.status];
+    if (!outcome) return;
+
+    const live = this.liveCalls.get(call.id);
+    this.liveCalls.delete(call.id);
+
+    // Offline replay is the same hazard as on the offer path: WhatsApp resends the signalling for
+    // calls that ended while this session was disconnected, and announcing those as fresh outcomes
+    // would report last week's declined call as if it just happened.
+    if (call.offline) return;
+
+    // An outcome for a call this session never saw ring is not actionable — it belongs to another
+    // device's conversation, or predates the connection — and would arrive with no caller identity
+    // beyond the raw jid. Dropping it keeps the event stream to calls the consumer already knows.
+    if (!live) return;
+
+    this.host.getOnCallOutcome()?.({
+      callId: call.id,
+      from: this.host.toNeutralJid(call.callerPn ?? call.from),
+      outcome,
+      isVideo: call.isVideo === true,
+      isGroup: call.isGroup === true,
+      timestamp:
+        call.date instanceof Date && !Number.isNaN(call.date.getTime())
+          ? Math.floor(call.date.getTime() / 1000)
+          : Math.floor(Date.now() / 1000),
+    });
+  }
+
+  /**
+   * Map Baileys' `presence.update` onto the neutral event.
+   *
+   * The payload is a per-participant map even for a 1:1 chat, where it holds the one contact — so
+   * the shape is preserved rather than flattened, and a group reports everyone WhatsApp mentioned.
+   * Ids are neutralized on both the chat and each participant, so a consumer never sees a raw
+   * `@s.whatsapp.net` or a lid that the phone-dialect side of the API would not accept back.
+   *
+   * `lastSeen` is absent far more often than not: WhatsApp withholds it whenever the contact's
+   * privacy settings do, which is the default for most accounts. That is not an error and is not
+   * substituted with a guess.
+   */
+  handlePresenceUpdate(update: { id?: string; presences?: Record<string, RawPresence> }): void {
+    const report = this.host.getOnPresenceUpdate();
+    if (!report || !update?.id || !update.presences) return;
+
+    const participants: ParticipantPresence[] = [];
+    for (const [participant, data] of Object.entries(update.presences)) {
+      const state = data?.lastKnownPresence;
+      // An entry with no state says nothing; forwarding it as a guessed 'unavailable' would report
+      // a contact offline on the strength of a malformed payload.
+      if (!state || !PRESENCE_STATES.has(state)) continue;
+      participants.push({
+        id: this.host.toNeutralJid(participant),
+        state,
+        ...(typeof data.lastSeen === 'number' && Number.isFinite(data.lastSeen) ? { lastSeen: data.lastSeen } : {}),
+      });
+    }
+    if (participants.length === 0) return;
+
+    const groupOnlineCount = Object.values(update.presences).find(
+      p => typeof p?.groupOnlineCount === 'number',
+    )?.groupOnlineCount;
+    this.host.getOnPresenceUpdate()?.({
+      chatId: this.host.toNeutralJid(update.id),
+      participants,
+      ...(typeof groupOnlineCount === 'number' ? { groupOnlineCount } : {}),
+    });
+  }
+
+  /**
    * Cache a ringing call's raw caller JID for a later rejectCall(). Lazy expiry: inserting a new
    * call drops already-expired entries, so a session that receives calls but never rejects them
    * can't grow the map without bound; an entry that never sees another call is tiny and is dropped
@@ -439,7 +582,11 @@ export class BaileysEvents {
    * once per call rather than once per upstream offer tag. A repeat offer still refreshes the
    * entry, so a long-ringing call stays rejectable for a full TTL from the most recent signal.
    */
-  private cacheLiveCall(callId: string, callFrom: string): boolean {
+  private cacheLiveCall(
+    callId: string,
+    callFrom: string,
+    published: { from: string; isVideo: boolean; isGroup: boolean },
+  ): boolean {
     const now = Date.now();
     for (const [id, entry] of this.liveCalls) {
       if (entry.expiresAt <= now) {
@@ -447,7 +594,10 @@ export class BaileysEvents {
       }
     }
     const isNewCall = !this.liveCalls.has(callId);
-    this.liveCalls.set(callId, { callFrom, expiresAt: now + BaileysEvents.LIVE_CALL_TTL_MS });
+    // The published identity is cached alongside the raw JID so a rejection issued through the API
+    // can report the same shape the engine-observed outcomes do — the call event itself is long
+    // gone by then.
+    this.liveCalls.set(callId, { callFrom, expiresAt: now + BaileysEvents.LIVE_CALL_TTL_MS, ...published });
     return isNewCall;
   }
 
@@ -467,6 +617,18 @@ export class BaileysEvents {
       throw new EngineNotReadyError('Cannot reject a call before the engine is initialized.');
     }
     await sock.rejectCall(callId, entry.callFrom);
+    // A rejection made HERE produces no inbound `reject` signal to observe, so without this the
+    // one outcome the caller definitely knows about — the one they asked for — was the only one
+    // never published. Emitted only after the socket accepted it, and the entry is already evicted,
+    // so a server echo arriving later cannot publish a second time.
+    this.host.getOnCallOutcome()?.({
+      callId,
+      from: entry.from,
+      outcome: 'rejected',
+      isVideo: entry.isVideo,
+      isGroup: entry.isGroup,
+      timestamp: Math.floor(Date.now() / 1000),
+    });
   }
 
   /**

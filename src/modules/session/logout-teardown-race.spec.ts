@@ -6,6 +6,8 @@ import { ConfigService } from '@nestjs/config';
 import { SessionService } from './session.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { SessionErrorStore } from './session-error-store.service';
+import { SessionRestrictionStore } from './session-restriction-store.service';
+import { PresenceStore } from './presence-store.service';
 import { Session, SessionStatus } from './entities/session.entity';
 import { Message } from '../message/entities/message.entity';
 import { EngineFactory } from '../../engine/engine.factory';
@@ -34,6 +36,10 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
     proxyType: null,
     connectedAt: null,
     lastActiveAt: null,
+    nodeId: null,
+    claimedAt: null,
+    leaseExpiresAt: null,
+    nodeUrl: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -96,6 +102,8 @@ describe('SessionService logout() name-scoped teardown fence', () => {
         SessionService,
         SessionEngineLifecycle,
         SessionErrorStore,
+        SessionRestrictionStore,
+        PresenceStore,
         { provide: getRepositoryToken(Session, 'data'), useValue: repository },
         { provide: getRepositoryToken(Message, 'data'), useValue: messageRepository },
         { provide: getDataSourceToken('data'), useValue: dataSource },

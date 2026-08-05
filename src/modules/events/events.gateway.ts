@@ -91,7 +91,7 @@ const EVICTION_MESSAGES: Record<ApiKeyEvictionReason, string> = {
 })
 export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private logger = new Logger('EventsGateway');
 
@@ -537,6 +537,44 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
    */
   emitSessionDisconnected(sessionId: string, data: { reason: string }) {
     this.emitToRooms(sessionId, 'session.disconnected', data);
+  }
+
+  /**
+   * Emit a restriction change (imposed or lifted), mirroring the `session.restriction` webhook
+   * payload. Needed live because a restriction can arrive with no status transition at all (the
+   * Baileys reachout timelock rides a connect probe) — without this push the dashboard badge only
+   * appeared on a full page reload.
+   */
+  emitSessionRestriction(sessionId: string, data: Record<string, unknown>) {
+    this.emitToRooms(sessionId, 'session.restriction', data);
+  }
+
+  /**
+   * The end of a ringing call, one method per outcome.
+   *
+   * Three methods rather than one taking the name as a parameter: the drift guard discovers emitters
+   * by reflection and invokes each with an empty payload, so a parameterised name would leave the
+   * event catalog unverifiable — exactly the drift the guard exists to catch.
+   */
+  emitCallAccepted(sessionId: string, data: Record<string, unknown>) {
+    this.emitToRooms(sessionId, 'call.accepted', data);
+  }
+
+  emitCallRejected(sessionId: string, data: Record<string, unknown>) {
+    this.emitToRooms(sessionId, 'call.rejected', data);
+  }
+
+  emitCallMissed(sessionId: string, data: Record<string, unknown>) {
+    this.emitToRooms(sessionId, 'call.missed', data);
+  }
+
+  /**
+   * Emit a presence update. Socket-subscribable as well as webhook-delivered because presence is the
+   * one event whose whole value is being live — a webhook round-trip to render a typing indicator
+   * has usually expired by the time it arrives. Only actual changes reach here (see the wiring).
+   */
+  emitPresenceUpdate(sessionId: string, data: Record<string, unknown>) {
+    this.emitToRooms(sessionId, 'presence.update', data);
   }
 
   /**

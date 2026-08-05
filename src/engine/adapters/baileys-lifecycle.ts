@@ -82,6 +82,7 @@ export interface BaileysLifecycleHost {
   handleGroupParticipantsUpdate: BaileysEvents['handleGroupParticipantsUpdate'];
   handleGroupsUpdate: BaileysEvents['handleGroupsUpdate'];
   handleCallEvents: BaileysEvents['handleCallEvents'];
+  handlePresenceUpdate: BaileysEvents['handlePresenceUpdate'];
   captureHistoryMessages: BaileysHistory['captureHistoryMessages'];
   /** Backfill names the initial sync skipped (runs on connection 'open'). */
   hydrateNames: BaileysHistory['hydrateNames'];
@@ -97,6 +98,8 @@ export interface BaileysLifecycleHost {
   getOnStateChanged(): EngineEventCallbacks['onStateChanged'];
   /** The currently-registered onCredentialTeardownStarted callback, if any (assigned at initialize()). */
   getOnCredentialTeardownStarted(): EngineEventCallbacks['onCredentialTeardownStarted'];
+  /** The currently-registered onAccountRestriction callback, if any (assigned at initialize()). */
+  getOnAccountRestriction(): EngineEventCallbacks['onAccountRestriction'];
 }
 
 export class BaileysLifecycle {
@@ -221,6 +224,7 @@ export class BaileysLifecycle {
         previous.ev.removeAllListeners('group-participants.update');
         previous.ev.removeAllListeners('groups.update');
         previous.ev.removeAllListeners('call');
+        previous.ev.removeAllListeners('presence.update');
         void previous.end(undefined);
       } catch {
         // end() may already have run from Baileys' own close handler — a safe no-op.
@@ -319,14 +323,23 @@ export class BaileysLifecycle {
     // 'chats.phoneNumberShare' event, whose { lid, jid } payload this shape directly replaces).
     sock.ev.on('lid-mapping.update', ({ lid, pn }) => this.host.addLidMappings([{ lid, pn }]));
     sock.ev.on('call', calls => this.host.handleCallEvents(calls));
+    sock.ev.on('presence.update', update => this.host.handlePresenceUpdate(update));
   }
 
   private handleConnectionUpdate(update: {
     connection?: string;
     qr?: string;
     lastDisconnect?: { error?: unknown };
+    reachoutTimeLock?: { isActive?: boolean; timeEnforcementEnds?: Date; enforcementType?: string };
   }): void {
-    const { connection, qr, lastDisconnect } = update;
+    const { connection, qr, lastDisconnect, reachoutTimeLock } = update;
+
+    // Arrives on its own update (no `connection` key) both when WhatsApp pushes a change and when
+    // probeAccountRestriction() pulls the current state — Baileys routes its own query result back
+    // through this same event, so one handler covers both channels.
+    if (reachoutTimeLock) {
+      this.reportReachoutTimelock(reachoutTimeLock);
+    }
 
     if (qr) {
       // Baileys hands us the raw QR ref string; render it to a PNG data URL so the stored
@@ -350,6 +363,9 @@ export class BaileysLifecycle {
       this.connectedAt = Math.floor(Date.now() / 1000) - 10;
       this.setStatus(EngineStatus.READY);
       this.host.getOnReady()?.(this.phoneNumber ?? '', this.pushName ?? '');
+      // WhatsApp only PUSHES a timelock when it changes, so a gateway that starts (or reconnects)
+      // while the account is already restricted would never hear about it. Ask once per connection.
+      void this.probeAccountRestriction();
       // Backfill names the initial sync skipped (see BaileysHistory.hydrateNames).
       void this.host.hydrateNames();
     }
@@ -426,6 +442,59 @@ export class BaileysLifecycle {
       }
       this.lastConnectionCloseAt = now;
       this.scheduleReconnect();
+    }
+  }
+
+  /**
+   * Translate Baileys' reachout-timelock state into the neutral restriction signal. Baileys reports
+   * this first-class — it is not inferred from failures — and it reports the lift as well as the
+   * onset, so `isActive: false` is a positive "no restriction" and is forwarded as `null`.
+   *
+   * A timelock does NOT close the connection: the account stays linked and existing chats keep
+   * working, only starting new conversations is blocked. Nothing here touches status or reconnects.
+   */
+  private reportReachoutTimelock(state: {
+    isActive?: boolean;
+    timeEnforcementEnds?: Date;
+    enforcementType?: string;
+  }): void {
+    const report = this.host.getOnAccountRestriction();
+    if (!report) return;
+
+    if (!state.isActive) {
+      report(null);
+      return;
+    }
+
+    // `time_enforcement_ends` is a server-supplied string Baileys parses with parseInt, so a
+    // malformed value yields an Invalid Date whose getTime() is NaN — which would serialize to null
+    // and read as "no expiry known". Same outcome, but reached deliberately rather than by accident.
+    const endsAt = state.timeEnforcementEnds?.getTime();
+    report({
+      kind: 'reachout_timelock',
+      // DEFAULT is Baileys' own "no specific enforcement type" value, not a placeholder of ours.
+      code: state.enforcementType ?? 'DEFAULT',
+      expiresAt: typeof endsAt === 'number' && Number.isFinite(endsAt) ? endsAt : undefined,
+    });
+  }
+
+  /**
+   * Ask WhatsApp for the account's current restriction standing. The answer is not used here:
+   * Baileys emits its own `connection.update { reachoutTimeLock }` with the result, so it arrives
+   * through the same path as a pushed change.
+   *
+   * Best-effort by design — an account or server that does not answer this query must not turn a
+   * healthy connection into a logged failure, so it stays at debug level.
+   */
+  private async probeAccountRestriction(): Promise<void> {
+    try {
+      await this.sock?.fetchAccountReachoutTimelock();
+    } catch (error) {
+      this.host.logger.debug('Could not read the account restriction state', {
+        action: 'baileys_restriction_probe_failed',
+        sessionId: this.host.config.sessionId,
+        error: String(error),
+      });
     }
   }
 

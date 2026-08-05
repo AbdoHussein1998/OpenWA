@@ -11,6 +11,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { SessionService } from '../session/session.service';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
+import { SessionOwnershipService } from '../session/session-ownership.service';
 import type {
   MigrationTables,
   TableCounts,
@@ -27,6 +28,7 @@ import type {
   WebhookDeliveryFailureRow,
   IntegrationDeliveryFailureRow,
   StatusUpdateRow,
+  AutomationRuleRow,
 } from './migration-tables.types';
 import { TABLE_IMPORTERS } from './table-importers';
 
@@ -58,6 +60,10 @@ export class InfraDataController {
     private readonly sessionService?: SessionService,
     @Optional()
     private readonly lidMappingStore?: LidMappingStoreService,
+    // Same trailing-@Optional convention as the services above: provided by the app, omitted by the
+    // direct-construction unit tests, and every use is `?.`-guarded.
+    @Optional()
+    private readonly ownership?: SessionOwnershipService,
   ) {}
 
   @Get('export-data')
@@ -82,6 +88,7 @@ export class InfraDataController {
       webhookDeliveryFailures: number;
       integrationDeliveryFailures: number;
       statusUpdates: number;
+      automationRules: number;
     };
     /** Optional tables that were skipped because they genuinely do not exist in this DB (older schema). */
     skippedTables: string[];
@@ -130,6 +137,7 @@ export class InfraDataController {
       'integration_delivery_failures',
     );
     const statusUpdates = await queryOptionalTable<StatusUpdateRow>('status_updates');
+    const automationRules = await queryOptionalTable<AutomationRuleRow>('automation_rules');
 
     const counts = {
       sessions: sessions.length,
@@ -145,6 +153,7 @@ export class InfraDataController {
       webhookDeliveryFailures: webhookDeliveryFailures.length,
       integrationDeliveryFailures: integrationDeliveryFailures.length,
       statusUpdates: statusUpdates.length,
+      automationRules: automationRules.length,
     };
 
     // Audit the full-DB export: this payload carries webhook + plugin-instance secrets, so WHO pulled
@@ -169,6 +178,7 @@ export class InfraDataController {
         webhookDeliveryFailures,
         integrationDeliveryFailures,
         statusUpdates,
+        automationRules,
       },
       counts,
       skippedTables,
@@ -272,6 +282,20 @@ export class InfraDataController {
     // must NOT trip the warnings→rollback gate further down. warnings is reserved for per-row import
     // failures that make the replace partial and therefore require a rollback.
     const notices: string[] = [];
+
+    // `getActiveSessionIds` reads this process's own engine registry, so an engine another node is
+    // running is invisible here and cannot be stopped from this request — there is no cross-process
+    // control channel. Left unsaid, a clean response would read as "every orphan was reconciled".
+    // Say it instead: the operator is the only one who can act on it.
+    const heldElsewhere = (await this.ownership?.heldByOtherNodes()) ?? [];
+    if (heldElsewhere.length > 0) {
+      restartRequired = true;
+      notices.push(
+        `${heldElsewhere.length} session(s) are running on another node and could not be reconciled from ` +
+          `this request: ${heldElsewhere.join(', ')}. Their engines may still write into the restored ` +
+          `tables — stop those nodes before relying on this import.`,
+      );
+    }
 
     if (orphanedEngines.length > 0 && data.stopOrphans && this.sessionService) {
       // Stop the orphans inside this request, BEFORE the transaction opens. destroyEngineSafely's
@@ -386,7 +410,12 @@ export class InfraDataController {
       for (const importer of TABLE_IMPORTERS) {
         const rows = data.tables[importer.key];
         if (!rows?.length) continue;
-        for (const row of rows) {
+        for (const untypedRow of rows) {
+          // `rows` was read from `data.tables[importer.key]`, so it holds exactly the row type this
+          // descriptor's id/map/skip declare. That correlation is what the erased importer type
+          // cannot carry, and this loop is the one place it is known — so the cast lives here rather
+          // than at each of the three uses below.
+          const row = untypedRow as never;
           const skipWarning = importer.skip?.(row);
           if (skipWarning != null) {
             warnings.push(skipWarning);
@@ -396,7 +425,9 @@ export class InfraDataController {
             await insert(importer.sql, importer.map(row));
             counts[importer.key]++;
           } catch (err) {
-            warnings.push(`Failed to import ${importer.label} ${importer.id(row)}: ${err}`);
+            warnings.push(
+              `Failed to import ${importer.label} ${importer.id(row)}: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
       }

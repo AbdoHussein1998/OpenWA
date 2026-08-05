@@ -410,6 +410,14 @@ On a **pre-action** event it is a veto, because the action has not been taken ye
 `message:sending` blocks the send (the caller gets a `400`), and on `webhook:before` it cancels that one
 delivery.
 
+> **`message:sending` does not see every attempted send.** With send pacing enabled
+> (`SEND_PACING_ENABLED`), the pacing governor runs *before* this hook, so a send it refuses never
+> fires `message:sending` — plugins are not asked to moderate, and cannot rewrite, traffic that
+> policy already forbids. Treat the hook as a complete record of sends **actually attempted against
+> WhatsApp**, not of send *requests*. A paced-out request surfaces to the caller as `429` with
+> `code: SEND_PACING_LIMITED`; a plugin veto stays `400`. Pacing is off by default, so a deployment
+> that has not opted in sees the hook fire exactly as before.
+
 > Until 0.10.5, `continue: false` on the two notification events also skipped persistence, the webhook
 > and the websocket emit. An auto-reply plugin returning it for its ordinary purpose therefore erased
 > the triggering message from the dashboard's chat history and from every integration downstream. If you

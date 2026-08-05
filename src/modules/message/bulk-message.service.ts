@@ -1,4 +1,11 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+  Optional,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Not, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { createHash, randomUUID } from 'crypto';
@@ -13,6 +20,13 @@ import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { MessageStatus } from './entities/message.entity';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { MessageService } from './message.service';
+import {
+  SendPacingService,
+  isPacingLimitedError,
+  countsTowardSendBreaker,
+  SEND_PACING_LIMITED,
+} from './send-pacing.service';
+import { SessionOwnershipService } from '../session/session-ownership.service';
 import { HookManager } from '../../core/hooks';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from './media-cap.util';
 import { SsrfBlockedError, SSRF_BLOCKED_CLIENT_MESSAGE } from '../../common/security/ssrf-guard';
@@ -50,11 +64,15 @@ export function resolveFinalBatchStatus(
 /**
  * Build the error stored on a batch result. An SSRF block names the internal host/IP it refused, so
  * it must never be persisted/returned verbatim — it would be readable via GET batch status. Map it to
- * a generic, code-tagged message; ordinary errors keep their (non-sensitive) message.
+ * a generic, code-tagged message; a pacing refusal keeps its own code so batch results distinguish
+ * policy 429s from engine refusals; ordinary errors keep their (non-sensitive) message.
  */
 export function sanitizeBatchError(error: unknown): { code: string; message: string } {
   if (error instanceof SsrfBlockedError) {
     return { code: 'SEND_BLOCKED', message: SSRF_BLOCKED_CLIENT_MESSAGE };
+  }
+  if (isPacingLimitedError(error)) {
+    return { code: SEND_PACING_LIMITED, message: error instanceof Error ? error.message : String(error) };
   }
   return { code: 'SEND_FAILED', message: error instanceof Error ? error.message : String(error) };
 }
@@ -89,6 +107,12 @@ export class BulkMessageService implements OnApplicationBootstrap {
     private readonly engines: EngineRegistry,
     private readonly messageService: MessageService,
     private readonly hookManager: HookManager,
+    private readonly pacing: SendPacingService,
+    // Trailing @Optional, matching the convention used elsewhere here: the running app always
+    // provides it, while direct-construction unit tests omit it and every batch then reads as this
+    // node's — which is exactly a single-process deployment.
+    @Optional()
+    private readonly ownership?: SessionOwnershipService,
   ) {}
 
   /**
@@ -96,19 +120,63 @@ export class BulkMessageService implements OnApplicationBootstrap {
    * previous (crashed/restarted) process — this fresh process is not driving it, so it would
    * otherwise be stuck in PROCESSING forever. Mark it FAILED. Auto-resume is intentionally NOT
    * done here: resuming risks re-sending messages already delivered before the crash.
+   *
+   * "A previous process" is not the same as "any process". A batch is only ever driven by whichever
+   * process holds its session's engine, so a batch belongs to a peer exactly when its session does.
+   * Without that distinction a booting replica declares a live peer's in-flight batches FAILED
+   * while they are still sending — the caller is told the send failed, and the messages go out
+   * anyway. Batch ownership follows session ownership rather than being tracked separately,
+   * because the two cannot diverge: only the engine holder can send.
    */
   async onApplicationBootstrap(): Promise<void> {
-    const orphaned = await this.batchRepository.find({ where: { status: BatchStatus.PROCESSING } });
+    const processing = await this.batchRepository.find({ where: { status: BatchStatus.PROCESSING } });
+    const orphaned = await this.ownedByThisNode(processing);
     for (const batch of orphaned) {
-      batch.status = BatchStatus.FAILED;
-      this.stripBatchMediaPayloads(batch.messages);
-      await this.batchRepository.save(batch);
+      await this.failOrphanedBatch(batch);
     }
     if (orphaned.length > 0) {
       this.logger.warn(
         `Marked ${orphaned.length} orphaned PROCESSING batch(es) FAILED on startup (interrupted by a restart)`,
       );
     }
+    const skipped = processing.length - orphaned.length;
+    if (skipped > 0) {
+      this.logger.log(`Left ${skipped} PROCESSING batch(es) alone: their sessions are held by another node`);
+    }
+  }
+
+  private async failOrphanedBatch(batch: MessageBatch): Promise<void> {
+    batch.status = BatchStatus.FAILED;
+    this.stripBatchMediaPayloads(batch.messages);
+    await this.batchRepository.save(batch);
+  }
+
+  /**
+   * Fail a session's stuck PROCESSING batches after the session was adopted from a lapsed node.
+   * Same policy as the boot reaper and for the same reason: the dead node's already-sent messages
+   * are unknowable, so resuming risks double-sends — FAILED with the payloads stripped is the
+   * honest terminal state, and the caller can re-issue the batch knowingly.
+   */
+  async reapProcessingBatches(sessionId: string, reason: string): Promise<number> {
+    const processing = await this.batchRepository.find({ where: { status: BatchStatus.PROCESSING, sessionId } });
+    for (const batch of processing) {
+      await this.failOrphanedBatch(batch);
+    }
+    if (processing.length > 0) {
+      this.logger.warn(`Marked ${processing.length} PROCESSING batch(es) FAILED for session ${sessionId} (${reason})`);
+    }
+    return processing.length;
+  }
+
+  /**
+   * Narrow to the batches this process may act on. With no ownership service — a single-process
+   * deployment, or a directly-constructed unit test — every batch qualifies, which is the behaviour
+   * that existed before ownership was recorded at all.
+   */
+  private async ownedByThisNode(batches: MessageBatch[]): Promise<MessageBatch[]> {
+    if (!this.ownership || batches.length === 0) return batches;
+    const claimable = new Set(await this.ownership.claimable([...new Set(batches.map(b => b.sessionId))]));
+    return batches.filter(batch => claimable.has(batch.sessionId));
   }
 
   async createBatch(sessionId: string, dto: SendBulkMessageDto): Promise<MessageBatch> {
@@ -377,6 +445,11 @@ export class BulkMessageService implements OnApplicationBootstrap {
       // Apply template variables
       content = this.applyVariables(msg.content, msg.variables);
 
+      // Pacing runs BEFORE the moderation gate, matching MessageService: a send policy forbids is not
+      // offered to plugins at all. A refusal is a 429 that fails THIS item (honouring stopOnError),
+      // not the batch — the allowance may free up, and a batch killed outright could not resume.
+      await this.pacing.assertSendAllowed(batch.sessionId, msg.chatId);
+
       // Per-message moderation gate — the SAME message:sending hook single sends use, so a
       // compliance/moderation plugin sees bulk traffic too (bulk previously bypassed it entirely).
       // A block fails just THIS message (honouring stopOnError below); a plugin may also rewrite it.
@@ -396,8 +469,23 @@ export class BulkMessageService implements OnApplicationBootstrap {
       // A violation fails just this item (honouring stopOnError) instead of sending it.
       this.assertContentMediaWithinCap(content);
 
-      // Send message based on type
-      const messageResult = await this.sendMessage(engine, msg.chatId, msg.type, content);
+      // Send message based on type. The engine call is bracketed on its own so the pacing breaker
+      // hears exactly what the single-send path feeds it (message.service failSend/persistSentState):
+      // recordSendFailure only when the ENGINE was asked and refused — never for the pre-engine
+      // pacing/plugin/media-cap throws above — and recordSendSuccess the moment it accepts. Without
+      // this the breaker was blind to bulk, the highest-volume path it exists to protect.
+      let messageResult;
+      try {
+        messageResult = await this.sendMessage(engine, msg.chatId, msg.type, content);
+      } catch (engineError) {
+        // Same filter the single-send path applies: adapters also raise client-fault and
+        // engine-state errors from inside this call, and those say nothing about the account.
+        if (countsTowardSendBreaker(engineError)) {
+          this.pacing.recordSendFailure(batch.sessionId);
+        }
+        throw engineError;
+      }
+      this.pacing.recordSendSuccess(batch.sessionId);
 
       result.status = BatchMessageStatus.SENT;
       result.messageId = messageResult.id;
@@ -420,9 +508,10 @@ export class BulkMessageService implements OnApplicationBootstrap {
       batch.progress.pending--;
 
       // Fire message:failed so alerting/analytics plugins observe bulk failures too (previously
-      // none) — but NOT for a plugin gate-block, which is a moderation decision, not a delivery
-      // failure (matches single send, where a block is a 400 with no message:failed).
-      if (!blockedByPlugin) {
+      // none) — but NOT for a plugin gate-block (a moderation decision) nor a pacing refusal (a
+      // policy 429, thrown before the engine was asked): neither is a delivery failure, matching
+      // single send where a block is a 400 and a pacing refusal is a 429, neither firing the hook.
+      if (!blockedByPlugin && !isPacingLimitedError(error)) {
         await this.hookManager.execute(
           'message:failed',
           { sessionId: batch.sessionId, error: sanitized.message, input: content, type: msg.type },

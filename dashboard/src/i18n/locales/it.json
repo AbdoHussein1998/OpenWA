@@ -315,7 +315,8 @@
       "phone": "Telefono",
       "sessionId": "ID Sessione",
       "lastActive": "Ultima Attività",
-      "error": "Errore"
+      "error": "Errore",
+      "restriction": "Limitazione"
     },
     "forceKill": {
       "title": "Termina sessione bloccata",
@@ -360,6 +361,12 @@
     "start": {
       "teardownPendingTitle": "Avvio sessione",
       "teardownPending": "Uno smontaggio delle credenziali per questa sessione è ancora in corso. Attendi un momento e riprova."
+    },
+    "restriction": {
+      "reachout_timelock": "Nuove chat bloccate",
+      "tos_block": "Bloccato da WhatsApp",
+      "proxy_block": "Connessione bloccata",
+      "until": "fino al {{date}}"
     }
   },
   "webhooks": {

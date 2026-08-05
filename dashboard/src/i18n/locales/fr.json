@@ -315,7 +315,8 @@
       "phone": "Téléphone",
       "sessionId": "ID de session",
       "lastActive": "Dernière activité",
-      "error": "Erreur"
+      "error": "Erreur",
+      "restriction": "Restriction"
     },
     "forceKill": {
       "title": "Arrêter la session bloquée",
@@ -360,6 +361,12 @@
     "start": {
       "teardownPendingTitle": "Démarrage de la session",
       "teardownPending": "Un nettoyage d'identifiants pour cette session est encore en cours. Patientez un instant et réessayez."
+    },
+    "restriction": {
+      "reachout_timelock": "Nouvelles discussions bloquées",
+      "tos_block": "Bloqué par WhatsApp",
+      "proxy_block": "Connexion bloquée",
+      "until": "jusqu'au {{date}}"
     }
   },
   "webhooks": {

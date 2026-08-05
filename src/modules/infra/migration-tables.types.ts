@@ -51,6 +51,13 @@ export interface MessageRow {
   status: string;
   createdAt: string;
   /**
+   * Chat-media archive pointers (nullable; added after author — keep the import list in sync).
+   * Dropping these on import would leave the archived FILES restored but unreferenced, and the
+   * orphan sweep would then delete them after its grace window.
+   */
+  mediaPath: string | null;
+  mediaMimetype: string | null;
+  /**
    * Postgres-only STORED generated tsvector (FTS). Present in `SELECT *` rows read from a Postgres
    * source (and in backups made before it was stripped) but never a real payload column: export drops
    * it, and the import's explicit column list ignores it. Declared so both directions type-check.
@@ -200,6 +207,25 @@ export interface StatusUpdateRow {
   expiresAt: number | string;
 }
 
+/**
+ * automation_rules has an ON DELETE CASCADE FK to sessions, so the import's `DELETE FROM sessions`
+ * takes every rule with it — on SQLite too, where better-sqlite3 enforces foreign keys. Exporting
+ * and re-inserting it is therefore not optional: without it a backup/restore silently destroys
+ * every autoreply rule. `conditions` is stored as text (the webhook-filter JSON), `enabled` reads
+ * back as a boolean on Postgres and 0/1 on SQLite.
+ */
+export interface AutomationRuleRow {
+  id: string;
+  sessionId: string;
+  name: string;
+  enabled: boolean | number;
+  conditions: string | null;
+  replyText: string;
+  cooldownSeconds: number;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
 export interface MigrationTables {
   sessions: SessionRow[];
   webhooks: WebhookRow[];
@@ -214,6 +240,7 @@ export interface MigrationTables {
   webhookDeliveryFailures: WebhookDeliveryFailureRow[];
   integrationDeliveryFailures: IntegrationDeliveryFailureRow[];
   statusUpdates: StatusUpdateRow[];
+  automationRules: AutomationRuleRow[];
 }
 
 export type TableCounts = { [K in keyof MigrationTables]: number };

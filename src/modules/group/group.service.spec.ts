@@ -4,12 +4,17 @@ import { EngineRegistry } from '../../engine/engine-registry.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
+import { SendPacingService } from '../message/send-pacing.service';
+
+/** Pacing is off by default; its own spec covers the governor, so here it must simply not refuse. */
+const inertPacing = (): SendPacingService =>
+  ({ assertReachoutAllowed: jest.fn().mockResolvedValue(undefined) }) as unknown as SendPacingService;
 
 describe('GroupService', () => {
-  const makeService = (engine: Partial<IWhatsAppEngine> | undefined) => {
+  const makeService = (engine: Partial<IWhatsAppEngine> | undefined, pacing: SendPacingService = inertPacing()) => {
     const engines = new EngineRegistry();
     if (engine) engines.set('s1', engine as IWhatsAppEngine);
-    return new GroupService(engines);
+    return new GroupService(engines, pacing);
   };
 
   it('throws 400 "Session is not started" when the engine is missing (guard preserved)', () => {
@@ -152,6 +157,30 @@ describe('GroupService', () => {
       expect(engine.setGroupInfoAdminsOnly).not.toHaveBeenCalled();
     });
 
+    it('keeps memberAddMode BEHIND ephemeralSeconds, so the deterministic 501 still fails first', async () => {
+      // memberAddMode is supported on both engines and therefore has no deterministic refusal.
+      // Ordering it ahead of ephemeralSeconds would reintroduce exactly the half-applied patch the
+      // rule above exists to prevent: the mode would land, then the ephemeral call would 501.
+      const engine = {
+        setGroupMemberAddMode: jest.fn().mockResolvedValue(undefined),
+        setGroupMessagesAdminsOnly: jest.fn().mockResolvedValue(undefined),
+        setGroupInfoAdminsOnly: jest.fn().mockResolvedValue(undefined),
+        setGroupEphemeral: jest.fn().mockRejectedValue(new EngineNotSupportedError('setGroupEphemeral')),
+      };
+      const svc = makeService(engine);
+      await expect(
+        svc.updateGroupSettings('s1', 'g1', { memberAddMode: 'admins', ephemeralSeconds: 86400 }),
+      ).rejects.toBeInstanceOf(EngineNotSupportedError);
+      expect(engine.setGroupMemberAddMode).not.toHaveBeenCalled();
+    });
+
+    it('applies memberAddMode when it is the only field in the patch', async () => {
+      const engine = { setGroupMemberAddMode: jest.fn().mockResolvedValue(undefined) };
+      const svc = makeService(engine);
+      await svc.updateGroupSettings('s1', 'g1', { memberAddMode: 'all' });
+      expect(engine.setGroupMemberAddMode).toHaveBeenCalledWith('g1', 'all');
+    });
+
     it('names the failed field AND the applied ones when a patch partially applies', async () => {
       // ephemeralSeconds applied, then announce failed: the client must learn the group is now in a
       // mixed state (and which subset took effect), not receive a bare engine error.
@@ -183,5 +212,38 @@ describe('GroupService', () => {
       ).rejects.toBeInstanceOf(EngineRefusedError);
       expect(engine.setGroupMessagesAdminsOnly).not.toHaveBeenCalled();
     });
+  });
+});
+
+// A preview must never look like membership: it reports a count, never a participant list, and it
+// changes nothing about the account.
+describe('GroupService join-info preview', () => {
+  const makeService = (engine: Partial<IWhatsAppEngine>) => {
+    const engines = new EngineRegistry();
+    engines.set('s1', engine as IWhatsAppEngine);
+    return new GroupService(engines, inertPacing());
+  };
+
+  it('delegates the trimmed code to the engine', async () => {
+    const getGroupJoinInfo = jest.fn().mockResolvedValue({ id: 'g@g.us', name: 'Team' });
+
+    await makeService({ getGroupJoinInfo }).getGroupJoinInfo('s1', '  ABC123  ');
+
+    expect(getGroupJoinInfo).toHaveBeenCalledWith('ABC123');
+  });
+
+  // An empty code would otherwise reach the engine and come back as a confusing not-found rather
+  // than the client error it plainly is.
+  it.each(['', '   ', undefined])('rejects a missing code (%p) before reaching the engine', code => {
+    const getGroupJoinInfo = jest.fn();
+
+    expect(() => makeService({ getGroupJoinInfo }).getGroupJoinInfo('s1', code as string)).toThrow(BadRequestException);
+    expect(getGroupJoinInfo).not.toHaveBeenCalled();
+  });
+
+  it('throws 400 when the session is not started', () => {
+    expect(() => new GroupService(new EngineRegistry(), inertPacing()).getGroupJoinInfo('s1', 'ABC')).toThrow(
+      BadRequestException,
+    );
   });
 });

@@ -28,6 +28,22 @@ interface S3Config {
 /** How often an S3-configured service re-probes a bucket that was unreachable at boot. */
 export const DEFAULT_S3_REPROBE_INTERVAL_MS = 60_000;
 
+/**
+ * True when a storage read failed because the object is simply not there.
+ *
+ * Both backends must be covered, and they report it differently: the local backend raises a POSIX
+ * `ENOENT` (a `.code`), while S3 raises `NoSuchKey`/`NotFound`, which carries a `.name` and no
+ * `.code` at all — `getS3File` below rethrows that original error when the local read-through also
+ * misses. Checking only `.code` turns a missing S3 object into a 500 on the one backend where
+ * retention and bucket lifecycle rules make a miss most likely.
+ */
+export function isMissingObjectError(error: unknown): boolean {
+  const e = error as { code?: string; name?: string; $metadata?: { httpStatusCode?: number } };
+  return (
+    e?.code === 'ENOENT' || e?.name === 'NoSuchKey' || e?.name === 'NotFound' || e?.$metadata?.httpStatusCode === 404
+  );
+}
+
 function positiveIntFromEnv(name: string, fallback: number): number {
   const parsed = Number.parseInt(process.env[name] ?? '', 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;

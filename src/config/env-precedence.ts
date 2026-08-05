@@ -44,6 +44,34 @@ export const BLANK_SHADOWED_ENV_KEYS: string[] = [
   // forward too (otherwise it could shadow a value in data/.env.generated).
   'S3_ACCESS_KEY',
   'S3_SECRET_KEY',
+  // Chat-media archiving. Blank-forwarded by compose like the storage keys above, so an operator
+  // who sets nothing must not have an empty string pin the feature off against data/.env.generated.
+  'CHAT_MEDIA_ARCHIVE_ENABLED',
+  'CHAT_MEDIA_ARCHIVE_MAX_BYTES',
+  'CHAT_MEDIA_ARCHIVE_TTL_DAYS',
+  'CHAT_MEDIA_ORPHAN_SWEEP_INTERVAL_MS',
+  'CHAT_MEDIA_ORPHAN_GRACE_MS',
+  // Send pacing. Blank-forwarded by compose like the chat-media keys, so an operator who sets
+  // nothing must not have an empty string pin pacing off against .env / data/.env.generated.
+  'SEND_PACING_ENABLED',
+  'SEND_PACING_WARMUP_SCHEDULE',
+  'SEND_PACING_COLD_DAILY_CAP',
+  'SEND_PACING_BREAKER_THRESHOLD',
+  'SEND_PACING_BREAKER_COOLDOWN_MS',
+  // Server-side media conversion, same arrangement.
+  'MEDIA_CONVERSION_ENABLED',
+  'FFMPEG_PATH',
+  'MEDIA_CONVERSION_TIMEOUT_MS',
+  'MEDIA_CONVERSION_MAX_OUTPUT_BYTES',
+  'MEDIA_CONVERSION_CONCURRENCY',
+  // Session ownership / multi-node routing (docs/13). Blank-forwarded so the single-node default
+  // stays untouched while .env / data/.env.generated can supply real values.
+  'NODE_ID',
+  'NODE_URL',
+  'SESSION_LEASE_TTL_MS',
+  'SESSION_LEASE_HEARTBEAT_MS',
+  'SESSION_TAKEOVER_SWEEP_MS',
+  'SESSION_PROXY_TIMEOUT_MS',
   // Redis selection + connection details (#488)
   'REDIS_ENABLED',
   'REDIS_HOST',

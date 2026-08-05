@@ -9,9 +9,13 @@ import { decideReconnect, type ReconnectAttemptState } from './reconnect-policy'
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
+import { SessionRestrictionStore } from './session-restriction-store.service';
+import { PresenceStore } from './presence-store.service';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { resolveEngineInitTimeoutMs } from '../../engine/engine-init-timeout';
 import { StatusStoreService } from '../status-store/status-store.service';
-import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
+import { IWhatsAppEngine, AccountRestriction } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { ShutdownService } from '../../common/services/shutdown.service';
 import {
@@ -209,6 +213,8 @@ export class SessionEngineLifecycle {
     private readonly watchdog: SessionLivenessWatchdog,
     private readonly messages: MessageProjector,
     private readonly sessionErrors: SessionErrorStore,
+    private readonly sessionRestrictions: SessionRestrictionStore,
+    private readonly presence: PresenceStore,
     private readonly eventsGateway: EventsGateway,
     private readonly webhookService: WebhookService,
     private readonly hookManager: HookManager,
@@ -220,6 +226,10 @@ export class SessionEngineLifecycle {
     // service degrades to today's behaviour if it is ever constructed without the (global) LoggerModule.
     @Optional()
     private readonly shutdownService?: ShutdownService,
+    // @Optional so the existing spec constructions keep working. AuditModule is @Global, so a
+    // running gateway always has it.
+    @Optional()
+    private readonly auditService?: AuditService,
   ) {
     // The fence Maps are handed over BY REFERENCE: they stay lifecycle fields (specs poke them
     // through the lifecycle), while the fence logic operates on the same instances.
@@ -257,6 +267,7 @@ export class SessionEngineLifecycle {
       cancelReconnect: id => this.cancelReconnect(id),
       evictAndForceDestroy: (id, engine) => this.evictAndForceDestroy(id, engine),
       trackPendingCredentialTeardown: (sessionName, raw) => this.trackPendingCredentialTeardown(sessionName, raw),
+      reportRestrictionLifted: (id, lifted) => this.reportRestrictionLifted(id, lifted),
       claimStuckAuthRecovery: (id, engine) => {
         // SYNCHRONOUS atomic claim for the one-shot automatic credential-reset budget. The adapter
         // calls this right before it would wipe LocalAuth (recoverFromStuckAuth); a denial makes the
@@ -274,6 +285,9 @@ export class SessionEngineLifecycle {
       },
       messages: this.messages,
       sessionErrors: this.sessionErrors,
+      sessionRestrictions: this.sessionRestrictions,
+      presence: this.presence,
+      auditService: this.auditService,
       webhookService: this.webhookService,
       eventsGateway: this.eventsGateway,
       hookManager: this.hookManager,
@@ -289,6 +303,8 @@ export class SessionEngineLifecycle {
       engineFactory: this.engineFactory,
       engines: this.engineRegistry,
       sessionErrors: this.sessionErrors,
+      sessionRestrictions: this.sessionRestrictions,
+      presence: this.presence,
       hookManager: this.hookManager,
       configService: this.configService,
       logger: this.logger,
@@ -385,6 +401,40 @@ export class SessionEngineLifecycle {
     this.fences.evictAndForceDestroy(id, engine);
   }
 
+  /**
+   * Set the tearing-down mark synchronously, before any awaited work a retiring control performs.
+   *
+   * The pre-initialize retirement race turns on this mark being visible to initializeEngine's
+   * post-INITIALIZING check (line ~507) by the time that awaited DB write settles. stop()/delete()
+   * both add the mark internally, but only AFTER their own first await (requireSession /
+   * awaitPendingTeardown), and the ownership fence added another await ahead of them — so the mark
+   * could land after the window it guards. Exposing it lets SessionService set it at true entry,
+   * with nothing awaited in between; a mark left behind by a request that then refuses (a 409) is
+   * harmless and is cleared by the next start(), which is what the mark is designed for.
+   */
+  markStopping(id: string): void {
+    this.stoppingSessions.add(id);
+  }
+
+  /**
+   * True while this process still has anything alive for the session: a registered engine, an
+   * in-flight start(), or reconnect state whose armed/executing attempt will re-register one.
+   * The ownership heartbeat consults this so a claim that no longer covers an engine stops being
+   * renewed and can lapse for a peer to adopt; the service-level release paths consult it so an
+   * "already starting/started" refusal never releases a session this node genuinely runs.
+   */
+  isEngineActive(id: string): boolean {
+    if (this.engines.has(id) || this.initializingSessions.has(id)) return true;
+    // Reconnect state counts only while an attempt is actually pending: a timer armed by
+    // scheduleReconnect, or one that has fired and is running executeReconnect (which leaves the
+    // spent handle in place and has already counted its attempt). The entry start() creates up
+    // front — {attempts: 0, timer: null} — is dormant: a start that then failed leaves nothing
+    // that will ever re-register an engine, and treating it as liveness would pin the claim to
+    // this node forever.
+    const reconnect = this.reconnectStates.get(id);
+    return reconnect != null && (reconnect.timer !== null || reconnect.attempts > 0);
+  }
+
   // --- Leaf-event delegates (SessionEngineLeafEvents) ------------------------------------------
   // Same-named, same-signature forwarders onto the extracted unit, so handleEngineReady's call
   // site stays byte-identical (the wiring reaches the unit directly through host.leafEvents).
@@ -423,7 +473,14 @@ export class SessionEngineLifecycle {
       proxyType: session.proxyType || undefined,
     });
     this.engines.set(id, engine);
-    // Clear any prior failure reason before a fresh start.
+    // Presence subscriptions live on the socket, so a fresh engine has none — whatever the previous
+    // connection last reported is now unverifiable and would be served as if it were current.
+    this.presence.clear(id);
+    // Clear any prior failure reason before a fresh start. A recorded account restriction is
+    // deliberately NOT cleared here: it describes the account, not this attempt, so a restart does
+    // not resolve it — and clearing it per attempt would make it flicker off and on through a
+    // reconnect loop, re-announcing one unchanged block on every pass. It is dropped where it is
+    // actually disproved (handleEngineReady) or reported lifted.
     this.sessionErrors.clear(id);
 
     // Mark INITIALIZING before engine.initialize(): the engine drives status forward
@@ -575,6 +632,12 @@ export class SessionEngineLifecycle {
     // A fresh READY stretch starts the watchdog's failure budget clean too.
     this.watchdog.clear(id);
     this.sessionErrors.clear(id);
+    // Being linked and ready is proof that a connection-level block is over — it is exactly what such
+    // a block prevents. A reachout timelock survives: it never stopped the session connecting.
+    const liftedByReady = this.sessionRestrictions.clearIfDisprovedByReady(id);
+    if (liftedByReady) {
+      this.reportRestrictionLifted(id, liftedByReady);
+    }
     // READY proves any in-flight stuck-auth recovery succeeded (or none was needed), so the
     // one-shot recovery budget is re-armed for a future episode.
     this.stuckAuthRecoveryUsed.delete(id);
@@ -598,6 +661,41 @@ export class SessionEngineLifecycle {
     // posts arrive through onMessage below; this just backfills what was already up before we
     // connected. Not awaited — onReady must not block on it.
     void this.seedStatuses(id, engine);
+  }
+
+  /**
+   * Announce that a restriction has ended. Shared by the two paths that can end one — the engine
+   * reporting it lifted, and a session reaching READY despite a connection-level block — so the two
+   * cannot drift into announcing the same thing differently. The caller has already removed it from
+   * the store and passes what was removed, since the payload describes the restriction that ended.
+   */
+  reportRestrictionLifted(id: string, lifted: AccountRestriction): void {
+    // Phrased as "no longer in force" rather than "WhatsApp lifted it": only one of the two paths is
+    // WhatsApp saying so. The other infers it from the session having connected, and the log should
+    // not claim more than was actually observed.
+    this.logger.log(`The ${lifted.kind} restriction on this session is no longer in force`, {
+      sessionId: id,
+      kind: lifted.kind,
+      code: lifted.code,
+      action: 'account_restriction_lifted',
+    });
+    void this.webhookService.dispatch(id, 'session.restriction', {
+      sessionId: id,
+      active: false,
+      kind: lifted.kind,
+      code: lifted.code,
+      expiresAt: null,
+    });
+    this.eventsGateway.emitSessionRestriction(id, {
+      active: false,
+      kind: lifted.kind,
+      code: lifted.code,
+      expiresAt: null,
+    });
+    void this.auditService?.logInfo(AuditAction.SESSION_RESTRICTION_LIFTED, {
+      sessionId: id,
+      metadata: { kind: lifted.kind, code: lifted.code },
+    });
   }
 
   /**
@@ -710,6 +808,10 @@ export class SessionEngineLifecycle {
       if (deadEngine) {
         this.evictAndForceDestroy(id, deadEngine);
       }
+      // Terminal: drop the reconnect state too. Nothing fires again for this episode, and a stale
+      // entry would keep isEngineActive() true — the ownership heartbeat would renew the claim on
+      // a session with no engine, pinning it to this node. start() builds fresh state anyway.
+      this.cancelReconnect(id);
       return;
     }
 

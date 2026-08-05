@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ValidateNested,
   IsString,
   IsNotEmpty,
   IsOptional,
@@ -10,6 +11,7 @@ import {
   ArrayMaxSize,
   IsBoolean,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ToStrictBoolean } from '../../../common/utils/strict-boolean';
 
 const MENTIONS_DESCRIPTION =
@@ -19,6 +21,33 @@ const MENTIONS_DESCRIPTION =
 // (src/core/agent-tools/tools/message.tools.ts) so MCP and REST enforce the same limit.
 export const MESSAGE_TEXT_MAX_LENGTH = 4096;
 
+export class CustomLinkPreviewDto {
+  @ApiProperty({
+    description: 'The URL as it appears in the message text — WhatsApp anchors the preview to it.',
+    example: 'https://example.com/launch',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2048)
+  url!: string;
+
+  @ApiProperty({
+    description: 'Required: WhatsApp will not render a preview without a title.',
+    example: 'We just launched',
+    maxLength: 256,
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(256)
+  title!: string;
+
+  @ApiPropertyOptional({ description: 'Preview description', example: 'Read the announcement.', maxLength: 1024 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  description?: string;
+}
+
 export class SendTextMessageDto {
   @ApiProperty({
     description: 'WhatsApp chat ID (phone@c.us for individual, groupId@g.us for groups)',
@@ -26,7 +55,7 @@ export class SendTextMessageDto {
   })
   @IsString()
   @IsNotEmpty()
-  chatId: string;
+  chatId!: string;
 
   @ApiProperty({
     description: 'Text message content',
@@ -36,7 +65,7 @@ export class SendTextMessageDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(MESSAGE_TEXT_MAX_LENGTH)
-  text: string;
+  text!: string;
 
   @ApiPropertyOptional({ description: MENTIONS_DESCRIPTION, example: ['628123456789@c.us'], type: [String] })
   @IsOptional()
@@ -45,6 +74,34 @@ export class SendTextMessageDto {
   @IsString({ each: true })
   @MaxLength(64, { each: true })
   mentions?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Controls the URL preview, and the engines differ. On whatsapp-web.js WhatsApp Web builds one ' +
+      'by default and `false` suppresses it. On Baileys previews are OPT-IN: `true` asks the gateway ' +
+      'to fetch the page and attach one, while unset or `false` sends none — generating a preview is ' +
+      'a blocking outbound fetch per URL in the text, so it is never done unless asked for.',
+    example: false,
+  })
+  // Implicit conversion turns EVERY non-empty string into true, so an unguarded `false` sent as a
+  // string would request a preview instead of suppressing one — the opposite of what was asked.
+  @ToStrictBoolean()
+  @IsOptional()
+  @IsBoolean()
+  linkPreview?: boolean;
+
+  @ApiPropertyOptional({
+    type: CustomLinkPreviewDto,
+    description:
+      'Attach a preview you supply yourself, instead of one fetched from the URL. Nothing is ' +
+      'fetched for these, so a preview can be attached even for a URL this server cannot reach. ' +
+      '**Baileys only** — whatsapp-web.js takes a boolean and answers `501`. Cannot be combined ' +
+      'with `linkPreview: false`, which asks for the opposite.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CustomLinkPreviewDto)
+  customLinkPreview?: CustomLinkPreviewDto;
 }
 
 export class SendMediaMessageDto {
@@ -54,7 +111,7 @@ export class SendMediaMessageDto {
   })
   @IsString()
   @IsNotEmpty()
-  chatId: string;
+  chatId!: string;
 
   @ApiPropertyOptional({
     description: 'Media URL (http/https)',
@@ -137,11 +194,11 @@ export class MessageResponseDto {
       'not come online since the send stays at `sent` too.',
     example: 'true_628123456789@c.us_3EB0123456789',
   })
-  messageId: string;
+  messageId!: string;
 
   @ApiProperty({
     description: 'Unix timestamp (seconds) at which the gateway accepted the message for sending.',
     example: 1706868000,
   })
-  timestamp: number;
+  timestamp!: number;
 }

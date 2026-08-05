@@ -319,7 +319,8 @@
       "phone": "Phone",
       "sessionId": "Session ID",
       "lastActive": "Last Active",
-      "error": "Error"
+      "error": "Error",
+      "restriction": "Restriction"
     },
     "forceKill": {
       "title": "Kill Stuck Session",
@@ -360,6 +361,12 @@
       "step3": "<strong>3.</strong> Tap <strong>Link a Device</strong>, then tap <strong>Link with phone number instead</strong>",
       "step4": "<strong>4.</strong> Enter the 8-character code shown above on your phone",
       "waitingConnection": "Waiting for your phone to link…"
+    },
+    "restriction": {
+      "reachout_timelock": "New chats blocked",
+      "tos_block": "Blocked by WhatsApp",
+      "proxy_block": "Connection blocked",
+      "until": "until {{date}}"
     }
   },
   "webhooks": {

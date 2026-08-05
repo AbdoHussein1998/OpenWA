@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PayloadTooLargeException } from '@nestjs/common';
+import { HttpException, PayloadTooLargeException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { In, Not } from 'typeorm';
 import {
@@ -14,6 +14,8 @@ import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import type { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { MessageService } from './message.service';
+import { SendPacingService, SEND_PACING_LIMITED } from './send-pacing.service';
+import { SessionOwnershipService } from '../session/session-ownership.service';
 import { HookManager } from '../../core/hooks';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 
@@ -71,6 +73,16 @@ describe('BulkMessageService.onApplicationBootstrap', () => {
         EngineRegistry,
         { provide: MessageService, useValue: { saveOutgoingMessage: jest.fn() } },
         {
+          // Pacing is off by default; its own spec covers the governor. Here it must simply not
+          // refuse, so the bulk assertions exercise the paths they were written for.
+          provide: SendPacingService,
+          useValue: {
+            assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+            recordSendFailure: jest.fn(),
+            recordSendSuccess: jest.fn(),
+          },
+        },
+        {
           provide: HookManager,
           useValue: {
             execute: jest
@@ -99,6 +111,103 @@ describe('BulkMessageService.onApplicationBootstrap', () => {
     await service.onApplicationBootstrap();
     expect(repo.save).not.toHaveBeenCalled();
   });
+
+  /**
+   * The takeover path's reconcile: adopting a session from a lapsed node must fail THAT session's
+   * stuck batches (same no-auto-resume policy as boot — the dead node's already-sent messages are
+   * unknowable), scoped strictly to the one session, with inline media payloads stripped.
+   */
+  it('reapProcessingBatches fails only the given session’s PROCESSING batches and strips payloads', async () => {
+    const mine = {
+      id: 'b1',
+      sessionId: 'sess-a',
+      status: BatchStatus.PROCESSING,
+      messages: [{ content: { image: { base64: 'x'.repeat(64) } } }],
+    } as unknown as MessageBatch;
+    repo.find.mockResolvedValue([mine]);
+
+    const reaped = await service.reapProcessingBatches('sess-a', 'session adopted from a lapsed node');
+
+    expect(repo.find).toHaveBeenCalledWith({ where: { status: BatchStatus.PROCESSING, sessionId: 'sess-a' } });
+    expect(reaped).toBe(1);
+    expect(mine.status).toBe(BatchStatus.FAILED);
+    expect(repo.save).toHaveBeenCalledWith(mine);
+    expect(JSON.stringify(mine.messages)).not.toContain('x'.repeat(64));
+  });
+
+  /**
+   * A batch is only ever driven by the process holding its session's engine, so on a second replica
+   * "PROCESSING" does not mean "abandoned". Reaping a peer's batch tells the caller their send
+   * failed while the messages continue going out — a wrong answer about work that is still running.
+   */
+  describe('with another node in play', () => {
+    /** Rebuild the service with an ownership service that owns only `ownedSessionIds`. */
+    const withOwnership = async (ownedSessionIds: string[]): Promise<BulkMessageService> => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          BulkMessageService,
+          { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
+          EngineRegistry,
+          { provide: MessageService, useValue: { saveOutgoingMessage: jest.fn() } },
+          {
+            provide: SendPacingService,
+            useValue: {
+              assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+              recordSendFailure: jest.fn(),
+              recordSendSuccess: jest.fn(),
+            },
+          },
+          {
+            provide: HookManager,
+            useValue: {
+              execute: jest
+                .fn()
+                .mockImplementation((_e: string, d: unknown) => Promise.resolve({ continue: true, data: d })),
+            },
+          },
+          {
+            provide: SessionOwnershipService,
+            useValue: {
+              claimable: jest.fn((ids: string[]) => Promise.resolve(ids.filter(id => ownedSessionIds.includes(id)))),
+            },
+          },
+        ],
+      }).compile();
+      return module.get<BulkMessageService>(BulkMessageService);
+    };
+
+    it('leaves a batch alone when its session belongs to another node', async () => {
+      const peers = { id: 'b1', sessionId: 'peer-session', status: BatchStatus.PROCESSING } as MessageBatch;
+      repo.find.mockResolvedValue([peers]);
+
+      await (await withOwnership([])).onApplicationBootstrap();
+
+      expect(peers.status).toBe(BatchStatus.PROCESSING);
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('still reaps a batch whose session this node may claim', async () => {
+      const mine = { id: 'b2', sessionId: 'my-session', status: BatchStatus.PROCESSING } as MessageBatch;
+      repo.find.mockResolvedValue([mine]);
+
+      await (await withOwnership(['my-session'])).onApplicationBootstrap();
+
+      expect(mine.status).toBe(BatchStatus.FAILED);
+      expect(repo.save).toHaveBeenCalledWith(mine);
+    });
+
+    it('reaps only its own when both are present', async () => {
+      const mine = { id: 'b2', sessionId: 'my-session', status: BatchStatus.PROCESSING } as MessageBatch;
+      const peers = { id: 'b1', sessionId: 'peer-session', status: BatchStatus.PROCESSING } as MessageBatch;
+      repo.find.mockResolvedValue([mine, peers]);
+
+      await (await withOwnership(['my-session'])).onApplicationBootstrap();
+
+      expect(mine.status).toBe(BatchStatus.FAILED);
+      expect(peers.status).toBe(BatchStatus.PROCESSING);
+      expect(repo.save).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 /** Regression lock: an SSRF block (which names the internal host/IP) must not be stored verbatim. */
@@ -115,6 +224,15 @@ describe('sanitizeBatchError', () => {
     const result = sanitizeBatchError(new Error('Session is not active'));
     expect(result).toEqual({ code: 'SEND_FAILED', message: 'Session is not active' });
   });
+
+  it('keeps the pacing code, so a policy 429 is distinguishable from an engine refusal', () => {
+    const refusal = new HttpException(
+      { statusCode: 429, message: 'Daily send allowance of 20 reached', code: 'SEND_PACING_LIMITED' },
+      429,
+    );
+    const result = sanitizeBatchError(refusal);
+    expect(result).toEqual({ code: 'SEND_PACING_LIMITED', message: 'Daily send allowance of 20 reached' });
+  });
 });
 
 describe('BulkMessageService.processBatch', () => {
@@ -129,6 +247,7 @@ describe('BulkMessageService.processBatch', () => {
   };
   let engines: EngineRegistry;
   let hookManager: { execute: jest.Mock };
+  let pacing: { assertSendAllowed: jest.Mock; recordSendFailure: jest.Mock; recordSendSuccess: jest.Mock };
 
   const makeBatch = (messageCount: number): MessageBatch =>
     ({
@@ -155,6 +274,11 @@ describe('BulkMessageService.processBatch', () => {
     hookManager = {
       execute: jest.fn().mockImplementation((_e: string, data: unknown) => Promise.resolve({ continue: true, data })),
     };
+    pacing = {
+      assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+      recordSendFailure: jest.fn(),
+      recordSendSuccess: jest.fn(),
+    };
     repo = {
       findOne: jest.fn(),
       save: jest.fn().mockImplementation(b => Promise.resolve(b)),
@@ -167,6 +291,10 @@ describe('BulkMessageService.processBatch', () => {
         { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
         { provide: EngineRegistry, useValue: engines },
         { provide: MessageService, useValue: messageService },
+        {
+          provide: SendPacingService,
+          useValue: pacing,
+        },
         { provide: HookManager, useValue: hookManager },
       ],
     }).compile();
@@ -273,6 +401,42 @@ describe('BulkMessageService.processBatch', () => {
     // A moderation block must not be reported as a delivery failure — matches single send, where a
     // block is a 400 with no message:failed.
     expect(hookManager.execute).not.toHaveBeenCalledWith('message:failed', expect.anything(), expect.anything());
+  });
+
+  it('feeds the pacing breaker: a successful bulk send records success, so bulk can reset a streak', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+
+    await runProcessBatch();
+
+    expect(pacing.recordSendSuccess).toHaveBeenCalledWith('s1');
+    expect(pacing.recordSendFailure).not.toHaveBeenCalled();
+  });
+
+  it('feeds the pacing breaker: an engine refusal records a failure, so bulk can trip the streak', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    engine.sendTextMessage.mockRejectedValueOnce(new Error('boom'));
+
+    await runProcessBatch();
+
+    // The engine was asked and refused — exactly what the breaker's streak counts, just like the
+    // single-send path (message.service failSend). A success never happened, so no reset.
+    expect(pacing.recordSendFailure).toHaveBeenCalledWith('s1');
+    expect(pacing.recordSendSuccess).not.toHaveBeenCalled();
+  });
+
+  it('a pacing 429 fails the item WITHOUT a message:failed hook or a breaker increment (policy, not delivery)', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    pacing.assertSendAllowed.mockRejectedValueOnce(
+      new HttpException({ statusCode: 429, code: SEND_PACING_LIMITED }, 429),
+    );
+
+    await runProcessBatch();
+
+    // Thrown before the engine was asked: not a delivery failure (no message:failed), and it must
+    // not feed the breaker — matching single send, where a pacing refusal is a bare 429.
+    expect(engine.sendTextMessage).not.toHaveBeenCalled();
+    expect(hookManager.execute).not.toHaveBeenCalledWith('message:failed', expect.anything(), expect.anything());
+    expect(pacing.recordSendFailure).not.toHaveBeenCalled();
   });
 
   it('sends a bulk audio item with ptt as a voice note and persists type "voice"', async () => {
@@ -579,6 +743,14 @@ describe('BulkMessageService.cancelBatch', () => {
         { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
         EngineRegistry,
         { provide: MessageService, useValue: {} },
+        {
+          provide: SendPacingService,
+          useValue: {
+            assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+            recordSendFailure: jest.fn(),
+            recordSendSuccess: jest.fn(),
+          },
+        },
         { provide: HookManager, useValue: { execute: jest.fn() } },
       ],
     }).compile();
@@ -654,6 +826,14 @@ describe('BulkMessageService.createBatch base64 media cap', () => {
         { provide: getRepositoryToken(MessageBatch, 'data'), useValue: repo },
         { provide: EngineRegistry, useValue: engines },
         { provide: MessageService, useValue: messageService },
+        {
+          provide: SendPacingService,
+          useValue: {
+            assertSendAllowed: jest.fn().mockResolvedValue(undefined),
+            recordSendFailure: jest.fn(),
+            recordSendSuccess: jest.fn(),
+          },
+        },
         {
           provide: HookManager,
           useValue: {

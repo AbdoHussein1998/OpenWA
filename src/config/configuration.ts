@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { computeFeatureFlags } from './feature-flags';
+import { computeSendPacingConfig } from '../modules/message/send-pacing.config';
 import { resolveInflightBodyBudgetBytes } from './inflight-body-budget';
 import { readWsRateLimitConfig } from '../modules/events/ws-rate-limit';
 
@@ -113,6 +114,10 @@ export default () => ({
   // Runtime feature flags. Single source of truth: src/config/feature-flags.ts. Exposed here so the
   // full set is discoverable via ConfigService (`features.*`) instead of scattered process.env reads.
   features: computeFeatureFlags(),
+
+  // Outbound send pacing. Its own object rather than a feature flag: every field needs clamping,
+  // because a bad value here decides whether messages are refused. See message/send-pacing.config.ts.
+  sendPacing: computeSendPacingConfig(),
 
   // Redis configuration
   redis: {
@@ -361,6 +366,118 @@ export default () => ({
     orphanGraceMs: (() => {
       const n = parseInt(process.env.STATUS_ORPHAN_GRACE_MS ?? '', 10);
       return Number.isFinite(n) && n > 0 ? n : 60 * 60 * 1000;
+    })(),
+  },
+
+  // Chat-media archiving (opt-in): a copy of each message's media in the file store, addressable
+  // after delivery. Independent of the inline base64 the message row already carries.
+  chatMedia: {
+    // Off by default: archiving doubles storage for media under the cap, since the inline copy stays.
+    archiveEnabled: process.env.CHAT_MEDIA_ARCHIVE_ENABLED === 'true',
+    // Per-file cap on archived chat media (default 25 MiB). Media above it is simply not archived —
+    // the message row and its inline copy are unaffected.
+    maxBytes: (() => {
+      const n = parseInt(process.env.CHAT_MEDIA_ARCHIVE_MAX_BYTES ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 25 * 1024 * 1024;
+    })(),
+    // How long an archived file is kept, in days. 0 (the default) means forever. Unlike statuses,
+    // chat messages have no WhatsApp-side expiry, so retention is purely an operator policy.
+    ttlDays: (() => {
+      const n = parseInt(process.env.CHAT_MEDIA_ARCHIVE_TTL_DAYS ?? '', 10);
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    })(),
+    // Cadence of the reconciliation sweep that reaps chat-media files no row references (default 1h).
+    orphanSweepIntervalMs: (() => {
+      const n = parseInt(process.env.CHAT_MEDIA_ORPHAN_SWEEP_INTERVAL_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60 * 60 * 1000;
+    })(),
+    // How long an unreferenced chat-media file must be observed by the sweep before deletion
+    // (default 1h), so a file mid-write is never reaped.
+    orphanGraceMs: (() => {
+      const n = parseInt(process.env.CHAT_MEDIA_ORPHAN_GRACE_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60 * 60 * 1000;
+    })(),
+  },
+
+  // Session ownership across processes. A session's engine runs in exactly one process; these
+  // record which, so a second process booting beside a live one does not disturb its sessions.
+  session: {
+    // Stable across restarts by design — a restarted process must recognise its own leftover rows
+    // in order to reset them. Defaults to the hostname, which is the container or host boundary.
+    nodeId: process.env.NODE_ID || '',
+    // Where THIS node answers HTTP for its peers (e.g. http://10.0.0.5:2785). Written onto every
+    // session this node claims, so a peer can forward a request to the engine's host. Empty (the
+    // default) disables request forwarding entirely — the right setting for single-node
+    // deployments, where the lookup would be pure overhead.
+    nodeUrl: process.env.NODE_URL || '',
+    // Ceiling for one forwarded request (default 60s): engine operations can legitimately take
+    // tens of seconds (a send with typing simulation, a media fetch), but a peer must not hold a
+    // caller forever when the owner hangs.
+    proxyTimeoutMs: (() => {
+      const n = parseInt(process.env.SESSION_PROXY_TIMEOUT_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60_000;
+    })(),
+    // How long a claim is honoured without renewal (default 60s). This is the worst-case delay
+    // before a peer may take over from a process that died without releasing.
+    leaseTtlMs: (() => {
+      const n = parseInt(process.env.SESSION_LEASE_TTL_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60_000;
+    })(),
+    // Renewal cadence (default 20s). Comfortably under the TTL so a single missed tick — a slow
+    // query, a brief database blip — never costs a live process its sessions.
+    leaseHeartbeatMs: (() => {
+      const n = parseInt(process.env.SESSION_LEASE_HEARTBEAT_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 20_000;
+    })(),
+    // Takeover sweep cadence (default 30s): how often a node looks for sessions whose holder's
+    // lease has lapsed — a crashed peer, or this node's own previous identity after a container
+    // recreate — and starts them here. Gated by the AUTO_START_SESSIONS feature flag.
+    takeoverSweepMs: (() => {
+      const n = parseInt(process.env.SESSION_TAKEOVER_SWEEP_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 30_000;
+    })(),
+  },
+
+  // Autoreply rules
+  automation: {
+    // Max rules per session. Every inbound message is evaluated against every rule of its session,
+    // so an unbounded count turns each message into unbounded work. Creating a NEW rule above the
+    // cap is rejected with 400; existing ones are grandfathered. Default 32; 0 disables the cap.
+    maxPerSession: (() => {
+      const n = parseInt(process.env.AUTOMATION_MAX_PER_SESSION ?? '', 10);
+      return Number.isFinite(n) && n >= 0 ? n : 32;
+    })(),
+  },
+
+  // Server-side media conversion (opt-in): transcodes caller-supplied audio and video into the
+  // shapes WhatsApp clients actually play, by running the ffmpeg binary. Nothing is converted
+  // implicitly — only the explicit conversion endpoints use this.
+  mediaConversion: {
+    // Off by default: it spawns an external process per request, so an operator opts in knowingly.
+    // Even when true the endpoints stay unavailable unless the binary is actually present, so
+    // enabling it on a host without ffmpeg degrades to a clear 503 rather than a spawn error.
+    enabled: process.env.MEDIA_CONVERSION_ENABLED === 'true',
+    // Absolute path to the binary, for hosts that keep it outside PATH. Resolved via PATH by default.
+    ffmpegPath: process.env.FFMPEG_PATH || 'ffmpeg',
+    // Wall-clock ceiling for one conversion (default 60s). A codec can spin on malformed input, and
+    // this process is spawned on a request path, so the timeout kills it rather than tying up a slot.
+    timeoutMs: (() => {
+      const n = parseInt(process.env.MEDIA_CONVERSION_TIMEOUT_MS ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 60_000;
+    })(),
+    // Cap on the CONVERTED bytes (default 50 MiB, matching the inbound media cap). Transcoding can
+    // inflate as well as shrink, so the output needs its own ceiling and not just the input's.
+    maxOutputBytes: (() => {
+      const n = parseInt(process.env.MEDIA_CONVERSION_MAX_OUTPUT_BYTES ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 50 * 1024 * 1024;
+    })(),
+    // At most this many ffmpeg processes at once (default 2). Each conversion spawns an external
+    // process and holds its input in heap; without a bound, requests inside the rate-limit window
+    // can stack processes for as long as each one runs. A short queue absorbs bursts; beyond it
+    // the endpoint answers 503 rather than piling on.
+    concurrency: (() => {
+      const n = parseInt(process.env.MEDIA_CONVERSION_CONCURRENCY ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : 2;
     })(),
   },
 

@@ -1,5 +1,6 @@
 import { MessageMedia, MessageTypes, type Client, type Message } from 'whatsapp-web.js';
 import {
+  CustomLinkPreview,
   IncomingMessage,
   LocationInput,
   ContactCard,
@@ -10,6 +11,7 @@ import {
   PollInput,
 } from '../interfaces/whatsapp-engine.interface';
 import { MessageWithReactions, SerializedWid } from '../types/whatsapp-web-js.types';
+import { BadRequestException } from '@nestjs/common';
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
@@ -17,6 +19,7 @@ import { chatKind, userPart } from '../identity/wa-id';
 import { chatHistoryMediaBudgetBytes, coerceDeclaredSize, ingestMediaBudgetBytes } from './inbound-media-cap';
 import { buildIncomingMessageBase } from './message-mapper';
 import { buildVCard } from './vcard';
+import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -265,12 +268,34 @@ export class WwebjsMessaging {
     }
   }
 
-  async sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult> {
+  async sendTextMessage(
+    chatId: string,
+    text: string,
+    mentions?: string[],
+    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
+  ): Promise<MessageResult> {
     this.host.ensureReady();
     // wwebjs accepts neutral `<phone>@c.us` WIDs directly as mentionedJidList, so no de-normalization
     // is needed. Omit the options object entirely when none are given to keep today's send behavior.
+    //
+    // Only an explicit `false` is forwarded. whatsapp-web.js reads the flag as
+    // `linkPreview === false ? undefined : true` (Client.js:1458), so passing `true` is identical to
+    // passing nothing — sending it anyway would add an options object to every plain send for no
+    // change in behaviour.
+    // whatsapp-web.js takes a BOOLEAN only (index.d.ts:1547) — there is no way to hand it title,
+    // description or a thumbnail. Silently dropping the caller's preview would send a message that
+    // looks nothing like what they asked for, so it refuses instead.
+    if (options?.customPreview) {
+      throw new EngineNotSupportedError('sendTextMessage(customPreview)');
+    }
+    const sendOptions: { mentions?: string[]; linkPreview?: boolean } = {};
+    if (mentions?.length) sendOptions.mentions = mentions;
+    if (options?.linkPreview === false) sendOptions.linkPreview = false;
+
     const msg = await this.sendResolved(chatId, to =>
-      mentions?.length ? this.client().sendMessage(to, text, { mentions }) : this.client().sendMessage(to, text),
+      Object.keys(sendOptions).length
+        ? this.client().sendMessage(to, text, sendOptions)
+        : this.client().sendMessage(to, text),
     );
     return toMessageResult(msg);
   }
@@ -654,5 +679,78 @@ export class WwebjsMessaging {
     }
     this.host.logger.log(`Edited message ${messageId} in chat ${chatId}`);
     return toMessageResult(edited);
+  }
+
+  /**
+   * Locate a message in the 100-message fetch window shared by react/delete/edit — and now pin.
+   * Deliberately NOT applied to the existing call sites: they differ in whether they tolerate an
+   * unknown chat, and rewriting them is not this change's business.
+   *
+   * As with those sites, chatId is NOT lid-resolved: the pin acts on the found message's own key,
+   * so resolving would only risk missing a message stored under the pre-migration @c.us chat.
+   */
+  private async findInFetchWindow(chatId: string, messageId: string): Promise<Message> {
+    const chat = await this.client().getChatById(chatId);
+    // getChatById RESOLVES undefined for an unknown chat rather than throwing, which is the same
+    // client-facing outcome as a message outside the window — a 404, not a TypeError-driven 500.
+    if (!chat) throw new MessageNotFoundError(messageId, chatId);
+    const messages = await chat.fetchMessages({ limit: 100 });
+    const message = messages.find(m => m.id._serialized === messageId || m.id.id === messageId);
+    if (!message) throw new MessageNotFoundError(messageId, chatId);
+    return message;
+  }
+
+  async votePoll(chatId: string, pollMessageId: string, options: string[]): Promise<void> {
+    this.host.ensureReady();
+    // Same 100-message window as pin/react/delete, so a poll older than that is unreachable and
+    // reported as not-found rather than as a failed vote.
+    const message = await this.findInFetchWindow(chatId, pollMessageId);
+    try {
+      await (message as unknown as { vote(selected: string[]): Promise<void> }).vote(options);
+    } catch (error) {
+      // vote() throws a BARE STRING (not an Error) when the target is not a poll creation message
+      // (Message.js:1010). Left alone that surfaces as an opaque 500; it is a client mistake, so
+      // map it to a 400. Anything that is a real Error is a genuine engine fault and propagates.
+      if (typeof error === 'string') {
+        throw new BadRequestException(`Message ${pollMessageId} is not a poll: ${error}`);
+      }
+      throw error;
+    }
+    this.host.logger.log(`Voted on poll ${pollMessageId} in chat ${chatId} (${options.length} option(s))`);
+  }
+
+  async pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {
+    this.host.ensureReady();
+    const message = await this.findInFetchWindow(chatId, messageId);
+    // The page-side helper returns false rather than throwing for every refusal — a non-number
+    // duration, a message it cannot resolve, or a send WhatsApp rejected (Injected/Utils.js:1670).
+    // Surface that as a refusal instead of reporting a pin that never happened.
+    if (!(await message.pin(durationSeconds))) {
+      throw new EngineRefusedError(
+        `the pin of message ${messageId} was rejected — in a group only admins may pin, and the duration must be 24h, 7d or 30d`,
+      );
+    }
+    this.host.logger.log(`Pinned message ${messageId} in chat ${chatId} for ${durationSeconds}s`);
+  }
+
+  async starMessage(chatId: string, messageId: string, star: boolean): Promise<void> {
+    this.host.ensureReady();
+    const message = await this.findInFetchWindow(chatId, messageId);
+    // Both resolve void, and the page-side helper silently does nothing when canStarMsg() refuses
+    // the message (Message.js:672-712). There is no signal to map, so a star that WhatsApp declined
+    // is indistinguishable from one it accepted — documented rather than faked into a refusal.
+    await (star ? message.star() : message.unstar());
+    this.host.logger.log(`${star ? 'Starred' : 'Unstarred'} message ${messageId} in chat ${chatId}`);
+  }
+
+  async unpinMessage(chatId: string, messageId: string): Promise<void> {
+    this.host.ensureReady();
+    const message = await this.findInFetchWindow(chatId, messageId);
+    // unpin() passes duration 0 itself, so the injected non-number guard cannot bite here; a false
+    // return means WhatsApp refused the unpin (e.g. not an admin).
+    if (!(await message.unpin())) {
+      throw new EngineRefusedError(`the unpin of message ${messageId} was rejected — in a group only admins may unpin`);
+    }
+    this.host.logger.log(`Unpinned message ${messageId} in chat ${chatId}`);
   }
 }

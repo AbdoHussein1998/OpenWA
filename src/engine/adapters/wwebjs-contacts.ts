@@ -1,6 +1,8 @@
 import { type Client } from 'whatsapp-web.js';
 import { Contact } from '../interfaces/whatsapp-engine.interface';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
+import { userPart } from '../identity/wa-id';
+import { readWid } from '../types/whatsapp-web-js.types';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -57,7 +59,9 @@ export class WwebjsContacts {
     this.host.ensureReady();
     try {
       const numberId = await this.client().getNumberId(number);
-      return numberId?._serialized ?? null;
+      // Read both property names: a WA Web build that renamed `_serialized` would otherwise make
+      // every number look unregistered — and checkNumberExists below reports exactly that.
+      return readWid(numberId) ?? null;
     } catch (error) {
       this.host.reportIfPageTransportError(error, 'getNumberId');
       throw error;
@@ -83,6 +87,23 @@ export class WwebjsContacts {
       });
       return null;
     }
+  }
+
+  async upsertContact(contactId: string, firstName: string, lastName = ''): Promise<void> {
+    this.host.ensureReady();
+    // wwjs addresses the addressbook entry by PHONE NUMBER, not JID (Client.js:3266). lastName is
+    // positional and required there, so an absent one is passed as an empty string rather than
+    // undefined, which would land in the page-side payload as the literal string "undefined".
+    // syncToAddressbook is left at its default (false): writing to the device addressbook is a
+    // heavier, separately-consented action than saving the WhatsApp contact.
+    await this.client().saveOrEditAddressbookContact(userPart(contactId), firstName, lastName);
+    this.host.logger.log(`Saved addressbook contact ${contactId}`);
+  }
+
+  async deleteContact(contactId: string): Promise<void> {
+    this.host.ensureReady();
+    await this.client().deleteAddressbookContact(userPart(contactId));
+    this.host.logger.log(`Deleted addressbook contact ${contactId}`);
   }
 
   async blockContact(contactId: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Optional } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -12,6 +12,7 @@ import { assertBase64WithinMediaCap, stripBase64DataUri } from './media-cap.util
 import { MediaInput, IWhatsAppEngine, MessageResult } from '../../engine/interfaces/whatsapp-engine.interface';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
 import { HookManager, applySendingGate } from '../../core/hooks';
+import { SendPacingService, countsTowardSendBreaker } from './send-pacing.service';
 import { TemplateService } from '../template/template.service';
 import { renderTemplate } from '../../common/utils/template-render';
 import { createLogger } from '../../common/services/logger.service';
@@ -20,6 +21,8 @@ import { parseWaId } from '../../engine/identity/wa-id';
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
+import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
+import { StorageService, isMissingObjectError } from '../../common/storage/storage.service';
 
 export interface GetMessagesOptions {
   chatId?: string;
@@ -31,6 +34,22 @@ export interface GetMessagesOptions {
 
 /** Default cap on a rendered template's final text; overridable via TEMPLATE_RENDER_MAX_CHARS. */
 export const DEFAULT_TEMPLATE_RENDER_MAX_CHARS = 64 * 1024;
+
+/** Pin window applied when the caller does not choose one — WhatsApp's own default of 24h. */
+export const DEFAULT_PIN_DURATION_SECONDS = 86400;
+
+/**
+ * Mimetypes an archived chat-media file may be served as. Everything else — documents, and notably
+ * `image/svg+xml`, which is scriptable despite the `image/` prefix — is served as inert
+ * octet-stream so the media endpoint cannot host active content on the API origin.
+ */
+const INERT_MEDIA_MIMETYPE =
+  /^(image\/(jpeg|png|gif|webp|bmp)|video\/(mp4|webm|quicktime|3gpp)|audio\/(mpeg|mp4|ogg|aac|wav|webm))(;|$)/;
+
+/** The declared mimetype when it is safe to echo back, else inert octet-stream. */
+function inertMimetype(mimetype: string): string {
+  return INERT_MEDIA_MIMETYPE.test(mimetype) ? mimetype : 'application/octet-stream';
+}
 
 /**
  * Outbound sends are executed directly against the WhatsApp engine, not via a BullMQ queue.
@@ -60,11 +79,25 @@ export class MessageService {
     private readonly hookManager: HookManager,
     private readonly templateService: TemplateService,
     private readonly lidMappingStore: LidMappingStoreService,
+    // Required, not @Optional: a missing pacing service would silently mean "no pacing", which is
+    // the one failure mode this feature must not have. The service itself no-ops when disabled.
+    private readonly pacing: SendPacingService,
     @Optional()
     private readonly configService?: ConfigService,
+    // Optional so the existing standalone constructions keep working; absent means the archive
+    // read endpoint reports "nothing archived", which is also what a disabled archive reports.
+    @Optional()
+    private readonly chatMediaArchive?: ChatMediaArchiveService,
+    @Optional()
+    private readonly storageService?: StorageService,
   ) {}
 
   async sendText(sessionId: string, dto: SendTextMessageDto): Promise<MessageResponseDto> {
+    // Asking to suppress the preview AND to attach one is a contradiction, and guessing which half
+    // the caller meant would send a message they did not ask for either way.
+    if (dto.linkPreview === false && dto.customLinkPreview) {
+      throw new BadRequestException('linkPreview: false cannot be combined with customLinkPreview');
+    }
     const finalDto = await this.applySendingGate(sessionId, 'text', dto);
 
     const engine = this.getEngine(sessionId);
@@ -81,10 +114,21 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      // Keep the 2-arg call shape for plain sends; only pass mentions when the caller supplied any.
-      result = finalDto.mentions?.length
-        ? await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions)
-        : await engine.sendTextMessage(finalDto.chatId, finalDto.text);
+      // The call is widened ONLY as far as the caller actually asked. A send with neither mentions
+      // nor a preview choice keeps its two-argument shape, and one with mentions alone keeps its
+      // three — trailing `undefined`s would be harmless to the engines but would rewrite the call
+      // shape of every existing send for no behavioural gain.
+      const { linkPreview, customLinkPreview } = finalDto;
+      if (linkPreview !== undefined || customLinkPreview) {
+        result = await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions, {
+          ...(linkPreview === undefined ? {} : { linkPreview }),
+          ...(customLinkPreview ? { customPreview: customLinkPreview } : {}),
+        });
+      } else if (finalDto.mentions?.length) {
+        result = await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions);
+      } else {
+        result = await engine.sendTextMessage(finalDto.chatId, finalDto.text);
+      }
     } catch (error) {
       // The SEND itself failed — mark FAILED + fire message:failed (a post-send persistence fault is
       // handled separately by persistSentState and must NOT land here).
@@ -105,7 +149,18 @@ export class MessageService {
    * reply/forward) and edit — passes through the same moderation chokepoint, instead of only
    * `sendText`. The implementation is shared with StatusService via core/hooks/sending-gate.
    */
-  private applySendingGate<T extends object>(sessionId: string, type: string, input: T): Promise<T> {
+  private async applySendingGate<T extends object>(sessionId: string, type: string, input: T): Promise<T> {
+    // Pacing runs BEFORE the plugin gate, so a send that policy forbids never reaches a plugin at
+    // all — plugins should not be asked to moderate, or given the chance to rewrite, traffic that is
+    // not going to be sent. The consequence is deliberate and documented in the hook contract: a
+    // paced-out send fires no `message:sending`, so a plugin cannot observe it. Refusals are a 429
+    // carrying `code: SEND_PACING_LIMITED`; a plugin veto stays a 400.
+    // Every gated sender's DTO addresses its destination as `chatId` except forward, which uses
+    // `toChatId` — without the fallback a forward skipped the cold-reachout gate entirely, while
+    // its persisted row still drained the cold budget. Edit carries a chatId too; the edited
+    // message's own row already makes that chat warm, so the gate is a no-op there.
+    const target = input as { chatId?: string; toChatId?: string };
+    await this.pacing.assertSendAllowed(sessionId, target.chatId ?? target.toChatId);
     return applySendingGate(this.hookManager, sessionId, type, input, 'MessageService');
   }
 
@@ -123,6 +178,13 @@ export class MessageService {
     input: unknown,
     error: unknown,
   ): Promise<never> {
+    // Only failures that say something about the account's standing feed the breaker: adapters also
+    // raise client-fault and engine-state errors from inside this call (a blocked media URL, an
+    // unsupported capability, a disconnected socket), and counting those let a client sending bad
+    // requests trip the breaker on a healthy session.
+    if (countsTowardSendBreaker(error)) {
+      this.pacing.recordSendFailure(sessionId);
+    }
     await this.saveFailedMessage(message);
     // Sanitize the hook payload: an SSRF block's raw .message names the resolved internal address
     // (a recon/DNS-rebind oracle) — the client-facing throw below already maps it to a generic
@@ -629,6 +691,9 @@ export class MessageService {
     // A send whose engine couldn't read the sent message's id back reports an empty id — a forward that
     // can't recover the copy, or a WhatsApp Web build that renamed the id field out from under the
     // engine. Leave waMessageId unset (NULL) so no ack mis-matches it.
+    // The engine accepted the message, so whatever streak the breaker was tracking is over. Recorded
+    // here rather than at each call site for the same reason failSend is: one funnel, twelve senders.
+    this.pacing.recordSendSuccess(message.sessionId);
     if (result.id) message.waMessageId = result.id;
     message.status = MessageStatus.SENT;
     message.timestamp = result.timestamp;
@@ -695,6 +760,36 @@ export class MessageService {
     return engine.getMessageReactions(chatId, messageId);
   }
 
+  /**
+   * Read a message's archived media back out of the file store.
+   *
+   * Unlike status media (only ever an image or video), chat media includes documents a sender chose
+   * the type of — so the declared mimetype is echoed back only when it is inert, and the caller
+   * serves the result as an attachment regardless. Both matter: an allow-list alone would still let
+   * `image/svg+xml` through as active content on the API origin.
+   */
+  async getChatMedia(
+    sessionId: string,
+    chatId: string,
+    messageId: string,
+  ): Promise<{ buffer: Buffer; mimetype: string }> {
+    const media = await this.chatMediaArchive?.getMedia(sessionId, chatId, messageId);
+    if (!media || !this.storageService) {
+      throw new NotFoundException('No archived media for this message');
+    }
+    try {
+      const buffer = await this.storageService.getFile(media.path);
+      return { buffer, mimetype: inertMimetype(media.mimetype) };
+    } catch (error) {
+      // The row outlived its file: the retention purge (or a concurrent delete) removed it between
+      // the DB read and this read. That's "gone", not a server fault — surface a 404.
+      if (isMissingObjectError(error)) {
+        throw new NotFoundException('No archived media for this message');
+      }
+      throw error;
+    }
+  }
+
   /** Maximum messages a single getChatHistory call may request from the engine. */
   private static readonly MAX_CHAT_HISTORY_LIMIT = 100;
 
@@ -732,6 +827,47 @@ export class MessageService {
   }
 
   // ========== Delete Message ==========
+
+  /**
+   * Pin a message for a bounded window. Nothing is persisted locally: a pin is chat state owned by
+   * WhatsApp, not a property of our message row, and it expires on WhatsApp's clock — a mirrored
+   * copy here would silently go stale.
+   */
+  async pinMessage(sessionId: string, dto: { chatId: string; messageId: string; durationSeconds?: number }) {
+    const engine = this.getEngine(sessionId);
+    await engine.pinMessage(dto.chatId, dto.messageId, dto.durationSeconds ?? DEFAULT_PIN_DURATION_SECONDS);
+    return { success: true };
+  }
+
+  async unpinMessage(sessionId: string, dto: { chatId: string; messageId: string }) {
+    const engine = this.getEngine(sessionId);
+    await engine.unpinMessage(dto.chatId, dto.messageId);
+    return { success: true };
+  }
+
+  /**
+   * Star or unstar a message. Like a pin, this is WhatsApp-owned state and is not mirrored locally
+   * — but unlike a pin it is private to the account and never expires.
+   *
+   * Best-effort on whatsapp-web.js: its star/unstar resolve void and silently do nothing when
+   * WhatsApp declines the message, so a 200 here means the instruction was delivered, not that the
+   * star is definitely set.
+   */
+  async starMessage(sessionId: string, dto: { chatId: string; messageId: string; star: boolean }) {
+    const engine = this.getEngine(sessionId);
+    await engine.starMessage(dto.chatId, dto.messageId, dto.star);
+    return { success: true };
+  }
+
+  /**
+   * Cast a vote on a poll. Not supported on the Baileys engine, which surfaces as a 501 from the
+   * adapter. `options` are option texts — see the engine interface for why there are no ids.
+   */
+  async votePoll(sessionId: string, dto: { chatId: string; pollMessageId: string; options: string[] }) {
+    const engine = this.getEngine(sessionId);
+    await engine.votePoll(dto.chatId, dto.pollMessageId, dto.options);
+    return { success: true };
+  }
 
   async deleteMessage(
     sessionId: string,

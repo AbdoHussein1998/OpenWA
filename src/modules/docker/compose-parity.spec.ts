@@ -235,6 +235,51 @@ describe('DockerService managed specs ↔ docker-compose.yml parity', () => {
     expect(cfg.Env).toBeUndefined();
   });
 
+  // docker-compose.yml has NO env_file — the `environment:` list is an explicit allow-list, so a
+  // variable missing from it never reaches the container and the feature it gates stays silently
+  // off however the operator's .env is written. Exactly how AUTO_START_SESSIONS was inert before
+  // v0.12.0, and how SEND_PACING_* / MEDIA_CONVERSION_* shipped inert alongside CHAT_MEDIA_*.
+  const apiForwards = (): Set<string> => {
+    const api = (compose.services as Record<string, { environment?: string[] }>)['openwa-api'];
+    return new Set((api.environment ?? []).map(line => line.split('=')[0]));
+  };
+
+  it.each([
+    ['CHAT_MEDIA_*', 'config/configuration.ts', /CHAT_MEDIA_[A-Z_]+/g],
+    ['MEDIA_CONVERSION_*/FFMPEG_PATH', 'config/configuration.ts', /MEDIA_CONVERSION_[A-Z_]+|FFMPEG_PATH/g],
+    ['SEND_PACING_*', 'modules/message/send-pacing.config.ts', /SEND_PACING_[A-Z_]+/g],
+  ])('forwards every %s variable the app reads to the api container', (_family, sourcePath, pattern) => {
+    // Derived from the reading source file rather than hardcoded, so a new flag cannot be added to
+    // the app and forgotten here.
+    const src = readFileSync(join(__dirname, '..', '..', sourcePath), 'utf8');
+    const read = [...new Set(src.match(pattern) ?? [])];
+    expect(read.length).toBeGreaterThan(0);
+    const forwarded = apiForwards();
+    expect(read.filter(name => !forwarded.has(name))).toEqual([]);
+  });
+
+  it('forwards the session-ownership keys multi-node deployments set (.env.example "Session ownership")', () => {
+    const forwarded = apiForwards();
+    const keys = [
+      'NODE_ID',
+      'NODE_URL',
+      'SESSION_LEASE_TTL_MS',
+      'SESSION_LEASE_HEARTBEAT_MS',
+      'SESSION_TAKEOVER_SWEEP_MS',
+      'SESSION_PROXY_TIMEOUT_MS',
+    ];
+    expect(keys.filter(name => !forwarded.has(name))).toEqual([]);
+  });
+
+  it('redis: sets the noeviction maxmemory policy BullMQ requires, on both launch paths', async () => {
+    const cfg = await capture('redis');
+    // The parity assertion above only proves the two launch paths AGREE — dropping the flag from
+    // both would keep it green. BullMQ needs noeviction: under any other policy Redis may evict
+    // queue keys once maxmemory is reached, losing queued jobs with no error surfaced anywhere.
+    expect(compose.services.redis.command).toContain('--maxmemory-policy noeviction');
+    expect(cfg.Cmd).toEqual(expect.arrayContaining(['--maxmemory-policy', 'noeviction']));
+  });
+
   it('redis: publishes no host ports, like compose', async () => {
     const cfg = await capture('redis');
     expect(compose.services.redis.ports).toBeUndefined();

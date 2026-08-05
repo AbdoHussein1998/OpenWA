@@ -193,6 +193,25 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/unre
   -d '{ "chatId": "1234567890@c.us" }'
 ```
 
+#### DELETE /api/sessions/:id/chats/:chatId/messages
+
+Delete every message in a chat, keeping the chat.
+
+```bash
+curl -X DELETE "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/1234567890-123@g.us/messages" \
+  -H "X-API-Key: $API_KEY"
+```
+
+#### POST /api/sessions/:id/chats/archive
+
+Archive or unarchive a chat.
+
+```bash
+curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/archive" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"1234567890-123@g.us","archive":true}'
+```
+
 #### POST /api/sessions/:id/chats/delete
 
 Delete a chat from the chat list (OPERATOR).
@@ -253,6 +272,54 @@ Get reactions for a message, grouped by emoji.
 ```bash
 curl "$BASE/api/sessions/$SESSION_ID/messages/628123456789@c.us/true_628123456789@c.us_3EB0ABCD/reactions" \
   -H "X-API-Key: $API_KEY"
+```
+
+#### POST /api/sessions/:sessionId/messages/vote-poll
+
+Vote on a poll (whatsapp-web.js only).
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/vote-poll" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"628123456789@c.us","pollMessageId":"true_628123456789@c.us_3EB0ABCD","options":["Pizza"]}'
+```
+
+#### POST /api/sessions/:sessionId/messages/pin
+
+Pin a message for 24h (default), 7d or 30d.
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/pin" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"628123456789@c.us","messageId":"true_628123456789@c.us_3EB0ABCD","durationSeconds":604800}'
+```
+
+#### POST /api/sessions/:sessionId/messages/star
+
+Star or unstar a message.
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/star" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"628123456789@c.us","messageId":"true_628123456789@c.us_3EB0ABCD","star":true}'
+```
+
+#### POST /api/sessions/:sessionId/messages/unpin
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/unpin" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"628123456789@c.us","messageId":"true_628123456789@c.us_3EB0ABCD"}'
+```
+
+#### GET /api/sessions/:sessionId/messages/:chatId/:messageId/media
+
+Download a message's archived media. Requires `CHAT_MEDIA_ARCHIVE_ENABLED=true` to have been set
+when the message arrived; `404` otherwise.
+
+```bash
+curl "$BASE/api/sessions/$SESSION_ID/messages/628123456789@c.us/true_628123456789@c.us_3EB0ABCD/media" \
+  -H "X-API-Key: $API_KEY" -o media.bin
 ```
 
 #### GET /api/sessions/:sessionId/messages/batch/:batchId
@@ -488,6 +555,25 @@ Resolve a contact id (e.g. an @lid) to a phone number.
 
 ```bash
 curl -X GET "$BASE/api/sessions/$SESSION_ID/contacts/12345678901234@lid/phone" \
+  -H "X-API-Key: $API_KEY"
+```
+
+#### PUT /api/sessions/:sessionId/contacts/:contactId
+
+Save or edit an addressbook contact.
+
+```bash
+curl -X PUT "$BASE/api/sessions/$SESSION_ID/contacts/628123456789@c.us" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"firstName":"Ada","lastName":"Lovelace"}'
+```
+
+#### DELETE /api/sessions/:sessionId/contacts/:contactId
+
+Remove an addressbook contact.
+
+```bash
+curl -X DELETE "$BASE/api/sessions/$SESSION_ID/contacts/628123456789@c.us" \
   -H "X-API-Key: $API_KEY"
 ```
 

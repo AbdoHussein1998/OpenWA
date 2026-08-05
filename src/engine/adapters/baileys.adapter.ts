@@ -21,9 +21,13 @@ import {
   EngineStatus,
   Group,
   GroupInfo,
+  GroupMemberAddMode,
   IncomingMessage,
   IWhatsAppEngine,
   Label,
+  CustomLinkPreview,
+  GroupJoinInfo,
+  LabelInput,
   LocationInput,
   MediaInput,
   MessageReaction,
@@ -130,6 +134,8 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getOnMessageAck: () => this.callbacks.onMessageAck,
       getOnGroupEvent: () => this.callbacks.onGroupEvent,
       getOnCall: () => this.callbacks.onCall,
+      getOnPresenceUpdate: () => this.callbacks.onPresenceUpdate,
+      getOnCallOutcome: () => this.callbacks.onCallOutcome,
     });
     this.groups = new BaileysGroups({
       ensureReady: () => this.ensureReady(),
@@ -151,6 +157,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
       loadLib: () => this.loadLib(),
       putStoredMessage: msg => this.config.messageStore?.put(this.config.dbSessionId, msg),
       getStoredMessage: messageId => this.config.messageStore?.getMessage(this.config.dbSessionId, messageId),
+      // Store the device-stripped lid: that is the key the lid->phone lookup reads.
+      recordLidMapping: (lid, pn) =>
+        this.sessionStore.addLidMappings([{ lid: `${lid.split('@')[0].split(':')[0]}@lid`, pn }]),
       getOnMessageCreate: () => this.callbacks.onMessageCreate,
       mapMessage: (msg, contentType, opts) => this.events.mapMessage(msg, contentType, opts),
     });
@@ -164,6 +173,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       resolvePhone: contactId => this.sessionStore.resolvePhone(contactId),
       listChats: () => this.sessionStore.listChats(),
       lastMessage: chatId => this.sessionStore.lastMessage(chatId),
+      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
     });
     this.statusOps = new BaileysStatus({
       ensureReady: () => this.ensureReady(),
@@ -210,6 +220,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       handleGroupParticipantsUpdate: event => this.events.handleGroupParticipantsUpdate(event),
       handleGroupsUpdate: updates => this.events.handleGroupsUpdate(updates),
       handleCallEvents: calls => this.events.handleCallEvents(calls),
+      handlePresenceUpdate: update => this.events.handlePresenceUpdate(update),
       captureHistoryMessages: messages => this.history.captureHistoryMessages(messages),
       hydrateNames: () => this.history.hydrateNames(),
       getOnQRCode: () => this.callbacks.onQRCode,
@@ -218,6 +229,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getOnError: () => this.callbacks.onError,
       getOnStateChanged: () => this.callbacks.onStateChanged,
       getOnCredentialTeardownStarted: () => this.callbacks.onCredentialTeardownStarted,
+      getOnAccountRestriction: () => this.callbacks.onAccountRestriction,
     });
   }
 
@@ -274,8 +286,13 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   // ----- Messaging -----
 
-  async sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult> {
-    return this.messaging.sendTextMessage(chatId, text, mentions);
+  async sendTextMessage(
+    chatId: string,
+    text: string,
+    mentions?: string[],
+    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
+  ): Promise<MessageResult> {
+    return this.messaging.sendTextMessage(chatId, text, mentions, options);
   }
 
   async checkNumberExists(number: string): Promise<boolean> {
@@ -338,6 +355,18 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.messaging.deleteMessage(chatId, messageId, forEveryone);
   }
 
+  async starMessage(chatId: string, messageId: string, star: boolean): Promise<void> {
+    return this.messaging.starMessage(chatId, messageId, star);
+  }
+
+  async pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void> {
+    return this.messaging.pinMessage(chatId, messageId, durationSeconds);
+  }
+
+  async unpinMessage(chatId: string, messageId: string): Promise<void> {
+    return this.messaging.unpinMessage(chatId, messageId);
+  }
+
   async editMessage(chatId: string, messageId: string, body: string): Promise<MessageResult> {
     return this.messaging.editMessage(chatId, messageId, body);
   }
@@ -392,6 +421,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.groups.revokeGroupInviteCode(groupId);
   }
 
+  getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo> {
+    return this.groups.getGroupJoinInfo(inviteCode);
+  }
+
   async joinGroupViaInviteCode(inviteCode: string): Promise<string> {
     return this.groups.joinGroupViaInviteCode(inviteCode);
   }
@@ -404,6 +437,18 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.groups.setGroupInfoAdminsOnly(groupId, adminsOnly);
   }
 
+  async setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void> {
+    return this.groups.setGroupMemberAddMode(groupId, mode);
+  }
+
+  async setGroupPicture(groupId: string, media: MediaInput): Promise<void> {
+    return this.groups.setGroupPicture(groupId, media);
+  }
+
+  async deleteGroupPicture(groupId: string): Promise<void> {
+    return this.groups.deleteGroupPicture(groupId);
+  }
+
   async setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
     return this.groups.setGroupEphemeral(groupId, durationSec);
   }
@@ -414,6 +459,14 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   async blockContact(contactId: string): Promise<void> {
     return this.contacts.blockContact(contactId);
+  }
+
+  async upsertContact(contactId: string, firstName: string, lastName?: string): Promise<void> {
+    return this.contacts.upsertContact(contactId, firstName, lastName);
+  }
+
+  async deleteContact(contactId: string): Promise<void> {
+    return this.contacts.deleteContact(contactId);
   }
 
   async unblockContact(contactId: string): Promise<void> {
@@ -452,6 +505,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.contacts.getChats();
   }
 
+  async subscribeToPresence(chatId: string): Promise<void> {
+    return this.messaging.subscribeToPresence(chatId);
+  }
+
   async sendSeen(chatId: string): Promise<boolean> {
     return this.contacts.sendSeen(chatId);
   }
@@ -464,11 +521,34 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.contacts.deleteChat(chatId);
   }
 
+  async archiveChat(chatId: string, archive: boolean): Promise<boolean> {
+    return this.contacts.archiveChat(chatId, archive);
+  }
+
+  async clearChatMessages(chatId: string): Promise<boolean> {
+    return this.contacts.clearChatMessages(chatId);
+  }
+
   // ----- Gated: not supported by this minimal slice (no store) -----
   /* eslint-disable @typescript-eslint/no-unused-vars */
 
   getMessageReactions(_chatId: string, _messageId: string): Promise<MessageReaction[]> {
     return this.unsupported('getMessageReactions');
+  }
+
+  // Baileys exposes label WRITES only — chats.d.ts:69-73 has addLabel/addChatLabel/removeChatLabel
+  // and no query of any kind, and Types/Label.d.ts is types-only. Listing the chats on a label would
+  // mean maintaining an app-state cache fed by the label-association sync events, which is a
+  // separate piece of work from this one and is tracked as such.
+  getChatsByLabel(_labelId: string): Promise<ChatSummary[]> {
+    return this.unsupported('getChatsByLabel');
+  }
+
+  // No vote-send helper exists in Baileys — only decryptPollVote for RECEIVING. Sending one needs a
+  // hand-built proto.Message.PollUpdateMessage with HMAC-SHA256 vote encryption keyed by the poll
+  // creation's messageSecret.
+  votePoll(_chatId: string, _pollMessageId: string, _options: string[]): Promise<void> {
+    return this.unsupported('votePoll');
   }
   getChatHistory(
     _chatId: string,
@@ -491,14 +571,64 @@ export class BaileysAdapter implements IWhatsAppEngine {
   // WhatsApp Business only — Baileys rejects these on personal accounts. The label must already
   // exist (use getLabels on an engine that lists them); addChatLabel/removeChatLabel associate it
   // with a chat, they do not create/edit the label definition.
+  // Fold @c.us -> @s.whatsapp.net first: chatModify (which both calls wrap) keys the label
+  // app-state index by the RAW jid, so a neutral @c.us would label a phantom chat the phone never
+  // reads — reported as success. Same class of no-op the deleteForMe/star folds fixed.
   async addLabelToChat(chatId: string, labelId: string): Promise<void> {
     this.ensureReady();
-    await this.sock!.addChatLabel(chatId, labelId);
+    await this.sock!.addChatLabel(this.sessionStore.toEngineJid(chatId), labelId);
   }
   async removeLabelFromChat(chatId: string, labelId: string): Promise<void> {
     this.ensureReady();
-    await this.sock!.removeChatLabel(chatId, labelId);
+    await this.sock!.removeChatLabel(this.sessionStore.toEngineJid(chatId), labelId);
   }
+  /**
+   * Create or update a label.
+   *
+   * WhatsApp models this as ONE app-state write — a `label_edit` patch indexed by the label id — so
+   * create and update are the same operation, distinguished only by whether the id already exists.
+   * That is why the id is caller-supplied rather than returned.
+   *
+   * The `jid` Baileys asks for is unused on this patch: `chatModifyToPatch` builds the index from
+   * `['label_edit', id]` and never reads it (Utils/chat-utils.js:579-593). The account's own jid is
+   * passed because the call demands one, not because it addresses anything.
+   */
+  async upsertLabel(label: LabelInput): Promise<void> {
+    this.ensureReady();
+    // Unset fields are passed through as undefined rather than stripped: the protobuf encoder skips
+    // a field that is `!= null` false, exactly as it skips a missing one (WAProto/index.js,
+    // LabelEditAction.encode), so an omitted name really does leave the stored name alone. Colour 0
+    // is a real WhatsApp colour and survives that check — which is why it must never be tested for
+    // truthiness on the way here.
+    await this.sock!.addLabel(this.ownJidForAppState(), { id: label.id, name: label.name, color: label.color });
+  }
+
+  /** Delete a label. The same `label_edit` write, with the tombstone flag set. */
+  async deleteLabel(labelId: string): Promise<void> {
+    this.ensureReady();
+    await this.sock!.addLabel(this.ownJidForAppState(), { id: labelId, deleted: true });
+  }
+
+  /**
+   * A jid for the label-edit app-state write, which needs one but never uses it. The account's own
+   * id is the honest choice — the write is about this account, not about a conversation.
+   */
+  private ownJidForAppState(): string {
+    return this.sock?.user?.id ?? 'status@broadcast';
+  }
+
+  createChannel(name: string, description?: string): Promise<Channel> {
+    return this.channels.createChannel(name, description);
+  }
+
+  deleteChannel(channelId: string): Promise<void> {
+    return this.channels.deleteChannel(channelId);
+  }
+
+  muteChannel(channelId: string, mute: boolean): Promise<void> {
+    return this.channels.muteChannel(channelId, mute);
+  }
+
   getSubscribedChannels(): Promise<Channel[]> {
     return this.unsupported('getSubscribedChannels');
   }
@@ -535,6 +665,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
   }
   postVideoStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
     return this.statusOps.postVideoStatus(media, options);
+  }
+
+  postVoiceStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
+    return this.statusOps.postVoiceStatus(media, options);
   }
   async deleteStatus(statusId: string): Promise<void> {
     return this.statusOps.deleteStatus(statusId);

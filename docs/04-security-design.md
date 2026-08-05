@@ -74,19 +74,19 @@ fixed `dev-admin-key`; with neither set, the seed key is generated in the format
 API keys carry **no permission strings**. Authorization is a role hierarchy on the key itself, plus
 two scoping dimensions enforced by `ApiKeyGuard`.
 
-| Role | Rank | Meaning |
-|------|------|---------|
-| `admin` | 3 | Satisfies every `@RequireRole` level, including API-key management |
-| `operator` | 2 | Satisfies `operator` and `viewer` routes — the default for a new key |
-| `viewer` | 1 | Satisfies `viewer` routes only |
+| Role       | Rank | Meaning                                                              |
+| ---------- | ---- | -------------------------------------------------------------------- |
+| `admin`    | 3    | Satisfies every `@RequireRole` level, including API-key management   |
+| `operator` | 2    | Satisfies `operator` and `viewer` routes — the default for a new key |
+| `viewer`   | 1    | Satisfies `viewer` routes only                                       |
 
 A route declares its minimum level with `@RequireRole(...)`; a key passes when its role ranks at or
 above that level (`AuthService.hasPermission`). A key below it is rejected with `403 Forbidden`.
 
-| Scope | Field | Effect |
-|-------|-------|--------|
-| Source IP | `allowedIps` | Empty/absent = unrestricted; non-empty = fail-closed IP whitelist (see §4.3) |
-| Sessions | `allowedSessions` | Empty/absent = every session; non-empty = a request carrying any other session id is rejected with `401` |
+| Scope     | Field             | Effect                                                                                                   |
+| --------- | ----------------- | -------------------------------------------------------------------------------------------------------- |
+| Source IP | `allowedIps`      | Empty/absent = unrestricted; non-empty = fail-closed IP whitelist (see §4.3)                             |
+| Sessions  | `allowedSessions` | Empty/absent = every session; non-empty = a request carrying any other session id is rejected with `401` |
 
 The key-lifecycle routes (`/api/auth/api-keys`) are additionally fenced with `@RequireUnscopedKey()`:
 a session-scoped key is refused there whatever its role, so it cannot mint or widen credentials
@@ -200,13 +200,13 @@ flowchart TB
 
 ### Validation Examples
 
-| Field | Rules |
-|-------|-------|
-| `chatId` | Non-empty string — **no format pattern**; the engine resolves the id, so `@c.us`, `@g.us`, `@lid`, `@newsletter` and `status@broadcast` all pass |
-| `phoneNumber` (pairing code) | Pattern: `^[0-9]{6,15}$` — digits only, international format |
-| `url` | Valid URL (`require_tld: false`, so single-label hosts like `http://localhost:3000` pass); HTTPS is a recommendation, not enforced |
-| `text` | Max 4096 chars (`send-text`) |
-| `sessionName` | Alphanumeric + hyphen, 3-50 chars |
+| Field                        | Rules                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `chatId`                     | Non-empty string — **no format pattern**; the engine resolves the id, so `@c.us`, `@g.us`, `@lid`, `@newsletter` and `status@broadcast` all pass |
+| `phoneNumber` (pairing code) | Pattern: `^[0-9]{6,15}$` — digits only, international format                                                                                     |
+| `url`                        | Valid URL (`require_tld: false`, so single-label hosts like `http://localhost:3000` pass); HTTPS is a recommendation, not enforced               |
+| `text`                       | Max 4096 chars (`send-text`)                                                                                                                     |
+| `sessionName`                | Alphanumeric + hyphen, 3-50 chars                                                                                                                |
 
 ### DTO Validation
 
@@ -370,6 +370,7 @@ from unauthenticated WhatsApp senders — so the copy amplification is bounded a
 | Bound                         | Knob                                      | Default                            | Behavior                                                                                                                                                                             |
 | ----------------------------- | ----------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Webhooks per session          | `WEBHOOK_MAX_PER_SESSION`                 | 16 (`0` = unlimited)               | Creating a NEW webhook at/over the cap is rejected with `400`; existing webhooks are grandfathered                                                                                   |
+| Autoreply rules per session   | `AUTOMATION_MAX_PER_SESSION`              | 32 (`0` = unlimited)               | Creating a NEW rule at/over the cap is rejected with `400`; existing rules are grandfathered. Every inbound message is evaluated against every rule of its session                   |
 | Inline media in payloads      | `WEBHOOK_MEDIA_INLINE_MAX_BYTES`          | 1 MiB (`0` = never inline)         | Larger media is replaced once, before per-webhook cloning, with `media: { mimetype, filename?, omitted: true, sizeBytes }`                                                           |
 | Serialized body size          | `WEBHOOK_MAX_PAYLOAD_BYTES`               | 1 MiB                              | Over-budget bodies shed any remaining inline media (marker form) and are re-checked; still over budget → recorded as undelivered, never sent/queued                                  |
 | Failed-job retention in Redis | queue `removeOnComplete` / `removeOnFail` | 1h/1000 completed, 24h/5000 failed | Finished jobs auto-evict; payloads were already media-shed before enqueue, so retained jobs stay small. The durable record of a lost delivery is the `webhook_delivery_failures` row |
@@ -413,13 +414,13 @@ app.use(helmet({
 
 ### Security Headers Checklist
 
-| Header | Value | Purpose |
-|--------|-------|---------|
-| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains; preload` | Force HTTPS |
-| `X-Content-Type-Options` | `nosniff` | Prevent MIME sniffing |
-| `X-Frame-Options` | `SAMEORIGIN` | Prevent clickjacking (helmet's default; not overridden) |
-| `X-XSS-Protection` | `0` | Helmet 8 deliberately disables the legacy auditor — the CSP is the protection |
-| `Referrer-Policy` | `strict-origin-when-cross-origin` | Control referrer |
+| Header                      | Value                                          | Purpose                                                                       |
+| --------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains; preload` | Force HTTPS                                                                   |
+| `X-Content-Type-Options`    | `nosniff`                                      | Prevent MIME sniffing                                                         |
+| `X-Frame-Options`           | `SAMEORIGIN`                                   | Prevent clickjacking (helmet's default; not overridden)                       |
+| `X-XSS-Protection`          | `0`                                            | Helmet 8 deliberately disables the legacy auditor — the CSP is the protection |
+| `Referrer-Policy`           | `strict-origin-when-cross-origin`              | Control referrer                                                              |
 
 ## 4.10 Audit Logging
 
@@ -663,12 +664,12 @@ updates:
       - dependencies
     ignore:
       # TypeScript 7 is the native port: typescript-eslint and ts-jest cannot load it (#727/#729).
-      - dependency-name: "typescript"
-        versions: [">=7.0.0"]
+      - dependency-name: 'typescript'
+        versions: ['>=7.0.0']
       # better-sqlite3 v13: every released TypeORM caps its peer at ^12, and the linux-arm64
       # prebuild needs glibc 2.38 (the node:22-slim base has 2.36).
-      - dependency-name: "better-sqlite3"
-        versions: [">=13.0.0"]
+      - dependency-name: 'better-sqlite3'
+        versions: ['>=13.0.0']
 ```
 
 Majors are **not** ignored — they arrive as their own grouped PR, separate from the minor/patch

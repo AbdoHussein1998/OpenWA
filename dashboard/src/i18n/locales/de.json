@@ -315,7 +315,8 @@
       "phone": "Telefon",
       "sessionId": "Sitzungs-ID",
       "lastActive": "Zuletzt aktiv",
-      "error": "Fehler"
+      "error": "Fehler",
+      "restriction": "Einschränkung"
     },
     "forceKill": {
       "title": "Hängende Sitzung zwangsweise beenden",
@@ -360,6 +361,12 @@
     "start": {
       "teardownPendingTitle": "Sitzung wird gestartet",
       "teardownPending": "Ein Anmeldedatenabbau für diese Sitzung läuft noch. Warten Sie einen Moment und versuchen Sie es erneut."
+    },
+    "restriction": {
+      "reachout_timelock": "Neue Chats blockiert",
+      "tos_block": "Von WhatsApp gesperrt",
+      "proxy_block": "Verbindung gesperrt",
+      "until": "bis {{date}}"
     }
   },
   "webhooks": {

@@ -3,7 +3,7 @@ import type { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { StatusService } from './status.service';
 import { SendTextStatusDto } from './dto/send-text-status.dto';
-import { SendImageStatusDto, SendVideoStatusDto } from './dto/send-media-status.dto';
+import { SendImageStatusDto, SendVideoStatusDto, SendVoiceStatusDto } from './dto/send-media-status.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 
@@ -99,6 +99,28 @@ export class StatusController {
     return this.statusService.postVideoStatus(sessionId, dto.video, {
       recipients: dto.recipients,
       caption: dto.caption,
+    });
+  }
+
+  @Post('send-voice')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Post an audio status as a voice note' })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Voice status posted. WhatsApp plays a status voice note only as Ogg/Opus and neither engine ' +
+      'transcodes, so convert first via POST /media/convert/voice. The recipients allow-list is honored ' +
+      "on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience.",
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Neither url nor base64 provided, or the post was blocked by a plugin.',
+  })
+  @ApiResponse({ status: 413, description: 'Base64 media exceeds MEDIA_DOWNLOAD_MAX_BYTES.' })
+  async sendVoiceStatus(@Param('sessionId') sessionId: string, @Body() dto: SendVoiceStatusDto) {
+    return this.statusService.postVoiceStatus(sessionId, dto.audio, {
+      recipients: dto.recipients,
+      backgroundColor: dto.backgroundColor,
     });
   }
 

@@ -18,7 +18,10 @@ import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SessionLidResolver } from './session-lid-resolver.service';
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { SessionErrorStore } from './session-error-store.service';
+import { SessionRestrictionStore } from './session-restriction-store.service';
+import { PresenceStore, type ChatPresence } from './presence-store.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
+import { SessionOwnershipService } from './session-ownership.service';
 import { paginate, ListOptions, resolveListWindow } from '../../common/utils/paginate';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 import { resolveFeatureFlags } from '../../config/feature-flags';
@@ -70,15 +73,27 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     private readonly lidResolver: SessionLidResolver,
     private readonly watchdog: SessionLivenessWatchdog,
     private readonly sessionErrors: SessionErrorStore,
+    private readonly sessionRestrictions: SessionRestrictionStore,
+    private readonly presence: PresenceStore,
     private readonly hookManager: HookManager,
     private readonly engineLifecycle: SessionEngineLifecycle,
     @Optional()
     private readonly configService?: ConfigService,
+    // Trailing @Optional, like configService: the running app always provides it, while the
+    // direct-construction unit tests omit it — every use below is `?.`-guarded, so a session simply
+    // behaves as unowned there, which is what a single-process deployment is anyway.
+    @Optional()
+    private readonly ownership?: SessionOwnershipService,
   ) {}
 
   /**
-   * On backend startup, reset all active session statuses to disconnected
-   * because the engines are not running yet after restart
+   * On startup, mark as disconnected the sessions whose engines this process was running, since no
+   * engine survives a restart.
+   *
+   * Scoped to what this process may claim. An active status means "an engine is running somewhere",
+   * and resetting all of them assumed that somewhere was always here — true of a single process,
+   * and wrong beside a live peer, whose sessions would be reported disconnected while they are
+   * serving traffic. A row held by another node with an unexpired lease is therefore left alone.
    */
   async onModuleInit(): Promise<void> {
     const activeStatuses = [
@@ -89,8 +104,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       SessionStatus.ACTION_REQUIRED,
     ];
 
+    const claimable = this.ownership?.claimableWhere() ?? [{}];
     const result = await this.sessionRepository.update(
-      { status: In(activeStatuses) },
+      claimable.map(clause => ({ ...clause, status: In(activeStatuses) })),
       { status: SessionStatus.DISCONNECTED },
     );
 
@@ -98,6 +114,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       this.logger.log(`Reset ${result.affected} session(s) to disconnected on startup`, {
         action: 'startup_reset',
         affected: result.affected,
+        nodeId: this.ownership?.nodeId,
       });
     }
   }
@@ -108,11 +125,28 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // The watchdog owns the probe cadence and failure counting; a session it proves dead comes
     // back through the same disconnect path an engine-reported drop uses.
     this.watchdog.start((id, engine, reason) => this.engineLifecycle.handleEngineDisconnected(id, engine, reason));
+    // A session this node has lost belongs to a peer now, which is free to start its own engine.
+    // Leaving ours running would put two engines on one WhatsApp account — the thing the claim
+    // exists to prevent — so the engine goes down. stopOrphanEngines is the right verb: it tears
+    // down locally and leaves the row alone, because the row is no longer ours to write.
+    // The teardown report is not consulted here: losing a claim is not a request anyone is waiting
+    // on, and stopOrphanEngines already logs what it could not stop.
+    this.ownership?.onLeaseLoss(async ids => void (await this.engineLifecycle.stopOrphanEngines(ids)));
+    // Claims are only renewed while something still runs for them here, so a claim left behind by
+    // an untracked teardown path lapses instead of pinning the session to this node forever.
+    this.ownership?.setEngineLiveness(id => this.engineLifecycle.isEngineActive(id));
+    // Renewal runs regardless of auto-start: a session started through the API later is claimed the
+    // same way and must keep its lease alive.
+    this.ownership?.startHeartbeat();
 
     if (!resolveFeatureFlags(this.configService).autoStartSessions) return;
 
+    // Restricted to sessions this node may claim. Without it every replica scans the same rows and
+    // races to launch the same engines, which is a WhatsApp account being opened twice, not merely
+    // duplicated work.
+    const claimable = this.ownership?.claimableWhere() ?? [{}];
     const sessions = await this.sessionRepository.find({
-      where: { phone: Not(IsNull()), status: SessionStatus.DISCONNECTED },
+      where: claimable.map(clause => ({ ...clause, phone: Not(IsNull()), status: SessionStatus.DISCONNECTED })),
     });
 
     if (sessions.length === 0) return;
@@ -148,8 +182,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // Stop the watchdog FIRST (before any teardown below can hang): no new probe/disconnect handling
     // may start mid-shutdown. stop() is idempotent, so a second onModuleDestroy call stays safe.
     this.watchdog.stop();
+    this.ownership?.stopHeartbeat();
     // Reconnect timers + engine teardown belong to the lifecycle owner.
     await this.engineLifecycle.shutdown();
+    // Released only after the engines are actually down, so a peer never claims a session this
+    // process is still holding open.
+    await this.ownership?.releaseAll();
   }
 
   async create(dto: CreateSessionDto): Promise<Session> {
@@ -208,7 +246,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       options.where = { id: In(allowedSessions) };
     }
     const sessions = await this.sessionRepository.find(options);
-    return sessions.map(session => this.attachLastError(session));
+    return sessions.map(session => this.attachRuntimeState(session));
   }
 
   async findOne(id: string): Promise<Session> {
@@ -216,12 +254,16 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     if (!session) {
       throw new NotFoundException(`Session with id '${id}' not found`);
     }
-    return this.attachLastError(session);
+    return this.attachRuntimeState(session);
   }
 
-  /** See SessionErrorStore — the reason map and this projection live together. */
-  private attachLastError(session: Session): Session {
-    return this.sessionErrors.attachTo(session);
+  /**
+   * Attach the transient fields no column carries: why the session last failed, and whether
+   * WhatsApp is restricting its account. See SessionErrorStore / SessionRestrictionStore — each map
+   * and its projection live together.
+   */
+  private attachRuntimeState(session: Session): Session {
+    return this.sessionRestrictions.attachTo(this.sessionErrors.attachTo(session));
   }
 
   async findByName(name: string): Promise<Session> {
@@ -234,24 +276,101 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   /** Record removal + engine retirement + credential purge: owned by the lifecycle service. */
   async delete(id: string): Promise<void> {
-    return this.engineLifecycle.delete(id);
+    // Set the tearing-down mark SYNCHRONOUSLY, before the ownership fence's awaited query. The
+    // pre-initialize retirement race needs this mark visible to an in-flight start()'s
+    // post-INITIALIZING check by the time that write settles; awaiting anything first — the fence's
+    // COUNT, or delete()'s own requireSession — would let the mark land after that window. A mark
+    // left behind when the fence refuses (409) is harmless and is cleared by the next start().
+    this.engineLifecycle.markStopping(id);
+    if (this.ownership) await this.assertNotHeldElsewhere(id);
+    await this.engineLifecycle.delete(id);
+    await this.ownership?.release(id);
+  }
+
+  /**
+   * Refuse a lifecycle write for a session a LIVE peer is running.
+   *
+   * start() is fenced by the claim itself, and logout/force-kill require a local engine, so they
+   * cannot act on a peer's session. stop() and delete() can: neither needs an engine here, so
+   * without this a request landing on the wrong node — routine when ownership is configured but
+   * request routing is not — writes DISCONNECTED over a peer's live session, or deletes its row and
+   * credentials outright, while the peer's engine keeps running. A LAPSED claim is not fenced: the
+   * holder may be gone, and taking over is exactly what the claim rule allows.
+   */
+  private async assertNotHeldElsewhere(id: string): Promise<void> {
+    if (await this.ownership?.isHeldByOtherNode(id)) {
+      throw new ConflictException(`Session ${id} is running on another node`);
+    }
   }
 
   async start(id: string): Promise<Session> {
-    return this.engineLifecycle.start(id);
+    // Claimed before the engine is launched, never after: launching first and discovering the
+    // session belongs elsewhere would already have opened a second connection to the account.
+    if (this.ownership && !(await this.ownership.claim(id))) {
+      // The claim is a conditional UPDATE, so an id that does not exist also matches zero rows —
+      // surface the route's documented 404 for that case instead of a misleading 409.
+      await this.findOne(id);
+      throw new ConflictException(`Session ${id} is running on another node`);
+    }
+    try {
+      return await this.engineLifecycle.start(id);
+    } catch (error) {
+      // A failed or refused start must not leave the claim pinned here — the heartbeat would renew
+      // it and the session could never be started anywhere else. Released only when nothing is
+      // actually alive locally: an "already starting/started" refusal means this node genuinely
+      // runs the engine, and releasing then would invite a peer to open a second connection.
+      await this.releaseUnlessEngineActive(id);
+      throw error;
+    }
   }
 
   async stop(id: string): Promise<Session> {
-    return this.engineLifecycle.stop(id);
+    // Synchronous stop-mark before the awaited fence — see delete() for why.
+    this.engineLifecycle.markStopping(id);
+    if (this.ownership) await this.assertNotHeldElsewhere(id);
+    const session = await this.engineLifecycle.stop(id);
+    // Handed back on the way out so a peer can pick it up immediately rather than waiting for the
+    // lease to lapse. Stop is the deliberate end of this process's ownership — but a start() that
+    // began before this stop and is still mid-launch owns the claim now, so the same
+    // engine-liveness guard the failure paths use applies here: releasing under an in-flight start
+    // would leave a live engine on an unclaimed row that no heartbeat renews and any peer may
+    // start a second time.
+    await this.releaseUnlessEngineActive(id);
+    return session;
   }
 
   /** See SessionEngineLifecycle.logout() for the full unlink/502 contract. */
   async logout(id: string): Promise<Session> {
-    return this.engineLifecycle.logout(id);
+    try {
+      const session = await this.engineLifecycle.logout(id);
+      // Torn down locally on the 200 path — hand the claim back the way stop() does.
+      await this.releaseUnlessEngineActive(id);
+      return session;
+    } catch (error) {
+      // The 502-incomplete path tears the engine down too, and a "not started" refusal never had
+      // one — either way a claim that no longer covers an engine must not survive the call.
+      await this.releaseUnlessEngineActive(id);
+      throw error;
+    }
   }
 
   async forceKill(id: string): Promise<Session> {
-    return this.engineLifecycle.forceKill(id);
+    try {
+      const session = await this.engineLifecycle.forceKill(id);
+      await this.releaseUnlessEngineActive(id);
+      return session;
+    } catch (error) {
+      await this.releaseUnlessEngineActive(id);
+      throw error;
+    }
+  }
+
+  /** Hand the claim back unless something still runs here (engine, in-flight start, pending reconnect). */
+  private async releaseUnlessEngineActive(id: string): Promise<void> {
+    if (!this.ownership || this.engineLifecycle.isEngineActive(id)) {
+      return;
+    }
+    await this.ownership.release(id);
   }
 
   async getQRCode(id: string): Promise<{ qrCode: string; status: SessionStatus }> {
@@ -334,6 +453,36 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     return paginate(chats, opts.limit, opts.offset);
   }
 
+  /**
+   * Ask WhatsApp to start reporting a chat's presence. Updates arrive as `presence.update` events;
+   * there is no synchronous answer to give here, because presence cannot be queried from either
+   * library — only received.
+   *
+   * The subscription belongs to the connection, so it does not survive a restart or an automatic
+   * reconnect and has to be re-issued. That is the engine's contract, not a gateway choice, and the
+   * API documents it rather than pretending otherwise by silently replaying subscriptions.
+   */
+  async subscribeToPresence(id: string, chatId: string): Promise<void> {
+    await this.findOne(id);
+    const engine = this.engines.get(id);
+
+    if (!engine) {
+      throw new BadRequestException('Session is not started');
+    }
+
+    return engine.subscribeToPresence(chatId);
+  }
+
+  /**
+   * The last presence WhatsApp reported for a chat, or null when none has been — either because the
+   * chat was never subscribed, or because nothing has changed since the subscription was made.
+   * Deliberately not an error: "nothing reported yet" is a normal state, not a missing resource.
+   */
+  async getPresence(id: string, chatId: string): Promise<ChatPresence | null> {
+    await this.findOne(id);
+    return this.presence.get(id, chatId);
+  }
+
   async sendSeen(id: string, chatId: string): Promise<boolean> {
     await this.findOne(id); // Verify session exists
     const engine = this.engines.get(id);
@@ -354,6 +503,37 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     }
 
     return engine.markUnread(chatId);
+  }
+
+  /**
+   * Delete every message in a chat, keeping the chat itself. Resolves false when the engine could
+   * not act — an unknown chat, or on Baileys a chat with no known history to key the change to.
+   */
+  async clearChatMessages(id: string, chatId: string): Promise<boolean> {
+    await this.findOne(id); // Verify session exists
+    const engine = this.engines.get(id);
+
+    if (!engine) {
+      throw new BadRequestException('Session is not started');
+    }
+
+    return engine.clearChatMessages(chatId);
+  }
+
+  /**
+   * Archive or unarchive a chat. Resolves false when the engine could not act — on Baileys a chat
+   * with no known history has no last message to key the app-state modification to. That is a
+   * defined outcome, not an error, so it is reported as `success: false` rather than a 500.
+   */
+  async archiveChat(id: string, chatId: string, archive: boolean): Promise<boolean> {
+    await this.findOne(id); // Verify session exists
+    const engine = this.engines.get(id);
+
+    if (!engine) {
+      throw new BadRequestException('Session is not started');
+    }
+
+    return engine.archiveChat(chatId, archive);
   }
 
   async deleteChat(id: string, chatId: string): Promise<boolean> {

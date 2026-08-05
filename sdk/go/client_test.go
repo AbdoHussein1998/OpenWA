@@ -989,6 +989,11 @@ func TestWebhookEventWireValues(t *testing.T) {
 		EventSessionAuthenticated: "session.authenticated",
 		EventSessionDisconnected:  "session.disconnected",
 		EventSessionReconnectLoop: "session.reconnect_loop",
+		EventSessionRestriction:   "session.restriction",
+		EventPresenceUpdate:       "presence.update",
+		EventCallAccepted:         "call.accepted",
+		EventCallRejected:         "call.rejected",
+		EventCallMissed:           "call.missed",
 		EventGroupJoin:            "group.join",
 		EventGroupLeave:           "group.leave",
 		EventGroupUpdate:          "group.update",
@@ -1271,5 +1276,61 @@ func TestWebhookFiltersPolymorphicWireShape(t *testing.T) {
 	}
 	if _, present := first["caseSensitive"]; present {
 		t.Fatal("caseSensitive should be omitted when unset")
+	}
+}
+
+func TestMediaConversionStatus(t *testing.T) {
+	rt := &recordTransport{status: 200, body: `{"available":true}`}
+	c := newTestClient(t, rt)
+
+	res, err := c.Media.ConversionStatus(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("ConversionStatus: %v", err)
+	}
+	if !res.Available {
+		t.Fatalf("unexpected response: %+v", res)
+	}
+	if got, want := rt.lastReq.URL.Path, "/api/sessions/s1/media/convert"; got != want {
+		t.Fatalf("path = %q, want %q", got, want)
+	}
+	if rt.lastReq.Method != "GET" {
+		t.Fatalf("method = %q, want GET", rt.lastReq.Method)
+	}
+}
+
+func TestConvertVoice(t *testing.T) {
+	rt := &recordTransport{status: 200, body: `{"base64":"T2dnUw==","mimetype":"audio/ogg; codecs=opus","bytes":8}`}
+	c := newTestClient(t, rt)
+
+	res, err := c.Media.ConvertVoice(context.Background(), "s1", ConvertMediaInput{Base64: "SUQz"})
+	if err != nil {
+		t.Fatalf("ConvertVoice: %v", err)
+	}
+	if res.Mimetype != "audio/ogg; codecs=opus" || res.Bytes != 8 {
+		t.Fatalf("unexpected response: %+v", res)
+	}
+	if got, want := rt.lastReq.URL.Path, "/api/sessions/s1/media/convert/voice"; got != want {
+		t.Fatalf("path = %q, want %q", got, want)
+	}
+
+	// An unset URL must be omitted rather than sent as an empty string, which the
+	// server would read as a supplied-but-blank field.
+	if got := string(rt.lastRaw); got != `{"base64":"SUQz"}` {
+		t.Fatalf("body = %s, want {\"base64\":\"SUQz\"}", got)
+	}
+}
+
+func TestConvertVideo(t *testing.T) {
+	rt := &recordTransport{status: 200, body: `{"base64":"AAAA","mimetype":"video/mp4","bytes":4}`}
+	c := newTestClient(t, rt)
+
+	if _, err := c.Media.ConvertVideo(context.Background(), "s1", ConvertMediaInput{URL: "https://example.com/c.mov"}); err != nil {
+		t.Fatalf("ConvertVideo: %v", err)
+	}
+	if got, want := rt.lastReq.URL.Path, "/api/sessions/s1/media/convert/video"; got != want {
+		t.Fatalf("path = %q, want %q", got, want)
+	}
+	if got := string(rt.lastRaw); got != `{"url":"https://example.com/c.mov"}` {
+		t.Fatalf("body = %s, want the url only", got)
 	}
 }

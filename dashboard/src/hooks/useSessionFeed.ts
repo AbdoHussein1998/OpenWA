@@ -13,6 +13,7 @@ export interface UseSessionFeedArgs {
   sessionsRef: RefObject<Session[]>;
   onQRCode: (event: { sessionId: string; qrCode: string }) => void;
   onSessionStatus: (event: { sessionId: string; status: string }) => void;
+  onSessionRestriction?: (event: { sessionId: string }) => void;
 }
 
 /**
@@ -26,7 +27,13 @@ export interface UseSessionFeedArgs {
  * push touches `sessions`/`selectedSession` state that lives in the page body (see the `useSessionList`
  * rejection), so this hook only wires the callbacks through — it never mutates the session list itself.
  */
-export function useSessionFeed({ sessions, sessionsRef, onQRCode, onSessionStatus }: UseSessionFeedArgs): SessionFeed {
+export function useSessionFeed({
+  sessions,
+  sessionsRef,
+  onQRCode,
+  onSessionStatus,
+  onSessionRestriction,
+}: UseSessionFeedArgs): SessionFeed {
   // Live session-feed subscription state: wildcard first, per-session fallback for scoped keys.
   const feedStateRef = useRef(createSessionFeedState());
   // Most recent server error frame; folded into feedStateRef by the effect below (kept as state
@@ -36,6 +43,7 @@ export function useSessionFeed({ sessions, sessionsRef, onQRCode, onSessionStatu
   const { isConnected, subscribe } = useWebSocket({
     onQRCode,
     onSessionStatus,
+    onSessionRestriction,
     onServerError: useCallback((frame: { code: string }) => {
       setFeedErrorFrame(frame);
     }, []),

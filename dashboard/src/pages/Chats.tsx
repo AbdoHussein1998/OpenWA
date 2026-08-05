@@ -1003,7 +1003,7 @@ export function Chats() {
                         <StatusMedia
                           sessionId={selectedSessionId || null}
                           statusId={item.id}
-                          type={item.type === 'video' ? 'video' : 'image'}
+                          type={item.type === 'video' ? 'video' : item.type === 'voice' ? 'audio' : 'image'}
                         />
                       )}
                       {item.caption && <MessageBody text={item.caption} className="message-text" />}

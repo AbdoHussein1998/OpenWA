@@ -30,8 +30,9 @@ BulkMessageType = Literal["text", "image", "video", "audio", "document"]
 WebhookEvent = Literal[
     "message.received", "message.sent", "message.ack", "message.failed", "message.revoked",
     "message.reaction", "message.edited", "session.status", "session.qr", "session.authenticated",
-    "session.disconnected", "session.reconnect_loop",
+    "session.disconnected", "session.reconnect_loop", "session.restriction", "presence.update",
     "group.join", "group.leave", "group.update", "call.received", "status.received",
+    "call.accepted", "call.rejected", "call.missed",
     "*",
 ]
 
@@ -41,7 +42,92 @@ class SuccessResult(TypedDict, total=False):
     message: str
 
 
+class ParticipantPresence(TypedDict, total=False):
+    """One participant's presence within a chat."""
+
+    id: str
+    # 'composing'/'recording' mean actively typing or recording; 'paused' means they stopped.
+    state: Literal["available", "unavailable", "composing", "recording", "paused"]
+    # Unix SECONDS. Absent whenever the contact's privacy settings hide last-seen -- the common case.
+    lastSeen: int
+
+
+class ChatPresence(TypedDict, total=False):
+    """The last presence reported for a chat since it was subscribed."""
+
+    chatId: str
+    participants: list[ParticipantPresence]
+    # Online member count, groups only.
+    groupOnlineCount: int
+    # When the gateway received the report -- NOT a WhatsApp timestamp.
+    observedAt: str
+
+
+class UpsertLabelRequest(TypedDict, total=False):
+    """A label create-or-update body. The id travels in the path -- WhatsApp keys the write on it."""
+
+    # Leave out to keep the current name.
+    name: str
+    # WhatsApp's colour INDEX (0-19), NOT a hex value -- it does not round-trip with the hexColor
+    # labels are read back with, because neither engine exposes the mapping.
+    color: int
+
+
+class CreateChannelRequest(TypedDict, total=False):
+    """Body for creating a channel."""
+
+    name: str
+    description: str
+
+
+class MuteChannelRequest(TypedDict):
+    """Body for muting or unmuting a channel."""
+
+    # True mutes, False unmutes. The subscription is unaffected either way.
+    mute: bool
+
+
+class GroupJoinInfo(TypedDict, total=False):
+    """What an invite code discloses about a group before joining.
+
+    Not GroupInfo: a non-member has no participant list, only a count, and only when WhatsApp
+    discloses one.
+    """
+
+    id: str
+    name: str
+    description: str
+    owner: str
+    # Unix seconds.
+    createdAt: int
+    participantCount: int
+
+
+class CustomLinkPreview(TypedDict, total=False):
+    """A caller-supplied link preview. Nothing is fetched for these."""
+
+    url: str
+    # Required -- WhatsApp will not render a preview without a title.
+    title: str
+    description: str
+
+
 # ── Session ───────────────────────────────────────────────────────
+
+
+class AccountRestriction(TypedDict, total=False):
+    """A restriction WhatsApp has in force on a session's account.
+
+    'reachout_timelock' leaves the session connected and existing chats working -- only starting new
+    conversations is blocked -- whereas 'tos_block' and 'proxy_block' refuse the connection itself
+    and therefore cannot coexist with a 'ready' status.
+    """
+
+    kind: Literal["reachout_timelock", "tos_block", "proxy_block"]
+    # The engine's own token for the cause, verbatim (TOS_BLOCK, BIZ_QUALITY, ...).
+    code: str
+    # ISO timestamp when enforcement ends, when WhatsApp states one.
+    expiresAt: str | None
 
 
 class SessionResponse(TypedDict, total=False):
@@ -55,6 +141,9 @@ class SessionResponse(TypedDict, total=False):
     createdAt: str
     updatedAt: str
     lastError: str | None
+    # A limit WhatsApp itself has placed on the account, or None when there is none. Distinct from
+    # lastError, which describes a fault on the gateway's side.
+    restriction: AccountRestriction | None
     # Whether the gateway holds a live engine for this session -- the precondition stop/logout/
     # force-kill require and start refuses. Not derivable from status: 'disconnected' covers both a
     # session mid automatic-reconnect (engine present) and one stopped with no engine. Absent from a
@@ -112,6 +201,14 @@ class SendTextRequest(TypedDict, total=False):
     text: str
     # WIDs to @mention (e.g. ["62811@c.us"]). The text must also contain the @<number> token.
     mentions: list[str]
+    # Controls the URL preview. False suppresses it on both engines. Otherwise the engines differ:
+    # whatsapp-web.js builds one in-page by default, while on Baileys a preview is OPT-IN -- it needs
+    # True, because generating one is a blocking outbound fetch per URL.
+    linkPreview: bool
+    # Attach a preview you supply yourself instead of one fetched from the URL. Nothing is fetched,
+    # so this works even for a URL the gateway cannot reach. Baileys only -- whatsapp-web.js takes a
+    # boolean and answers 501. Cannot be combined with linkPreview=False.
+    customLinkPreview: CustomLinkPreview
 
 
 class SendMediaRequest(TypedDict, total=False):
@@ -480,10 +577,15 @@ class JoinGroupResponse(TypedDict, total=False):
 # (callers pass plain dicts); the backend validates (empty body -> 400).
 # `ephemeralSeconds` is the disappearing-messages timer (0 disables); the
 # whatsapp-web.js engine does not support it (request -> 501).
+GroupMemberAddMode = Literal["all", "admins"]
+
+
 class GroupSettings(TypedDict, total=False):
     announce: bool
     locked: bool
     ephemeralSeconds: int
+    # Who may add participants: "all" (any member) or "admins" (admins only).
+    memberAddMode: GroupMemberAddMode
 
 
 # ── Profile (own account) ─────────────────────────────────────────
@@ -612,7 +714,7 @@ class StatusRecord(TypedDict, total=False):
     expiresAt: str
 
 
-# Result of a status POST (``send-text``/``send-image``/``send-video``). Mirrors the backend
+# Result of a status POST (``send-text``/``send-image``/``send-video``/``send-voice``). Mirrors the backend
 # ``StatusResult``, which is deliberately NOT ``Status``: the acknowledgement carries the id and
 # timing only, with no contact or media. ``statusId`` is the handle ``delete()`` takes.
 class StatusResult(TypedDict, total=False):
@@ -625,6 +727,64 @@ class StatusResult(TypedDict, total=False):
 
 class StatusMedia(TypedDict):
     """A stored status media file: raw bytes plus the served content type."""
+
+    data: bytes
+    contentType: str | None
+
+
+class PinMessageRequest(TypedDict, total=False):
+    """Pin a message. ``durationSeconds`` is 86400 (24h), 604800 (7d) or 2592000 (30d)."""
+
+    chatId: str
+    messageId: str
+    durationSeconds: int
+
+
+class SetGroupPictureRequest(TypedDict, total=False):
+    """Group picture: provide url OR base64 (base64 wins); mimetype required with base64."""
+
+    url: str
+    base64: str
+    mimetype: str
+
+
+class UpsertContactRequest(TypedDict, total=False):
+    """Save or edit an addressbook contact. lastName is optional."""
+
+    firstName: str
+    lastName: str
+
+
+class ArchiveChatRequest(TypedDict):
+    """Archive or unarchive a chat."""
+
+    chatId: str
+    archive: bool
+
+
+class VotePollRequest(TypedDict):
+    """Vote on a poll. options are option TEXTS (no ids); [] clears the vote."""
+
+    chatId: str
+    pollMessageId: str
+    options: list[str]
+
+
+class StarMessageRequest(TypedDict):
+    """Star or unstar a message. Best-effort on whatsapp-web.js."""
+
+    chatId: str
+    messageId: str
+    star: bool
+
+
+class UnpinMessageRequest(TypedDict):
+    chatId: str
+    messageId: str
+
+
+class MessageMedia(TypedDict):
+    """A message's archived media file: raw bytes plus the served content type."""
 
     data: bytes
     contentType: str | None
@@ -663,6 +823,21 @@ class SendVideoStatusRequest(TypedDict, total=False):
     # Recipient JIDs. Required on the Baileys engine (absent/empty -> 400); omit on whatsapp-web.js.
     recipients: list[str]
     caption: str
+
+
+class SendVoiceStatusRequest(TypedDict, total=False):
+    """Post an audio status as a voice note.
+
+    No caption: WhatsApp has nowhere to render one on a status voice note. ``audio.mimetype``
+    defaults to ``audio/ogg; codecs=opus``, the only format WhatsApp plays as one — neither engine
+    transcodes, so produce those bytes with ``media.convert_voice``.
+    """
+
+    audio: StatusMediaInput
+    #: Required on the Baileys engine (absent/empty -> 400); omit on whatsapp-web.js.
+    recipients: list[str]
+    #: Background colour as "#RRGGBB", behind the voice-note bubble. Baileys only; wwjs ignores it.
+    backgroundColor: str
 
 
 # ── Health ────────────────────────────────────────────────────────
@@ -893,3 +1068,20 @@ class SearchResults(TypedDict):
     total: int
     tookMs: int
     provider: str
+
+
+class ConvertedMedia(TypedDict, total=False):
+    """Converted media, shaped for handing straight to a send call."""
+
+    #: The converted bytes, ready to use as a send call's ``base64``.
+    base64: str
+    #: What the bytes now are — not what they were.
+    mimetype: str
+    #: Decoded size, so a size check needs no decoding.
+    bytes: int
+
+
+class MediaConversionAvailability(TypedDict, total=False):
+    """Whether server-side conversion can be used on this deployment."""
+
+    available: bool

@@ -395,6 +395,33 @@ class TestProfile:
         assert backend.calls[-1].body == {"base64": "aGVsbG8=", "mimetype": "image/jpeg"}
 
 
+class TestMedia:
+    def test_conversion_status(self):
+        backend = MockBackend().on("GET", "/media/convert", body={"available": True})
+        res = make_client(backend).media.conversion_status("s")
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/media/convert"
+        assert res["available"] is True
+
+    def test_convert_voice(self):
+        backend = MockBackend().on(
+            "POST", "/media/convert/voice", body={"base64": "T2dnUw==", "mimetype": "audio/ogg; codecs=opus", "bytes": 8}
+        )
+        res = make_client(backend).media.convert_voice("s", base64="SUQz")
+        assert backend.last_call.method == "POST"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/media/convert/voice"
+        # Only the field that was given: a blank one reads as supplied-but-empty.
+        assert backend.last_call.body == {"base64": "SUQz"}
+        assert res["mimetype"] == "audio/ogg; codecs=opus"
+
+    def test_convert_video_with_url(self):
+        backend = MockBackend().on(
+            "POST", "/media/convert/video", body={"base64": "AAAA", "mimetype": "video/mp4", "bytes": 4}
+        )
+        make_client(backend).media.convert_video("s", url="https://example.com/c.mov")
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/media/convert/video"
+        assert backend.last_call.body == {"url": "https://example.com/c.mov"}
+
+
 class TestCalls:
     def test_reject_call(self):
         backend = MockBackend().on("POST", "/reject", body={"success": True})
@@ -489,6 +516,7 @@ class TestStatus:
         backend = MockBackend()
         backend.on("POST", "/status/send-image", body={"statusId": "s1"})
         backend.on("POST", "/status/send-video", body={"statusId": "s2"})
+        backend.on("POST", "/status/send-voice", body={"statusId": "s3"})
         client = make_client(backend)
         # Server requires a nested {image|video:{...}} body, not flat media fields,
         # plus a required recipients list.
@@ -496,6 +524,41 @@ class TestStatus:
         assert backend.calls[-1].body == {"image": {"url": "http://img"}, "recipients": ["a@c.us"], "caption": "hi"}
         client.status.send_video("s", {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]})
         assert backend.calls[-1].body == {"video": {"url": "http://vid"}, "recipients": ["a@c.us"]}
+        # A voice status takes an `audio` wrapper and carries no caption — WhatsApp has nowhere to
+        # render one on a status voice note.
+        client.status.send_voice("s", {"audio": {"base64": "T2dnUw=="}, "recipients": ["a@c.us"]})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/status/send-voice"
+        assert backend.calls[-1].body == {"audio": {"base64": "T2dnUw=="}, "recipients": ["a@c.us"]}
+
+    def test_vote_poll_posts_option_texts(self):
+        backend = MockBackend().on("POST", "/messages/vote-poll", body={"success": True})
+        make_client(backend).messages.vote_poll("s", {"chatId": "c1", "pollMessageId": "p1", "options": ["Pizza"]})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/vote-poll"
+        assert backend.last_call.body == {"chatId": "c1", "pollMessageId": "p1", "options": ["Pizza"]}
+
+    def test_star_posts_the_boolean_through(self):
+        backend = MockBackend().on("POST", "/messages/star", body={"success": True})
+        make_client(backend).messages.star("s", {"chatId": "c1", "messageId": "m1", "star": False})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/star"
+        assert backend.last_call.body == {"chatId": "c1", "messageId": "m1", "star": False}
+
+    def test_pin_and_unpin_post_to_their_routes(self):
+        backend = MockBackend().on("POST", "/messages/pin", body={"success": True})
+        backend.on("POST", "/messages/unpin", body={"success": True})
+        client = make_client(backend)
+        client.messages.pin("s", {"chatId": "c1", "messageId": "m1", "durationSeconds": 604800})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/pin"
+        assert backend.last_call.method == "POST"
+        client.messages.unpin("s", {"chatId": "c1", "messageId": "m1"})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/unpin"
+
+    def test_message_media_fetches_archived_bytes(self):
+        backend = MockBackend()
+        backend.fallback = lambda _: httpx.Response(200, content=b"PNG_BYTES", headers={"content-type": "image/png"})
+        res = make_client(backend).messages.media("s", "c1", "m1")
+        assert backend.last_call.method == "GET"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/messages/c1/m1/media"
+        assert res == {"data": b"PNG_BYTES", "contentType": "image/png"}
 
     def test_media_fetches_stored_status_bytes(self):
         backend = MockBackend()
@@ -530,6 +593,40 @@ class TestChatsAndHealth:
         client.chats.delete("s", {"chatId": "a@c.us"})
         client.chats.send_state("s", {"chatId": "a@c.us", "state": "typing"})
         assert "/chats/typing" in backend.calls[-1].url
+
+    def test_chats_clear_messages(self):
+        backend = MockBackend().on("DELETE", "/messages", body={"success": True})
+        make_client(backend).chats.clear_messages("s", "a@c.us")
+        assert backend.last_call.method == "DELETE"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/chats/a@c.us/messages"
+
+    def test_groups_picture(self):
+        backend = MockBackend().on("GET", "/picture", body={"url": "https://x/p.jpg"})
+        backend.on("PUT", "/picture", body={"success": True})
+        backend.on("DELETE", "/picture", body={"success": True})
+        client = make_client(backend)
+        assert client.groups.get_picture("s", "g@g.us") == {"url": "https://x/p.jpg"}
+        client.groups.set_picture("s", "g@g.us", {"url": "https://x/new.jpg"})
+        assert backend.last_call.method == "PUT"
+        client.groups.delete_picture("s", "g@g.us")
+        assert backend.last_call.method == "DELETE"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/groups/g@g.us/picture"
+
+    def test_contacts_addressbook(self):
+        backend = MockBackend().on("PUT", "/contacts/", body={"success": True})
+        backend.on("DELETE", "/contacts/", body={"success": True})
+        client = make_client(backend)
+        client.contacts.upsert("s", "a@c.us", {"firstName": "Ada"})
+        assert backend.last_call.method == "PUT"
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/contacts/a@c.us"
+        client.contacts.delete("s", "a@c.us")
+        assert backend.last_call.method == "DELETE"
+
+    def test_chats_archive(self):
+        backend = MockBackend().on("POST", "/chats/archive", body={"success": True})
+        make_client(backend).chats.archive("s", {"chatId": "a@c.us", "archive": True})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/chats/archive"
+        assert backend.last_call.body == {"chatId": "a@c.us", "archive": True}
 
     def test_health_and_auth(self):
         backend = MockBackend()

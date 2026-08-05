@@ -22,7 +22,7 @@ The `rootCause`/`evidence` fields are hand-curated from source traces of the ins
 
 ## Unwired-capability inventory
 
-16 of the 80 interface methods are `not-available` on at least one adapter (21 not-available adapter-cells total). Grouped by cluster below. Each entry shows: status today → rootCause → evidence → wiring note.
+21 of the 100 interface methods are `not-available` on at least one adapter (22 not-available adapter-cells total). Grouped by cluster below. Each entry shows: status today → rootCause → evidence → wiring note.
 
 ### Channels / Newsletter
 
@@ -144,7 +144,9 @@ _✅ #17 `getProduct` — wired on Baileys (#905); see §Catalog / Products / Or
 
 These are honestly out of reach of a clean adapter wiring because the installed library exposes no first-class symbol. Listed so operators can plan around them rather than file unactionable bugs.
 
-**baileys (9 cells):**
+**baileys (11 cells):**
+
+- `getChatsByLabel` — label WRITES only (`Socket/chats.d.ts:69-73`: `addLabel`, `addChatLabel`, `removeChatLabel`); there is no label query of any kind and `Types/Label.d.ts` is types-only. Listing a label's chats needs an app-state cache fed by the label-association sync events, which is its own piece of work. whatsapp-web.js: `Client.getChatsByLabelId`.
 
 - `getSubscribedChannels` — no enumerate-newsletters query; all 19 newsletter members of `Socket/newsletter.d.ts` address a single newsletter (by jid, by invite key, or by creating one). Needs a raw WMex/app-state hack.
 - `getLabels` / `getLabelById` / `getChatLabels` — no label read symbol; only writes (`Types/Label.d.ts` is types-only). Workaround: capture labels from the `messaging-history.set` app-state event into an in-memory cache (relay hack, no on-demand refresh).
@@ -152,9 +154,13 @@ These are honestly out of reach of a clean adapter wiring because the installed 
 - `getMessageReactions` — no on-demand fetch; reactions only arrive via the `messages.reaction` event. Partial local path: persist each event into the `messageStore`, then read (no historical backfill).
 - `getContactStatus` / `getContactStatuses` — `fetchStatus` returns the _about_ text, not 24h stories; stories only surface as `status@broadcast` messages. The engine-level Baileys adapter methods remain unimplemented (`501`); however, the REST API reads are served from the `StatusStoreService` accumulator (see §Status — read above), so API-level parity is shipped.
 - `sendCatalog` — no catalog-share message type in `AnyMessageContent` (only single `{product}`).
+- `votePoll` — no vote-SEND helper at all; the library only decrypts INCOMING votes (`decryptPollVote`). Sending one means hand-building a `proto.Message.PollUpdateMessage` with HMAC-SHA256 vote encryption keyed by the poll creation's `messageSecret`. Supported on whatsapp-web.js.
 
-**wwjs (6 cells):**
+**wwjs (9 cells):**
 
+- `upsertLabel` / `deleteLabel` — whatsapp-web.js 1.34.7 can READ labels and assign them, but cannot edit one: `index.d.ts:129-154` exposes `getLabels`, `getLabelById`, `getChatLabels`, `getChatsByLabelId` and `addOrRemoveLabels`, and nothing that creates, renames, recolours or deletes a label. Baileys: one `addLabel` write covering all four.
+
+- `subscribeToPresence` — no way to observe another party's presence. `WAWebPresenceChatAction` offers only `sendPresenceAvailable` / `sendPresenceUnavailable` (`index.d.ts:230,233`), which publish the ACCOUNT's own presence, and the library emits no presence event at all. Baileys: `presenceSubscribe` + the `presence.update` event. Reaching it would mean injecting page-level subscriptions against undocumented WA Web modules.
 - `getCatalog` / `getProducts` / `getProduct` — no catalog API at all (`index.d.ts` 0 hits; `Product` is inbound-only).
 - `sendProduct` — no outbound product content type.
 - `sendCatalog` — no outbound catalog content type.
@@ -164,7 +170,23 @@ These are honestly out of reach of a clean adapter wiring because the installed 
 
 ## Snapshot summary
 
-- **80** interface methods, **160** adapter-cells (80 × 2 engines).
-- **139** supported cells; **21** not-available cells across **16** methods.
-- Of the 21 not-available cells: **6 adapter-gaps** (fixable) + **15 library-limitations** + **0 uncertain**.
-- **0 phantom-support rows** — every `not-available` row now throws at the adapter boundary, so the drift gate's throw-heuristic covers the full matrix.
+These are hand-maintained and had drifted from the source before this pass; they are now recomputed
+from `engine-capability-matrix.ts` rather than adjusted by hand. Re-derive them the same way when
+adding a method, instead of incrementing the previous figure.
+
+- **100** interface methods, **200** adapter-cells (100 × 2 engines).
+- **178** supported cells; **22** not-available cells across **21** methods.
+- Of the 22 not-available cells: **2 adapter-gaps** (fixable) + **20 library-limitations** + **0 uncertain**.
+- **0 phantom-support rows** — every `not-available` row throws at the adapter boundary.
+
+  Note that the drift gate does **not** verify that for whatsapp-web.js. `engine-parity.spec.ts`
+  detects a throw with `Class.prototype.method.toString()`, and the wwjs adapter's methods are thin
+  forwarders whose throws live in delegate modules (`wwebjs-catalog.ts` and friends), so the scan
+  sees no throwing method on that adapter at all — its `supported ⇒ does not throw` invariant is
+  vacuously true for those. Baileys is unaffected: its unavailable methods call `this.unsupported(...)`
+  inline on the adapter. Until the delegated ones are addressed, most of the wwjs column is guarded by
+  review rather than by the gate.
+
+  New wwjs `not-available` methods should therefore throw **inline on the adapter class**, the way
+  `subscribeToPresence` does, so the scan can see them — a delegate keeps the code tidy at the cost of
+  the only automated check this column has.

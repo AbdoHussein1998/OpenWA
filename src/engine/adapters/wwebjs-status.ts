@@ -113,7 +113,16 @@ export class WwebjsStatus {
           // listed status unactionable (#747). The contact id above is a Wid and is unaffected.
           id: ((msg.id as unknown as SerializedWid)?._serialized ?? (msg.id as unknown as SerializedWid)?.$1) || '',
           contact: contactSummary,
-          type: msg.type === MessageTypes.IMAGE ? 'image' : msg.type === MessageTypes.VIDEO ? 'video' : 'text',
+          type:
+            msg.type === MessageTypes.IMAGE
+              ? 'image'
+              : msg.type === MessageTypes.VIDEO
+                ? 'video'
+                : // MessageTypes.VOICE is wwjs' name for 'ptt'. Without this a posted voice status
+                  // reads back as a text status, which is what everything non-image/video collapsed to.
+                  msg.type === MessageTypes.VOICE
+                  ? 'voice'
+                  : 'text',
           ...(msg.body ? { caption: msg.body } : {}),
           ...(media ? { media } : {}),
           timestamp: ts,
@@ -149,12 +158,24 @@ export class WwebjsStatus {
     return this.postMediaStatus(media, options);
   }
 
-  private async postMediaStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
+  async postVoiceStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
+    // `sendAudioAsVoice` is what makes the bubble a voice note rather than an audio file: it becomes
+    // `isPtt` inside the page. The waveform is separate — whatsapp-web.js already generates one for
+    // any audio going to status, so it appears either way, but only this flag changes the bubble.
+    return this.postMediaStatus(media, options, { sendAudioAsVoice: true });
+  }
+
+  private async postMediaStatus(
+    media: MediaInput,
+    options: StatusPostOptions,
+    extra?: { sendAudioAsVoice: true },
+  ): Promise<StatusResult> {
     this.host.ensureReady();
     this.warnStatusRecipientsOnce(options);
     const messageMedia = await toMessageMedia(media);
     const msg = await this.client().sendMessage('status@broadcast', messageMedia, {
       ...(options.caption !== undefined ? { caption: options.caption } : {}),
+      ...extra,
     });
     return toStatusResult(msg);
   }

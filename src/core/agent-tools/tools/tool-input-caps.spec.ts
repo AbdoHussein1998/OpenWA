@@ -22,7 +22,7 @@ import {
   GroupSubjectDto,
   ParticipantsDto,
 } from '../../../modules/group/dto/group.dto';
-import type { ToolDescriptor } from '../tool-descriptor';
+import type { AnyToolDescriptor } from '../tool-descriptor';
 import { messageTools } from './message.tools';
 import { groupTools } from './group.tools';
 
@@ -33,7 +33,7 @@ const PIPE_TRANSFORM_OPTS = { enableImplicitConversion: true };
 const messages = messageTools({} as unknown as MessageService);
 const groups = groupTools({} as unknown as GroupService);
 
-function tool(name: string): ToolDescriptor {
+function tool(name: string): AnyToolDescriptor {
   const found = [...messages, ...groups].find(t => t.name === name);
   if (!found) throw new Error(`tool not registered: ${name}`);
   return found;

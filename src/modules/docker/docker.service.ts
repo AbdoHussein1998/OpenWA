@@ -240,7 +240,9 @@ export class DockerService implements OnModuleInit {
         image: 'redis:7-alpine',
         name: 'openwa-redis',
         alias: 'redis', // DNS alias for resolution
-        cmd: ['redis-server', '--appendonly', 'yes'],
+        // noeviction mirrors docker-compose.yml: BullMQ requires it, or Redis may evict queue keys
+        // once maxmemory is reached and silently drop queued jobs.
+        cmd: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction'],
         volumes: [{ name: 'openwa_redis-data', path: '/data' }],
         healthcheck: {
           test: ['CMD', 'redis-cli', 'ping'],
@@ -403,7 +405,9 @@ export class DockerService implements OnModuleInit {
       this.logger.log(`Created and started container: ${spec.name}`);
       return true;
     } catch (error) {
-      this.logger.error(`Failed to create service ${profile}: ${error instanceof Error ? error.message : error}`);
+      this.logger.error(
+        `Failed to create service ${profile}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return false;
     }
   }
