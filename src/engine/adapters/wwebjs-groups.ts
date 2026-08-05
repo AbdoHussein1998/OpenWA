@@ -8,7 +8,7 @@ import {
   GroupParticipant,
   ParticipantOperationResult,
 } from '../interfaces/whatsapp-engine.interface';
-import { GroupChat, GroupMetadataRaw, GroupCreateResult, SerializedWid } from '../types/whatsapp-web-js.types';
+import { GroupChat, GroupMetadataRaw, GroupCreateResult, SerializedWid, readWid } from '../types/whatsapp-web-js.types';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
@@ -30,11 +30,7 @@ export function extractLinkedParentJID(groupMetadata?: GroupMetadataRaw): string
     return null;
   }
 
-  if (typeof candidate === 'string') {
-    return candidate;
-  }
-
-  return candidate._serialized ?? null;
+  return readWid(candidate) ?? null;
 }
 
 /**
@@ -89,7 +85,9 @@ export class WwebjsGroups {
           id: g.id._serialized,
           name: g.name,
           participantsCount: groupChat.participants?.length,
-          isAdmin: groupChat.participants?.some(p => p.isAdmin && p.id._serialized === client.info?.wid?._serialized),
+          isAdmin: groupChat.participants?.some(
+            p => p.isAdmin && readWid(p.id) !== undefined && readWid(p.id) === readWid(client.info?.wid),
+          ),
           linkedParentJID: extractLinkedParentJID(groupChat.groupMetadata),
         };
       });
@@ -107,19 +105,23 @@ export class WwebjsGroups {
         return null;
       }
       const groupChat = chat as unknown as GroupChat;
-      const participants: GroupParticipant[] = (groupChat.participants || []).map(p => ({
-        id: String(p.id._serialized),
-        number: String(p.id.user),
-        name: p.name ? String(p.name) : undefined,
-        isAdmin: Boolean(p.isAdmin),
-        isSuperAdmin: Boolean(p.isSuperAdmin),
-      }));
+      // Raw page-context Wids: read both property names, and DROP a participant whose id is
+      // unreadable rather than emitting the literal string "undefined" as an addressable id.
+      const participants: GroupParticipant[] = (groupChat.participants || [])
+        .filter(p => readWid(p.id) !== undefined)
+        .map(p => ({
+          id: readWid(p.id)!,
+          number: String(p.id.user),
+          name: p.name ? String(p.name) : undefined,
+          isAdmin: Boolean(p.isAdmin),
+          isSuperAdmin: Boolean(p.isSuperAdmin),
+        }));
 
       return {
         id: chat.id._serialized,
         name: chat.name,
         description: groupChat.description ? String(groupChat.description) : undefined,
-        owner: groupChat.owner?._serialized ? String(groupChat.owner._serialized) : undefined,
+        owner: readWid(groupChat.owner),
         createdAt: groupChat.createdAt,
         participants,
         isReadOnly: Boolean(groupChat.isReadOnly),
@@ -157,7 +159,7 @@ export class WwebjsGroups {
       throw new Error(result);
     }
     const gid = (result as unknown as GroupCreateResult).gid as SerializedWid | undefined;
-    const groupId = gid?._serialized ?? gid?.$1;
+    const groupId = readWid(gid);
     // A group id is not ack-safe the way a message id is: there is no empty-sentinel equivalent, and any
     // placeholder would be handed back as a real, addressable group. Fail instead of inventing one.
     if (!groupId) {
@@ -356,6 +358,12 @@ export class WwebjsGroups {
     try {
       raw = await this.client().getInviteInfo(inviteCode);
     } catch (error) {
+      // A dead page and a refused invite both land here; only the second is a 404. Folding a
+      // transport death into "no such invite" sends operators debugging the wrong layer.
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'getGroupJoinInfo');
+        throw new EngineTransportError(`Transport died while previewing invite ${inviteCode}`);
+      }
       this.host.logger.debug('getInviteInfo rejected; treating the invite as not found', {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -364,11 +372,11 @@ export class WwebjsGroups {
 
     // Raw page-context Wids: read `$1` before concluding absence (#747, the WA Web minifier
     // rename) — without the fallback a renamed build turns every VALID invite into a false 404.
-    const id = typeof raw?.id === 'string' ? raw.id : (raw?.id?._serialized ?? raw?.id?.$1);
+    const id = readWid(raw?.id);
     if (!id) {
       throw new GroupNotFoundError(inviteCode);
     }
-    const owner = typeof raw?.owner === 'string' ? raw.owner : (raw?.owner?._serialized ?? raw?.owner?.$1);
+    const owner = readWid(raw?.owner);
     // `size` is the disclosed count; a participants array is used only as a fallback for builds that
     // send one instead. Neither is synthesised when both are missing.
     const count = typeof raw?.size === 'number' ? raw.size : raw?.participants?.length;

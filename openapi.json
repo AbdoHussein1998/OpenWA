@@ -2472,7 +2472,7 @@
             "description": "The archived media bytes, served as an attachment."
           },
           "404": {
-            "description": "Nothing archived for this message — archiving was off when it arrived, the message carries no media, the media was above the archive cap, or retention has since cleared it."
+            "description": "Nothing archived for this message — archiving was off when it arrived, the message carries no media, the media was above the archive cap, retention has since cleared it, or the message was sent BY this account (only inbound media is archived)."
           }
         },
         "summary": "Download a message’s archived media",
@@ -4227,6 +4227,9 @@
         "responses": {
           "200": {
             "description": "Subject updated"
+          },
+          "403": {
+            "description": "The engine refused the change — admin rights are required"
           }
         },
         "summary": "Change group name/subject",
@@ -4271,6 +4274,9 @@
         "responses": {
           "200": {
             "description": "Description updated"
+          },
+          "403": {
+            "description": "The engine refused the change — admin rights are required"
           }
         },
         "summary": "Change group description",
@@ -5709,7 +5715,7 @@
             "description": "The supplied media is above the media size cap."
           },
           "503": {
-            "description": "Conversion is disabled, or the ffmpeg binary is not runnable."
+            "description": "Conversion is disabled, the ffmpeg binary is not runnable, or the conversion queue is saturated — retry shortly."
           }
         },
         "summary": "Convert audio into a WhatsApp voice note (Ogg/Opus)",
@@ -5743,7 +5749,7 @@
             "description": "The supplied media is above the media size cap."
           },
           "503": {
-            "description": "Conversion is disabled, or the ffmpeg binary is not runnable."
+            "description": "Conversion is disabled, the ffmpeg binary is not runnable, or the conversion queue is saturated — retry shortly."
           }
         },
         "summary": "Convert video into a WhatsApp-compatible MP4",
@@ -8245,7 +8251,7 @@
           },
           "linkPreview": {
             "type": "boolean",
-            "description": "Set `false` to suppress the URL preview. Guaranteed only in that direction: leaving it unset means whatever the engine does by default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a preview, while Baileys builds none unless its optional preview generator is installed. Sending `true` therefore does not force a preview on Baileys.",
+            "description": "Controls the URL preview, and the engines differ. On whatsapp-web.js WhatsApp Web builds one by default and `false` suppresses it. On Baileys previews are OPT-IN: `true` asks the gateway to fetch the page and attach one, while unset or `false` sends none — generating a preview is a blocking outbound fetch per URL in the text, so it is never done unless asked for.",
             "example": false
           },
           "customLinkPreview": {
@@ -9506,6 +9512,11 @@
                 "$ref": "#/components/schemas/StatusMediaInput"
               }
             ]
+          },
+          "backgroundColor": {
+            "type": "string",
+            "description": "Background colour as `#RRGGBB`, which WhatsApp renders behind the voice-note bubble. Baileys only — whatsapp-web.js exposes no styling for a status and ignores it.",
+            "example": "#25D366"
           },
           "recipients": {
             "description": "Recipient JIDs (0–256), @c.us or @lid. Required on the Baileys engine (it posts to exactly this allow-list); ignored by whatsapp-web.js, which broadcasts to the account's status-privacy audience — omit it there.",

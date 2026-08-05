@@ -4,6 +4,7 @@ import { GroupChat, BusinessClient } from '../types/whatsapp-web-js.types';
 import { isChannelJid, chatKind } from '../identity/wa-id';
 import { ChatLabelsUnsupportedError } from '../../common/errors/chat-labels-unsupported.error';
 import { LabelNotFoundError } from '../../common/errors/label-not-found.error';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -48,6 +49,11 @@ export class WwebjsLabels {
     try {
       chats = await (this.client() as unknown as BusinessClient).getChatsByLabelId(labelId);
     } catch (error) {
+      // Same split the group read makes: a dead page is a 503, not "no such label".
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'getChatsByLabel');
+        throw new EngineTransportError(`Transport died while listing chats for label ${labelId}`);
+      }
       this.host.logger.debug('getChatsByLabelId rejected; treating the label as not found', {
         labelId,
         error: error instanceof Error ? error.message : String(error),

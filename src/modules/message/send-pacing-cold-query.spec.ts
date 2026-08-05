@@ -252,6 +252,17 @@ describe('group reachouts against a real database', () => {
     ).resolves.toBeUndefined();
   });
 
+  // The group endpoints accept a bare number and the engines qualify it themselves, so the probe
+  // must look under both spellings or a known contact is charged as a stranger.
+  it('does not charge for a known contact passed as a bare number', async () => {
+    await addMessage('628555@c.us', YESTERDAY);
+
+    // Four participants, but the bare-number form of a known contact is not a stranger — three are.
+    await expect(
+      service.assertReachoutAllowed('s1', ['628555', 'a@c.us', 'b@c.us', 'c@c.us']),
+    ).resolves.toBeUndefined();
+  });
+
   it('counts a repeated id once', async () => {
     await expect(
       service.assertReachoutAllowed('s1', ['a@c.us', 'a@c.us', 'a@c.us', 'b@c.us', 'b@c.us']),

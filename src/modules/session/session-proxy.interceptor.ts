@@ -23,7 +23,27 @@ import { normalizeIp } from '../../common/utils/ip';
 const FORWARDED_REQUEST_HEADERS = ['x-api-key', 'authorization', 'content-type', 'accept'] as const;
 
 /** The response headers relayed back. Deliberately short: hop-by-hop headers must not leak through. */
-const RELAYED_RESPONSE_HEADERS = ['content-type', 'content-disposition', 'x-content-type-options'] as const;
+const RELAYED_RESPONSE_HEADERS = [
+  'content-type',
+  'content-disposition',
+  'x-content-type-options',
+  // Throttle answers come from the OWNER's counters, so the client must be told what the owner
+  // said: without these a forwarded 429 arrives with no indication of when to retry. The suffixed
+  // names are the ones the throttler actually sets (there is no bare Retry-After).
+  'retry-after',
+  'retry-after-short',
+  'retry-after-medium',
+  'retry-after-long',
+  'x-ratelimit-limit-short',
+  'x-ratelimit-remaining-short',
+  'x-ratelimit-reset-short',
+  'x-ratelimit-limit-medium',
+  'x-ratelimit-remaining-medium',
+  'x-ratelimit-reset-medium',
+  'x-ratelimit-limit-long',
+  'x-ratelimit-remaining-long',
+  'x-ratelimit-reset-long',
+] as const;
 
 /** Marks a request as already forwarded once. Whatever happens, it is never forwarded again. */
 export const FORWARDED_HEADER = 'x-openwa-forwarded';
@@ -140,7 +160,6 @@ export class SessionProxyInterceptor implements NestInterceptor {
     ownerNodeId: string,
     ownerNodeUrl: string,
   ): Promise<void> {
-    const target = forwardTarget(request.originalUrl, ownerNodeUrl);
     const timeoutMs = this.configService?.get<number>('session.proxyTimeoutMs', 60_000) ?? 60_000;
 
     const headers: Record<string, string> = { [FORWARDED_HEADER]: this.ownership?.nodeId ?? '1' };
@@ -162,6 +181,10 @@ export class SessionProxyInterceptor implements NestInterceptor {
 
     const hasBody = !['GET', 'HEAD'].includes(request.method);
     try {
+      // Inside the try: a NODE_URL that is not a usable absolute URL makes this throw, and that is
+      // an unreachable-owner condition (the 503 below names the node and the setting) — not a 500
+      // on a request that had nothing wrong with it. Boot validation rejects such a value too.
+      const target = forwardTarget(request.originalUrl, ownerNodeUrl);
       const upstream = await fetch(target, {
         method: request.method,
         headers,
@@ -183,7 +206,7 @@ export class SessionProxyInterceptor implements NestInterceptor {
       else response.end();
     } catch (error) {
       this.logger.warn(`Forwarding to session owner '${ownerNodeId}' failed`, {
-        target,
+        ownerNodeUrl,
         error: error instanceof Error ? error.message : String(error),
       });
       response.status(503).json({

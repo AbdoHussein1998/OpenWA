@@ -196,6 +196,7 @@ export class GroupController {
   @ApiParam({ name: 'groupId', description: 'Group ID' })
   @ApiBody({ type: GroupSubjectDto })
   @ApiResponse({ status: 200, description: 'Subject updated' })
+  @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights are required' })
   async setSubject(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,
@@ -212,6 +213,7 @@ export class GroupController {
   @ApiParam({ name: 'groupId', description: 'Group ID' })
   @ApiBody({ type: GroupDescriptionDto })
   @ApiResponse({ status: 200, description: 'Description updated' })
+  @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights are required' })
   async setDescription(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,

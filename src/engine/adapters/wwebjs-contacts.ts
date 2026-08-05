@@ -2,6 +2,7 @@ import { type Client } from 'whatsapp-web.js';
 import { Contact } from '../interfaces/whatsapp-engine.interface';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { userPart } from '../identity/wa-id';
+import { readWid } from '../types/whatsapp-web-js.types';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -58,7 +59,9 @@ export class WwebjsContacts {
     this.host.ensureReady();
     try {
       const numberId = await this.client().getNumberId(number);
-      return numberId?._serialized ?? null;
+      // Read both property names: a WA Web build that renamed `_serialized` would otherwise make
+      // every number look unregistered — and checkNumberExists below reports exactly that.
+      return readWid(numberId) ?? null;
     } catch (error) {
       this.host.reportIfPageTransportError(error, 'getNumberId');
       throw error;

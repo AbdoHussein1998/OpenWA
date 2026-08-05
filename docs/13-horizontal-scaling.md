@@ -49,6 +49,16 @@
 > which is exactly how a takeover begins. Without `NODE_URL` the whole path is inert and
 > single-node deployments pay nothing.
 >
+> **The lease compares timestamps written by different nodes, so their clocks must agree.** Each
+> node writes `leaseExpiresAt` from its own clock and reads every other node's the same way, so a
+> node whose clock runs more than one lease TTL (default 60s) ahead sees healthy peers as lapsed and
+> will take their sessions over. Run NTP (or any time sync) on every node — the default on ordinary
+> server images — and treat a skew larger than `SESSION_LEASE_TTL_MS` as a misconfiguration.
+>
+> **A forwarded request is throttled on both nodes.** The receiving node counts it before
+> forwarding, and the owner counts it again on arrival; with `REDIS_ENABLED=true` both counts land
+> in the same shared bucket. Size the rate limits with that in mind for a routed deployment.
+>
 > Forwards carry the client address in `x-forwarded-for` (inbound chain preserved, the
 > observed peer appended). For an `allowedIps`-restricted key or the per-IP throttler to see
 > the REAL client on forwarded calls, each node must list its peer nodes' addresses in its
@@ -188,8 +198,9 @@ services:
       - DATABASE_PASSWORD=${DB_PASSWORD}
       - REDIS_HOST=redis
       - QUEUE_ENABLED=true
-      # Operator-facing metadata only — the application does not read NODE_ID (no consumer
-      # exists in src/). Useful for correlating log lines by hand, nothing more.
+      # The session-ownership identity: it names which process holds each session's engine, and
+      # it must be STABLE across restarts (a value that changes makes the restarted process a new
+      # node, which has to wait out its own previous lease). Defaults to the container hostname.
       - NODE_ID={{.Node.Hostname}}-{{.Task.Slot}}
     volumes:
       - sessions:/app/data/sessions
@@ -345,8 +356,11 @@ spec:
             - secretRef:
                 name: openwa-secrets
           env:
-            # Operator-facing metadata only — the application does not read NODE_ID (no consumer
-            # exists in src/); it is retained for the future node-affinity design in 13.2.
+            # The session-ownership identity — see the compose example above. It must be STABLE
+            # across restarts, which a Deployment's pod name is NOT: use a StatefulSet (whose pod
+            # names are ordinal and stable) for a routed multi-node deployment, or pin a value per
+            # replica. A changing NODE_ID still converges (the old lease lapses and the sweep
+            # adopts), but every restart then costs one lease TTL of downtime for its sessions.
             - name: NODE_ID
               valueFrom:
                 fieldRef:

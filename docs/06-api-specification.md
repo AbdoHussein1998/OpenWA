@@ -1299,7 +1299,7 @@ Send a plain text message.
 | chatId            | string   | Yes      | non-empty                      | `phone@c.us` or `groupId@g.us`                                             |
 | text              | string   | Yes      | non-empty, max 4096            | Message text                                                               |
 | mentions          | string[] | No       | array of WIDs                  | WIDs to @mention (e.g. `["62811@c.us"]`). See **Mentions** below           |
-| linkPreview       | boolean  | No       | —                              | `false` suppresses the URL preview. See **Link previews** below            |
+| linkPreview       | boolean  | No       | —                              | `false` suppresses it; on Baileys `true` is required to get one. See **Link previews** below |
 | customLinkPreview | object   | No       | `{ url, title, description? }` | Attach a preview you supply. **Baileys only.** See **Link previews** below |
 
 ```json
@@ -1310,14 +1310,16 @@ Send a plain text message.
 { "chatId": "628123456789@c.us", "text": "see https://example.com", "linkPreview": false }
 ```
 
-**Link previews.** `linkPreview` is guaranteed **only in its suppressing direction**. Sending `false`
-stops the preview on both engines. Leaving it unset means "whatever the engine does by default", and
-the two engines genuinely differ:
+**Link previews.** Sending `false` stops the preview on both engines. The two differ on what
+happens otherwise: whatsapp-web.js lets WhatsApp Web build one in-page (free, so it is the default),
+while on Baileys the gateway must fetch the page itself — a blocking outbound request per URL before
+the message can go out — so there a preview is **opt-in**:
 
 |                      | whatsapp-web.js                                                       | Baileys                                            |
 | -------------------- | --------------------------------------------------------------------- | -------------------------------------------------- |
 | `linkPreview: false` | no preview                                                            | no preview                                         |
-| unset / `true`       | asks WhatsApp Web to build a preview in-page                          | the gateway fetches the page itself and builds one |
+| unset                | asks WhatsApp Web to build a preview in-page                          | no preview                                         |
+| `linkPreview: true`  | asks WhatsApp Web to build a preview in-page                          | the gateway fetches the page itself and builds one |
 | `customLinkPreview`  | `501` — the library takes a boolean only, with no way to pass a title | preview attached verbatim, nothing fetched         |
 
 **How Baileys previews are generated.** Not with the library's own generator. That one delegates to

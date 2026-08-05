@@ -4804,6 +4804,29 @@ describe('BaileysAdapter call outcomes', () => {
     expect(onCallOutcome).not.toHaveBeenCalled();
   });
 
+  // A rejection issued through the API produces no inbound signal to observe, so it was the one
+  // outcome never published — the very one the caller knows happened.
+  it('publishes call.rejected when the call is rejected through the API', async () => {
+    const onCallOutcome = jest.fn();
+    const adapter = await ringing({ onCall: jest.fn(), onCallOutcome });
+
+    await adapter.rejectCall(CALL_ID);
+
+    expect(fakeSock.rejectCall).toHaveBeenCalledWith(CALL_ID, CALLER);
+    expect(onCallOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: CALL_ID, outcome: 'rejected', from: '628111@c.us' }),
+    );
+  });
+
+  it('publishes nothing when the socket refuses the rejection', async () => {
+    const onCallOutcome = jest.fn();
+    const adapter = await ringing({ onCall: jest.fn(), onCallOutcome });
+    fakeSock.rejectCall.mockRejectedValueOnce(new Error('socket closed'));
+
+    await expect(adapter.rejectCall(CALL_ID)).rejects.toThrow('socket closed');
+    expect(onCallOutcome).not.toHaveBeenCalled();
+  });
+
   // WhatsApp replays signalling for calls that ended while the session was disconnected. Announcing
   // those would report last week's declined call as if it had just happened.
   it('drops an offline-replayed outcome', async () => {

@@ -157,6 +157,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
       loadLib: () => this.loadLib(),
       putStoredMessage: msg => this.config.messageStore?.put(this.config.dbSessionId, msg),
       getStoredMessage: messageId => this.config.messageStore?.getMessage(this.config.dbSessionId, messageId),
+      // Store the device-stripped lid: that is the key the lid->phone lookup reads.
+      recordLidMapping: (lid, pn) =>
+        this.sessionStore.addLidMappings([{ lid: `${lid.split('@')[0].split(':')[0]}@lid`, pn }]),
       getOnMessageCreate: () => this.callbacks.onMessageCreate,
       mapMessage: (msg, contentType, opts) => this.events.mapMessage(msg, contentType, opts),
     });

@@ -19,6 +19,17 @@ export interface SerializedWid {
 }
 
 /**
+ * Read a page-context Wid's serialized id under either property name, or undefined when neither is
+ * present. Every raw-Wid read goes through this: the rename lands on all of them at once, and a
+ * site that reads `_serialized` alone silently yields undefined — which `String()` then turns into
+ * the literal id `"undefined"`, an id that looks real and addresses nothing.
+ */
+export function readWid(wid: SerializedWid | string | null | undefined): string | undefined {
+  if (typeof wid === 'string') return wid || undefined;
+  return wid?._serialized ?? wid?.$1 ?? undefined;
+}
+
+/**
  * Raw group metadata as returned by `chat.groupMetadata.serialize()`.
  * The field that links a community sub-group to its parent community has
  * varied across whatsapp-web.js/WA Web versions, so multiple known

@@ -77,10 +77,10 @@ export class SendTextMessageDto {
 
   @ApiPropertyOptional({
     description:
-      'Set `false` to suppress the URL preview. Guaranteed only in that direction: leaving it unset ' +
-      'means whatever the engine does by default, and the engines differ — whatsapp-web.js asks ' +
-      'WhatsApp Web to build a preview, while Baileys builds none unless its optional preview ' +
-      'generator is installed. Sending `true` therefore does not force a preview on Baileys.',
+      'Controls the URL preview, and the engines differ. On whatsapp-web.js WhatsApp Web builds one ' +
+      'by default and `false` suppresses it. On Baileys previews are OPT-IN: `true` asks the gateway ' +
+      'to fetch the page and attach one, while unset or `false` sends none — generating a preview is ' +
+      'a blocking outbound fetch per URL in the text, so it is never done unless asked for.',
     example: false,
   })
   // Implicit conversion turns EVERY non-empty string into true, so an unguarded `false` sent as a

@@ -29,6 +29,7 @@ import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { GroupNotFoundError } from '../../common/errors/group-not-found.error';
+import { LabelNotFoundError } from '../../common/errors/label-not-found.error';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { fetch as undiciFetch } from 'undici';
 
@@ -6059,6 +6060,37 @@ describe('WhatsAppWebJsAdapter voice status', () => {
 // and getChatsByLabelId yields undefined ENTRIES for label items whose chat no longer resolves.
 // These raw-id extraction sites must read the rename and skip the hole instead of crashing or
 // minting the literal id "undefined".
+// A dead page and a genuinely-missing resource both reject; only the second is a 404. Folding a
+// transport death into "not found" sends operators debugging the wrong layer — the sibling
+// joinGroupViaInviteCode already makes this split.
+describe('WhatsAppWebJsAdapter transport death is not a not-found', () => {
+  const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = client;
+    return adapter;
+  };
+  const dead = (): Error => new Error('Protocol error (Runtime.callFunctionOn): Target closed');
+
+  it('getGroupJoinInfo answers 503 for a dead page, 404 for a refused invite', async () => {
+    const transport = readyAdapter({ getInviteInfo: jest.fn().mockRejectedValue(dead()) });
+    await expect(transport.getGroupJoinInfo('CODE')).rejects.toBeInstanceOf(EngineTransportError);
+
+    const refused = readyAdapter({ getInviteInfo: jest.fn().mockRejectedValue(new Error('invite revoked')) });
+    await expect(refused.getGroupJoinInfo('CODE')).rejects.toBeInstanceOf(GroupNotFoundError);
+  });
+
+  it('getChatsByLabel answers 503 for a dead page, 404 for an unknown label', async () => {
+    const transport = readyAdapter({ getChatsByLabelId: jest.fn().mockRejectedValue(dead()) });
+    await expect(transport.getChatsByLabel('7')).rejects.toBeInstanceOf(EngineTransportError);
+
+    const unknown = readyAdapter({
+      getChatsByLabelId: jest.fn().mockRejectedValue(new TypeError('Cannot read properties of undefined')),
+    });
+    await expect(unknown.getChatsByLabel('7')).rejects.toBeInstanceOf(LabelNotFoundError);
+  });
+});
+
 describe('WhatsAppWebJsAdapter raw-id extraction hardening', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });

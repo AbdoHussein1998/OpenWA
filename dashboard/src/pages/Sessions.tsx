@@ -59,6 +59,8 @@ export function Sessions() {
   const queryClient = useQueryClient();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  // The full-page spinner belongs to the FIRST load only (see fetchSessions).
+  const initialLoadDone = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -70,7 +72,10 @@ export function Sessions() {
 
   const fetchSessions = useCallback(async (): Promise<Session[]> => {
     try {
-      setLoading(true);
+      // Background refetches — a websocket push, a mutation reloading the list — would otherwise
+      // replace the whole page with a spinner for the length of a round-trip, so a restriction
+      // arriving on a live page reads as a full reload.
+      if (!initialLoadDone.current) setLoading(true);
       const data = await sessionApi.list();
       setSessions(data);
       // Keep the shared React Query cache (read by the Dashboard via useSessionsQuery /
@@ -86,6 +91,7 @@ export function Sessions() {
       setError(err instanceof Error ? err.message : t('sessions.create.errorDefault'));
       return [];
     } finally {
+      initialLoadDone.current = true;
       setLoading(false);
     }
   }, [t, queryClient]);

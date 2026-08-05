@@ -46,7 +46,7 @@ public record SendTextRequest(
         /**
          * {@code false} suppresses the URL preview. Guaranteed only in that direction: unset means the
          * engine default, and the engines differ — whatsapp-web.js asks WhatsApp Web to build a
-         * preview, Baileys builds none unless its optional generator is installed.
+         * preview by default; on Baileys a preview is OPT-IN and needs {@code true}.
          */
         public Builder linkPreview(Boolean v) {
             this.linkPreview = v;

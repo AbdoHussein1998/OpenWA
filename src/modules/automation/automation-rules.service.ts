@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { createLogger } from '../../common/services/logger.service';
@@ -47,9 +48,24 @@ export class AutomationRulesService {
     private readonly moduleRef?: ModuleRef,
     @Optional()
     private readonly lidMappingStore?: LidMappingStoreService,
+    @Optional()
+    private readonly configService?: ConfigService,
   ) {}
 
   async create(sessionId: string, dto: CreateAutomationRuleDto): Promise<AutomationRule> {
+    // Per-session cap, the same shape (and softness) the webhook fan-out cap has: every inbound
+    // message is evaluated against every rule of its session, so an unbounded count turns each
+    // message into unbounded work. A concurrent create can race the count — the cap bounds
+    // amplification, it is not an invariant. Rules already above it are left alone.
+    const maxPerSession = this.configService?.get<number>('automation.maxPerSession', 32) ?? 32;
+    if (maxPerSession > 0) {
+      const existing = await this.ruleRepository.count({ where: { sessionId } });
+      if (existing >= maxPerSession) {
+        throw new BadRequestException(
+          `Automation rule limit reached for this session (${existing}/${maxPerSession}); delete one before adding another`,
+        );
+      }
+    }
     const rule = this.ruleRepository.create({
       sessionId,
       name: dto.name,
