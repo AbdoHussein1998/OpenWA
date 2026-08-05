@@ -1247,7 +1247,7 @@ When enabled, two rules can refuse a send:
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Warm-up daily cap | The session has used its allowance for the current **UTC** day. The allowance grows with the session's age (`SEND_PACING_WARMUP_SCHEDULE`), because a brand-new WhatsApp account that immediately sends at volume is the pattern that gets numbers banned. The count comes from the messages table, so it survives restarts.                             |
 | Cold-reachout cap | The session has used its allowance of **new conversations** for the UTC day (`SEND_PACING_COLD_DAILY_CAP`). A send is a cold reachout when the account has no history with that chat in **either** direction — replying to someone who wrote to you first is never counted, and never refused by this rule. Status posts address no chat and are exempt. |
-| Failure breaker   | Consecutive send failures reached `SEND_PACING_BREAKER_THRESHOLD`, which usually means WhatsApp has already started refusing this account. Sends resume after `SEND_PACING_BREAKER_COOLDOWN_MS`, or immediately after any send succeeds.                                                                                                                 |
+| Failure breaker   | Consecutive send failures reached `SEND_PACING_BREAKER_THRESHOLD`, which usually means WhatsApp has already started refusing this account. The streak has no time decay — only a successful send resets it, so failures spread across a long quiet period still accumulate toward the threshold. Sends resume after `SEND_PACING_BREAKER_COOLDOWN_MS`, or immediately after any send succeeds.                                                                                                                 |
 
 A refusal is `429` with a body carrying **`code: "SEND_PACING_LIMITED"`** and `retryAfterSeconds`:
 
@@ -1294,13 +1294,13 @@ Send a plain text message.
 
 **Request body** — `SendTextMessageDto`
 
-| Field             | Type     | Required | Constraints                    | Description                                                                |
-| ----------------- | -------- | -------- | ------------------------------ | -------------------------------------------------------------------------- |
-| chatId            | string   | Yes      | non-empty                      | `phone@c.us` or `groupId@g.us`                                             |
-| text              | string   | Yes      | non-empty, max 4096            | Message text                                                               |
-| mentions          | string[] | No       | array of WIDs                  | WIDs to @mention (e.g. `["62811@c.us"]`). See **Mentions** below           |
+| Field             | Type     | Required | Constraints                    | Description                                                                                  |
+| ----------------- | -------- | -------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
+| chatId            | string   | Yes      | non-empty                      | `phone@c.us` or `groupId@g.us`                                                               |
+| text              | string   | Yes      | non-empty, max 4096            | Message text                                                                                 |
+| mentions          | string[] | No       | array of WIDs                  | WIDs to @mention (e.g. `["62811@c.us"]`). See **Mentions** below                             |
 | linkPreview       | boolean  | No       | —                              | `false` suppresses it; on Baileys `true` is required to get one. See **Link previews** below |
-| customLinkPreview | object   | No       | `{ url, title, description? }` | Attach a preview you supply. **Baileys only.** See **Link previews** below |
+| customLinkPreview | object   | No       | `{ url, title, description? }` | Attach a preview you supply. **Baileys only.** See **Link previews** below                   |
 
 ```json
 { "chatId": "628123456789@c.us", "text": "Hello from OpenWA!" }
@@ -3845,13 +3845,14 @@ Post an audio status (story) as a **voice note**, from a URL or base64 payload. 
 
 **Request body** — `SendVoiceStatusDto`
 
-| Field          | Type                        | Required | Constraints                                                                                           | Description                                                                                                      |
-| -------------- | --------------------------- | -------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| audio          | object (`StatusMediaInput`) | yes      | validated nested object; one of `url`/`base64` must be present — an empty `{}` is rejected with `400` | Media source wrapper                                                                                             |
-| audio.url      | string                      | no       | must be a non-empty string whenever `base64` is absent **or** `url` is present at all                 | Media source URL                                                                                                 |
-| audio.base64   | string                      | no       | must be a non-empty string whenever `url` is absent **or** `base64` is present at all                 | Base64-encoded media data                                                                                        |
-| audio.mimetype | string                      | no       | —                                                                                                     | Media MIME type; if omitted the service defaults to `audio/ogg; codecs=opus`                                     |
-| recipients     | string[]                    | no       | 0–256 items, each matching `^\d+@(c\.us\|lid)$`                                                       | JIDs permitted to view the status (`statusJidList`). Required in practice on Baileys; ignored by whatsapp-web.js |
+| Field           | Type                        | Required | Constraints                                                                                           | Description                                                                                                      |
+| --------------- | --------------------------- | -------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| audio           | object (`StatusMediaInput`) | yes      | validated nested object; one of `url`/`base64` must be present — an empty `{}` is rejected with `400` | Media source wrapper                                                                                             |
+| audio.url       | string                      | no       | must be a non-empty string whenever `base64` is absent **or** `url` is present at all                 | Media source URL                                                                                                 |
+| audio.base64    | string                      | no       | must be a non-empty string whenever `url` is absent **or** `base64` is present at all                 | Base64-encoded media data                                                                                        |
+| audio.mimetype  | string                      | no       | —                                                                                                     | Media MIME type; if omitted the service defaults to `audio/ogg; codecs=opus`                                     |
+| recipients      | string[]                    | no       | 0–256 items, each matching `^\d+@(c\.us\|lid)$`                                                       | JIDs permitted to view the status (`statusJidList`). Required in practice on Baileys; ignored by whatsapp-web.js |
+| backgroundColor | string                      | no       | `^#[0-9A-Fa-f]{6}$`                                                                                   | Background colour rendered behind the voice-note bubble. Baileys only; whatsapp-web.js ignores it                |
 
 There is **no `caption`**: WhatsApp has nowhere to render one on a status voice note.
 

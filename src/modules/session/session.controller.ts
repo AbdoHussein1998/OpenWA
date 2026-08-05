@@ -108,9 +108,10 @@ export class SessionController {
   @ApiResponse({
     status: 409,
     description:
-      'A credential teardown for the same session name is still in flight. Retryable — the body ' +
-      "carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; wait for it to settle and retry. No " +
-      'destructive side effect runs before this refusal.',
+      'A credential teardown for the same session name is still in flight (retryable — the body ' +
+      "carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; wait for it to settle and retry), OR " +
+      "another node currently holds this session's live engine and deleting it here would strip a " +
+      'session the owner is running. No destructive side effect runs before either refusal.',
   })
   async delete(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     const session = await this.sessionService.findOne(id);
@@ -165,6 +166,13 @@ export class SessionController {
     type: SessionResponseDto,
   })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({
+    status: 409,
+    description:
+      "Another node currently holds this session's live engine (multi-node deployments): stopping " +
+      'it here would report the session down while the owner keeps running it, so the request is ' +
+      'refused. Retry against the owning node, or once its lease has lapsed.',
+  })
   async stop(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.stop(id);
     await this.auditService.logInfo(AuditAction.SESSION_STOPPED, {

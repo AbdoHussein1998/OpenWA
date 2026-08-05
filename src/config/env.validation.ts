@@ -170,6 +170,7 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'WEBHOOK_DISPATCH_MAX_QUEUED',
     'STATS_CACHE_TTL_MS', // 0 = memo disabled
     'WEBHOOK_MAX_PER_SESSION', // 0 = unlimited
+    'AUTOMATION_MAX_PER_SESSION', // 0 = unlimited
     'WEBHOOK_MEDIA_INLINE_MAX_BYTES', // 0 = never inline media
   ]) {
     checkNonNegativeInt(key);
@@ -226,16 +227,22 @@ export function validateEnv(config: EnvConfig): EnvConfig {
   // operator happened to set would let a lone oversized heartbeat through.
   const leaseTtlMs = Number(str('SESSION_LEASE_TTL_MS') ?? '60000');
   const heartbeatMs = Number(str('SESSION_LEASE_HEARTBEAT_MS') ?? '20000');
-  if (Number.isInteger(leaseTtlMs) && Number.isInteger(heartbeatMs) && heartbeatMs * 2 > leaseTtlMs) {
+  // Strictly LESS than half: at exactly half, two renewals span the whole TTL, so a single missed
+  // renewal lands on the expiry instant — a tie that any scheduling jitter turns into a lapse. A
+  // margin below half is what lets one late or failed renewal still land inside the lease.
+  if (Number.isInteger(leaseTtlMs) && Number.isInteger(heartbeatMs) && heartbeatMs * 2 >= leaseTtlMs) {
     errors.push(
-      `SESSION_LEASE_HEARTBEAT_MS (${heartbeatMs}) must be at most half of SESSION_LEASE_TTL_MS (${leaseTtlMs}) ` +
+      `SESSION_LEASE_HEARTBEAT_MS (${heartbeatMs}) must be less than half of SESSION_LEASE_TTL_MS (${leaseTtlMs}) ` +
         'so a renewal that is late or fails once still lands inside the lease',
     );
   }
 
   // The forwarder builds an absolute URL from this; a value without a scheme parses as something
   // unusable (`localhost:2785` reads as the scheme `localhost:`) and only fails at the first
-  // forward, as a 500 on a request that had nothing wrong with it.
+  // forward, as a 500 on a request that had nothing wrong with it. Embedded credentials
+  // (`http://user:pw@host`) parse fine here but undici's fetch rejects them outright — every
+  // forward would 503 permanently, with the credentials sitting in sessions.nodeUrl — so refuse
+  // those at boot too rather than let them reach the DB and the first forward.
   const nodeUrl = str('NODE_URL');
   if (nodeUrl) {
     let parsed: URL | undefined;
@@ -246,6 +253,8 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     }
     if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
       errors.push(`NODE_URL must be an absolute http(s) URL (got "${nodeUrl}")`);
+    } else if (parsed.username || parsed.password) {
+      errors.push('NODE_URL must not embed credentials — the forwarder cannot send a URL with a userinfo component');
     }
   }
 

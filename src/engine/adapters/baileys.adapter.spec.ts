@@ -1228,6 +1228,22 @@ describe('BaileysAdapter messaging', () => {
     );
   });
 
+  // Resolving a contact's LID at send time is the one place a cold contact's mapping is learned
+  // before any message arrives; without writing it back, a later message-target ownership check
+  // comparing the stored key's lid against a phone-dialect chatId rejects a message that IS in chat.
+  it('sendTextMessage records the resolved LID back into the session store (device-stripped)', async () => {
+    fakeSock.sendMessage.mockResolvedValue({ key: { id: 'OUT1' }, messageTimestamp: 1700000001 });
+    fakeSock.signalRepository = { lidMapping: { getLIDForPN: jest.fn().mockResolvedValue('484848:3@lid') } };
+    const adapter = await readyAdapter();
+    const store = (adapter as unknown as { sessionStore: { addLidMappings: (m: unknown[]) => void } }).sessionStore;
+    const spy = jest.spyOn(store, 'addLidMappings');
+
+    await adapter.sendTextMessage('628111@c.us', 'hello');
+
+    // The device suffix (:3) is stripped — that is the key the lid->phone lookup reads.
+    expect(spy).toHaveBeenCalledWith([{ lid: '484848@lid', pn: '628111@s.whatsapp.net' }]);
+  });
+
   it('sendTextMessage keeps the phone jid when no LID mapping is known', async () => {
     fakeSock.sendMessage.mockResolvedValue({ key: { id: 'OUT1' }, messageTimestamp: 1700000001 });
     fakeSock.signalRepository = { lidMapping: { getLIDForPN: jest.fn().mockResolvedValue(null) } };

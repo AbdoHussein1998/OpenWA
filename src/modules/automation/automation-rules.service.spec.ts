@@ -4,12 +4,13 @@
 // cooldown window, and no failure may escape into the receive path. These run against a real
 // in-memory DB so scoping and ordering are exercised end-to-end, not asserted on a mock's WHERE.
 import { DataSource } from 'typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AutomationRulesService } from './automation-rules.service';
 import { AutomationRule } from './entities/automation-rule.entity';
 import { Session, SessionStatus } from '../session/entities/session.entity';
 import type { MessageService } from '../message/message.service';
 import type { ModuleRef } from '@nestjs/core';
+import type { ConfigService } from '@nestjs/config';
 
 describe('AutomationRulesService', () => {
   let ds: DataSource;
@@ -58,6 +59,30 @@ describe('AutomationRulesService', () => {
     fromMe: false,
     isGroup: false,
     ...over,
+  });
+
+  describe('per-session cap', () => {
+    // Every inbound message is evaluated against every rule of its session, so an unbounded count
+    // turns each message into unbounded work — the same reason the webhook fan-out is capped.
+    const cappedService = (max: number): AutomationRulesService =>
+      new AutomationRulesService(ds.getRepository(AutomationRule), moduleRefStub, undefined, {
+        get: (_key: string, def?: number) => max ?? def,
+      } as unknown as ConfigService);
+
+    it('refuses a NEW rule at or over the cap; existing ones are grandfathered', async () => {
+      const svc = cappedService(2);
+      await svc.create('sessA', { name: 'r1', replyText: 'a' });
+      await svc.create('sessA', { name: 'r2', replyText: 'b' });
+      await expect(svc.create('sessA', { name: 'r3', replyText: 'c' })).rejects.toBeInstanceOf(BadRequestException);
+      // The cap is per-session — another session is unaffected.
+      await expect(svc.create('sessB', { name: 'r1', replyText: 'a' })).resolves.toBeDefined();
+    });
+
+    it('0 disables the cap', async () => {
+      const svc = cappedService(0);
+      for (let i = 0; i < 5; i++) await svc.create('sessA', { name: `r${i}`, replyText: 'x' });
+      await expect(svc.create('sessA', { name: 'more', replyText: 'x' })).resolves.toBeDefined();
+    });
   });
 
   describe('CRUD scoping', () => {

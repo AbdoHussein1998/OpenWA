@@ -163,6 +163,42 @@ describe('RedisIoAdapter', () => {
       }
     });
 
+    // The server must close BEFORE the clients are released: the namespace adapters unsubscribe as
+    // the server closes, and issuing those on already-quit clients surfaced as a handful of
+    // unhandled-rejection ERRORs on every graceful shutdown.
+    it('closes the server before releasing the pub/sub clients', async () => {
+      process.env.REDIS_ENABLED = 'true';
+      const { server } = fakeServer();
+      const createSpy = withBaseServer(server);
+      const order: string[] = [];
+      const closeSpy = jest.spyOn(IoAdapter.prototype, 'close').mockImplementation(() => {
+        order.push('super.close');
+        return Promise.resolve();
+      });
+      try {
+        const adapter = new RedisIoAdapter({} as never);
+        adapter.createIOServer(2785);
+        const [pub, sub] = redisInstances;
+        pub.quit.mockImplementation(() => {
+          order.push('pub.quit');
+          return Promise.resolve();
+        });
+        sub.quit.mockImplementation(() => {
+          order.push('sub.quit');
+          return Promise.resolve();
+        });
+
+        await adapter.close(server);
+
+        expect(order[0]).toBe('super.close');
+        expect(order).toContain('pub.quit');
+        expect(order).toContain('sub.quit');
+      } finally {
+        createSpy.mockRestore();
+        closeSpy.mockRestore();
+      }
+    });
+
     it('does not hang when quit() never resolves (Redis down at shutdown), then force-disconnects', async () => {
       jest.useFakeTimers();
       process.env.REDIS_ENABLED = 'true';

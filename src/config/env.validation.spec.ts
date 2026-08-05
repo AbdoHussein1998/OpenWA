@@ -301,12 +301,16 @@ describe('validateEnv', () => {
   // ticks and peers adopt sessions from a healthy node, with nothing in the logs saying why.
   it('rejects a lease heartbeat that does not comfortably fit inside the TTL', () => {
     expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '60000', SESSION_LEASE_HEARTBEAT_MS: '50000' })).toThrow(
-      /at most half/,
+      /less than half/,
     );
     // The defaults stand in for whatever is unset, so a lone oversized heartbeat cannot slip past.
-    expect(() => validateEnv({ SESSION_LEASE_HEARTBEAT_MS: '45000' })).toThrow(/at most half/);
-    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '20000' })).toThrow(/at most half/);
+    expect(() => validateEnv({ SESSION_LEASE_HEARTBEAT_MS: '45000' })).toThrow(/less than half/);
+    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '20000' })).toThrow(/less than half/);
     expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '120000', SESSION_LEASE_HEARTBEAT_MS: '30000' })).not.toThrow();
+    // Exactly half is rejected too: a single missed renewal then lands on the expiry instant.
+    expect(() => validateEnv({ SESSION_LEASE_TTL_MS: '60000', SESSION_LEASE_HEARTBEAT_MS: '30000' })).toThrow(
+      /less than half/,
+    );
     expect(() => validateEnv({})).not.toThrow();
   });
 
@@ -316,6 +320,8 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ NODE_URL: 'localhost:2785' })).toThrow(/absolute http/);
     expect(() => validateEnv({ NODE_URL: '10.0.0.5:2785' })).toThrow(/absolute http/);
     expect(() => validateEnv({ NODE_URL: 'ftp://10.0.0.5' })).toThrow(/absolute http/);
+    // Embedded credentials parse as a valid URL but undici's fetch refuses them, so reject at boot.
+    expect(() => validateEnv({ NODE_URL: 'http://user:pw@10.0.0.5:2785' })).toThrow(/must not embed credentials/);
     expect(() => validateEnv({ NODE_URL: 'http://10.0.0.5:2785' })).not.toThrow();
     expect(() => validateEnv({ NODE_URL: 'https://node-a.internal' })).not.toThrow();
   });

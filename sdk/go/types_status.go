@@ -30,7 +30,7 @@ type StatusListResponse struct {
 	Statuses []StatusRecord `json:"statuses"`
 }
 
-// StatusResult is the acknowledgement returned by Send{Text,Image,Video}Status.
+// StatusResult is the acknowledgement returned by Send{Text,Image,Video,Voice}Status.
 // It intentionally differs from StatusRecord: the POST response has statusId +
 // timing, no contact/media.
 type StatusResult struct {
@@ -88,4 +88,7 @@ type SendVideoStatusRequest struct {
 type SendVoiceStatusRequest struct {
 	Audio      StatusMediaInput `json:"audio"`
 	Recipients []string         `json:"recipients,omitempty"`
+	// BackgroundColor as "#RRGGBB", rendered behind the voice-note bubble.
+	// Baileys only; whatsapp-web.js ignores it.
+	BackgroundColor string `json:"backgroundColor,omitempty"`
 }
