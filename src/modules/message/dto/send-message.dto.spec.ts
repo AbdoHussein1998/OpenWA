@@ -1,6 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { SendTextMessageDto, SendMediaMessageDto } from './send-message.dto';
+import { SendTextMessageDto, SendMediaMessageDto, SEND_TEXT_BODY_EXAMPLES } from './send-message.dto';
 
 // Mirror the global ValidationPipe (main.ts): whitelist + forbidNonWhitelisted strip/reject unknown props.
 const validateDto = (cls: new () => object, obj: unknown) =>
@@ -46,6 +46,28 @@ describe('SendTextMessageDto mentions', () => {
       mentions: ['a'.repeat(65) + '@c.us'],
     });
     expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
+// These examples are what Swagger UI pre-fills into "Try it out", so a caller who changes nothing
+// submits them verbatim. Left to the schema sampler the body paired `linkPreview: false` with a
+// `customLinkPreview` and every Try-it click 400'd (#1068); these assertions are what keeps a new
+// optional field from quietly recreating an unusable default.
+describe('SEND_TEXT_BODY_EXAMPLES', () => {
+  const entries = Object.entries(SEND_TEXT_BODY_EXAMPLES);
+
+  it('declares at least one example', () => {
+    expect(entries.length).toBeGreaterThan(0);
+  });
+
+  it.each(entries)('%s passes DTO validation', async (_name, example) => {
+    const errors = await validateDto(SendTextMessageDto, example.value);
+    expect(errors).toHaveLength(0);
+  });
+
+  it.each(entries)('%s does not combine linkPreview:false with customLinkPreview', (_name, example) => {
+    const value = example.value as { linkPreview?: boolean; customLinkPreview?: unknown };
+    expect(value.linkPreview === false && value.customLinkPreview !== undefined).toBe(false);
   });
 });
 

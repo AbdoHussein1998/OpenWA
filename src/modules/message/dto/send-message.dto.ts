@@ -104,6 +104,33 @@ export class SendTextMessageDto {
   customLinkPreview?: CustomLinkPreviewDto;
 }
 
+/**
+ * Request-body examples for `POST send-text`, applied with `@ApiBody` on the controller.
+ *
+ * Swagger UI does NOT pre-fill "Try it out" from the required properties — its sampler walks EVERY
+ * property in the schema, skipping only `deprecated`/`readOnly`/`writeOnly`. So an optional field is
+ * always present in the generated body; a property's `example` only decides the VALUE it is given,
+ * never whether it appears. Left to the sampler this endpoint offers `linkPreview: false` together
+ * with a `customLinkPreview` object — the one combination `MessageService.sendText` rejects outright
+ * — so every Try-it click returned `400 linkPreview: false cannot be combined with customLinkPreview`
+ * without the caller having typed anything (#1068). An explicit example overrides the sampler
+ * entirely, which is the only way to stop an optional property from reaching the default body.
+ *
+ * Keep every entry here a payload the API actually accepts: `send-message.dto.spec.ts` validates each
+ * one against the DTO and asserts it does not trip that guard, so a future field cannot silently
+ * reintroduce an unusable default.
+ */
+export const SEND_TEXT_BODY_EXAMPLES = {
+  minimal: {
+    summary: 'Plain text message',
+    value: { chatId: '628123456789@c.us', text: 'Hello from OpenWA!' },
+  },
+  withMentions: {
+    summary: 'Group message with an @mention (the text must carry the @<number> token)',
+    value: { chatId: '120363000000000000@g.us', text: 'Hello @62811', mentions: ['62811@c.us'] },
+  },
+};
+
 export class SendMediaMessageDto {
   @ApiProperty({
     description: 'WhatsApp chat ID',

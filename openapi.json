@@ -1787,6 +1787,25 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendTextMessageDto"
+              },
+              "examples": {
+                "minimal": {
+                  "summary": "Plain text message",
+                  "value": {
+                    "chatId": "628123456789@c.us",
+                    "text": "Hello from OpenWA!"
+                  }
+                },
+                "withMentions": {
+                  "summary": "Group message with an @mention (the text must carry the @<number> token)",
+                  "value": {
+                    "chatId": "120363000000000000@g.us",
+                    "text": "Hello @62811",
+                    "mentions": [
+                      "62811@c.us"
+                    ]
+                  }
+                }
               }
             }
           }
