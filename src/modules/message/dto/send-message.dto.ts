@@ -194,6 +194,37 @@ export class SendMediaMessageDto {
   mentions?: string[];
 }
 
+/**
+ * Request-body examples for the media send routes, applied with `@ApiBody` on the controller.
+ *
+ * Same reason as the text route: Swagger UI's sampler emits EVERY property, so the generated body
+ * carried `url` AND `base64` together. `base64` has no `example`, so it arrived as the literal string
+ * `"string"` — and `MessageService.buildMediaInput` deliberately lets base64 win over url (a stale
+ * example url must never be fetched in place of real bytes), so pressing Execute uploaded four
+ * characters of garbage instead of the example image. An explicit example is the only way to keep an
+ * optional property out of the body.
+ *
+ * Only the URL form is offered, and every entry must be submittable as-is: a base64 example would
+ * need real bytes pasted in, which is the "click Execute, get an error" trap this exists to remove.
+ * `base64` and its `mimetype` requirement stay documented in the schema.
+ */
+const mediaBodyExample = (url: string, extra: Record<string, unknown> = {}) => ({
+  fromUrl: {
+    summary: 'Fetch the media from a URL',
+    value: { chatId: '628123456789@c.us', url, ...extra },
+  },
+});
+
+export const SEND_IMAGE_BODY_EXAMPLES = mediaBodyExample('https://example.com/image.jpg', {
+  caption: 'Check out this image!',
+});
+export const SEND_VIDEO_BODY_EXAMPLES = mediaBodyExample('https://example.com/video.mp4');
+export const SEND_AUDIO_BODY_EXAMPLES = mediaBodyExample('https://example.com/audio.ogg', { ptt: true });
+export const SEND_DOCUMENT_BODY_EXAMPLES = mediaBodyExample('https://example.com/report.pdf', {
+  filename: 'report.pdf',
+});
+export const SEND_STICKER_BODY_EXAMPLES = mediaBodyExample('https://example.com/sticker.png');
+
 export class SendAudioMessageDto extends SendMediaMessageDto {
   @ApiPropertyOptional({
     description:
