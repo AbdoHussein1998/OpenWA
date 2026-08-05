@@ -1,9 +1,15 @@
 import { Controller, Post, Get, Param, Body, Query, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { MessageService } from './message.service';
 import { BulkMessageService } from './bulk-message.service';
-import { SendTextMessageDto, SendMediaMessageDto, SendAudioMessageDto, MessageResponseDto } from './dto';
+import {
+  SendTextMessageDto,
+  SendMediaMessageDto,
+  SendAudioMessageDto,
+  MessageResponseDto,
+  SEND_TEXT_BODY_EXAMPLES,
+} from './dto';
 import { SendTemplateMessageDto } from './dto/send-template.dto';
 import { SendBulkMessageDto, BulkMessageResponseDto } from './dto/bulk-message.dto';
 import {
@@ -66,6 +72,9 @@ export class MessageController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Send a text message' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  // Without an explicit example Swagger UI samples the body from EVERY property, which pairs
+  // `linkPreview: false` with a `customLinkPreview` — the combination sendText rejects (#1068).
+  @ApiBody({ type: SendTextMessageDto, examples: SEND_TEXT_BODY_EXAMPLES })
   @ApiResponse({
     status: 201,
     description: 'Message sent',
