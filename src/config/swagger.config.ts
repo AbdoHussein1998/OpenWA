@@ -96,11 +96,20 @@ export function createSwaggerConfig(): Omit<OpenAPIObject, 'paths'> {
       .addTag('audit', 'Audit log')
       .addTag('metrics', 'Prometheus metrics')
       .addTag('health', 'Health check endpoints')
-      // Templated server: defaults to the out-of-box local instance, and the {host}/{port}
-      // variables keep Swagger UI "Try it" usable on real deployments (a hardcoded
-      // localhost URL would break Try-it for anyone serving elsewhere). Static consumers
-      // of the spec (the docs site) also get a concrete base URL to display.
-      .addServer('http://{host}:{port}', 'OpenWA instance', {
+      // ORDER MATTERS. Swagger UI resolves "Try it" against servers[0], substituting the variable
+      // defaults — it does not consider the origin the page was served from. A templated server
+      // alone therefore aimed every request at `http://localhost:2785`, so on any deployment that
+      // is not exactly that (a LAN address, a different PORT, a TLS proxy) Try-it called the
+      // reader's own machine and failed with "Failed to fetch" — the browser's CSP `connect-src
+      // 'self'` rejects the cross-origin call before it is even sent (#1068). A relative URL is
+      // resolved against the document's own location, which is what OpenAPI 3 specifies and what
+      // the spec did implicitly before it declared any server at all.
+      //
+      // So: relative first, and keep the templated absolute one second. Static consumers of
+      // openapi.json still get a concrete base URL to display (#975), and the host/port editor
+      // stays in the Servers dropdown for anyone pointing the docs at a different instance.
+      .addServer('/', 'This instance (the origin serving these docs)')
+      .addServer('http://{host}:{port}', 'Another instance (set host and port)', {
         host: { default: 'localhost' },
         port: { default: '2785', description: 'PORT env var' },
       })
