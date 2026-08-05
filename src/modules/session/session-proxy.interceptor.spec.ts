@@ -343,6 +343,17 @@ describe('forwardTarget', () => {
     expect(target.pathname).toBe('/api/sessions/s1');
   });
 
+  it.each([
+    // A pathname that resolves to a leading `//` is a network-path reference: re-anchoring it with
+    // `new URL(path, base)` would read `attacker` as the authority. The setter-based rebuild must not.
+    ['double-slash path after an absolute host', 'http://attacker.tld//evil.host/api/x'],
+    ['bare network-path in the path', 'http://attacker.tld//evil.host/foo?keep=1'],
+    // A control character can split the parse and shift the host the same way.
+    ['embedded tab', 'http://attacker.tld/\t/evil.host/x'],
+  ])('keeps the owner origin for a %s (network-path / control-char hijack)', (_label, originalUrl) => {
+    expect(new URL(forwardTarget(originalUrl, OWNER)).origin).toBe('http://10.0.0.5:2785');
+  });
+
   it('carries the owner base path when one is configured', () => {
     expect(forwardTarget('/api/sessions/s1', 'http://10.0.0.5:2785/')).toBe('http://10.0.0.5:2785/api/sessions/s1');
   });

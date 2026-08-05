@@ -58,11 +58,23 @@ export const FORWARDED_HEADER = 'x-openwa-forwarded';
  * any origin they choose and receive the response, with the credentials of the call attached: a
  * server-side request forgery that also exfiltrates the API key. Rebuilding from the owner's base
  * makes the origin structurally un-influenceable rather than merely validated.
+ *
+ * The rebuild carries the path and query only, and it does so through the URL setters rather than
+ * `new URL(path, base)`: a `pathname` that begins with `//` (or that a control character re-parses
+ * into) is a network-path reference, so `new URL('//elsewhere/x', base)` would resolve its authority
+ * from the path and re-open the exact origin hijack this function exists to close. Assigning
+ * `target.pathname` / `target.search` on a clone of the owner's origin never reinterprets the value
+ * as an authority, so the host stays the owner's for every input. Routing cannot currently deliver
+ * such a target (Express does not match a session route whose path starts with `//`), but the origin
+ * must be un-influenceable by construction, not by the router's normalization holding.
  */
 export function forwardTarget(originalUrl: string, ownerNodeUrl: string): string {
   const base = new URL(ownerNodeUrl);
   const requested = new URL(originalUrl, base);
-  return new URL(`${requested.pathname}${requested.search}`, base).toString();
+  const target = new URL(base.toString());
+  target.pathname = requested.pathname;
+  target.search = requested.search;
+  return target.toString();
 }
 
 /**
