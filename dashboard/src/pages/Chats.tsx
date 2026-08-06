@@ -416,12 +416,18 @@ export function Chats() {
   );
 
   const handleIncomingMessageReaction = useCallback(
-    (event: { sessionId: string; messageId: string; reactions: Record<string, string> }) => {
+    (event: { sessionId: string; messageId: string; reactions?: Record<string, string> }) => {
       if (event.sessionId !== selectedSessionId) return;
 
       // Reactions update `metadata.reactions` while preserving `metadata.media` / `metadata.quotedMessage`,
       // so we must read the prior message and deep-merge — `updateMessage`'s shallow merge would clobber
       // the rest of metadata.
+      //
+      // `reactions` is absent when the gateway holds no stored copy of the message to snapshot from (an
+      // ephemeral message, or one that predates the session going live). Absent means "unknown", not
+      // "none", so the known map has to survive — overwriting it would drop the optimistic reaction the
+      // user just added under the local `me` key. Folding in the single reported change instead would
+      // double-count that same reaction under its real sender id, so we keep what we have.
       const caches = queryClient.getQueriesData<ChatMessageView[]>({
         queryKey: ['messages', event.sessionId],
       });
@@ -433,7 +439,7 @@ export function Chats() {
         const next = list.slice();
         next[idx] = {
           ...target,
-          metadata: { ...(target.metadata || {}), reactions: event.reactions },
+          metadata: { ...(target.metadata || {}), reactions: event.reactions ?? target.metadata?.reactions },
         };
         queryClient.setQueryData(key, next);
       }
