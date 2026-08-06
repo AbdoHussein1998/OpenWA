@@ -265,10 +265,10 @@
         "statements": 90
       },
       "./src/modules/contact/": {
-        "branches": 39,
-        "functions": 53,
-        "lines": 50,
-        "statements": 49
+        "branches": 79,
+        "functions": 90,
+        "lines": 89,
+        "statements": 88
       },
       "./src/modules/docker/": {
         "branches": 29,

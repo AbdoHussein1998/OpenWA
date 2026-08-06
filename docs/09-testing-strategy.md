@@ -194,7 +194,7 @@ authoritative gate. Current policy:
 | `src/modules/auth/`         | 75%      | 85%       | 86%   | 85%        |
 | `src/modules/automation/`   | 60%      | 55%       | 75%   | 70%        |
 | `src/modules/chat-media/`   | 78%      | 81%       | 92%   | 90%        |
-| `src/modules/contact/`      | 39%      | 53%       | 50%   | 49%        |
+| `src/modules/contact/`      | 79%      | 90%       | 89%   | 88%        |
 | `src/modules/docker/`       | 29%      | 55%       | 40%   | 40%        |
 | `src/modules/events/`       | 70%      | 84%       | 81%   | 80%        |
 | `src/modules/group/`        | 64%      | 47%       | 67%   | 67%        |
