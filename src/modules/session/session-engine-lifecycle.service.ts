@@ -117,6 +117,24 @@ function isAuthTimeoutRejection(err: unknown): boolean {
 }
 
 /**
+ * Disconnect reasons that mean WhatsApp revoked this device, as opposed to a link that merely
+ * dropped. Only these are audited (#1107): they are one-shot and terminal — no reconnect can
+ * restore the link, only a fresh QR can — so they cannot produce the per-attempt flood that keeps
+ * the rest of the disconnect transitions out of the audit log.
+ *
+ * Deliberately not CONFLICT (another device took over, and takeover is recoverable), not
+ * DEPRECATED_VERSION (our own client is too old), and not TIMEOUT (a fault, and the single most
+ * common reconnect-storm reason). The first three mirror how the whatsapp-web.js adapter classifies
+ * the same states.
+ *
+ * BOTH engines are covered, and they spell it differently: `'logged out'` is the only reason the
+ * Baileys adapter ever passes to this callback, emitted for a WhatsApp-originated loggedOut (401)
+ * close — the same event, so it must audit the same way. Baileys' other two terminal closes (403
+ * forbidden, 440 connectionReplaced) report through onError instead and are not unlinks.
+ */
+const TERMINAL_UNLINK_REASONS = new Set(['LOGOUT', 'UNPAIRED', 'UNPAIRED_IDLE', 'logged out']);
+
+/**
  * Owns the live WhatsApp engines and every state machine around them: start/stop/logout/forceKill,
  * delete's engine retirement, reconnect backoff, engine-event wiring, and the credential-teardown /
  * initial-status fences that keep concurrent lifecycle actions serialized. SessionService keeps the
@@ -759,6 +777,21 @@ export class SessionEngineLifecycle {
       reason,
       action: 'disconnected',
     });
+
+    // #1107: everything else this method does with `reason` is ephemeral — a log line, a webhook, a
+    // socket emit, a plugin hook — and the only DB write below is the status. So once the process
+    // restarts, a WhatsApp unlink is indistinguishable over the API from a network drop: both read
+    // `disconnected` with a null `lastError`. Audit the unlinks, and only those. That is the same
+    // test SESSION_RESTRICTED already passes next door — rare, not reconnect noise, no other durable
+    // record — and it keeps the objection that keeps the rest unemitted intact, since a flapping
+    // connection retries with TIMEOUT/NAVIGATION and never with one of these.
+    if (TERMINAL_UNLINK_REASONS.has(reason)) {
+      void this.auditService?.logWarn(AuditAction.SESSION_DISCONNECTED, {
+        sessionId: id,
+        metadata: { reason },
+        errorMessage: `WhatsApp unlinked this device (${reason}); the session must be re-paired with a fresh QR`,
+      });
+    }
 
     void this.webhookService.dispatch(id, 'session.disconnected', { sessionId: id, reason });
     this.eventsGateway.emitSessionDisconnected(id, { reason });

@@ -2637,6 +2637,86 @@ describe('SessionService', () => {
       expect(eventsGateway.emitSessionDisconnected).toHaveBeenCalledWith('sess-uuid-1', { reason: 'socket closed' });
     });
 
+    // #1107: the reason reaches the log, the webhook, the socket and the plugin hook, and stops
+    // there — the only DB write on this path is the status. So an operator reading the session
+    // afterwards cannot tell a WhatsApp unlink from a network drop: both are `disconnected` with a
+    // null `lastError`. An unlink is rare, is not reconnect noise, and has no other durable record,
+    // which is the same test that already earns SESSION_RESTRICTED its audit row.
+    const disconnectAndFlush = async (callbacks: EngineEventCallbacks, reason: string): Promise<void> => {
+      callbacks.onDisconnected?.(reason);
+      // The handler re-reads the session row before publishing, so the audit lands after the findOne.
+      await new Promise(resolve => setImmediate(resolve));
+    };
+
+    // 'logged out' is the Baileys spelling: baileys-lifecycle reports a WhatsApp-originated
+    // loggedOut (401) close through this same callback with that exact string, and it is the ONLY
+    // reason that adapter ever passes here. Without it the audit row would exist for whatsapp-web.js
+    // sessions and silently not for Baileys ones — the engine asymmetry this test exists to prevent.
+    it.each(['LOGOUT', 'UNPAIRED', 'UNPAIRED_IDLE', 'logged out'])(
+      'writes a durable audit record for a terminal unlink (%s)',
+      async reason => {
+        const callbacks = await startAndCapture();
+        jest
+          .spyOn(lifecycle as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
+          .mockImplementation(() => {});
+        auditService.logWarn.mockClear();
+
+        await disconnectAndFlush(callbacks, reason);
+
+        // Assert the call before destructuring it: an absent call would otherwise surface as an
+        // unreadable TypeError on the array pattern rather than as the missing audit row.
+        expect(auditService.logWarn).toHaveBeenCalledTimes(1);
+        const [action, context] = auditCall(auditService.logWarn);
+        expect(action).toBe('session_disconnected');
+        expect(context.sessionId).toBe('sess-uuid-1');
+        expect(context.metadata).toMatchObject({ reason });
+      },
+    );
+
+    // The reason this action was left unemitted until now: a flapping connection retries forever,
+    // and a row per attempt would bury the one that matters. Filtering to the unlinks keeps that
+    // objection answered — a storm is TIMEOUT/NAVIGATION, never LOGOUT.
+    it.each(['TIMEOUT', 'NAVIGATION', 'socket closed'])('does not audit a transient drop (%s)', async reason => {
+      const callbacks = await startAndCapture();
+      jest
+        .spyOn(lifecycle as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
+        .mockImplementation(() => {});
+      auditService.logWarn.mockClear();
+
+      await disconnectAndFlush(callbacks, reason);
+
+      expect(auditService.logWarn).not.toHaveBeenCalled();
+    });
+
+    // The audit row is a disconnect side effect like the webhook and the socket emit, so it belongs
+    // behind the SAME post-await identity fence. Superseding before the call would only exercise the
+    // wiring's entry check, which would pass wherever the emit sat — so supersede the engine while
+    // the handler is parked on its session reload, the one window that discriminates the placement.
+    it('does not audit an unlink from an engine superseded during the async session reload', async () => {
+      const callbacks = await startAndCapture();
+      jest
+        .spyOn(lifecycle as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
+        .mockImplementation(() => {});
+      let resolveReload!: (value: Session | null) => void;
+      (repository.findOne as jest.Mock).mockImplementation(
+        () =>
+          new Promise<Session | null>(resolve => {
+            resolveReload = resolve;
+          }),
+      );
+      auditService.logWarn.mockClear();
+
+      // Still the live owner here, so the handler proceeds past its entry fence and parks.
+      const handled = Promise.resolve(callbacks.onDisconnected?.('LOGOUT'));
+      enginesOf().set('sess-uuid-1', { marker: 'engine-B' });
+      await Promise.resolve();
+      await Promise.resolve();
+      resolveReload(createMockSession({ status: SessionStatus.READY }));
+      await handled;
+
+      expect(auditService.logWarn).not.toHaveBeenCalled();
+    });
+
     it('ignores onReady from an engine that was torn down (post-stop window)', async () => {
       const callbacks = await startAndCapture();
       enginesOf().delete('sess-uuid-1'); // stop()/forceKill() removes the engine from the live map
