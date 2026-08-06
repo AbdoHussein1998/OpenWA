@@ -59,10 +59,50 @@ async function readSessionOwnership(queryRunner: QueryRunner): Promise<SessionOw
 }
 
 /**
- * Re-apply the claims verbatim for ids present in both the pre-import database and the restored set.
- * Values are re-bound exactly as they were read (ISO text on SQLite, Date on Postgres) rather than
- * reconstructed, and go through the caller's `insert` so the `$N`→`?` rewrite applies on SQLite. An
- * id the backup did not restore simply matches no row.
+ * Carry a lease across the transaction by its REMAINING time rather than its absolute stamp.
+ *
+ * The stamp is a deadline, and the transaction that re-applies it can run for longer than the
+ * deadline has left. Writing it back unchanged therefore commits an expiry this request already knows
+ * has passed, while `nodeId` still names the owner whose engine never stopped — a lapse manufactured
+ * by the restore, on a claim it observed live moments earlier.
+ *
+ * A claim that was ALREADY lapsed when read is re-bound untouched: shifting that one would resurrect
+ * a dead node's hold, which is the property the verbatim write was protecting. So is anything
+ * unparseable — a value this function does not understand is not one it should rewrite.
+ *
+ * The stored shape is preserved (ISO text on SQLite, Date on Postgres) because these values go back
+ * through raw SQL, bypassing the column transformer that would otherwise normalise them.
+ *
+ * Note the deliberate asymmetry with `claimedAt`, which stays verbatim because it is a historical
+ * fact. After a carry the pair therefore no longer spans a single TTL — `leaseExpiresAt - claimedAt`
+ * is the TTL plus the restore's duration — so it must not be used to derive a lease age.
+ */
+function carryLease(raw: unknown, readAt: Date, now: Date): unknown {
+  // Only the two shapes these columns are actually stored in are interpreted, and for text only the
+  // UTC form the two writers emit (`DateTransformer.to` and `leaseParam`, both `toISOString()`).
+  // Anything else is left alone: rewriting a shape this function does not understand would be worse
+  // than not carrying it, because a local-time parse would bake the host's UTC offset into the
+  // column permanently — where the old verbatim write merely passed the odd value through.
+  if (!(raw instanceof Date) && typeof raw !== 'string') return raw;
+  if (typeof raw === 'string' && !raw.endsWith('Z')) return raw;
+  const deadline = raw instanceof Date ? raw : new Date(raw);
+  const remainingMs = deadline.getTime() - readAt.getTime();
+  if (Number.isNaN(remainingMs) || remainingMs <= 0) return raw;
+  // Never earlier than what was read: a backward clock step between the two stamps must not be able
+  // to commit an expiry sooner than the row already carried, which would re-create the very problem.
+  const carried = new Date(Math.max(now.getTime() + remainingMs, deadline.getTime()));
+  // A deadline that is representable but whose carry is not: fall back rather than throw, since the
+  // caller routes a throw into `warnings` and every later row in the loop would lose its claim.
+  if (!Number.isFinite(carried.getTime())) return raw;
+  return raw instanceof Date ? carried : carried.toISOString();
+}
+
+/**
+ * Re-apply the claims for ids present in both the pre-import database and the restored set.
+ * `nodeId`/`claimedAt`/`nodeUrl` are re-bound exactly as they were read rather than reconstructed;
+ * only the lease deadline is carried forward (see {@link carryLease}). They go through the caller's
+ * `insert` so the `$N`→`?` rewrite applies on SQLite. An id the backup did not restore simply
+ * matches no row.
  *
  * Errors are NOT swallowed. On PostgreSQL a failed statement aborts the transaction, and the COMMIT
  * that followed would silently execute as a ROLLBACK — reporting a fully-discarded import as a
@@ -72,12 +112,14 @@ async function readSessionOwnership(queryRunner: QueryRunner): Promise<SessionOw
 export async function restoreSessionOwnership(
   preserved: SessionOwnershipRow[] | null,
   insert: (text: string, params: unknown[]) => Promise<unknown>,
+  readAt: Date,
+  now: Date = new Date(),
 ): Promise<void> {
   if (!preserved?.length) return;
   for (const row of preserved) {
     await insert(
       'UPDATE sessions SET "nodeId" = $1, "claimedAt" = $2, "leaseExpiresAt" = $3, "nodeUrl" = $4 WHERE id = $5',
-      [row.nodeId, row.claimedAt, row.leaseExpiresAt, row.nodeUrl, row.id],
+      [row.nodeId, row.claimedAt, carryLease(row.leaseExpiresAt, readAt, now), row.nodeUrl, row.id],
     );
   }
 }
@@ -567,6 +609,9 @@ export class InfraDataController {
         // deadlock on Postgres) and tolerate the columns being absent, so a database whose ownership
         // migration has been rolled back still imports.
         const preservedOwnership = await readSessionOwnership(queryRunner);
+        // Stamped AFTER the read, so the remaining lease time carried forward later is measured from
+        // the latest moment these values are known to have been true — never longer than they were.
+        const ownershipReadAt = new Date();
 
         await queryRunner.query('DELETE FROM sessions');
 
@@ -606,7 +651,7 @@ export class InfraDataController {
         // execute as a ROLLBACK and the endpoint would report a fully discarded import as a success,
         // with per-table counts, to an operator restoring after data loss.
         try {
-          await restoreSessionOwnership(preservedOwnership, insert);
+          await restoreSessionOwnership(preservedOwnership, insert, ownershipReadAt);
         } catch (error) {
           warnings.push(
             `Failed to restore session ownership: ${error instanceof Error ? error.message : String(error)}`,
