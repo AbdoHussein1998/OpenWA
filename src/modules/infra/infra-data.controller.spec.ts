@@ -176,7 +176,11 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     await outer.connect();
     await outer.startTransaction();
 
-    await expect(controller.importData({ tables: dump.tables })).rejects.toMatchObject({ status: 409 });
+    const refusal = await controller.importData({ tables: dump.tables }).catch((e: unknown) => e);
+    expect((refusal as ConflictException).getStatus()).toBe(409);
+    // The dashboard decides whether to offer the destructive stop-orphans retry by matching this
+    // code positively, so which code this refusal carries is a cross-tier contract, not a detail.
+    expect((refusal as ConflictException).getResponse()).toMatchObject({ code: 'IMPORT_NESTED_TRANSACTION' });
 
     // The decisive assertion: nothing was destroyed on the way to the refusal.
     const survived = await ds.getRepository(Session).findOneBy({ id: 's1' });
@@ -215,7 +219,9 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     const first = controller.importData({ tables: dump.tables });
     const second = controller.importData({ tables: dump.tables });
 
-    await expect(second).rejects.toMatchObject({ status: 409 });
+    const refusal = await second.catch((e: unknown) => e);
+    expect((refusal as ConflictException).getStatus()).toBe(409);
+    expect((refusal as ConflictException).getResponse()).toMatchObject({ code: 'IMPORT_ALREADY_RUNNING' });
     await expect(first).resolves.toMatchObject({ imported: true });
   });
 
@@ -1301,6 +1307,11 @@ describe('InfraDataController.importData status_updates + runtime reconciliation
     expect(err).toBeInstanceOf(ConflictException);
     expect((err as ConflictException).getStatus()).toBe(409);
     expect((err as ConflictException).message).toContain('ghost');
+    // This is the ONLY refusal on this route whose documented retry (stopOrphans=true) is a real
+    // decision the operator can act on, and it is the only one the dashboard may offer a destructive
+    // retry for. It carries its own code so that identification is positive: an unrecognised code and
+    // a 409 that never reached this method both fail closed instead of opening the confirm.
+    expect((err as ConflictException).getResponse()).toMatchObject({ code: 'IMPORT_WOULD_ORPHAN_ENGINES' });
     expect(await ds.getRepository(Session).count()).toBe(1); // nothing deleted
 
     // With force: the restore proceeds and the response tells the operator a restart is required

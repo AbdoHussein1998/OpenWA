@@ -1073,12 +1073,12 @@ export const infraApi = {
       counts: Record<string, number>;
     }>('/infra/export-data'),
   // 200 contract includes the orphan-engine reconciliation result (restartRequired / notices /
-  // stopped+failed ids). 409 has several causes and the error's `code` distinguishes them: a coded
-  // refusal is a "not now" with nothing to retry (IMPORT_ALREADY_RUNNING, another restore is in
-  // flight; IMPORT_NESTED_TRANSACTION, another transaction holds the connection), while the
-  // code-less orphan case (live engines exist for sessions the backup would remove; the message
-  // lists them) is the one the caller retries with stopOrphans=true to stop those engines inside
-  // the request. force is
+  // stopped+failed ids). 409 has several causes and the error's `code` distinguishes them:
+  // IMPORT_WOULD_ORPHAN_ENGINES (live engines exist for sessions the backup would remove; the
+  // message lists them) is the only one the caller retries with stopOrphans=true to stop those
+  // engines inside the request. IMPORT_ALREADY_RUNNING (another restore is in flight) and
+  // IMPORT_NESTED_TRANSACTION (another transaction holds the connection) leave nothing to retry.
+  // force is
   // deliberately NOT exposed: it leaves the engines writing into the restored tables until a
   // restart — the window stopOrphans exists to close.
   importData: (tables: Record<string, unknown[]>, options?: { stopOrphans?: boolean }) =>
