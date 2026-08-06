@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The JavaScript SDK now publishes to npm from CI** via Trusted Publishing (OIDC) on a `js-sdk-v*` tag — no npm token exists anywhere, and every release carries build provenance.
+- **The JavaScript SDK now publishes to npm from CI** via Trusted Publishing (OIDC) on a `js-sdk-v*` tag — no npm token exists anywhere, and every release carries build provenance. First release through it: `@rmyndharis/openwa@0.2.0`, carrying everything added since 0.1.0 in June.
 - **The Python SDK now publishes to PyPI from CI** via Trusted Publishing (OIDC) on a `py-sdk-v*` tag — no PyPI token exists anywhere, matching the JavaScript SDK's release path.
 - **The PHP SDK now cuts versioned releases from CI** on a `php-sdk-v*` tag — it tags the Packagist mirror, which previously only ever tracked `dev-main` because nothing propagated a version.
 - **The Go SDK documents how it is released** — tags must carry the `sdk/go/` module prefix, so a bare `v*` app tag never publishes it and callers can finally pin a version instead of a pseudo-version.
