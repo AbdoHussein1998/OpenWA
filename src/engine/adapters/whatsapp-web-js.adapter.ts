@@ -473,6 +473,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     } catch (error) {
       this.setStatus(EngineStatus.FAILED);
       const reason = error instanceof Error ? error.message : String(error);
+      // What the dashboard renders as `lastError` is exactly this string and nothing else — the log
+      // below never reaches it. Carry a one-line remedy with the reason for the one failure we can
+      // actually advise on, so the session card stops being a dead end (#1081).
+      let surfacedReason = reason;
       if (isExecutionContextDestroyedError(reason)) {
         // #708: Puppeteer's "Execution context was destroyed" during inject reads like a Puppeteer bug.
         // During initialize() its dominant cause is a browser profile left stale by an upgrade that
@@ -490,8 +494,15 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
             `navigation or renderer crash (check for memory pressure or a WhatsApp Web reload). ` +
             `See docs/12-troubleshooting-faq.md.`,
         );
+        // Kept short and with the raw Puppeteer text FIRST: operators search on that string, and the
+        // dashboard truncates a long reason. The profile path stays in the log above — it is too long
+        // for a card, and naming the wrong remedy is worse than pointing at the FAQ, since deleting a
+        // profile forces an irreversible re-pair.
+        surfacedReason =
+          `${reason} WhatsApp Web's page context was destroyed during startup. If this followed an ` +
+          `upgrade, the session's browser profile is likely stale — see docs/12-troubleshooting-faq.md.`;
       }
-      this.callbacks.onError?.(reason);
+      this.callbacks.onError?.(surfacedReason);
       throw error;
     }
   }

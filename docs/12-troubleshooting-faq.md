@@ -438,7 +438,8 @@ flavours; loading the stale profile destroys the page context during `Client.inj
 trigger today is the **v0.8.12** amd64 switch from Debian's `chromium` package to Chrome for Testing
 (#663), but the same symptom can follow any future change to the bundled browser binary. The error
 reads like a Puppeteer bug and gives no hint that the profile is the cause — the adapter now logs an
-advisory when it detects this error.
+advisory when it detects this error, and the session's `lastError` (the message the dashboard shows on
+the session card) carries a short form of it, so the pointer survives without reading the container log.
 
 **Fix:** delete the affected session's profile dir and start the session again to scan a new QR. The
 profile cannot be salvaged — clearing only the cache subdirs (`Cache`, `GPUCache`, `Code Cache`, …) is
