@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Go SDK has its first semantic version, `sdk/go/v0.2.0`** — until now the module proxy only served pseudo-versions, so callers could not pin a release at all.
 - **`rmyndharis-openwa` 0.2.0 on PyPI** — the first release through the trusted-publishing workflow, carrying everything the Python SDK gained since 0.1.0 in June.
 
 ## [0.14.2] - 2026-08-06
