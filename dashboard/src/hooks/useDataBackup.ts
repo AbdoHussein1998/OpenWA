@@ -44,10 +44,11 @@ export function useDataBackup(): DataBackup {
   };
 
   // POST the replace-all restore and fold the backend's orphan-engine contract into the UI. The route
-  // answers 409 for TWO different reasons and they need opposite handling, so branch on the machine
-  // code, never on the status alone: IMPORT_ALREADY_RUNNING means another restore is in flight and
-  // there is nothing to decide (retrying with stopOrphans would run a second destructive replace the
-  // operator never asked for). The orphan case does have a decision — live engines exist for sessions
+  // answers 409 for several different reasons and they need opposite handling, so branch on the
+  // machine code, never on the status alone: a coded refusal (IMPORT_ALREADY_RUNNING, another restore
+  // in flight; IMPORT_NESTED_TRANSACTION, another transaction holds the connection) leaves nothing to
+  // decide, and retrying it with stopOrphans would run a second destructive replace the operator
+  // never asked for. The orphan case does have a decision — live engines exist for sessions
   // the backup would remove — and its preferred retry is stopOrphans=true, which stops them inside
   // the request, so that one is offered as a confirm. force=true is deliberately not offered (the api
   // client does not even send it): it leaves the engines running until a restart.

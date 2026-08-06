@@ -25,8 +25,12 @@ test('leaves every other status alone', () => {
   assert.equal(shouldOfferStopOrphansRetry(undefined, undefined, false), false);
 });
 
-test('an unknown future 409 code still gets the orphan treatment, not silence', () => {
-  // Fail toward showing the operator something actionable rather than swallowing a refusal we do
-  // not recognise; only the code we know needs no decision is excluded.
-  assert.equal(shouldOfferStopOrphansRetry(409, 'SOME_FUTURE_CODE', false), true);
+test('never offers the retry when another transaction holds the connection', () => {
+  assert.equal(shouldOfferStopOrphansRetry(409, 'IMPORT_NESTED_TRANSACTION', false), false);
+});
+
+test('an unknown future 409 code does not get the destructive retry', () => {
+  // The non-offered branch is not silence — the caller still toasts the server's message — so the
+  // safe default is to withhold a retry that stops live engines and replaces every table again.
+  assert.equal(shouldOfferStopOrphansRetry(409, 'SOME_FUTURE_CODE', false), false);
 });
