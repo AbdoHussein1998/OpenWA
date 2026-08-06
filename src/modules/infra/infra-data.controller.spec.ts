@@ -22,7 +22,7 @@ jest.mock('fs', () => {
 
 import { DataSource, QueryFailedError } from 'typeorm';
 import { ConflictException } from '@nestjs/common';
-import { InfraDataController } from './infra-data.controller';
+import { InfraDataController, restoreSessionOwnership } from './infra-data.controller';
 import { Session, SessionStatus } from '../session/entities/session.entity';
 import { Webhook } from '../webhook/entities/webhook.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
@@ -87,6 +87,79 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
         lastActiveAt: null,
       }),
     );
+
+  it('keeps the session ownership lease across a replace, and never takes it from the payload', async () => {
+    await seedSession('s1');
+    const claimedAt = new Date('2026-08-06T10:00:00.000Z');
+    const leaseExpiresAt = new Date('2026-08-06T10:05:00.000Z');
+    // A live claim held by THIS node, exactly as SessionOwnershipService would have written it.
+    await ds
+      .getRepository(Session)
+      .update({ id: 's1' }, { nodeId: 'node-a', claimedAt, leaseExpiresAt, nodeUrl: 'http://10.0.0.5:2785' });
+
+    // export-data does SELECT *, so the dump genuinely carries the ownership columns. Rewriting them
+    // to a FOREIGN node proves the restore ignores the payload: taking them from the backup would
+    // install another host's claim with a still-future lease and 409 every start until it lapsed.
+    const dump = await controller.exportData();
+    for (const row of dump.tables.sessions as unknown as Record<string, unknown>[]) {
+      row.nodeId = 'node-from-another-host';
+      row.nodeUrl = 'http://198.51.100.9:2785';
+      row.leaseExpiresAt = new Date('2099-01-01T00:00:00.000Z').toISOString();
+    }
+
+    const res = await controller.importData({ tables: dump.tables });
+    expect(res.warnings).toEqual([]);
+    expect(res.imported).toBe(true);
+
+    const restored = await ds.getRepository(Session).findOneByOrFail({ id: 's1' });
+    expect(restored.nodeId).toBe('node-a');
+    expect(restored.nodeUrl).toBe('http://10.0.0.5:2785');
+    expect(new Date(restored.claimedAt as unknown as string).toISOString()).toBe(claimedAt.toISOString());
+    expect(new Date(restored.leaseExpiresAt as unknown as string).toISOString()).toBe(leaseExpiresAt.toISOString());
+  });
+
+  it('rolls the whole import back when ownership cannot be re-applied, instead of reporting success', async () => {
+    await seedSession('s1');
+    await ds.getRepository(Session).update({ id: 's1' }, { nodeId: 'node-a', nodeUrl: 'http://10.0.0.5:2785' });
+    const dump = await controller.exportData();
+
+    // Fail only the ownership UPDATE, leaving every other statement alone. On PostgreSQL a failed
+    // statement aborts the transaction, so a caller that degraded this to a notice and committed
+    // anyway would have the COMMIT execute as a ROLLBACK and still answer imported:true.
+    const realCreate = ds.createQueryRunner.bind(ds);
+    jest.spyOn(ds, 'createQueryRunner').mockImplementation((...args: Parameters<typeof realCreate>) => {
+      const runner = realCreate(...args);
+      const realQuery = runner.query.bind(runner);
+      // Pass EVERY argument through: TypeORM's query builder calls query(sql, params,
+      // useStructuredResult) and silently misreads a raw array when the third is dropped.
+      runner.query = ((...callArgs: Parameters<typeof realQuery>) =>
+        /UPDATE sessions SET "nodeId"/.test(callArgs[0])
+          ? Promise.reject(new Error('ownership write failed'))
+          : realQuery(...callArgs)) as typeof runner.query;
+      return runner;
+    });
+
+    const res = await controller.importData({ tables: dump.tables });
+    jest.restoreAllMocks();
+
+    expect(res.imported).toBe(false);
+    expect(res.warnings.join(' ')).toContain('session ownership');
+    // The rollback must have restored the pre-import row, ownership and all.
+    const stored = await ds.getRepository(Session).findOneByOrFail({ id: 's1' });
+    expect(stored.nodeId).toBe('node-a');
+  });
+
+  it('leaves a session that had no claim unclaimed rather than inventing one', async () => {
+    await seedSession('s1');
+
+    const dump = await controller.exportData();
+    const res = await controller.importData({ tables: dump.tables });
+    expect(res.imported).toBe(true);
+
+    const restored = await ds.getRepository(Session).findOneByOrFail({ id: 's1' });
+    expect(restored.nodeId).toBeNull();
+    expect(restored.leaseExpiresAt).toBeNull();
+  });
 
   it('restores messages and message_batches faithfully — not silently to zero', async () => {
     await seedSession('s1');
@@ -1182,5 +1255,49 @@ describe('InfraDataController C002 audit trail (light-dependency handlers)', () 
     const calls = audit.logInfo.mock.calls as Array<[AuditAction, { metadata: { counts: { sessions: number } } }]>;
     expect(calls[0][0]).toBe(AuditAction.INFRA_DATA_EXPORTED);
     expect(calls[0][1].metadata.counts.sessions).toBe(0);
+  });
+});
+
+describe('restoreSessionOwnership', () => {
+  const claim = { id: 's1', nodeId: 'node-a', claimedAt: 'c', leaseExpiresAt: 'l', nodeUrl: 'u' };
+
+  it('propagates a failure instead of swallowing it, so the caller can roll the import back', async () => {
+    // Swallowing it would be worse than the bug: on PostgreSQL a failed statement aborts the
+    // transaction, so the COMMIT that followed would execute as a ROLLBACK and the endpoint would
+    // report a fully discarded import as a success.
+    await expect(restoreSessionOwnership([claim], () => Promise.reject(new Error('db went away')))).rejects.toThrow(
+      'db went away',
+    );
+  });
+
+  it('does nothing when there is no ownership to carry', async () => {
+    const calls: unknown[][] = [];
+    const insert = (_sql: string, params: unknown[]): Promise<unknown> => {
+      calls.push(params);
+      return Promise.resolve();
+    };
+
+    await restoreSessionOwnership(null, insert);
+    await restoreSessionOwnership([], insert);
+
+    expect(calls).toEqual([]);
+  });
+
+  it('binds the values it read, never values from the payload', async () => {
+    const bound: unknown[][] = [];
+    const statements: string[] = [];
+    const insert = (sql: string, params: unknown[]): Promise<unknown> => {
+      statements.push(sql);
+      bound.push(params);
+      return Promise.resolve();
+    };
+
+    await restoreSessionOwnership([claim], insert);
+
+    expect(bound).toEqual([['node-a', 'c', 'l', 'u', 's1']]);
+    expect(statements[0]).toContain('UPDATE sessions SET "nodeId"');
+    expect(statements[0]).toContain('"claimedAt"');
+    expect(statements[0]).toContain('"leaseExpiresAt"');
+    expect(statements[0]).toContain('"nodeUrl"');
   });
 });

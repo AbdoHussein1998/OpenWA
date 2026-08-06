@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **An API request body with a `Content-Encoding` other than `identity` is now refused with `415`** — the aggregate in-flight body cap counts wire bytes, so a compressed body was admitted on its compressed size and then inflated past the memory it was supposed to bound.
 
+### Fixed
+
+- **A replace-all data import now carries the session ownership lease across the replace** — the restore re-inserted sessions without it, so the next lease renewal read the blank row as a lost claim and tore down engines that had never stopped.
+
 ## [0.14.2] - 2026-08-06
 
 ### Added
