@@ -214,7 +214,7 @@ authoritative gate. Current policy:
 | `src/modules/template/`     | 77%      | 99%       | 92%   | 89%        |
 | `src/modules/webhook/`      | 72%      | 89%       | 90%   | 87%        |
 
-Each floor sits roughly five points below that scope's measured coverage, so it catches a real
+Each floor sits a point or two below that scope's measured coverage, so it catches a real
 regression without failing on ordinary churn. Raise a floor when coverage rises; never lower one.
 
 Two behaviours of Jest's threshold matching are worth knowing before adding a scope:
