@@ -5000,6 +5000,8 @@ Export every row of the 13 migration tables from the Data DB as JSON. Read-only,
 
 **Auth:** API key (ADMIN)
 
+> **Inline media bytes are not in the export.** A message row's `metadata.media` keeps its shape but arrives as the omitted marker — `{ mimetype, filename?, omitted: true, sizeBytes }`, the same one the engine emits when an inbound payload is over `MEDIA_DOWNLOAD_MAX_BYTES`. Without this, one media message could exceed the import's own request-body limit (`BODY_SIZE_LIMIT`, 25mb by default), producing a backup this gateway refuses to restore with `413`. Restored messages therefore render without their pictures. The files themselves are not part of this endpoint in either direction: back them up with the storage tree (see `scripts/backup.sh`, which copies it unconditionally), and note that the export never carried them even before the bytes were dropped.
+
 The migration set (`MigrationTables`) is, in payload-key order: `sessions`, `webhooks`, `messages`, `messageBatches`, `templates`, `baileysStoredMessages`, `lidMappings`, `pluginInstances`, `conversationMappings`, `ingressEvents`, `webhookDeliveryFailures`, `integrationDeliveryFailures`, `statusUpdates`.
 
 **Response** `200`

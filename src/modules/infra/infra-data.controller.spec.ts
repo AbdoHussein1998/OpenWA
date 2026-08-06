@@ -528,6 +528,65 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     expect(b.status).toBe(BatchStatus.COMPLETED);
   });
 
+  it('drops inline media from the export, leaving the omitted marker and the rest of metadata intact', async () => {
+    // The export is unbounded while the import rides the 25mb body limit, so a single media message
+    // — base64 is 4/3 of a blob capped at MEDIA_DOWNLOAD_MAX_BYTES, 50 MiB by default — is enough to
+    // produce a backup this gateway cannot restore. The marker shape is the engine's own
+    // (capInboundMedia, inbound-media-cap.ts:148), so a restored row is indistinguishable from one
+    // whose media was skipped on the way in: the schema survives, only the pixels go.
+    const base64 = Buffer.from('not really a jpeg, but bytes all the same').toString('base64');
+    await seedSession('s1');
+    await ds.getRepository(Message).save(
+      ds.getRepository(Message).create({
+        id: 'm-media',
+        sessionId: 's1',
+        waMessageId: 'WA-MEDIA',
+        chatId: 'c1@s.whatsapp.net',
+        from: 'a@s.whatsapp.net',
+        to: 'b@s.whatsapp.net',
+        body: null as never,
+        type: 'image',
+        direction: MessageDirection.INCOMING,
+        timestamp: 1700000000,
+        metadata: { media: { mimetype: 'image/jpeg', filename: 'holiday.jpg', data: base64 }, ack: 2 },
+        status: MessageStatus.DELIVERED,
+      }),
+    );
+
+    const dump = await controller.exportData();
+    const exported = dump.tables.messages.find(r => r.id === 'm-media');
+    const meta = (typeof exported?.metadata === 'string' ? JSON.parse(exported.metadata) : exported?.metadata) as {
+      media: Record<string, unknown>;
+      ack: number;
+    };
+
+    expect(meta.media).not.toHaveProperty('data');
+    expect(meta.media).toEqual({
+      mimetype: 'image/jpeg',
+      filename: 'holiday.jpg',
+      omitted: true,
+      sizeBytes: Buffer.byteLength(base64, 'base64'),
+    });
+    // Everything else on the row, and everything else in metadata, is untouched.
+    expect(meta.ack).toBe(2);
+    expect(exported?.type).toBe('image');
+    expect(exported?.waMessageId).toBe('WA-MEDIA');
+
+    // And the backup still restores.
+    const res = await controller.importData({ tables: dump.tables });
+    expect(res.imported).toBe(true);
+    const restored = await ds.getRepository(Message).findOneByOrFail({ id: 'm-media' });
+    expect(restored.metadata).toEqual({
+      media: {
+        mimetype: 'image/jpeg',
+        filename: 'holiday.jpg',
+        omitted: true,
+        sizeBytes: Buffer.byteLength(base64, 'base64'),
+      },
+      ack: 2,
+    });
+  });
+
   it('round-trips plugin instances + integration delivery failures (Integration Fabric + DLQ)', async () => {
     await seedSession('s1');
     await ds.getRepository(PluginInstance).save(

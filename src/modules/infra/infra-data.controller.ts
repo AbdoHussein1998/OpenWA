@@ -131,6 +131,51 @@ export async function restoreSessionOwnership(
  */
 const SHARED_CONNECTION_DIALECTS = new Set(['better-sqlite3', 'sqlite']);
 
+/**
+ * Drop the inline base64 blob from an exported message row, leaving the engine's own omitted marker.
+ *
+ * The export is bounded by nothing while the import rides the global request body limit (25mb by
+ * default, `resolveBodyLimit`), so a single media message is enough to produce a backup this gateway
+ * cannot restore: inbound media is capped at MEDIA_DOWNLOAD_MAX_BYTES (50 MiB by default) and base64
+ * inflates it to 4/3 of that, well past the import's ceiling. Same reason the generated `body_ts`
+ * column is stripped a few lines below — a backup has to stay restorable to be a backup.
+ *
+ * The replacement is the marker `capInboundMedia` already emits for an over-cap payload
+ * (`{ mimetype, filename?, omitted: true, sizeBytes }`), so a restored row is indistinguishable from
+ * one whose media was skipped on the way in rather than a new shape consumers must learn: the `media`
+ * field stays present and only the bytes are gone. `mediaPath`/`mediaMimetype` are untouched, and
+ * `scripts/backup.sh` copies the storage tree unconditionally, so an operator on the runbook path
+ * still has the files themselves.
+ *
+ * NOTE: this bounds the media, not the export. A text-only history is still unbounded — every row
+ * carries a few hundred bytes of scaffolding regardless of what was said.
+ */
+function stripInlineMediaPayload(row: MessageRow): void {
+  const raw = row.metadata;
+  if (raw == null) return;
+  let parsed: Record<string, unknown>;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      // Metadata we cannot parse is not ours to rewrite; the importer round-trips it verbatim.
+      return;
+    }
+  } else {
+    parsed = { ...raw };
+  }
+  const media = parsed.media as { data?: unknown; sizeBytes?: number } | null | undefined;
+  if (!media || typeof media.data !== 'string') return;
+  const { data, ...withoutPayload } = media;
+  parsed.media = {
+    ...withoutPayload,
+    omitted: true,
+    // Decoded bytes, matching what capInboundMedia reports — the caller asked how big it WAS.
+    sizeBytes: media.sizeBytes ?? Buffer.byteLength(data, 'base64'),
+  };
+  row.metadata = typeof raw === 'string' ? JSON.stringify(parsed) : parsed;
+}
+
 @ApiTags('infrastructure')
 @Controller('infra')
 // Every route here is deployment-global (data export/import, infra config, service orchestration),
@@ -231,6 +276,7 @@ export class InfraDataController {
     // (and small). The import's explicit column list already ignores it in older archives.
     for (const row of messages) {
       delete row.body_ts;
+      stripInlineMediaPayload(row);
     }
     const messageBatches = await queryOptionalTable<MessageBatchRow>('message_batches');
     const templates = await queryOptionalTable<TemplateRow>('templates');
