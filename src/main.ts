@@ -125,9 +125,11 @@ async function bootstrap() {
   // what a provider signed, so the @Public ingress controller can HMAC-verify over the raw body
   // (JSON.stringify(req.body) is NOT byte-identical). Cheap for every route; non-ingress routes ignore it.
   // `inflate: false` is a backstop, not the guard: the budget middleware above already refuses a
-  // compressed body with 415 before a byte is read. It sits here so a future middleware reordering,
-  // or a route-level parser mounted past that middleware, cannot silently reopen the gap — an
-  // inflated body is charged to the budget at its compressed size and bounded by nothing.
+  // compressed body with 415 before a byte is read. It sits here so a future reordering of these
+  // parsers relative to that middleware cannot silently reopen the gap — an inflated body is
+  // charged to the budget at its compressed size and bounded by nothing. Every other parser in the
+  // process must carry the same flag for that argument to hold; the MCP route-level fallback
+  // (src/modules/mcp/mcp.server.ts) does.
   app.use(
     json({
       limit: bodyLimit,

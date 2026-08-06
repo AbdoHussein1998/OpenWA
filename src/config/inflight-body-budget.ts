@@ -163,8 +163,20 @@ export function createInflightBodyBudget(budgetBytes: number, options?: Inflight
     // orders of magnitude larger than the whole budget can be buffered without the accounting ever
     // seeing it. Refusing here — before admission, before a byte is read — keeps the invariant
     // true rather than trying to price an expansion that is not knowable in advance.
+    //
+    // The predicate is body-parser's, NOT `reserved > 0`. They disagree on exactly the cases that
+    // matter: `parseDeclaredLength` rejects a Content-Length that is not a safe integer (reserving
+    // nothing), while type-is `hasBody` accepts anything non-NaN — so `Content-Length: 2**53 + 1`
+    // with a gzip body reserves 0 here yet is still handed to the parser. Mirroring hasBody keeps
+    // the two layers from disagreeing about whether a body exists.
+    const bodyIndicated =
+      req.headers['transfer-encoding'] !== undefined || !Number.isNaN(Number(req.headers['content-length']));
+    // The accepted set is body-parser's, deliberately: it compares the WHOLE header against
+    // 'identity', so even a technically-uncompressed list ("identity, identity") is refused there.
+    // Accepting more here would only move the refusal to the parser, which answers a different
+    // shape — the two layers agreeing matters more than honouring an encoding list nobody sends.
     const encoding = (req.headers['content-encoding'] ?? '').trim().toLowerCase();
-    if (reserved > 0 && encoding !== '' && encoding !== 'identity') {
+    if (bodyIndicated && encoding !== '' && encoding !== 'identity') {
       rejectCompressed(req, res);
       return;
     }

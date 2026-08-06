@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { createServer, request as httpRequest, Server } from 'http';
 import { AddressInfo } from 'net';
 import { gzipSync } from 'zlib';
@@ -446,7 +448,13 @@ describe('compressed request bodies', () => {
       });
       req.on('error', (error: NodeJS.ErrnoException) => {
         if (reply) return;
-        if (error.code === 'ECONNRESET' || error.code === 'EPIPE') return;
+        // A refusal answers and drops the socket without reading the body, so the reset can beat
+        // the parsed response. Settle with a sentinel rather than swallowing it: a bare timeout
+        // would report as "test timed out" instead of "expected 415, got a connection reset".
+        if (error.code === 'ECONNRESET' || error.code === 'EPIPE') {
+          resolve({ status: 0, body: '' });
+          return;
+        }
         reject(error);
       });
       req.end(body);
@@ -492,6 +500,59 @@ describe('compressed request bodies', () => {
     expect(reply.status).toBe(503);
   });
 
+  it('refuses a compressed body whose Content-Length is zero', async () => {
+    await listen();
+
+    // `reserved` is 0 here, so a gate keyed on the reservation would wave this through to the
+    // parser and the client would get body-parser's HTML error instead of the documented shape.
+    const reply = await send(
+      { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip', 'Content-Length': '0' },
+      Buffer.alloc(0),
+    );
+
+    expect(reply.status).toBe(415);
+    expect((JSON.parse(reply.body) as { error?: string }).error).toBe('Unsupported Media Type');
+  });
+
+  it('refuses a compressed body whose Content-Length is not a safe integer', async () => {
+    await listen();
+    const gzipped = gzipSync(INFLATED_PAYLOAD);
+
+    // parseDeclaredLength refuses to reserve for this, but type-is `hasBody` still hands it to the
+    // parser — the one shape that escaped both the reservation AND admission control.
+    const reply = await send(
+      {
+        'Content-Type': 'application/json',
+        'Content-Encoding': 'gzip',
+        'Content-Length': String(Number.MAX_SAFE_INTEGER + 2),
+      },
+      gzipped,
+    );
+
+    expect(reply.status).toBe(415);
+    expect((JSON.parse(reply.body) as { error?: string }).error).toBe('Unsupported Media Type');
+  });
+
+  it('refuses an encoding LIST, matching what the parser would do with it', async () => {
+    await listen();
+    const plain = Buffer.from(JSON.stringify({ data: 'small' }));
+
+    // "identity, identity" transforms nothing, but body-parser compares the whole header against
+    // 'identity' and refuses it — so the middleware refuses it too and both layers answer the same
+    // documented shape instead of disagreeing about who rejects it.
+    const reply = await send(
+      {
+        'Content-Type': 'application/json',
+        'Content-Encoding': 'identity, identity',
+        'Content-Length': String(plain.length),
+      },
+      plain,
+    );
+
+    expect(reply.status).toBe(415);
+    expect((JSON.parse(reply.body) as { error?: string }).error).toBe('Unsupported Media Type');
+  });
+
   it('admits an ordinary body declaring Content-Encoding: identity', async () => {
     await listen();
     const plain = Buffer.from(JSON.stringify({ data: 'small' }));
@@ -506,5 +567,24 @@ describe('compressed request bodies', () => {
     );
 
     expect(reply.status).toBe(200);
+  });
+});
+
+/**
+ * The `inflate: false` backstop is unreachable while the guard above stands, so no behavioural test
+ * can lock it — yet it is the only thing standing if the guard is ever bypassed. Assert it in the
+ * source instead, the way load-env.spec.ts locks main.ts's import order.
+ */
+describe('body-parser inflate backstop', () => {
+  const read = (relative: string): string => readFileSync(resolve(__dirname, relative), 'utf8');
+
+  it('disables inflate on both global parsers in main.ts', () => {
+    const source = read('../main.ts');
+
+    expect(source.match(/^\s+inflate: false,$/gm)).toHaveLength(2);
+  });
+
+  it('disables inflate on the MCP route-level fallback parser', () => {
+    expect(read('../modules/mcp/mcp.server.ts')).toContain('express.json({ inflate: false })');
   });
 });

@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **A request body with a `Content-Encoding` other than `identity` is now refused with `415`** — the aggregate in-flight body cap counts wire bytes, so a compressed body was admitted on its compressed size and then inflated past the memory it was supposed to bound.
+- **An API request body with a `Content-Encoding` other than `identity` is now refused with `415`** — the aggregate in-flight body cap counts wire bytes, so a compressed body was admitted on its compressed size and then inflated past the memory it was supposed to bound.
 
 ## [0.14.2] - 2026-08-06
 

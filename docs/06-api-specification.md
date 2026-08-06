@@ -102,7 +102,7 @@ Validation failures (`statusCode: 400`) return `message` as an **array** of fiel
 | `404`       | Not Found             | The addressed resource (session, message, webhook, batch, …) does not exist                                                                                                                                             |
 | `409`       | Conflict              | A uniqueness constraint was violated (e.g. duplicate name), or a credential teardown for the same session name is still in flight on `start`/`delete` (retryable; body carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`) |
 | `413`       | Payload Too Large     | Base64 media exceeds the media byte cap (see §6.3)                                                                                                                                                                      |
-| `415`       | Unsupported Media Type | The request carries a `Content-Encoding` other than `identity`. Compressed request bodies are not accepted: the aggregate body cap counts wire bytes, so an inflated body would exceed the memory it bounds            |
+| `415`       | Unsupported Media     | The request has a body carrying a `Content-Encoding` other than `identity`; compressed request bodies are not accepted, as the aggregate body cap counts wire bytes                                                     |
 | `500`       | Internal Server Error | Send failed at the WhatsApp engine or an unexpected server error                                                                                                                                                        |
 
 ### Timestamp Conventions
