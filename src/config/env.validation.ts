@@ -172,6 +172,7 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'WEBHOOK_MAX_PER_SESSION', // 0 = unlimited
     'AUTOMATION_MAX_PER_SESSION', // 0 = unlimited
     'WEBHOOK_MEDIA_INLINE_MAX_BYTES', // 0 = never inline media
+    'EXPORT_INLINE_MEDIA_BUDGET_BYTES', // 0 = a data export carries no inline media at all
   ]) {
     checkNonNegativeInt(key);
   }

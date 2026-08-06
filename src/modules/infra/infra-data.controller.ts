@@ -132,48 +132,118 @@ export async function restoreSessionOwnership(
 const SHARED_CONNECTION_DIALECTS = new Set(['better-sqlite3', 'sqlite']);
 
 /**
- * Drop the inline base64 blob from an exported message row, leaving the engine's own omitted marker.
+ * Aggregate budget for the inline base64 media ONE export may carry, counted in the encoded bytes
+ * that actually land in the JSON body. Override with EXPORT_INLINE_MEDIA_BUDGET_BYTES; 0 omits every
+ * payload, and a garbage value falls back to the default.
  *
  * The export is bounded by nothing while the import rides the global request body limit (25mb by
- * default, `resolveBodyLimit`), so a single media message is enough to produce a backup this gateway
- * cannot restore: inbound media is capped at MEDIA_DOWNLOAD_MAX_BYTES (50 MiB by default) and base64
- * inflates it to 4/3 of that, well past the import's ceiling. Same reason the generated `body_ts`
- * column is stripped a few lines below — a backup has to stay restorable to be a backup.
+ * default, `resolveBodyLimit`), so unbounded inline media produces a backup this gateway then refuses
+ * with a 413 — inbound media is capped at MEDIA_DOWNLOAD_MAX_BYTES (50 MiB by default) and base64
+ * inflates that to 4/3.
  *
- * The replacement is the marker `capInboundMedia` already emits for an over-cap payload
- * (`{ mimetype, filename?, omitted: true, sizeBytes }`), so a restored row is indistinguishable from
- * one whose media was skipped on the way in rather than a new shape consumers must learn: the `media`
- * field stays present and only the bytes are gone. `mediaPath`/`mediaMimetype` are untouched, and
- * `scripts/backup.sh` copies the storage tree unconditionally, so an operator on the runbook path
- * still has the files themselves.
+ * A blanket strip would trade the 413 for silent data loss, which is why this is a budget and not a
+ * flag: with the chat-media archive off — the default — `metadata.media.data` is the ONLY copy of an
+ * inbound photo, and a 180 KB one costs nothing against a 25 MiB ceiling. Mirrors
+ * CHAT_HISTORY_MEDIA_BUDGET_BYTES, which bounds the same failure on the chat-history response.
+ */
+const DEFAULT_EXPORT_INLINE_MEDIA_BUDGET_BYTES = 8 * 1024 * 1024;
+
+function exportInlineMediaBudgetBytes(): number {
+  const parsed = Number.parseInt(process.env.EXPORT_INLINE_MEDIA_BUDGET_BYTES ?? '', 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : DEFAULT_EXPORT_INLINE_MEDIA_BUDGET_BYTES;
+}
+
+/**
+ * A `data` value that is a POINTER rather than bytes. `metadata.media.data` holds `base64 || dto.url!`
+ * (message.service.ts), and the URL form is the only one the send examples offer — so a URL must never
+ * be treated as a payload: dropping it destroys the reference for a few dozen bytes that were never a
+ * 413 risk, and reports a `sizeBytes` that is URL text measured as base64, the size of nothing.
+ */
+function isMediaPointer(data: string): boolean {
+  return data.startsWith('http://') || data.startsWith('https://');
+}
+
+/** Spends the shared budget. Returns true when this payload does not fit and must be dropped. */
+function createInlineMediaBudget(): (encodedBytes: number) => boolean {
+  const budget = exportInlineMediaBudgetBytes();
+  let spent = 0;
+  return (encodedBytes: number): boolean => {
+    if (spent + encodedBytes > budget) return true;
+    spent += encodedBytes;
+    return false;
+  };
+}
+
+/**
+ * Replace an over-budget inline payload on a message row with the engine's own omitted marker
+ * (`{ mimetype, filename?, omitted: true, sizeBytes }`, `capInboundMedia`), so a restored row is
+ * indistinguishable from one whose media was skipped on the way in rather than a new shape consumers
+ * must learn. `mediaPath`/`mediaMimetype` are untouched.
  *
  * NOTE: this bounds the media, not the export. A text-only history is still unbounded — every row
  * carries a few hundred bytes of scaffolding regardless of what was said.
  */
-function stripInlineMediaPayload(row: MessageRow): void {
+function stripInlineMediaPayload(row: MessageRow, exceedsBudget: (encodedBytes: number) => boolean): void {
+  // `metadata` is TEXT on both dialects and the export reads through a raw query that never hydrates
+  // an entity, so the value is always a string here.
   const raw = row.metadata;
-  if (raw == null) return;
-  let parsed: Record<string, unknown>;
-  if (typeof raw === 'string') {
-    try {
-      parsed = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      // Metadata we cannot parse is not ours to rewrite; the importer round-trips it verbatim.
-      return;
-    }
-  } else {
-    parsed = { ...raw };
+  if (typeof raw !== 'string') return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Metadata we cannot parse is not ours to rewrite; the importer round-trips it verbatim.
+    return;
   }
-  const media = parsed.media as { data?: unknown; sizeBytes?: number } | null | undefined;
-  if (!media || typeof media.data !== 'string') return;
+  // `JSON.parse('null')` yields null, and the import accepts a hand-edited archive verbatim, so this
+  // is reachable — reading `.media` off it would 500 every export until the row is deleted by hand.
+  if (typeof parsed !== 'object' || parsed === null) return;
+  const bag = parsed as Record<string, unknown>;
+  const media = bag.media as { data?: unknown; sizeBytes?: number } | null | undefined;
+  if (!media || typeof media.data !== 'string' || isMediaPointer(media.data)) return;
+  if (!exceedsBudget(Buffer.byteLength(media.data, 'utf8'))) return;
   const { data, ...withoutPayload } = media;
-  parsed.media = {
+  bag.media = {
     ...withoutPayload,
     omitted: true,
     // Decoded bytes, matching what capInboundMedia reports — the caller asked how big it WAS.
     sizeBytes: media.sizeBytes ?? Buffer.byteLength(data, 'base64'),
   };
-  row.metadata = typeof raw === 'string' ? JSON.stringify(parsed) : parsed;
+  row.metadata = JSON.stringify(bag);
+}
+
+/**
+ * The same budget applied to a bulk batch's stored message list.
+ *
+ * `message_batches.messages` carries the whole outbound list, base64 included, for the entire
+ * duration of a run — `stripBatchMediaPayloads` only fires on the four terminal transitions, and a
+ * batch left PROCESSING by another node keeps its payloads indefinitely. Bounding only `messages`
+ * would let the 413 arrive by this route instead. The batch shape keeps `url` in its own field, so
+ * unlike a message row there is no pointer to confuse with a payload.
+ */
+function stripBatchInlineMedia(row: MessageBatchRow, exceedsBudget: (encodedBytes: number) => boolean): void {
+  const raw = row.messages;
+  if (typeof raw !== 'string') return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!Array.isArray(parsed)) return;
+  let stripped = false;
+  for (const entry of parsed) {
+    const content = (entry as { content?: unknown } | null)?.content;
+    if (typeof content !== 'object' || content === null) continue;
+    for (const key of ['image', 'video', 'audio', 'document']) {
+      const media = (content as Record<string, unknown>)[key] as { base64?: unknown } | null | undefined;
+      if (!media || typeof media !== 'object' || typeof media.base64 !== 'string') continue;
+      if (!exceedsBudget(Buffer.byteLength(media.base64, 'utf8'))) continue;
+      delete media.base64;
+      stripped = true;
+    }
+  }
+  if (stripped) row.messages = JSON.stringify(parsed);
 }
 
 @ApiTags('infrastructure')
@@ -270,15 +340,22 @@ export class InfraDataController {
       }
     };
 
+    // One budget shared by both tables that can carry inline media, so the total is what is bounded
+    // rather than each table separately.
+    const exceedsBudget = createInlineMediaBudget();
+
     const messages = await queryOptionalTable<MessageRow>('messages');
     // Postgres carries a STORED generated tsvector column `body_ts` (FTS) that `SELECT *` picks up.
     // It is a server-maintained index artifact, not payload: strip it so backups stay dialect-neutral
     // (and small). The import's explicit column list already ignores it in older archives.
     for (const row of messages) {
       delete row.body_ts;
-      stripInlineMediaPayload(row);
+      stripInlineMediaPayload(row, exceedsBudget);
     }
     const messageBatches = await queryOptionalTable<MessageBatchRow>('message_batches');
+    for (const row of messageBatches) {
+      stripBatchInlineMedia(row, exceedsBudget);
+    }
     const templates = await queryOptionalTable<TemplateRow>('templates');
     const baileysStoredMessages = await queryOptionalTable<BaileysStoredMessageRow>('baileys_stored_messages');
     const lidMappings = await queryOptionalTable<LidMappingRow>('lid_mappings');
