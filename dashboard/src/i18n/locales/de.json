@@ -748,7 +748,8 @@
       "disconnected": "Getrennt",
       "disabled": "Deaktiviert"
     },
-    "envPinNote": "Durch eine Umgebungsvariable festgelegt — dies ist der aktuell verwendete Wert. Änderungen im Dashboard werden erst angewendet, wenn diese Variable entfernt wurde.",
+    "envPinNote": "Durch die Umgebungsvariable {{name}} festgelegt — dies ist der aktuell verwendete Wert. Änderungen im Dashboard werden erst wirksam, wenn diese Variable entfernt wird.",
+    "pendingRestartNote": "Gespeichert, aber noch nicht übernommen — starten Sie den Server neu, damit diese Änderung wirksam wird.",
     "migration": {
       "title": "Achtung — dadurch wird das Daten-Backend geändert",
       "dbWarning": "Die neue Datenbank ist zunächst leer. Lade jetzt eine Sicherung deiner aktuellen Daten herunter, solange noch die alte Datenbank aktiv ist, und stelle sie nach dem Neustart wieder her.",

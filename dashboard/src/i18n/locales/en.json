@@ -748,7 +748,8 @@
       "disconnected": "Disconnected",
       "disabled": "Disabled"
     },
-    "envPinNote": "Pinned by an environment variable — this is the running value; dashboard changes won't apply until that variable is unset.",
+    "envPinNote": "Pinned by the environment variable {{name}} — this is the running value; dashboard changes won't apply until that variable is unset.",
+    "pendingRestartNote": "Saved, but not applied yet — restart the server for this change to take effect.",
     "migration": {
       "title": "Heads up — this changes the data backend",
       "dbWarning": "The new database starts empty. Download a backup of your current data now (while still on the old database), then restore it after the restart.",

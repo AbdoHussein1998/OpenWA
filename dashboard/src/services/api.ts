@@ -451,6 +451,15 @@ export interface InfraStatus {
     webVersion?: string | null;
     webVersionSource?: 'pinned' | 'auto' | 'native';
   };
+  /**
+   * Editable settings supplied by a layer above `data/.env.generated` (the container environment or a
+   * project `.env`), which therefore cannot be changed from this page until that layer is. Reported by
+   * the gateway rather than inferred from a running-vs-saved mismatch, because that mismatch is also
+   * what an unrestarted save looks like and the two need opposite advice (#1082).
+   *
+   * Optional only because a dashboard can be served by a gateway that predates the field.
+   */
+  envPinned?: string[];
 }
 
 // Saved infrastructure config (from data/.env.generated) used to hydrate the form.

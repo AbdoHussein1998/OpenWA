@@ -124,27 +124,29 @@ export function Infrastructure() {
     );
   }
 
-  // A setting whose RUNNING value (/status) differs from the SAVED file (/config) is being pinned by a
-  // host/.env environment variable, which wins at runtime — so a dashboard change to it won't apply
-  // until that variable is unset. Surface that honestly instead of letting the control look effective.
-  const dbPinnedByEnv =
-    !configSave.savePending &&
-    !!infraStatus &&
-    !!savedConfig &&
-    infraStatus.database.type !== savedConfig.database.type;
-  const redisPinnedByEnv =
-    !configSave.savePending &&
-    !!infraStatus &&
-    !!savedConfig &&
-    infraStatus.redis.enabled !== savedConfig.redis.enabled;
-  const storagePinnedByEnv =
-    !configSave.savePending && !!infraStatus && !!savedConfig && infraStatus.storage.type !== savedConfig.storage.type;
-  const envPinNote = (pinned: boolean) =>
-    pinned ? (
+  // A control here can be ineffective for two different reasons, and they need OPPOSITE advice:
+  //   - an environment variable (or a project .env) supplies the value, so it outranks anything saved
+  //     here until the deployment changes — the gateway reports this in `envPinned`;
+  //   - the value WAS saved and the server has not been restarted yet — a restart applies it.
+  // Both look identical as "running differs from saved", which is why drift alone used to be reported
+  // as an environment pin even on a stock stack with no variable set anywhere (#1082).
+  const settingNote = (envKey: string, running: unknown, saved: unknown) => {
+    if (infraStatus?.envPinned?.includes(envKey)) {
+      return (
+        <p className="env-pin-note">
+          <AlertTriangle size={14} /> {t('infrastructure.envPinNote', { name: envKey })}
+        </p>
+      );
+    }
+    // savePending suppresses the note only while the request is in flight; afterwards the saved value
+    // genuinely differs from the running one until a restart, and saying so is the whole point.
+    const pendingRestart = !configSave.savePending && !!infraStatus && !!savedConfig && running !== saved;
+    return pendingRestart ? (
       <p className="env-pin-note">
-        <AlertTriangle size={14} /> {t('infrastructure.envPinNote')}
+        <AlertTriangle size={14} /> {t('infrastructure.pendingRestartNote')}
       </p>
     ) : null;
+  };
 
   return (
     <div className="infrastructure-page">
@@ -162,7 +164,7 @@ export function Infrastructure() {
               ● {configForm.dbConfig.type === 'postgres' ? 'PostgreSQL' : 'SQLite'}
             </span>
           </div>
-          {envPinNote(dbPinnedByEnv)}
+          {settingNote('DATABASE_TYPE', infraStatus.database.type, savedConfig?.database.type)}
 
           <div className="radio-group">
             <label className={`radio-option ${configForm.dbConfig.type === 'sqlite' ? 'selected' : ''}`}>
@@ -364,6 +366,9 @@ export function Infrastructure() {
             </div>
             <span className="status-indicator connected">● {currentEngine || configForm.engineConfig.type}</span>
           </div>
+          {/* The radio re-seeds from the RUNNING engine, so without this a pinned engine silently
+              snapped back after a restart and read as "the save did nothing" (#1082). */}
+          {settingNote('ENGINE_TYPE', infraStatus.engine.type, savedConfig?.engine.type)}
 
           <div className="radio-group">
             {engines.map(engine => (
@@ -463,7 +468,7 @@ export function Infrastructure() {
                 : t('infrastructure.statusLabels.disabled')}
             </span>
           </div>
-          {envPinNote(redisPinnedByEnv)}
+          {settingNote('REDIS_ENABLED', infraStatus.redis.enabled, savedConfig?.redis.enabled)}
 
           <div
             className="toggle-row"
@@ -634,7 +639,7 @@ export function Infrastructure() {
               );
             })()}
           </div>
-          {envPinNote(storagePinnedByEnv)}
+          {settingNote('STORAGE_TYPE', infraStatus.storage.type, savedConfig?.storage.type)}
 
           <div className="radio-group">
             <label className={`radio-option ${configForm.storageConfig.type === 'local' ? 'selected' : ''}`}>

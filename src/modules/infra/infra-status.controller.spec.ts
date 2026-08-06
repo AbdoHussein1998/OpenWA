@@ -21,6 +21,7 @@ jest.mock('fs', () => {
 });
 
 import { InfraStatusController } from './infra-status.controller';
+import { recordPinnedEnvKeys } from '../../config/env-precedence';
 
 describe('InfraStatusController.getStatus DB health (active SELECT 1 probe, not just isInitialized)', () => {
   const build = (query: jest.Mock) => {
@@ -178,5 +179,47 @@ describe('InfraStatusController.getStatus storage (reads the real storage.localP
   it('omits bucket in local mode (no fabricated field)', async () => {
     const status = await buildController({ 'storage.type': 'local' }).getStatus();
     expect(status.storage.bucket).toBeUndefined();
+  });
+});
+
+// #1082: the Infrastructure page used to INFER an environment pin from "running != saved", which also
+// describes a save that has not been restarted yet. getStatus now reports the real thing.
+describe('InfraStatusController.getStatus envPinned', () => {
+  const savedWebVer = process.env.WWEBJS_WEB_VERSION;
+  beforeAll(() => (process.env.WWEBJS_WEB_VERSION = 'off'));
+  afterAll(() => {
+    if (savedWebVer === undefined) delete process.env.WWEBJS_WEB_VERSION;
+    else process.env.WWEBJS_WEB_VERSION = savedWebVer;
+  });
+
+  const buildController = () => {
+    const config = { get: (_key: string, def?: unknown) => def };
+    const ds = { isInitialized: true, query: jest.fn().mockResolvedValue([{ '1': 1 }]) };
+    return new InfraStatusController(
+      config as never,
+      ds as never,
+      ds as never,
+      {} as never,
+      { isDockerAvailable: () => false } as never,
+      { isAvailable: () => Promise.resolve(false) } as never,
+      { isS3Available: () => false, refreshS3Availability: () => Promise.resolve(false) } as never,
+    );
+  };
+
+  it('reports only the editable selection keys a shadowing layer supplies', async () => {
+    // Snapshot as load-env does: ENGINE_TYPE comes from the host/.env, REDIS_ENABLED from the file.
+    recordPinnedEnvKeys({ ENGINE_TYPE: 'whatsapp-web.js', PATH: '/usr/bin' });
+
+    const status = await buildController().getStatus();
+
+    expect(status.envPinned).toEqual(['ENGINE_TYPE']);
+    // PATH is shadowing too but has no control on the page — naming it would be noise.
+    expect(status.envPinned).not.toContain('PATH');
+  });
+
+  it('reports an empty list when nothing above data/.env.generated supplies a selection key', async () => {
+    recordPinnedEnvKeys({});
+
+    expect((await buildController().getStatus()).envPinned).toEqual([]);
   });
 });

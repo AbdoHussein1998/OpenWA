@@ -767,7 +767,8 @@
     "toasts": {
       "saveFailed": "Salvataggio Fallito"
     },
-    "envPinNote": "Fissato da una variabile d'ambiente: questo è il valore in esecuzione; le modifiche dalla dashboard non avranno effetto finché la variabile non viene rimossa.",
+    "envPinNote": "Fissato dalla variabile d'ambiente {{name}}: questo è il valore in esecuzione; le modifiche dalla dashboard non verranno applicate finché quella variabile non viene rimossa.",
+    "pendingRestartNote": "Salvato, ma non ancora applicato: riavvia il server perché questa modifica abbia effetto.",
     "migration": {
       "title": "Attenzione: questa operazione cambia il backend dei dati",
       "dbWarning": "Il nuovo database parte vuoto. Scarica ora un backup dei tuoi dati attuali (mentre sei ancora sul vecchio database), poi ripristinalo dopo il riavvio.",
