@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`rmyndharis-openwa` 0.2.0 on PyPI** — the first release through the trusted-publishing workflow, carrying everything the Python SDK gained since 0.1.0 in June.
+
 ## [0.14.2] - 2026-08-06
 
 ### Added
