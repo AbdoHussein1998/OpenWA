@@ -1,5 +1,8 @@
 import { EventEmitter } from 'events';
-import { Request, Response } from 'express';
+import { createServer, request as httpRequest, Server } from 'http';
+import { AddressInfo } from 'net';
+import { gzipSync } from 'zlib';
+import express, { Request, Response, json } from 'express';
 import {
   createInflightBodyBudget,
   parseBodyLimitBytes,
@@ -388,5 +391,120 @@ describe('stall reaper', () => {
     jest.advanceTimersByTime(120_000);
     expect(destroyMock(getReq)).not.toHaveBeenCalled();
     expect(destroyMock(emptyReq)).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Compressed bodies, exercised over a REAL server with a RAW http client. The doubles above hand the
+ * middleware a header bag and never move a byte, so they cannot show what a compressed body costs
+ * once the parser inflates it. A raw client (rather than an assertion library) is deliberate: the
+ * exact bytes on the wire are the subject here, and a serializer that helpfully re-encodes a Buffer
+ * would test itself instead of the middleware.
+ */
+describe('compressed request bodies', () => {
+  const BUDGET = 64 * 1024;
+  /** Compresses ~1000:1, so its declared length is a small fraction of what inflating it costs. */
+  const INFLATED_PAYLOAD = Buffer.from(JSON.stringify({ data: 'a'.repeat(2 * MB) }));
+
+  let server: Server | undefined;
+  let budget: InflightBodyBudget;
+  let port = 0;
+
+  const listen = async (): Promise<void> => {
+    budget = createInflightBodyBudget(BUDGET);
+    const app = express();
+    app.use(budget.middleware);
+    app.use(json({ limit: '25mb' }));
+    app.post('/echo', (_req, res) => {
+      res.status(200).json({ ok: true });
+    });
+    server = createServer(app);
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
+    port = (server.address() as AddressInfo).port;
+  };
+
+  interface Reply {
+    status: number;
+    body: string;
+  }
+
+  /**
+   * Resolves on the response even when the server drops the socket mid-upload — which is exactly
+   * what a refusal does here (it answers, sets Connection: close and never reads the body), so a
+   * client that treated the reset as fatal could not observe the status it is meant to assert.
+   */
+  const send = (headers: Record<string, string>, body: Buffer): Promise<Reply> =>
+    new Promise((resolve, reject) => {
+      let reply: Reply | undefined;
+      const req = httpRequest({ host: '127.0.0.1', port, path: '/echo', method: 'POST', headers }, res => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          reply = { status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() };
+          resolve(reply);
+        });
+      });
+      req.on('error', (error: NodeJS.ErrnoException) => {
+        if (reply) return;
+        if (error.code === 'ECONNRESET' || error.code === 'EPIPE') return;
+        reject(error);
+      });
+      req.end(body);
+    });
+
+  beforeEach(() => jest.useRealTimers());
+  afterEach(async () => {
+    if (server) await new Promise<void>(resolve => server!.close(() => resolve()));
+    server = undefined;
+  });
+
+  it('refuses a gzip-encoded body with 415 instead of admitting it on its compressed length', async () => {
+    await listen();
+    const gzipped = gzipSync(INFLATED_PAYLOAD);
+    // The premise: compressed, this body is small enough to sail through admission control.
+    expect(gzipped.length).toBeLessThan(BUDGET);
+    expect(INFLATED_PAYLOAD.length).toBeGreaterThan(BUDGET);
+
+    const reply = await send(
+      {
+        'Content-Type': 'application/json',
+        'Content-Encoding': 'gzip',
+        'Content-Length': String(gzipped.length),
+      },
+      gzipped,
+    );
+
+    expect(reply.status).toBe(415);
+    expect(JSON.parse(reply.body)).toEqual({
+      statusCode: 415,
+      message: 'Compressed request bodies are not supported',
+      error: 'Unsupported Media Type',
+    });
+    expect(budget.currentBytes()).toBe(0);
+  });
+
+  it('refuses an oversized UNCOMPRESSED body through the budget, not the encoding guard', async () => {
+    await listen();
+    const plain = Buffer.alloc(BUDGET + 1, 0x20);
+
+    const reply = await send({ 'Content-Type': 'application/json', 'Content-Length': String(plain.length) }, plain);
+
+    expect(reply.status).toBe(503);
+  });
+
+  it('admits an ordinary body declaring Content-Encoding: identity', async () => {
+    await listen();
+    const plain = Buffer.from(JSON.stringify({ data: 'small' }));
+
+    const reply = await send(
+      {
+        'Content-Type': 'application/json',
+        'Content-Encoding': 'identity',
+        'Content-Length': String(plain.length),
+      },
+      plain,
+    );
+
+    expect(reply.status).toBe(200);
   });
 });

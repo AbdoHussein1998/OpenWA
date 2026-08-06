@@ -124,9 +124,14 @@ async function bootstrap() {
   // The `verify` callback stashes the EXACT bytes json() received on req.rawBody, byte-identical to
   // what a provider signed, so the @Public ingress controller can HMAC-verify over the raw body
   // (JSON.stringify(req.body) is NOT byte-identical). Cheap for every route; non-ingress routes ignore it.
+  // `inflate: false` is a backstop, not the guard: the budget middleware above already refuses a
+  // compressed body with 415 before a byte is read. It sits here so a future middleware reordering,
+  // or a route-level parser mounted past that middleware, cannot silently reopen the gap — an
+  // inflated body is charged to the budget at its compressed size and bounded by nothing.
   app.use(
     json({
       limit: bodyLimit,
+      inflate: false,
       verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
         req.rawBody = buf;
       },
@@ -136,6 +141,7 @@ async function bootstrap() {
     urlencoded({
       extended: true,
       limit: bodyLimit,
+      inflate: false,
       // Form-encoded webhook providers also sign the exact wire bytes. Use the same capture contract
       // as json(); other content types remain unsupported rather than installing a global catch-all.
       verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
