@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A whatsapp-web.js session failing with `Execution context was destroyed` showed a bare Puppeteer error with no next step** — the advisory naming the likely stale browser profile went only to the server log, so the session card now carries a short form of it too.
+
 ## [0.14.1] - 2026-08-05
 
 ### Added

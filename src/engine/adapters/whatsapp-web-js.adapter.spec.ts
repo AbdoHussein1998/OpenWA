@@ -128,6 +128,65 @@ describe('isExecutionContextDestroyedError (#708 — Puppeteer context loss duri
   );
 });
 
+// #1081: the advisory naming the stale profile dir went only to the server log, so the dashboard —
+// which renders nothing but onError's text as `lastError` — showed a bare Puppeteer error with no
+// next step. The hint has to travel WITH the reason, not beside it.
+describe('WhatsAppWebJsAdapter initialize() failure reason (#1081)', () => {
+  const newAdapter = (): WhatsAppWebJsAdapter =>
+    new WhatsAppWebJsAdapter({ sessionId: 'sess-advisory', sessionDataPath: './data/sessions', puppeteer: {} });
+
+  let rmSpy: jest.SpyInstance;
+  let clientInitSpy: jest.SpyInstance;
+  let savedWebVersion: string | undefined;
+
+  beforeEach(() => {
+    // 'off' keeps initialize() offline (no wa-version registry fetch); rm is stubbed so the real
+    // data dir is never touched by the pre-launch Singleton cleanup.
+    savedWebVersion = process.env.WWEBJS_WEB_VERSION;
+    process.env.WWEBJS_WEB_VERSION = 'off';
+    rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    clientInitSpy = jest.spyOn(Client.prototype as unknown as { initialize: () => Promise<void> }, 'initialize');
+  });
+
+  afterEach(() => {
+    rmSpy.mockRestore();
+    clientInitSpy.mockRestore();
+    if (savedWebVersion === undefined) {
+      delete process.env.WWEBJS_WEB_VERSION;
+    } else {
+      process.env.WWEBJS_WEB_VERSION = savedWebVersion;
+    }
+  });
+
+  /** Drive initialize() to the catch with `message`, and hand back what onError actually received. */
+  const reasonFor = async (message: string): Promise<string> => {
+    clientInitSpy.mockRejectedValue(new Error(message));
+    let surfaced = '';
+    const onError = jest.fn((reason: string) => {
+      surfaced = reason;
+    });
+    await expect(newAdapter().initialize({ onError })).rejects.toThrow(message);
+    expect(onError).toHaveBeenCalledTimes(1);
+    return surfaced;
+  };
+
+  it('appends the stale-profile remedy to the reason the dashboard shows', async () => {
+    const raw = 'Protocol error (Runtime.callFunctionOn): Execution context was destroyed.';
+    const surfaced = await reasonFor(raw);
+
+    // The raw Puppeteer text stays FIRST: it is what operators search for and what issue reports quote.
+    expect(surfaced.startsWith(raw)).toBe(true);
+    expect(surfaced).toMatch(/browser profile/i);
+    expect(surfaced).toMatch(/docs\/12-troubleshooting-faq\.md/);
+  });
+
+  it('leaves an unrelated initialize failure byte-identical', async () => {
+    const raw = 'Failed to launch the browser process:  Code: null';
+
+    expect(await reasonFor(raw)).toBe(raw);
+  });
+});
+
 describe('buildProxyLaunchConfig (#628 — proxy credentials must not go into --proxy-server)', () => {
   it('strips credentials from an HTTP proxy and returns them as proxyAuthentication', () => {
     expect(buildProxyLaunchConfig('http://user:pass@proxy.example.com:8080')).toEqual({
