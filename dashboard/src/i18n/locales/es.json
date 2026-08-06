@@ -767,7 +767,8 @@
     "toasts": {
       "saveFailed": "Error al guardar"
     },
-    "envPinNote": "Fijado por una variable de entorno: este es el valor en ejecución; los cambios del panel no se aplicarán hasta que esa variable se elimine.",
+    "envPinNote": "Fijado por la variable de entorno {{name}}: este es el valor en ejecución; los cambios del panel no se aplicarán hasta que esa variable se elimine.",
+    "pendingRestartNote": "Guardado, pero aún no aplicado: reinicia el servidor para que este cambio surta efecto.",
     "migration": {
       "title": "Atención: esto cambia el backend de datos",
       "dbWarning": "La nueva base de datos comienza vacía. Descarga ahora una copia de seguridad de tus datos actuales (mientras sigues en la base de datos anterior) y luego restáurala después del reinicio.",

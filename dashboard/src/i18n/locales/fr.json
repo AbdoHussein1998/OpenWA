@@ -767,7 +767,8 @@
     "toasts": {
       "saveFailed": "Échec de l'enregistrement"
     },
-    "envPinNote": "Défini par une variable d'environnement — c'est la valeur en cours d'exécution ; les modifications du tableau de bord ne s'appliqueront pas tant que cette variable ne sera pas supprimée.",
+    "envPinNote": "Défini par la variable d'environnement {{name}} — c'est la valeur en cours d'exécution ; les modifications du tableau de bord ne s'appliqueront pas tant que cette variable n'est pas supprimée.",
+    "pendingRestartNote": "Enregistré, mais pas encore appliqué — redémarrez le serveur pour que cette modification prenne effet.",
     "migration": {
       "title": "Attention — cela change le backend de données",
       "dbWarning": "La nouvelle base de données démarre vide. Téléchargez dès maintenant une sauvegarde de vos données actuelles (tant que vous êtes encore sur l'ancienne base de données), puis restaurez-la après le redémarrage.",

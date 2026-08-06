@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
-import { clearBlankEnv, BLANK_SHADOWED_ENV_KEYS } from './env-precedence';
+import { clearBlankEnv, BLANK_SHADOWED_ENV_KEYS, recordPinnedEnvKeys, isEnvPinned } from './env-precedence';
 import { computeFeatureFlags } from './feature-flags';
 
 describe('clearBlankEnv', () => {
@@ -18,6 +18,40 @@ describe('clearBlankEnv', () => {
     const env: NodeJS.ProcessEnv = {};
     clearBlankEnv(env, ['MISSING']);
     expect('MISSING' in env).toBe(false);
+  });
+});
+
+// #1082: the dashboard used to INFER an environment pin from "running value != saved value", which is
+// also true right after a save that has not been restarted yet. This snapshot is the real signal.
+describe('isEnvPinned — does a layer above data/.env.generated supply this key?', () => {
+  it('counts a key present before the saved file is merged, and not one the file supplies', () => {
+    // Mirrors load-env's order: the snapshot is taken after process.env and .env, before the file.
+    const env: NodeJS.ProcessEnv = { ENGINE_TYPE: 'whatsapp-web.js' };
+    recordPinnedEnvKeys(env);
+    env.REDIS_ENABLED = 'true'; // supplied by data/.env.generated afterwards
+
+    expect(isEnvPinned('ENGINE_TYPE')).toBe(true);
+    expect(isEnvPinned('REDIS_ENABLED')).toBe(false);
+  });
+
+  // The load-bearing case: the bundled compose forwards `- ENGINE_TYPE=${ENGINE_TYPE:-}`, which renders
+  // blank when the operator sets nothing. clearBlankEnv deletes it BEFORE the snapshot, so a stock stack
+  // must not be told an environment variable is pinning anything.
+  it('does not count a blank compose forward as a pin', () => {
+    const env: NodeJS.ProcessEnv = { ENGINE_TYPE: '', REDIS_ENABLED: '   ' };
+    clearBlankEnv(env, BLANK_SHADOWED_ENV_KEYS);
+    recordPinnedEnvKeys(env);
+
+    expect(isEnvPinned('ENGINE_TYPE')).toBe(false);
+    expect(isEnvPinned('REDIS_ENABLED')).toBe(false);
+  });
+
+  it('counts a real value that merely repeats the default — the case BLANK_SHADOWED_ENV_KEYS cannot cover', () => {
+    const env: NodeJS.ProcessEnv = { ENGINE_TYPE: 'whatsapp-web.js' };
+    clearBlankEnv(env, BLANK_SHADOWED_ENV_KEYS);
+    recordPinnedEnvKeys(env);
+
+    expect(isEnvPinned('ENGINE_TYPE')).toBe(true);
   });
 });
 

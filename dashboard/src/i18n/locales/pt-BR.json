@@ -767,7 +767,8 @@
     "toasts": {
       "saveFailed": "Erro ao salvar"
     },
-    "envPinNote": "Fixado por uma variável de ambiente: este é o valor em execução; as alterações do painel não serão aplicadas até que essa variável seja removida.",
+    "envPinNote": "Fixado pela variável de ambiente {{name}}: este é o valor em execução; as alterações do painel não serão aplicadas até que essa variável seja removida.",
+    "pendingRestartNote": "Salvo, mas ainda não aplicado: reinicie o servidor para que esta alteração tenha efeito.",
     "migration": {
       "title": "Atenção: isso altera o backend de dados",
       "dbWarning": "O novo banco de dados começa vazio. Baixe agora um backup dos seus dados atuais (enquanto ainda estiver no banco de dados anterior) e restaure-o após reiniciar.",

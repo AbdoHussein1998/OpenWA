@@ -15,6 +15,7 @@ import { CacheService } from '../../common/cache/cache.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { createLogger } from '../../common/services/logger.service';
 import { readGeneratedEnv } from './generated-env';
+import { isEnvPinned } from '../../config/env-precedence';
 
 interface InfraStatus {
   // `builtIn` reflects whether OpenWA's own bundled container is actually running and backing this
@@ -37,7 +38,18 @@ interface InfraStatus {
     webVersion?: string | null;
     webVersionSource?: 'pinned' | 'auto' | 'native';
   };
+  // Which of the settings this page can edit are supplied by a layer ABOVE data/.env.generated (the
+  // container environment or a project .env) and therefore cannot be changed from the dashboard until
+  // that layer is. Reported rather than inferred: a running-vs-saved mismatch is also what a save that
+  // has not been restarted yet looks like, and the two need opposite advice (#1082).
+  envPinned: string[];
 }
+
+/**
+ * The keys behind the Infrastructure page's four editable selections, in card order. Only these are
+ * reported: the page has no control for anything else, so naming other variables would be noise.
+ */
+const DASHBOARD_SELECTION_ENV_KEYS = ['DATABASE_TYPE', 'REDIS_ENABLED', 'STORAGE_TYPE', 'ENGINE_TYPE'];
 
 @ApiTags('infrastructure')
 @Controller('infra')
@@ -204,6 +216,7 @@ export class InfraStatusController {
         browserArgs,
         ...(engineType === 'whatsapp-web.js' ? { webVersion, webVersionSource } : {}),
       },
+      envPinned: DASHBOARD_SELECTION_ENV_KEYS.filter(isEnvPinned),
     };
   }
 

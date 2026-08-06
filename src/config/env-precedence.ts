@@ -143,3 +143,35 @@ export function recordOsEnvKeys(env: NodeJS.ProcessEnv = process.env): void {
 export function isOsProvidedEnv(key: string): boolean {
   return osEnvKeys === null || osEnvKeys.has(key);
 }
+
+/**
+ * Keys already present when `data/.env.generated` is about to be merged — i.e. supplied by the host
+ * OR by the project `.env`, both of which load with `override: false` and therefore win over the
+ * dashboard-saved file for good.
+ *
+ * Distinct from `osEnvKeys` on purpose. That snapshot answers "may this value win over the file being
+ * WRITTEN?" for the save-config guard, where only a host value counts. This one answers "can the
+ * dashboard change this setting at all?", and there a project `.env` pins exactly as hard as an
+ * orchestrator variable does.
+ */
+let pinnedEnvKeys: Set<string> | null = null;
+
+/** Snapshot the shadowing layers. Called by load-env immediately before `data/.env.generated` loads. */
+export function recordPinnedEnvKeys(env: NodeJS.ProcessEnv = process.env): void {
+  pinnedEnvKeys = new Set(Object.keys(env));
+}
+
+/**
+ * True when `key` is supplied by a layer above `data/.env.generated`, so saving it from the dashboard
+ * cannot take effect until that layer is changed.
+ *
+ * Defaults to FALSE with no snapshot taken (a unit test that never boots), the opposite of
+ * `isOsProvidedEnv`. Each default is the safe one for its caller: the save guard must assume an
+ * override it cannot see, while this drives a user-facing warning that must never be invented.
+ *
+ * Note `clearBlankEnv` runs BEFORE the snapshot, so a blank compose forward (`- KEY=${KEY:-}` with
+ * nothing set) is already gone and correctly does not count as a pin.
+ */
+export function isEnvPinned(key: string): boolean {
+  return pinnedEnvKeys !== null && pinnedEnvKeys.has(key);
+}
