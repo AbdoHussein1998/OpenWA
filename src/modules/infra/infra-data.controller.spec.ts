@@ -163,6 +163,42 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     expect(held).toBe(0);
   });
 
+  it('refuses outright when another transaction already holds the connection, before deleting anything', async () => {
+    await seedSession('s1');
+    const dump = await controller.exportData();
+
+    // better-sqlite3 hands out a SINGLETON runner, so an import started while a session create or
+    // delete holds a transaction becomes a SAVEPOINT inside it: its commit issues RELEASE SAVEPOINT,
+    // not COMMIT. The result is genuinely indeterminate — the enclosing transaction may commit (the
+    // replace lands) or roll back (it vanishes) — so detecting it afterwards cannot produce a
+    // truthful answer, and by then every row is already deleted. Refuse before touching anything.
+    const outer = ds.createQueryRunner();
+    await outer.connect();
+    await outer.startTransaction();
+
+    await expect(controller.importData({ tables: dump.tables })).rejects.toMatchObject({ status: 409 });
+
+    // The decisive assertion: nothing was destroyed on the way to the refusal.
+    const survived = await ds.getRepository(Session).findOneBy({ id: 's1' });
+    expect(survived).not.toBeNull();
+
+    await outer.rollbackTransaction();
+    await outer.release();
+  });
+
+  it('runs normally once no other transaction holds the connection', async () => {
+    await seedSession('s1');
+    const dump = await controller.exportData();
+
+    const outer = ds.createQueryRunner();
+    await outer.connect();
+    await outer.startTransaction();
+    await outer.rollbackTransaction();
+    await outer.release();
+
+    await expect(controller.importData({ tables: dump.tables })).resolves.toMatchObject({ imported: true });
+  });
+
   it('refuses a second concurrent import instead of letting two share one transaction', async () => {
     await seedSession('s1');
     const dump = await controller.exportData();
