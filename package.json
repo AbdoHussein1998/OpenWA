@@ -271,10 +271,10 @@
         "statements": 88
       },
       "./src/modules/docker/": {
-        "branches": 29,
-        "functions": 55,
-        "lines": 40,
-        "statements": 40
+        "branches": 88,
+        "functions": 99,
+        "lines": 96,
+        "statements": 96
       },
       "./src/modules/events/": {
         "branches": 70,
