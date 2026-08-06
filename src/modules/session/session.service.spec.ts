@@ -2648,7 +2648,11 @@ describe('SessionService', () => {
       await new Promise(resolve => setImmediate(resolve));
     };
 
-    it.each(['LOGOUT', 'UNPAIRED', 'UNPAIRED_IDLE'])(
+    // 'logged out' is the Baileys spelling: baileys-lifecycle reports a WhatsApp-originated
+    // loggedOut (401) close through this same callback with that exact string, and it is the ONLY
+    // reason that adapter ever passes here. Without it the audit row would exist for whatsapp-web.js
+    // sessions and silently not for Baileys ones — the engine asymmetry this test exists to prevent.
+    it.each(['LOGOUT', 'UNPAIRED', 'UNPAIRED_IDLE', 'logged out'])(
       'writes a durable audit record for a terminal unlink (%s)',
       async reason => {
         const callbacks = await startAndCapture();

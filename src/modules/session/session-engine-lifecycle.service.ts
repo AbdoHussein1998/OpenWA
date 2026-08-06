@@ -124,10 +124,15 @@ function isAuthTimeoutRejection(err: unknown): boolean {
  *
  * Deliberately not CONFLICT (another device took over, and takeover is recoverable), not
  * DEPRECATED_VERSION (our own client is too old), and not TIMEOUT (a fault, and the single most
- * common reconnect-storm reason). Mirrors how the whatsapp-web.js adapter classifies the same
- * states; the Baileys adapter reports its own logout through the same callback.
+ * common reconnect-storm reason). The first three mirror how the whatsapp-web.js adapter classifies
+ * the same states.
+ *
+ * BOTH engines are covered, and they spell it differently: `'logged out'` is the only reason the
+ * Baileys adapter ever passes to this callback, emitted for a WhatsApp-originated loggedOut (401)
+ * close — the same event, so it must audit the same way. Baileys' other two terminal closes (403
+ * forbidden, 440 connectionReplaced) report through onError instead and are not unlinks.
  */
-const TERMINAL_UNLINK_REASONS = new Set(['LOGOUT', 'UNPAIRED', 'UNPAIRED_IDLE']);
+const TERMINAL_UNLINK_REASONS = new Set(['LOGOUT', 'UNPAIRED', 'UNPAIRED_IDLE', 'logged out']);
 
 /**
  * Owns the live WhatsApp engines and every state machine around them: start/stop/logout/forceKill,
