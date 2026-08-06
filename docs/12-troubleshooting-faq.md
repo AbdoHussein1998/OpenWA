@@ -670,6 +670,10 @@ MEDIA_DOWNLOAD_MAX_BYTES=52428800
 # Default 25mb.
 BODY_SIZE_LIMIT=25mb
 
+# Note: send the body uncompressed. A request carrying Content-Encoding: gzip (or deflate/br)
+# is refused with 415 — the aggregate in-flight cap counts bytes on the wire, so a compressed
+# body would be admitted small and then inflated past the memory that cap exists to bound.
+
 # Supported formats
 # Images: jpg, jpeg, png, gif, webp
 # Videos: mp4, 3gp

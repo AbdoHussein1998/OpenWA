@@ -11,7 +11,19 @@
  * This middleware closes the gap. It tracks the aggregate body bytes currently in flight across
  * ALL connections — the declared Content-Length where present, one budget slot otherwise — and
  * refuses NEW requests with 503 + Retry-After once the budget is exhausted, without reading a
- * single byte of the rejected body. A stalled sender (headers, then silence) holds its
+ * single byte of the rejected body.
+ *
+ * The bound is on WIRE bytes, and it holds as heap only while a body is stored as it arrives.
+ * A compressed body would break that — admitted at its compressed length, then inflated by the
+ * parser into memory nothing accounted for — so a non-identity Content-Encoding is refused with
+ * 415 outright rather than priced. The remaining looseness in the wire-byte ACCOUNTING is
+ * deliberate and bounded: a chunked identity body reserves a placeholder and is reconciled against
+ * socket.bytesRead on the poll interval, so it can briefly under-report by the bytes that arrive
+ * within one interval. Separately, and by design, an admitted identity body still costs a constant
+ * multiple of its wire size once parsed (the raw Buffer pinned on rawBody, plus the decoded string
+ * and the parsed object) — the budget bounds the input, not the parse.
+ *
+ * A stalled sender (headers, then silence) holds its
  * reservation only until the stall reaper drops the socket after STALL_TIMEOUT_MS without any
  * new body bytes, so a handful of silent connections cannot pin the whole budget. The request
  * stream itself is never tapped — no 'data' listener — so downstream consumers (the body
@@ -127,12 +139,50 @@ export function createInflightBodyBudget(budgetBytes: number, options?: Inflight
       .json({ statusCode: 503, message: 'Too much request body data in flight; retry later' });
   };
 
+  /** Same never-read-the-body disposal as rejectBusy; only the reason and status differ. */
+  const rejectCompressed = (req: Request, res: Response): void => {
+    if (res.headersSent || res.writableEnded) {
+      req.destroy();
+      return;
+    }
+    res.status(415).set('Connection', 'close').json({
+      statusCode: 415,
+      message: 'Compressed request bodies are not supported',
+      error: 'Unsupported Media Type',
+    });
+  };
+
   const middleware = (req: Request, res: Response, next: NextFunction): void => {
     const declared = parseDeclaredLength(req.headers['content-length']);
     // A body with no declared length is expected only when the request is chunk-encoded (Node
     // ignores close-delimited request bodies on keep-alive HTTP/1.1). Anything else — GETs,
     // health checks, Content-Length: 0 — reserves nothing and is never reaped.
     let reserved = declared ?? (req.headers['transfer-encoding'] !== undefined ? undeclaredReservation : 0);
+
+    // Every quantity this budget works with — the declared length, and socket.bytesRead in the
+    // reconciler below — is a WIRE measurement, while what the budget exists to bound is HEAP. The
+    // two are the same size only while the body is stored as it arrives. A compressed body breaks
+    // that: it is admitted on its compressed length and then inflated by the parser, so a payload
+    // orders of magnitude larger than the whole budget can be buffered without the accounting ever
+    // seeing it. Refusing here — before admission, before a byte is read — keeps the invariant
+    // true rather than trying to price an expansion that is not knowable in advance.
+    //
+    // The predicate is body-parser's, NOT `reserved > 0`. They disagree on exactly the cases that
+    // matter: `parseDeclaredLength` rejects a Content-Length that is not a safe integer (reserving
+    // nothing), while type-is `hasBody` accepts anything non-NaN — so `Content-Length: 2**53 + 1`
+    // with a gzip body reserves 0 here yet is still handed to the parser. Mirroring hasBody keeps
+    // the two layers from disagreeing about whether a body exists.
+    const bodyIndicated =
+      req.headers['transfer-encoding'] !== undefined || !Number.isNaN(Number(req.headers['content-length']));
+    // The accepted set is body-parser's, deliberately: it compares the WHOLE header against
+    // 'identity', so even a technically-uncompressed list ("identity, identity") is refused there.
+    // Accepting more here would only move the refusal to the parser, which answers a different
+    // shape — the two layers agreeing matters more than honouring an encoding list nobody sends.
+    const encoding = (req.headers['content-encoding'] ?? '').trim().toLowerCase();
+    if (bodyIndicated && encoding !== '' && encoding !== 'identity') {
+      rejectCompressed(req, res);
+      return;
+    }
 
     // Admission control on the RESERVED size: a request that would push the aggregate past the
     // budget is refused before a single byte of its body is buffered.

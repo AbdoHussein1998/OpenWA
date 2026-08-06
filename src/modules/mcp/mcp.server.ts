@@ -244,5 +244,8 @@ export function mountMcpServer(
   // The route throttle gates the auth DB lookup and per-request MCP server/transport construction. The
   // process-wide capped json() in main.ts runs first for all routes; this route-level parser is a
   // defensive fallback and no-ops once the global parser has consumed the body.
-  adapter.post(basePath, createIpThrottle(ipRateLimiter), express.json(), handler);
+  // `inflate: false` matches the global parsers: a compressed body is refused by the budget
+  // middleware long before this runs, and this keeps the fallback from becoming the one parser that
+  // would still gunzip an unaccounted body if that ordering ever changed.
+  adapter.post(basePath, createIpThrottle(ipRateLimiter), express.json({ inflate: false }), handler);
 }
