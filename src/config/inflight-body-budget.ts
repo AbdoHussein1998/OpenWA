@@ -16,9 +16,12 @@
  * The bound is on WIRE bytes, and it holds as heap only while a body is stored as it arrives.
  * A compressed body would break that — admitted at its compressed length, then inflated by the
  * parser into memory nothing accounted for — so a non-identity Content-Encoding is refused with
- * 415 outright rather than priced. The one remaining looseness is deliberate and bounded: a
- * chunked identity body reserves a placeholder and is reconciled against socket.bytesRead on the
- * poll interval, so it can briefly under-report by the bytes that arrive within one interval.
+ * 415 outright rather than priced. The remaining looseness in the wire-byte ACCOUNTING is
+ * deliberate and bounded: a chunked identity body reserves a placeholder and is reconciled against
+ * socket.bytesRead on the poll interval, so it can briefly under-report by the bytes that arrive
+ * within one interval. Separately, and by design, an admitted identity body still costs a constant
+ * multiple of its wire size once parsed (the raw Buffer pinned on rawBody, plus the decoded string
+ * and the parsed object) — the budget bounds the input, not the parse.
  *
  * A stalled sender (headers, then silence) holds its
  * reservation only until the stall reaper drops the socket after STALL_TIMEOUT_MS without any
