@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **The JavaScript SDK now publishes to npm from CI** via Trusted Publishing (OIDC) on a `js-sdk-v*` tag — no npm token exists anywhere, and every release carries build provenance.
+- **The Python SDK now publishes to PyPI from CI** via Trusted Publishing (OIDC) on a `py-sdk-v*` tag — no PyPI token exists anywhere, matching the JavaScript SDK's release path.
 
 ### Fixed
 
