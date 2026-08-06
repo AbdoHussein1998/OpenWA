@@ -288,7 +288,7 @@ export class InfraDataController {
   @ApiResponse({
     status: 409,
     description:
-      'Refused, for one of two reasons: another import is already running (code IMPORT_ALREADY_RUNNING — wait for it, do not retry immediately); or live engines exist for sessions the backup would remove (retry with stopOrphans=true to stop them in-request, or force=true to proceed and restart after)',
+      'Refused. code IMPORT_ALREADY_RUNNING: another import is running — wait for it. code IMPORT_NESTED_TRANSACTION: another database transaction holds this connection, so a restore could not be made durable — retry with nothing else in flight. Otherwise: live engines exist for sessions the backup would remove (retry with stopOrphans=true to stop them in-request, or force=true to proceed and restart after)',
   })
   async importData(
     @Body()
@@ -469,6 +469,29 @@ export class InfraDataController {
     try {
       const queryRunner = this.dataDataSource.createQueryRunner();
       await queryRunner.connect();
+
+      // Refuse BEFORE a single row is deleted, not after. On better-sqlite3 every query runner is a
+      // driver SINGLETON, so if anything else already holds a transaction on this DataSource — a
+      // session create or delete — this import would not get its own: it would become a SAVEPOINT
+      // inside theirs, and commitTransaction() would issue RELEASE SAVEPOINT rather than COMMIT.
+      //
+      // The outcome of that is genuinely indeterminate, which is why detecting it afterwards is not
+      // good enough: if the enclosing transaction commits, the replace lands; if it rolls back, the
+      // replace vanishes. Either way this request cannot report the truth, and it has already
+      // deleted every row — including any the enclosing transaction just wrote. Refusing up front is
+      // the only answer that is both honest and non-destructive. On Postgres each runner gets its own
+      // pooled client, so this is always false there and the check costs nothing.
+      if (queryRunner.isTransactionActive) {
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'Conflict',
+          message:
+            'Another database transaction is in progress on this connection, so a restore could not be ' +
+            'made durable. Retry with no other data operation in flight.',
+          code: 'IMPORT_NESTED_TRANSACTION',
+        });
+      }
+
       // startTransaction is inside the runner's own try/finally, so a throw from it still releases
       // the runner instead of stranding it for the life of the process.
       await queryRunner.startTransaction();
