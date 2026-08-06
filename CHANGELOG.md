@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-08-06
+
 ### Added
 
 - **The JavaScript SDK now publishes to npm from CI** via Trusted Publishing (OIDC) on a `js-sdk-v*` tag — no npm token exists anywhere, and every release carries build provenance. First release through it: `@rmyndharis/openwa@0.2.0`, carrying everything added since 0.1.0 in June.
