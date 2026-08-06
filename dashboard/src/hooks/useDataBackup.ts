@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { shouldOfferStopOrphansRetry } from '../utils/importRefusal';
 import { useTranslation } from 'react-i18next';
 import { infraApi } from '../services/api';
 import { useToast } from './useToast';
@@ -42,11 +43,14 @@ export function useDataBackup(): DataBackup {
     }
   };
 
-  // POST the replace-all restore and fold the backend's orphan-engine contract into the UI. A 409
-  // means live engines exist for sessions the backup would remove (the server message lists them);
-  // the contract's preferred retry is stopOrphans=true, which stops those engines inside the
-  // request, so offer it as a confirm. force=true is deliberately not offered (the api client does
-  // not even send it): it leaves the engines running until a restart.
+  // POST the replace-all restore and fold the backend's orphan-engine contract into the UI. The route
+  // answers 409 for TWO different reasons and they need opposite handling, so branch on the machine
+  // code, never on the status alone: IMPORT_ALREADY_RUNNING means another restore is in flight and
+  // there is nothing to decide (retrying with stopOrphans would run a second destructive replace the
+  // operator never asked for). The orphan case does have a decision — live engines exist for sessions
+  // the backup would remove — and its preferred retry is stopOrphans=true, which stops them inside
+  // the request, so that one is offered as a confirm. force=true is deliberately not offered (the api
+  // client does not even send it): it leaves the engines running until a restart.
   const runImport = async (tables: Record<string, unknown[]>, stopOrphans = false): Promise<void> => {
     try {
       const res = await infraApi.importData(tables, stopOrphans ? { stopOrphans: true } : undefined);
@@ -66,7 +70,8 @@ export function useDataBackup(): DataBackup {
       }
     } catch (err) {
       const status = (err as { status?: number } | null)?.status;
-      if (status === 409 && !stopOrphans && err instanceof Error) {
+      const code = (err as { code?: string } | null)?.code;
+      if (shouldOfferStopOrphansRetry(status, code, stopOrphans) && err instanceof Error) {
         // The confirm doubles as the refusal display: OK retries with stopOrphans=true, Cancel
         // leaves the engines (and the current data) untouched. A 409 on the retry itself (an
         // engine started mid-import) falls through to the plain error toast — no confirm loop.

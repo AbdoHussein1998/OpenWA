@@ -99,6 +99,16 @@ const SHARED_CONNECTION_DIALECTS = new Set(['better-sqlite3', 'sqlite']);
 export class InfraDataController {
   private readonly logger = createLogger('InfraDataController');
 
+  /**
+   * Whether a replace-all import is already running in this process. Not a nicety: on better-sqlite3
+   * every query runner is a driver SINGLETON, so two overlapping imports share one transaction — the
+   * second nests as SAVEPOINT, its commit issues RELEASE SAVEPOINT rather than COMMIT, and a rollback
+   * at depth 1 issues a full ROLLBACK that discards a restore the other call already answered
+   * `imported: true` for. Serialising them is the only honest answer; queueing the second would still
+   * run a destructive replace nobody is waiting on.
+   */
+  private importInFlight = false;
+
   constructor(
     private readonly configService: ConfigService,
     @InjectDataSource('data')
@@ -278,7 +288,7 @@ export class InfraDataController {
   @ApiResponse({
     status: 409,
     description:
-      'Refused: live engines exist for sessions the backup would remove (retry with stopOrphans=true to stop them in-request, or force=true to proceed and restart after)',
+      'Refused, for one of two reasons: another import is already running (code IMPORT_ALREADY_RUNNING — wait for it, do not retry immediately); or live engines exist for sessions the backup would remove (retry with stopOrphans=true to stop them in-request, or force=true to proceed and restart after)',
   })
   async importData(
     @Body()
@@ -310,6 +320,37 @@ export class InfraDataController {
     /** Orphan engines stopped inside this request (only populated when stopOrphans=true was passed). */
     stoppedOrphanEngines: string[];
     /** Orphan engines whose teardown threw or timed out (Map reconciled regardless; investigate). */
+    failedOrphanEngines: string[];
+  }> {
+    // Check-and-set with NO await between them, so the single-threaded event loop makes this atomic:
+    // the first call reaches the assignment before the second call starts. It guards the whole method,
+    // including the pre-flight orphan teardown below — running that twice concurrently would stop
+    // engines on behalf of a restore that is about to be refused.
+    if (this.importInFlight) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        message: 'A data import is already running; wait for it to finish before starting another.',
+        code: 'IMPORT_ALREADY_RUNNING',
+      });
+    }
+    this.importInFlight = true;
+    try {
+      return await this.runImport(data);
+    } finally {
+      this.importInFlight = false;
+    }
+  }
+
+  /** The replace-all restore itself. Only ever entered through importData's single-flight guard. */
+  private async runImport(data: { tables: Partial<MigrationTables>; force?: boolean; stopOrphans?: boolean }): Promise<{
+    imported: boolean;
+    counts: TableCounts;
+    warnings: string[];
+    notices: string[];
+    restartRequired: boolean;
+    orphanedEngines: string[];
+    stoppedOrphanEngines: string[];
     failedOrphanEngines: string[];
   }> {
     const warnings: string[] = [];

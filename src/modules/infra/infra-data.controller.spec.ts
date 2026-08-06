@@ -163,6 +163,34 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     expect(held).toBe(0);
   });
 
+  it('refuses a second concurrent import instead of letting two share one transaction', async () => {
+    await seedSession('s1');
+    const dump = await controller.exportData();
+
+    // Why this matters on the default dialect: BetterSqlite3Driver.createQueryRunner() returns a
+    // SINGLETON runner, so two overlapping imports share one transaction. The second startTransaction
+    // nests as SAVEPOINT, its commit issues RELEASE SAVEPOINT rather than COMMIT, and a rollback at
+    // depth 1 issues a full ROLLBACK — discarding a restore the other call already reported as
+    // imported:true.
+    //
+    // No gating needed to make this deterministic: the first call runs synchronously up to its first
+    // await, so the guard must be set before any await for the second call to see it. That ordering
+    // is the property under test as much as the 409 is.
+    const first = controller.importData({ tables: dump.tables });
+    const second = controller.importData({ tables: dump.tables });
+
+    await expect(second).rejects.toMatchObject({ status: 409 });
+    await expect(first).resolves.toMatchObject({ imported: true });
+  });
+
+  it('accepts an import again once the previous one has finished', async () => {
+    await seedSession('s1');
+    const dump = await controller.exportData();
+
+    await expect(controller.importData({ tables: dump.tables })).resolves.toMatchObject({ imported: true });
+    await expect(controller.importData({ tables: dump.tables })).resolves.toMatchObject({ imported: true });
+  });
+
   it('releases the loss-detection token even when the transaction never opens', async () => {
     await seedSession('s1');
     const dump = await controller.exportData();

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A second data import while one is running is now refused with `409`** — on SQLite both shared a single transaction, so the second one's rollback discarded a restore the first had already reported as successful.
 - **A replace-all data import no longer disturbs the engines it left running** — the restore dropped each session's ownership lease and, on SQLite, the heartbeat could read the half-applied transaction, so a renewal concluded the claim was lost and tore down engines that had never stopped.
 
 ## [0.14.2] - 2026-08-06
