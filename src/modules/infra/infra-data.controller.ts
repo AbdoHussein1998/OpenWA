@@ -72,15 +72,28 @@ async function readSessionOwnership(queryRunner: QueryRunner): Promise<SessionOw
  *
  * The stored shape is preserved (ISO text on SQLite, Date on Postgres) because these values go back
  * through raw SQL, bypassing the column transformer that would otherwise normalise them.
+ *
+ * Note the deliberate asymmetry with `claimedAt`, which stays verbatim because it is a historical
+ * fact. After a carry the pair therefore no longer spans a single TTL — `leaseExpiresAt - claimedAt`
+ * is the TTL plus the restore's duration — so it must not be used to derive a lease age.
  */
 function carryLease(raw: unknown, readAt: Date, now: Date): unknown {
-  // Only the two shapes these columns are actually stored in are interpreted; anything else is a
-  // value this function does not understand, and so not one it may rewrite.
+  // Only the two shapes these columns are actually stored in are interpreted, and for text only the
+  // UTC form the two writers emit (`DateTransformer.to` and `leaseParam`, both `toISOString()`).
+  // Anything else is left alone: rewriting a shape this function does not understand would be worse
+  // than not carrying it, because a local-time parse would bake the host's UTC offset into the
+  // column permanently — where the old verbatim write merely passed the odd value through.
   if (!(raw instanceof Date) && typeof raw !== 'string') return raw;
+  if (typeof raw === 'string' && !raw.endsWith('Z')) return raw;
   const deadline = raw instanceof Date ? raw : new Date(raw);
   const remainingMs = deadline.getTime() - readAt.getTime();
   if (Number.isNaN(remainingMs) || remainingMs <= 0) return raw;
-  const carried = new Date(now.getTime() + remainingMs);
+  // Never earlier than what was read: a backward clock step between the two stamps must not be able
+  // to commit an expiry sooner than the row already carried, which would re-create the very problem.
+  const carried = new Date(Math.max(now.getTime() + remainingMs, deadline.getTime()));
+  // A deadline that is representable but whose carry is not: fall back rather than throw, since the
+  // caller routes a throw into `warnings` and every later row in the loop would lose its claim.
+  if (!Number.isFinite(carried.getTime())) return raw;
   return raw instanceof Date ? carried : carried.toISOString();
 }
 

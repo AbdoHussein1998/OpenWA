@@ -122,11 +122,19 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     expect(new Date(restored.leaseExpiresAt as unknown as string).toISOString()).toBe(leaseExpiresAt.toISOString());
   });
 
-  it('carries a LIVE claim forward by its remaining time, not by its original expiry stamp', async () => {
+  it('carries LIVE claims forward by their remaining time, including a peer node’s', async () => {
     await seedSession('s1');
+    await seedSession('s2');
+    const dump = await controller.exportData();
+
+    // Seeded AFTER the export on purpose: the sessions importer writes 12 columns and none of them is
+    // ownership, so the dump cannot carry these values — and stamping them here keeps the assertion
+    // margin free of the export's cost. That margin is consumed by the import preamble and the
+    // commit, NOT by the stall below: a late timer moves the committed lease and `Date.now()` by the
+    // same amount, so lengthening the sleep buys nothing.
     const readAt = Date.now();
-    // A live claim whose remaining time the transaction below deliberately outlives. Scaled down from
-    // the real 60s TTL so the test costs a second, not a minute — the ordering is what matters.
+    // Scaled down from the real 60s TTL so the test costs a second, not a minute — the transaction
+    // outliving the remaining time is the property under test, not the size of either number.
     const remainingMs = 1_000;
     await ds.getRepository(Session).update(
       { id: 's1' },
@@ -137,7 +145,19 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
         nodeUrl: 'http://10.0.0.5:2785',
       },
     );
-    const dump = await controller.exportData();
+    // A claim this node does NOT own. The import reads every row with a nodeId, so without the carry
+    // it commits a live peer's lease as expired — and `lapsedHeldByOthers` excludes only `nodeId =
+    // me`, so the importing node's own takeover sweep is what would then adopt a session whose engine
+    // never stopped on the peer.
+    await ds.getRepository(Session).update(
+      { id: 's2' },
+      {
+        nodeId: 'node-b',
+        claimedAt: new Date(readAt),
+        leaseExpiresAt: new Date(readAt + remainingMs * 2),
+        nodeUrl: 'http://10.0.0.9:2785',
+      },
+    );
 
     // Hold the transaction open past the original expiry, the way a large restore does. Re-binding
     // the stamp verbatim would then commit a lease this request already knows has expired: nodeId
@@ -162,14 +182,20 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     jest.restoreAllMocks();
     expect(res.imported).toBe(true);
 
-    const restored = await ds.getRepository(Session).findOneByOrFail({ id: 's1' });
-    const committed = new Date(restored.leaseExpiresAt as unknown as string).getTime();
-    expect(restored.nodeId).toBe('node-a');
-    // Still in the future: the claim was live when read, so it must be live when written back.
-    expect(committed).toBeGreaterThan(Date.now());
-    // Carried, not renewed: the remaining time is preserved rather than reset to a full TTL, so the
-    // restore cannot extend anyone's hold — least of all a peer's.
-    expect(committed).toBeLessThanOrEqual(Date.now() + remainingMs);
+    const own = await ds.getRepository(Session).findOneByOrFail({ id: 's1' });
+    const peer = await ds.getRepository(Session).findOneByOrFail({ id: 's2' });
+    const ownLease = new Date(own.leaseExpiresAt as unknown as string).getTime();
+    const peerLease = new Date(peer.leaseExpiresAt as unknown as string).getTime();
+
+    expect(own.nodeId).toBe('node-a');
+    expect(peer.nodeId).toBe('node-b');
+    // Both still in the future: they were live when read, so they must be live when written back.
+    expect(ownLease).toBeGreaterThan(Date.now());
+    expect(peerLease).toBeGreaterThan(Date.now());
+    // Carried, not renewed: each keeps its OWN remaining time rather than being reset to a full TTL,
+    // so the restore extends nobody's hold and the two do not collapse onto the same deadline.
+    expect(ownLease).toBeLessThanOrEqual(Date.now() + remainingMs);
+    expect(peerLease).toBeGreaterThan(ownLease);
   });
 
   it('holds the ownership loss-detection token for the whole transaction, and releases it', async () => {
