@@ -118,6 +118,157 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     expect(new Date(restored.leaseExpiresAt as unknown as string).toISOString()).toBe(leaseExpiresAt.toISOString());
   });
 
+  it('holds the ownership loss-detection token for the whole transaction, and releases it', async () => {
+    await seedSession('s1');
+    const dump = await controller.exportData();
+
+    const events: string[] = [];
+    let held = 0;
+    const ownership = {
+      suspendLossDetection: () => {
+        held++;
+        events.push('suspend');
+        return () => {
+          held--;
+          events.push('release');
+        };
+      },
+      heldByOtherNodes: () => Promise.resolve([]),
+    };
+    // Observe from inside the transaction: the token must already be held by the time rows move.
+    const realCreate = ds.createQueryRunner.bind(ds);
+    jest.spyOn(ds, 'createQueryRunner').mockImplementation((...args: Parameters<typeof realCreate>) => {
+      const runner = realCreate(...args);
+      const realQuery = runner.query.bind(runner);
+      runner.query = ((...callArgs: Parameters<typeof realQuery>) => {
+        if (/DELETE FROM sessions/.test(callArgs[0])) events.push(`delete(held=${held})`);
+        return realQuery(...callArgs);
+      }) as typeof runner.query;
+      return runner;
+    });
+
+    const withOwnership = new InfraDataController(
+      cfg as never,
+      ds,
+      undefined,
+      undefined,
+      undefined,
+      ownership as never,
+    );
+    const res = await withOwnership.importData({ tables: dump.tables });
+    jest.restoreAllMocks();
+
+    expect(res.imported).toBe(true);
+    expect(events).toEqual(['suspend', 'delete(held=1)', 'release']);
+    expect(held).toBe(0);
+  });
+
+  it('releases the loss-detection token even when the transaction never opens', async () => {
+    await seedSession('s1');
+    const dump = await controller.exportData();
+
+    let held = 0;
+    const ownership = {
+      suspendLossDetection: () => {
+        held++;
+        return () => {
+          held--;
+        };
+      },
+      heldByOtherNodes: () => Promise.resolve([]),
+    };
+    // Stubbed rather than provoked: TypeORM nests a second startTransaction as SAVEPOINT, so no
+    // dialect here rejects it today. What is pinned is the STRUCTURE — the pre-body span sits
+    // outside the release, so any future throw there would strand the token, and a stranded token
+    // disables loss detection for the lifetime of the process, silently.
+    const realCreate = ds.createQueryRunner.bind(ds);
+    jest.spyOn(ds, 'createQueryRunner').mockImplementation((...args: Parameters<typeof realCreate>) => {
+      const runner = realCreate(...args);
+      runner.startTransaction = () => Promise.reject(new Error('cannot start a transaction within a transaction'));
+      return runner;
+    });
+
+    const withOwnership = new InfraDataController(
+      cfg as never,
+      ds,
+      undefined,
+      undefined,
+      undefined,
+      ownership as never,
+    );
+    await expect(withOwnership.importData({ tables: dump.tables })).rejects.toThrow('within a transaction');
+    jest.restoreAllMocks();
+
+    expect(held).toBe(0);
+  });
+
+  it('releases the loss-detection token even when the query runner cannot be created', async () => {
+    await seedSession('s1');
+    const dump = await controller.exportData();
+
+    let held = 0;
+    const ownership = {
+      suspendLossDetection: () => {
+        held++;
+        return () => {
+          held--;
+        };
+      },
+      heldByOtherNodes: () => Promise.resolve([]),
+    };
+    jest.spyOn(ds, 'createQueryRunner').mockImplementation(() => {
+      throw new Error('no connection available');
+    });
+
+    const withOwnership = new InfraDataController(
+      cfg as never,
+      ds,
+      undefined,
+      undefined,
+      undefined,
+      ownership as never,
+    );
+    await expect(withOwnership.importData({ tables: dump.tables })).rejects.toThrow('no connection available');
+    jest.restoreAllMocks();
+
+    expect(held).toBe(0);
+  });
+
+  it('does not suspend loss detection on a dialect where each query runner has its own connection', async () => {
+    await seedSession('s1');
+    const dump = await controller.exportData();
+
+    let suspends = 0;
+    const ownership = {
+      suspendLossDetection: () => {
+        suspends++;
+        return () => {};
+      },
+      heldByOtherNodes: () => Promise.resolve([]),
+    };
+    // Postgres hands every runner a dedicated pooled client, so the heartbeat cannot see the
+    // import's uncommitted DELETE. Suspending there would disable genuine loss detection in exactly
+    // the multi-node deployment that depends on it.
+    // Only the pre-transaction suspend decision is under test. Flipping the type also switches off
+    // the SQLite `$N`→`?` rewrite, so the import itself is expected to fail — that failure is not
+    // what this asserts, and the .catch() below is deliberate rather than defensive.
+    const realOptions = ds.options;
+    Object.defineProperty(ds, 'options', { value: { ...realOptions, type: 'postgres' }, configurable: true });
+
+    const withOwnership = new InfraDataController(
+      cfg as never,
+      ds,
+      undefined,
+      undefined,
+      undefined,
+      ownership as never,
+    );
+    await withOwnership.importData({ tables: dump.tables }).catch(() => undefined);
+    Object.defineProperty(ds, 'options', { value: realOptions, configurable: true });
+
+    expect(suspends).toBe(0);
+  });
+
   it('rolls the whole import back when ownership cannot be re-applied, instead of reporting success', async () => {
     await seedSession('s1');
     await ds.getRepository(Session).update({ id: 's1' }, { nodeId: 'node-a', nodeUrl: 'http://10.0.0.5:2785' });

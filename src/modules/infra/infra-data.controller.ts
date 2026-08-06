@@ -82,6 +82,13 @@ export async function restoreSessionOwnership(
   }
 }
 
+/**
+ * Dialects where every TypeORM query runner shares ONE connection, so an open transaction is visible
+ * to anything else querying in the same process. A positive list on purpose: a dialect nobody has
+ * classified must not silently opt into suspending a safety mechanism.
+ */
+const SHARED_CONNECTION_DIALECTS = new Set(['better-sqlite3', 'sqlite']);
+
 @ApiTags('infrastructure')
 @Controller('infra')
 // Every route here is deployment-global (data export/import, infra config, service orchestration),
@@ -402,175 +409,200 @@ export class InfraDataController {
       failedOrphanEngines,
     };
 
-    const queryRunner = this.dataDataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    // Silence the ownership heartbeat's loss detection for the whole transaction — but ONLY where the
+    // hazard exists. On SQLite every query runner shares one connection, so a heartbeat tick executes
+    // INSIDE this transaction, after the DELETE below and before the re-inserts commit, and sees no
+    // session rows at all; it would read that as "a peer took everything" and tear down every engine
+    // on this node, even on the paths where this import then rolls back. Postgres hands each runner a
+    // dedicated pooled client, so the heartbeat cannot see any of it — suspending there would only
+    // disable genuine loss detection in the multi-node deployment that depends on it.
+    const sharesOneConnection = SHARED_CONNECTION_DIALECTS.has(this.dataDataSource.options.type);
+    const resumeLossDetection = sharesOneConnection ? this.ownership?.suspendLossDetection() : undefined;
 
+    // Everything from here is wrapped so the token cannot outlive this request. It is not enough to
+    // release it in the transaction's own finally: createQueryRunner/connect/startTransaction sit
+    // before that finally exists, so any throw there — a driver change, a broadcaster subscriber, a
+    // failing BEGIN/SAVEPOINT — would strand it. Defence in depth rather than a reachable bug today,
+    // and deliberately so: a leaked token disables loss detection for the lifetime of the process,
+    // silently, which is strictly worse than the teardown the suspension prevents.
     try {
-      // Clear existing data (in correct order due to foreign keys). templates and
-      // baileys_stored_messages FK sessions ON DELETE CASCADE, so the sessions DELETE would clear
-      // them too; clearing them explicitly first keeps the order correct on engines where the
-      // cascade is not enforced. Tolerate a genuinely-absent table (isMissingTableError) but let any
-      // OTHER failure (lock, I/O, aborted tx) propagate to the transaction rollback below — a blind
-      // `.catch(() => {})` here could otherwise silently commit a MERGED (not replaced) restore on
-      // SQLite, violating the endpoint's "replaces existing data" contract.
-      const clearTable = async (table: string): Promise<void> => {
-        try {
-          await queryRunner.query(`DELETE FROM ${table}`);
-        } catch (err) {
-          if (!isMissingTableError(err)) throw err;
-          this.logger.debug('Skipped clearing a table that does not exist during import', { table });
-        }
-      };
-      // The INSERTs below are written once, in Postgres' `$N` placeholder form. better-sqlite3 differs
-      // from the legacy sqlite3 driver on raw queries in two ways: SQLite parses `$N` as a NAMED
-      // parameter, which cannot be bound from the positional array TypeORM passes through (RangeError),
-      // and strict binding rejects booleans/undefined — which a Postgres-made backup carries (real
-      // booleans survive the JSON round-trip). Postgres needs `$N` and binds booleans natively, so both
-      // rewrites apply only on the SQLite path. Safe: every `$N` below occurs once, in ascending order.
-      const isPostgres = this.dataDataSource.options.type === 'postgres';
-      const insert = (text: string, params: unknown[]): Promise<unknown> =>
-        queryRunner.query(
-          isPostgres ? text : text.replace(/\$\d+/g, '?'),
-          isPostgres ? params : params.map(v => (typeof v === 'boolean' ? Number(v) : (v ?? null))),
-        );
-      await queryRunner.query('DELETE FROM webhooks');
-      await clearTable('messages');
-      await clearTable('message_batches');
-      await clearTable('templates');
-      await clearTable('baileys_stored_messages');
-      // lid_mappings is not a FK to sessions, so the sessions DELETE below won't clear it; clear it
-      // explicitly so a restore replaces the cache rather than colliding on existing lid PKs.
-      await clearTable('lid_mappings');
-      // Integration Fabric + both DLQs: none carry an FK constraint to sessions (sessionId is provenance),
-      // so clearing them here before the sessions DELETE keeps the replace-semantics complete.
-      await clearTable('plugin_instances');
-      await clearTable('conversation_mappings');
-      await clearTable('ingress_events');
-      await clearTable('webhook_delivery_failures');
-      await clearTable('integration_delivery_failures');
-      // status_updates has no FK to sessions; clear it explicitly so the replace is complete.
-      await clearTable('status_updates');
-      // Session ownership is CLUSTER RUNTIME STATE, not backup payload: which process currently holds
-      // a session's engine, and until when. The replace below deletes it along with everything else,
-      // and the sessions importer does not restore it (deliberately — see below), so without this the
-      // committed rows come back unclaimed and the next lease renewal reads "claim lost" and tears
-      // down engines that never stopped running.
-      //
-      // It must NOT be restored from the payload instead. export-data does `SELECT *`, so real backups
-      // DO carry these columns even though SessionRow does not declare them — restoring them would
-      // install the SOURCE host's nodeId with its still-future lease, and every start would then 409
-      // "running on another node" until that lease lapsed. Strictly worse than the bug.
-      //
-      // Read through the SAME queryRunner (a repository would take a second connection and self-
-      // deadlock on Postgres) and tolerate the columns being absent, so a database whose ownership
-      // migration has been rolled back still imports.
-      const preservedOwnership = await readSessionOwnership(queryRunner);
+      const queryRunner = this.dataDataSource.createQueryRunner();
+      await queryRunner.connect();
+      // startTransaction is inside the runner's own try/finally, so a throw from it still releases
+      // the runner instead of stranding it for the life of the process.
+      await queryRunner.startTransaction();
 
-      await queryRunner.query('DELETE FROM sessions');
-
-      // Restore table by table in TABLE_IMPORTERS order (FK-safe: sessions first). The descriptors
-      // carry each table's INSERT text, param mapping, and per-row skip guard; a missing or empty
-      // table keeps its 0 count and contributes no warnings.
-      const counts = Object.fromEntries(TABLE_IMPORTERS.map(importer => [importer.key, 0] as const)) as TableCounts;
-      for (const importer of TABLE_IMPORTERS) {
-        const rows = data.tables[importer.key];
-        if (!rows?.length) continue;
-        for (const untypedRow of rows) {
-          // `rows` was read from `data.tables[importer.key]`, so it holds exactly the row type this
-          // descriptor's id/map/skip declare. That correlation is what the erased importer type
-          // cannot carry, and this loop is the one place it is known — so the cast lives here rather
-          // than at each of the three uses below.
-          const row = untypedRow as never;
-          const skipWarning = importer.skip?.(row);
-          if (skipWarning != null) {
-            warnings.push(skipWarning);
-            continue;
-          }
-          try {
-            await insert(importer.sql, importer.map(row));
-            counts[importer.key]++;
-          } catch (err) {
-            warnings.push(
-              `Failed to import ${importer.label} ${importer.id(row)}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-      }
-
-      // Re-apply the claims read before the DELETE, for ids that exist in both. This runs BEFORE the
-      // all-or-nothing gate below on purpose: a failure here must take the same rollback the gate
-      // already implements. Degrading it to a notice and committing anyway would be worse than the
-      // bug it fixes — on PostgreSQL a failed statement aborts the transaction, so the COMMIT would
-      // execute as a ROLLBACK and the endpoint would report a fully discarded import as a success,
-      // with per-table counts, to an operator restoring after data loss.
       try {
-        await restoreSessionOwnership(preservedOwnership, insert);
-      } catch (error) {
-        warnings.push(`Failed to restore session ownership: ${error instanceof Error ? error.message : String(error)}`);
-      }
+        // Clear existing data (in correct order due to foreign keys). templates and
+        // baileys_stored_messages FK sessions ON DELETE CASCADE, so the sessions DELETE would clear
+        // them too; clearing them explicitly first keeps the order correct on engines where the
+        // cascade is not enforced. Tolerate a genuinely-absent table (isMissingTableError) but let any
+        // OTHER failure (lock, I/O, aborted tx) propagate to the transaction rollback below — a blind
+        // `.catch(() => {})` here could otherwise silently commit a MERGED (not replaced) restore on
+        // SQLite, violating the endpoint's "replaces existing data" contract.
+        const clearTable = async (table: string): Promise<void> => {
+          try {
+            await queryRunner.query(`DELETE FROM ${table}`);
+          } catch (err) {
+            if (!isMissingTableError(err)) throw err;
+            this.logger.debug('Skipped clearing a table that does not exist during import', { table });
+          }
+        };
+        // The INSERTs below are written once, in Postgres' `$N` placeholder form. better-sqlite3 differs
+        // from the legacy sqlite3 driver on raw queries in two ways: SQLite parses `$N` as a NAMED
+        // parameter, which cannot be bound from the positional array TypeORM passes through (RangeError),
+        // and strict binding rejects booleans/undefined — which a Postgres-made backup carries (real
+        // booleans survive the JSON round-trip). Postgres needs `$N` and binds booleans natively, so both
+        // rewrites apply only on the SQLite path. Safe: every `$N` below occurs once, in ascending order.
+        const isPostgres = this.dataDataSource.options.type === 'postgres';
+        const insert = (text: string, params: unknown[]): Promise<unknown> =>
+          queryRunner.query(
+            isPostgres ? text : text.replace(/\$\d+/g, '?'),
+            isPostgres ? params : params.map(v => (typeof v === 'boolean' ? Number(v) : (v ?? null))),
+          );
+        await queryRunner.query('DELETE FROM webhooks');
+        await clearTable('messages');
+        await clearTable('message_batches');
+        await clearTable('templates');
+        await clearTable('baileys_stored_messages');
+        // lid_mappings is not a FK to sessions, so the sessions DELETE below won't clear it; clear it
+        // explicitly so a restore replaces the cache rather than colliding on existing lid PKs.
+        await clearTable('lid_mappings');
+        // Integration Fabric + both DLQs: none carry an FK constraint to sessions (sessionId is provenance),
+        // so clearing them here before the sessions DELETE keeps the replace-semantics complete.
+        await clearTable('plugin_instances');
+        await clearTable('conversation_mappings');
+        await clearTable('ingress_events');
+        await clearTable('webhook_delivery_failures');
+        await clearTable('integration_delivery_failures');
+        // status_updates has no FK to sessions; clear it explicitly so the replace is complete.
+        await clearTable('status_updates');
+        // Session ownership is CLUSTER RUNTIME STATE, not backup payload: which process currently holds
+        // a session's engine, and until when. The replace below deletes it along with everything else,
+        // and the sessions importer does not restore it (deliberately — see below), so without this the
+        // committed rows come back unclaimed and the next lease renewal reads "claim lost" and tears
+        // down engines that never stopped running.
+        //
+        // It must NOT be restored from the payload instead. export-data does `SELECT *`, so real backups
+        // DO carry these columns even though SessionRow does not declare them — restoring them would
+        // install the SOURCE host's nodeId with its still-future lease, and every start would then 409
+        // "running on another node" until that lease lapsed. Strictly worse than the bug.
+        //
+        // Read through the SAME queryRunner (a repository would take a second connection and self-
+        // deadlock on Postgres) and tolerate the columns being absent, so a database whose ownership
+        // migration has been rolled back still imports.
+        const preservedOwnership = await readSessionOwnership(queryRunner);
 
-      // "Replace all data" must be all-or-nothing: the import already DELETEd every row, so if any
-      // INSERT failed we must roll back (restoring the pre-import data) rather than commit a
-      // half-wiped DB and report success. A partial restore reported as imported:true was how
-      // message history could silently vanish on a SQLite->Postgres migration.
-      if (warnings.length > 0) {
-        await queryRunner.rollbackTransaction();
+        await queryRunner.query('DELETE FROM sessions');
+
+        // Restore table by table in TABLE_IMPORTERS order (FK-safe: sessions first). The descriptors
+        // carry each table's INSERT text, param mapping, and per-row skip guard; a missing or empty
+        // table keeps its 0 count and contributes no warnings.
+        const counts = Object.fromEntries(TABLE_IMPORTERS.map(importer => [importer.key, 0] as const)) as TableCounts;
+        for (const importer of TABLE_IMPORTERS) {
+          const rows = data.tables[importer.key];
+          if (!rows?.length) continue;
+          for (const untypedRow of rows) {
+            // `rows` was read from `data.tables[importer.key]`, so it holds exactly the row type this
+            // descriptor's id/map/skip declare. That correlation is what the erased importer type
+            // cannot carry, and this loop is the one place it is known — so the cast lives here rather
+            // than at each of the three uses below.
+            const row = untypedRow as never;
+            const skipWarning = importer.skip?.(row);
+            if (skipWarning != null) {
+              warnings.push(skipWarning);
+              continue;
+            }
+            try {
+              await insert(importer.sql, importer.map(row));
+              counts[importer.key]++;
+            } catch (err) {
+              warnings.push(
+                `Failed to import ${importer.label} ${importer.id(row)}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
+        }
+
+        // Re-apply the claims read before the DELETE, for ids that exist in both. This runs BEFORE the
+        // all-or-nothing gate below on purpose: a failure here must take the same rollback the gate
+        // already implements. Degrading it to a notice and committing anyway would be worse than the
+        // bug it fixes — on PostgreSQL a failed statement aborts the transaction, so the COMMIT would
+        // execute as a ROLLBACK and the endpoint would report a fully discarded import as a success,
+        // with per-table counts, to an operator restoring after data loss.
+        try {
+          await restoreSessionOwnership(preservedOwnership, insert);
+        } catch (error) {
+          warnings.push(
+            `Failed to restore session ownership: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+
+        // "Replace all data" must be all-or-nothing: the import already DELETEd every row, so if any
+        // INSERT failed we must roll back (restoring the pre-import data) rather than commit a
+        // half-wiped DB and report success. A partial restore reported as imported:true was how
+        // message history could silently vanish on a SQLite->Postgres migration.
+        if (warnings.length > 0) {
+          await queryRunner.rollbackTransaction();
+          return {
+            imported: false,
+            counts,
+            warnings,
+            notices,
+            ...engineStateAfterRollback,
+          };
+        }
+
+        // A wrong/empty/garbage backup file restores zero rows but the DELETE already ran — committing
+        // would silently WIPE the database and report success. Refuse it and roll back instead. (#488 review)
+        const totalRestored = Object.values(counts).reduce((sum, n) => sum + n, 0);
+        if (totalRestored === 0) {
+          await queryRunner.rollbackTransaction();
+          return {
+            imported: false,
+            counts,
+            warnings: ['Backup contained no rows to restore; refused to replace existing data. Check the file.'],
+            notices,
+            ...engineStateAfterRollback,
+          };
+        }
+
+        await queryRunner.commitTransaction();
+
+        // Runtime reconciliation, part 2 (post-commit): the in-memory lid->phone mirror was warmed from
+        // the OLD lid_mappings rows and is write-through only, so the just-restored table would never
+        // reach it — resolution would keep serving stale entries (and miss restored ones) until the next
+        // process start. Reload from the new DB contents. Best-effort: a miss falls back to engine
+        // re-resolution, so a reload failure degrades instead of failing the (already committed) import.
+        await this.lidMappingStore?.reload();
+
+        // Audit the destructive replace-all restore, only on the committed-success path (the rollback /
+        // refused-empty branches above return without emitting, since no data actually changed). Any
+        // warnings would have taken the rollback branch, so warnings.length is always 0 here — record
+        // only the per-table counts.
+        await this.auditService?.logInfo(AuditAction.INFRA_DATA_IMPORTED, { metadata: { counts } });
+
+        // restartRequired was computed in the pre-flight: true only when orphans were left running
+        // (force=true legacy path) or when stopOrphans teardown failed for at least one engine.
         return {
-          imported: false,
+          imported: true,
           counts,
           warnings,
           notices,
-          ...engineStateAfterRollback,
+          restartRequired,
+          orphanedEngines,
+          stoppedOrphanEngines,
+          failedOrphanEngines,
         };
-      }
-
-      // A wrong/empty/garbage backup file restores zero rows but the DELETE already ran — committing
-      // would silently WIPE the database and report success. Refuse it and roll back instead. (#488 review)
-      const totalRestored = Object.values(counts).reduce((sum, n) => sum + n, 0);
-      if (totalRestored === 0) {
+      } catch (error) {
         await queryRunner.rollbackTransaction();
-        return {
-          imported: false,
-          counts,
-          warnings: ['Backup contained no rows to restore; refused to replace existing data. Check the file.'],
-          notices,
-          ...engineStateAfterRollback,
-        };
+        throw error;
+      } finally {
+        await queryRunner.release();
       }
-
-      await queryRunner.commitTransaction();
-
-      // Runtime reconciliation, part 2 (post-commit): the in-memory lid->phone mirror was warmed from
-      // the OLD lid_mappings rows and is write-through only, so the just-restored table would never
-      // reach it — resolution would keep serving stale entries (and miss restored ones) until the next
-      // process start. Reload from the new DB contents. Best-effort: a miss falls back to engine
-      // re-resolution, so a reload failure degrades instead of failing the (already committed) import.
-      await this.lidMappingStore?.reload();
-
-      // Audit the destructive replace-all restore, only on the committed-success path (the rollback /
-      // refused-empty branches above return without emitting, since no data actually changed). Any
-      // warnings would have taken the rollback branch, so warnings.length is always 0 here — record
-      // only the per-table counts.
-      await this.auditService?.logInfo(AuditAction.INFRA_DATA_IMPORTED, { metadata: { counts } });
-
-      // restartRequired was computed in the pre-flight: true only when orphans were left running
-      // (force=true legacy path) or when stopOrphans teardown failed for at least one engine.
-      return {
-        imported: true,
-        counts,
-        warnings,
-        notices,
-        restartRequired,
-        orphanedEngines,
-        stoppedOrphanEngines,
-        failedOrphanEngines,
-      };
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      throw error;
     } finally {
-      await queryRunner.release();
+      // Its own finally, so a throwing release() cannot strand the token either.
+      resumeLossDetection?.();
     }
   }
 }

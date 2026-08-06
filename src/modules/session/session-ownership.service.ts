@@ -43,6 +43,12 @@ export class SessionOwnershipService {
   private readonly owned = new Set<string>();
   /** Notified when a renewal proves this process no longer holds sessions it thought it did. */
   private onLeaseLost?: (sessionIds: string[]) => Promise<void> | void;
+
+  /**
+   * How many callers are currently telling renew() that an empty/blank result is NOT evidence of
+   * loss. A counter rather than a flag so overlapping spans cannot resume each other early.
+   */
+  private lossDetectionSuspended = 0;
   /** Answers "does anything still run for this id here?" — consulted by renew(). See setEngineLiveness. */
   private engineLiveness?: (sessionId: string) => boolean;
 
@@ -193,6 +199,28 @@ export class SessionOwnershipService {
   }
 
   /**
+   * Tell renew() that "this node no longer holds the row" is currently uninformative, and get back
+   * the release. Held by a replace-all data import across its whole transaction.
+   *
+   * Why it is needed: on SQLite every TypeORM query runner shares ONE connection, so a heartbeat
+   * tick can execute INSIDE the import's open transaction, after its DELETE and before its
+   * re-inserts commit, and see no rows at all. Concluding loss there tears down engines that never
+   * stopped — and does so even when the import later rolls back and every row comes straight back.
+   *
+   * Returns a release rather than exposing a resume(), so the count cannot be unbalanced by a caller
+   * that forgets which spans it opened; releasing the same token twice is a no-op.
+   */
+  suspendLossDetection(): () => void {
+    this.lossDetectionSuspended++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.lossDetectionSuspended--;
+    };
+  }
+
+  /**
    * Register the probe renew() consults before extending a lease. Wired by SessionService to the
    * engine lifecycle (engine registered, start in flight, or reconnect pending). Optional like the
    * lease-loss handler: without it every held claim renews unconditionally.
@@ -242,6 +270,11 @@ export class SessionOwnershipService {
       });
       return;
     }
+
+    // Re-checked HERE, after the queries above rather than only at entry: the tick this protects
+    // against is precisely one that was already in flight when the import took the token, so an
+    // entry-only check would let it through. Renewing was harmless; concluding loss is not.
+    if (this.lossDetectionSuspended > 0) return;
 
     const lost = held.filter(id => !kept.has(id));
     if (lost.length === 0) return;

@@ -247,6 +247,120 @@ describe('SessionOwnershipService', () => {
    * perfectly healthy — a slow query is enough — after which a peer may legitimately claim the
    * session; an engine left running here would be the second one on that WhatsApp account.
    */
+  describe('suspending loss detection', () => {
+    /**
+     * On SQLite every query runner shares ONE connection, so a heartbeat tick can execute INSIDE a
+     * replace-all import's open transaction and see zero session rows — the DELETE has run and the
+     * re-inserts have not committed. Concluding loss from that tears down engines that never stopped,
+     * and does so even when the import later rolls back and the rows come straight back.
+     */
+    it('does not conclude loss while an import holds the token', async () => {
+      const session = await seed();
+      const nodeA = service('node-a', 60_000);
+      await nodeA.claim(session.id);
+      const lost: string[][] = [];
+      nodeA.onLeaseLoss(ids => {
+        lost.push(ids);
+      });
+
+      const release = nodeA.suspendLossDetection();
+      await sessions.delete({ id: session.id }); // what the import's DELETE looks like from here
+      await nodeA.renew();
+
+      expect(lost).toEqual([]);
+      expect(nodeA.ownedIds()).toContain(session.id);
+      release();
+    });
+
+    it('concludes loss again once the token is released', async () => {
+      const session = await seed();
+      const nodeA = service('node-a', 60_000);
+      await nodeA.claim(session.id);
+      const lost: string[][] = [];
+      nodeA.onLeaseLoss(ids => {
+        lost.push(ids);
+      });
+
+      nodeA.suspendLossDetection()();
+      await sessions.delete({ id: session.id });
+      await nodeA.renew();
+
+      expect(lost).toEqual([[session.id]]);
+    });
+
+    it('stays suspended until the LAST overlapping holder releases', async () => {
+      const session = await seed();
+      const nodeA = service('node-a', 60_000);
+      await nodeA.claim(session.id);
+      const lost: string[][] = [];
+      nodeA.onLeaseLoss(ids => {
+        lost.push(ids);
+      });
+
+      const first = nodeA.suspendLossDetection();
+      const second = nodeA.suspendLossDetection();
+      first();
+      await sessions.delete({ id: session.id });
+      await nodeA.renew();
+      expect(lost).toEqual([]);
+
+      second();
+      await nodeA.renew();
+      expect(lost).toEqual([[session.id]]);
+    });
+
+    it('releasing the same token twice does not resume early', async () => {
+      const session = await seed();
+      const nodeA = service('node-a', 60_000);
+      await nodeA.claim(session.id);
+      const lost: string[][] = [];
+      nodeA.onLeaseLoss(ids => {
+        lost.push(ids);
+      });
+
+      const outer = nodeA.suspendLossDetection();
+      const inner = nodeA.suspendLossDetection();
+      inner();
+      inner(); // a double release must not cancel the outer holder
+
+      await sessions.delete({ id: session.id });
+      await nodeA.renew();
+
+      expect(lost).toEqual([]);
+      outer();
+    });
+
+    /**
+     * The re-check must happen AFTER renew()'s awaits, not only at entry: a tick that was already in
+     * flight when the import began is exactly the one that observes the emptied table.
+     */
+    it('neutralises a tick that was already running when the suspension began', async () => {
+      const session = await seed();
+      const nodeA = service('node-a', 60_000);
+      await nodeA.claim(session.id);
+      const lost: string[][] = [];
+      nodeA.onLeaseLoss(ids => {
+        lost.push(ids);
+      });
+
+      // Suspend from inside the query renew() awaits, i.e. after it has already started.
+      const realFind = sessions.find.bind(sessions);
+      let release: (() => void) | undefined;
+      jest.spyOn(sessions, 'find').mockImplementation(async (...args: Parameters<typeof realFind>) => {
+        release = nodeA.suspendLossDetection();
+        await sessions.delete({ id: session.id });
+        return realFind(...args);
+      });
+
+      await nodeA.renew();
+      jest.restoreAllMocks();
+
+      expect(lost).toEqual([]);
+      expect(nodeA.ownedIds()).toContain(session.id);
+      release?.();
+    });
+  });
+
   describe('losing a claim', () => {
     it('reports the sessions a peer has taken, and stops counting them as its own', async () => {
       const mine = await seed();
