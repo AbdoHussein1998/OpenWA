@@ -1643,6 +1643,38 @@ describe('restoreSessionOwnership', () => {
     expect(await bindLease('2026-08-06T09:59:00.000Z', readAt, commitAt)).toBe('2026-08-06T09:59:00.000Z');
   });
 
+  it('refuses to carry text that is not the UTC form the writers emit', async () => {
+    const readAt = new Date('2026-08-06T10:00:00.000Z');
+    const commitAt = new Date('2026-08-06T10:02:00.000Z');
+    // `DateTransformer.to` and `leaseParam` both emit toISOString(), so a space-separated stamp can
+    // only come from somewhere that does not know this contract — e.g. a future migration DEFAULT of
+    // datetime('now'), the shape other columns in this repo already use. new Date() would read it as
+    // LOCAL time, and carrying it would write the host's UTC offset back into the column for good.
+    //
+    // Two days ahead, not seconds: parsed as local time this lands within ±14h of that instant, so it
+    // stays in the FUTURE under every timezone and would therefore be carried if the guard were gone.
+    // A near stamp would fall through to the already-lapsed branch on a positive-offset host and pass
+    // for the wrong reason — which is exactly what it did before this comment existed.
+    expect(await bindLease('2026-08-08 10:00:00', readAt, commitAt)).toBe('2026-08-08 10:00:00');
+  });
+
+  it('never carries a lease to an earlier instant than the one it read', async () => {
+    // A backward clock step between the read and the write-back. Without the clamp the carry would
+    // land before the original deadline — re-creating the expired-on-commit state it exists to avoid.
+    const readAt = new Date('2026-08-06T10:00:00.000Z');
+    const steppedBack = new Date('2026-08-06T09:58:00.000Z');
+    expect(await bindLease('2026-08-06T10:00:30.000Z', readAt, steppedBack)).toBe('2026-08-06T10:00:30.000Z');
+  });
+
+  it('falls back to the original value when the carry would overflow the Date range', async () => {
+    // A throw here would reach the caller's catch, which records a warning — and every claim after
+    // this row in the loop would silently never be re-applied.
+    const readAt = new Date('2026-08-06T10:00:00.000Z');
+    const commitAt = new Date('2026-08-06T10:02:00.000Z');
+    const nearMax = '+275760-09-13T00:00:00.000Z'; // the maximum representable Date
+    await expect(bindLease(nearMax, readAt, commitAt)).resolves.toBe(nearMax);
+  });
+
   it('preserves the stored shape — Date in, Date out (Postgres); text in, text out (SQLite)', async () => {
     const readAt = new Date('2026-08-06T10:00:00.000Z');
     const commitAt = new Date('2026-08-06T10:02:00.000Z');
