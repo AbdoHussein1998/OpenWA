@@ -342,17 +342,19 @@ describe('DockerService.getContainerByService label match and guard rails', () =
 
   it('resolves the container by its com.openwa.service label', async () => {
     const service = new DockerService();
+    const listContainers = jest.fn().mockResolvedValue([{ Id: 'label-hit-1', Names: ['/openwa-postgres'] }]);
     const getContainer = jest.fn((id: string) => ({ id }));
     Object.assign(service as unknown as Record<string, unknown>, {
-      docker: {
-        listContainers: jest.fn().mockResolvedValue([{ Id: 'label-hit-1', Names: ['/openwa-postgres'] }]),
-        getContainer,
-      },
+      docker: { listContainers, getContainer },
       isAvailable: true,
     });
 
     const result = await service.getContainerByService('database');
 
+    expect(listContainers).toHaveBeenCalledWith({
+      all: true,
+      filters: { label: ['com.openwa.service=database'] },
+    });
     expect(getContainer).toHaveBeenCalledWith('label-hit-1');
     expect(result).toEqual({ id: 'label-hit-1' });
   });
@@ -565,7 +567,7 @@ describe('DockerService.orchestrateProfiles', () => {
 
   it('collects per-profile failures and still succeeds when at least one started', async () => {
     const service = availableService();
-    jest.spyOn(service, 'startService').mockImplementation(async (svc: string) => svc === 'database');
+    jest.spyOn(service, 'startService').mockImplementation((svc: string) => Promise.resolve(svc === 'database'));
 
     const result = await service.orchestrateProfiles(['postgres', 'redis']);
 
