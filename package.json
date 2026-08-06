@@ -205,10 +205,10 @@
         "statements": 91
       },
       "./src/core/agent-tools/": {
-        "branches": 77,
-        "functions": 32,
-        "lines": 49,
-        "statements": 50
+        "branches": 88,
+        "functions": 87,
+        "lines": 83,
+        "statements": 83
       },
       "./src/core/hooks/": {
         "branches": 81,
@@ -265,16 +265,16 @@
         "statements": 90
       },
       "./src/modules/contact/": {
-        "branches": 25,
-        "functions": 48,
-        "lines": 44,
-        "statements": 43
+        "branches": 79,
+        "functions": 90,
+        "lines": 89,
+        "statements": 88
       },
       "./src/modules/docker/": {
-        "branches": 26,
-        "functions": 52,
-        "lines": 37,
-        "statements": 38
+        "branches": 88,
+        "functions": 99,
+        "lines": 96,
+        "statements": 96
       },
       "./src/modules/events/": {
         "branches": 70,
@@ -301,10 +301,10 @@
         "statements": 89
       },
       "./src/modules/mcp/": {
-        "branches": 33,
-        "functions": 48,
-        "lines": 45,
-        "statements": 46
+        "branches": 62,
+        "functions": 81,
+        "lines": 78,
+        "statements": 78
       },
       "./src/modules/media/": {
         "branches": 71,
@@ -367,10 +367,10 @@
         "statements": 60
       },
       "./src/modules/template/": {
-        "branches": 43,
-        "functions": 52,
-        "lines": 70,
-        "statements": 67
+        "branches": 77,
+        "functions": 99,
+        "lines": 92,
+        "statements": 89
       },
       "./src/modules/webhook/": {
         "branches": 72,

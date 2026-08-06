@@ -184,7 +184,7 @@ authoritative gate. Current policy:
 | `src/common/storage/`       | 75%      | 80%       | 80%   | 77%        |
 | `src/common/utils/`         | 86%      | 92%       | 92%   | 91%        |
 | `src/config/`               | 88%      | 92%       | 91%   | 91%        |
-| `src/core/agent-tools/`     | 77%      | 32%       | 49%   | 50%        |
+| `src/core/agent-tools/`     | 88%      | 87%       | 83%   | 83%        |
 | `src/core/hooks/`           | 81%      | 73%       | 85%   | 84%        |
 | `src/core/plugins/`         | 72%      | 74%       | 81%   | 80%        |
 | `src/database/`             | 69%      | 69%       | 72%   | 72%        |
@@ -194,13 +194,13 @@ authoritative gate. Current policy:
 | `src/modules/auth/`         | 75%      | 85%       | 86%   | 85%        |
 | `src/modules/automation/`   | 60%      | 55%       | 75%   | 70%        |
 | `src/modules/chat-media/`   | 78%      | 81%       | 92%   | 90%        |
-| `src/modules/contact/`      | 25%      | 48%       | 44%   | 43%        |
-| `src/modules/docker/`       | 26%      | 52%       | 37%   | 38%        |
+| `src/modules/contact/`      | 79%      | 90%       | 89%   | 88%        |
+| `src/modules/docker/`       | 88%      | 99%       | 96%   | 96%        |
 | `src/modules/events/`       | 70%      | 84%       | 81%   | 80%        |
 | `src/modules/group/`        | 64%      | 47%       | 67%   | 67%        |
 | `src/modules/infra/`        | 73%      | 71%       | 87%   | 86%        |
 | `src/modules/integration/`  | 76%      | 83%       | 90%   | 89%        |
-| `src/modules/mcp/`          | 33%      | 48%       | 45%   | 46%        |
+| `src/modules/mcp/`          | 62%      | 81%       | 78%   | 78%        |
 | `src/modules/media/`        | 71%      | 87%       | 89%   | 88%        |
 | `src/modules/message/`      | 57%      | 66%       | 81%   | 80%        |
 | `src/modules/metrics/`      | 61%      | 65%       | 68%   | 65%        |
@@ -211,10 +211,10 @@ authoritative gate. Current policy:
 | `src/modules/stats/`        | 67%      | 63%       | 71%   | 69%        |
 | `src/modules/status-store/` | 79%      | 83%       | 92%   | 91%        |
 | `src/modules/status/`       | 47%      | 45%       | 62%   | 60%        |
-| `src/modules/template/`     | 43%      | 52%       | 70%   | 67%        |
+| `src/modules/template/`     | 77%      | 99%       | 92%   | 89%        |
 | `src/modules/webhook/`      | 72%      | 89%       | 90%   | 87%        |
 
-Each floor sits roughly five points below that scope's measured coverage, so it catches a real
+Each floor sits a point or two below that scope's measured coverage, so it catches a real
 regression without failing on ordinary churn. Raise a floor when coverage rises; never lower one.
 
 Two behaviours of Jest's threshold matching are worth knowing before adding a scope:
