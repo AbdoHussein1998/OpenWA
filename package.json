@@ -205,10 +205,10 @@
         "statements": 91
       },
       "./src/core/agent-tools/": {
-        "branches": 80,
-        "functions": 39,
-        "lines": 58,
-        "statements": 57
+        "branches": 88,
+        "functions": 87,
+        "lines": 83,
+        "statements": 83
       },
       "./src/core/hooks/": {
         "branches": 81,
