@@ -367,10 +367,10 @@
         "statements": 60
       },
       "./src/modules/template/": {
-        "branches": 46,
-        "functions": 55,
-        "lines": 73,
-        "statements": 72
+        "branches": 77,
+        "functions": 99,
+        "lines": 92,
+        "statements": 89
       },
       "./src/modules/webhook/": {
         "branches": 72,

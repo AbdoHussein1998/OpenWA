@@ -211,7 +211,7 @@ authoritative gate. Current policy:
 | `src/modules/stats/`        | 67%      | 63%       | 71%   | 69%        |
 | `src/modules/status-store/` | 79%      | 83%       | 92%   | 91%        |
 | `src/modules/status/`       | 47%      | 45%       | 62%   | 60%        |
-| `src/modules/template/`     | 46%      | 55%       | 73%   | 72%        |
+| `src/modules/template/`     | 77%      | 99%       | 92%   | 89%        |
 | `src/modules/webhook/`      | 72%      | 89%       | 90%   | 87%        |
 
 Each floor sits roughly five points below that scope's measured coverage, so it catches a real
