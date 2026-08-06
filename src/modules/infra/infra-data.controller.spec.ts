@@ -118,6 +118,51 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     expect(new Date(restored.leaseExpiresAt as unknown as string).toISOString()).toBe(leaseExpiresAt.toISOString());
   });
 
+  it('holds the ownership loss-detection token for the whole transaction, and releases it', async () => {
+    await seedSession('s1');
+    const dump = await controller.exportData();
+
+    const events: string[] = [];
+    let held = 0;
+    const ownership = {
+      suspendLossDetection: () => {
+        held++;
+        events.push('suspend');
+        return () => {
+          held--;
+          events.push('release');
+        };
+      },
+      heldByOtherNodes: () => Promise.resolve([]),
+    };
+    // Observe from inside the transaction: the token must already be held by the time rows move.
+    const realCreate = ds.createQueryRunner.bind(ds);
+    jest.spyOn(ds, 'createQueryRunner').mockImplementation((...args: Parameters<typeof realCreate>) => {
+      const runner = realCreate(...args);
+      const realQuery = runner.query.bind(runner);
+      runner.query = ((...callArgs: Parameters<typeof realQuery>) => {
+        if (/DELETE FROM sessions/.test(callArgs[0])) events.push(`delete(held=${held})`);
+        return realQuery(...callArgs);
+      }) as typeof runner.query;
+      return runner;
+    });
+
+    const withOwnership = new InfraDataController(
+      cfg as never,
+      ds,
+      undefined,
+      undefined,
+      undefined,
+      ownership as never,
+    );
+    const res = await withOwnership.importData({ tables: dump.tables });
+    jest.restoreAllMocks();
+
+    expect(res.imported).toBe(true);
+    expect(events).toEqual(['suspend', 'delete(held=1)', 'release']);
+    expect(held).toBe(0);
+  });
+
   it('rolls the whole import back when ownership cannot be re-applied, instead of reporting success', async () => {
     await seedSession('s1');
     await ds.getRepository(Session).update({ id: 's1' }, { nodeId: 'node-a', nodeUrl: 'http://10.0.0.5:2785' });

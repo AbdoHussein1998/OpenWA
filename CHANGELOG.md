@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A replace-all data import now carries the session ownership lease across the replace** — the restore re-inserted sessions without it, so the next lease renewal read the blank row as a lost claim and tore down engines that had never stopped.
+- **A replace-all data import no longer disturbs the engines it left running** — the restore dropped each session's ownership lease and, on SQLite, the heartbeat could read the half-applied transaction, so a renewal concluded the claim was lost and tore down engines that had never stopped.
 
 ## [0.14.2] - 2026-08-06
 

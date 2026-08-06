@@ -402,6 +402,13 @@ export class InfraDataController {
       failedOrphanEngines,
     };
 
+    // Silence the ownership heartbeat's loss detection for the whole transaction. On SQLite every
+    // query runner shares ONE connection, so a heartbeat tick can execute INSIDE this transaction —
+    // after the DELETE below, before the re-inserts commit — and see no session rows at all. It
+    // would read that as "a peer took everything" and tear down every engine on this node, even on
+    // the paths where this import then rolls back and every row comes straight back.
+    const resumeLossDetection = this.ownership?.suspendLossDetection();
+
     const queryRunner = this.dataDataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -571,6 +578,8 @@ export class InfraDataController {
       throw error;
     } finally {
       await queryRunner.release();
+      // After release(), so the heartbeat cannot observe the transaction's connection state.
+      resumeLossDetection?.();
     }
   }
 }
