@@ -64,17 +64,17 @@ func main() {
 
 ## Configuration
 
-| Option | Purpose |
-| ------ | ------- |
-| `WithTimeout(d)` | Per-request timeout (default 30s). |
-| `WithHTTPClient(hc)` | Inject a preconfigured `*http.Client` (pool, jar, timeout). |
-| `WithTransport(rt)` | Inject the base `http.RoundTripper` (proxy, TLS, test double). |
-| `WithLogger(l)` | Inject a `Logger` (default: no-op). |
-| `WithRetry(p)` | Enable automatic retries (off by default). |
-| `WithMiddleware(mw...)` | Add transport middleware (tracing, metrics, auth). |
-| `WithUserAgent(ua)` | Override the `User-Agent`. |
-| `WithHeader(k, v)` | Add a default header on every request. |
-| `WithInsecureHTTP()` | Suppress the plaintext-`http://` warning. |
+| Option                  | Purpose                                                        |
+| ----------------------- | -------------------------------------------------------------- |
+| `WithTimeout(d)`        | Per-request timeout (default 30s).                             |
+| `WithHTTPClient(hc)`    | Inject a preconfigured `*http.Client` (pool, jar, timeout).    |
+| `WithTransport(rt)`     | Inject the base `http.RoundTripper` (proxy, TLS, test double). |
+| `WithLogger(l)`         | Inject a `Logger` (default: no-op).                            |
+| `WithRetry(p)`          | Enable automatic retries (off by default).                     |
+| `WithMiddleware(mw...)` | Add transport middleware (tracing, metrics, auth).             |
+| `WithUserAgent(ua)`     | Override the `User-Agent`.                                     |
+| `WithHeader(k, v)`      | Add a default header on every request.                         |
+| `WithInsecureHTTP()`    | Suppress the plaintext-`http://` warning.                      |
 
 ## Typed errors
 
@@ -187,7 +187,7 @@ subdirectory rather than at the repository root:
 git tag sdk/go/v0.2.0 && git push origin sdk/go/v0.2.0
 ```
 
-A bare `v0.2.0` tag is the *app* version and does nothing for this module.
+A bare `v0.2.0` tag is the _app_ version and does nothing for this module.
 Without a prefixed tag, `go get` resolves a pseudo-version
 (`v0.0.0-<date>-<commit>`) — usable, but callers cannot pin a release.
 

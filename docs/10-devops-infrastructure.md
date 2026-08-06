@@ -18,11 +18,11 @@ flowchart TB
     subgraph Development["Development"]
         DEV[Local Docker Compose]
     end
-    
+
     subgraph Registry["Container Registry"]
         GHCR["GHCR branch / SHA / release tags"]
     end
-    
+
     subgraph Deployment["Deployment (single server)"]
         PROXY[Reverse Proxy]
         PROXY --> APP[OpenWA - one instance]
@@ -30,7 +30,7 @@ flowchart TB
         APP --> REDIS[(Redis - optional)]
         APP --> VOL["Data volume (/app/data)"]
     end
-    
+
     DEV --> |CI builds and pushes| GHCR
     GHCR --> |operator pulls| Deployment
 ```
@@ -138,7 +138,7 @@ services:
       target: builder
     command: npm run start:dev
     ports:
-      - "2785:2785"
+      - '2785:2785'
     environment:
       - NODE_ENV=development
       - DATABASE_TYPE=postgres
@@ -176,14 +176,14 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - '5432:5432'
 
   redis:
     image: redis:7-alpine
     volumes:
       - redis-data:/data
     ports:
-      - "6379:6379"
+      - '6379:6379'
 
   # No separate dashboard service: the `app` image bundles the dashboard SPA and serves it
   # from the same port (2785) via NestJS. Open http://localhost:2785 for the UI.
@@ -240,7 +240,7 @@ services:
       # this volume loses the linked WhatsApp sessions and the API keys.
       - openwa-data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:2785/api/health/ready"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:2785/api/health/ready']
       interval: 30s
       timeout: 10s
       retries: 3
@@ -249,8 +249,8 @@ services:
   nginx:
     image: nginx:alpine
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
@@ -300,16 +300,16 @@ an illustrative design sketch; the chart is the authoritative artifact.
 SHA image tags to GHCR; `latest` is deliberately not set there and moves only through the separate,
 boot-smoke-gated release workflow.
 
-| Job | Needs | What it runs |
-|-----|-------|--------------|
-| `lint` | — | ESLint, `tsc --noEmit -p tsconfig.json` (full program, so spec files are type-checked too), `format:check`, `check:versions`, `check:dockerignore`, `openapi:check` |
-| `audit` | — | `npm audit --audit-level=high`, split out of `lint` so a newly published advisory can't abort the code-quality gates |
-| `test` | — | `npm test -- --coverage`, `test:scripts`, `test:e2e` (a `redis:7-alpine` service backs the queue-on e2e suite), coverage upload |
-| `test-postgres` | — | `npm run build`, then `test:pg-smoke` (migrations + uuid-default) and the Postgres FTS migration spec against a `postgres:16-alpine` service |
-| `dashboard` | — | In `dashboard/`: `lint`, `typecheck`, `i18n:check`, `build`, `test:unit` |
-| `scripts-smoke` | — | `shellcheck` plus the backup/restore smoke test for `scripts/backup.sh` and `scripts/restore.sh` |
-| `build` | lint, audit, test, dashboard, scripts-smoke | `npm run build`, uploads the `dist` artifact |
-| `docker` | build, test-postgres | Buildx multi-arch build (`linux/amd64,linux/arm64`) with provenance + SBOM attestations; pushes to `ghcr.io/<owner>/<repo>` on push events (fork PRs build both architectures without publishing) |
+| Job             | Needs                                       | What it runs                                                                                                                                                                                      |
+| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`          | —                                           | ESLint, `tsc --noEmit -p tsconfig.json` (full program, so spec files are type-checked too), `format:check`, `check:versions`, `check:dockerignore`, `openapi:check`                               |
+| `audit`         | —                                           | `npm audit --audit-level=high`, split out of `lint` so a newly published advisory can't abort the code-quality gates                                                                              |
+| `test`          | —                                           | `npm test -- --coverage`, `test:scripts`, `test:e2e` (a `redis:7-alpine` service backs the queue-on e2e suite), coverage upload                                                                   |
+| `test-postgres` | —                                           | `npm run build`, then `test:pg-smoke` (migrations + uuid-default) and the Postgres FTS migration spec against a `postgres:16-alpine` service                                                      |
+| `dashboard`     | —                                           | In `dashboard/`: `lint`, `typecheck`, `i18n:check`, `build`, `test:unit`                                                                                                                          |
+| `scripts-smoke` | —                                           | `shellcheck` plus the backup/restore smoke test for `scripts/backup.sh` and `scripts/restore.sh`                                                                                                  |
+| `build`         | lint, audit, test, dashboard, scripts-smoke | `npm run build`, uploads the `dist` artifact                                                                                                                                                      |
+| `docker`        | build, test-postgres                        | Buildx multi-arch build (`linux/amd64,linux/arm64`) with provenance + SBOM attestations; pushes to `ghcr.io/<owner>/<repo>` on push events (fork PRs build both architectures without publishing) |
 
 Rollout is left to the operator — the repo has no SSH deploy step, no staging/production
 environments and no auto-deploy on merge.
@@ -327,7 +327,7 @@ flowchart TB
         APP --> RD[(Redis)]
         APP --> FS[File Storage]
     end
-    
+
     Internet --> NGINX
 ```
 
@@ -343,24 +343,24 @@ flowchart TB
     subgraph External["External"]
         CDN[CDN / CloudFlare]
     end
-    
+
     subgraph LoadBalancer["Load Balancer"]
         LB[HAProxy / Nginx]
     end
-    
+
     subgraph AppServers["Application Servers"]
         APP1[OpenWA 1]
         APP2[OpenWA 2]
         APP3[OpenWA N]
     end
-    
+
     subgraph DataLayer["Data Layer"]
         PG[(PostgreSQL Primary)]
         PGR[(PostgreSQL Replica)]
         RD[(Redis Cluster)]
         S3[(S3 Storage)]
     end
-    
+
     CDN --> LB
     LB --> APP1 & APP2 & APP3
     APP1 & APP2 & APP3 --> PG
@@ -511,7 +511,10 @@ export default () => ({
   // API_MASTER_KEY is NOT part of this factory — `security` holds only trustedProxies, and the
   // master key is read straight from process.env by the auth service.
   security: {
-    trustedProxies: (process.env.TRUSTED_PROXIES || '').split(',').map(proxy => proxy.trim()).filter(Boolean),
+    trustedProxies: (process.env.TRUSTED_PROXIES || '')
+      .split(',')
+      .map(proxy => proxy.trim())
+      .filter(Boolean),
   },
   // Session data path and Puppeteer both live under `engine` — there is no top-level
   // `session` or `puppeteer` key.
@@ -522,7 +525,9 @@ export default () => ({
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: process.env.PUPPETEER_HEADLESS !== 'false',
       // Split on commas AND whitespace; the default is a four-flag string, not an empty list
-      args: (process.env.PUPPETEER_ARGS || '--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu')
+      args: (
+        process.env.PUPPETEER_ARGS || '--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu'
+      )
         .split(/[\s,]+/)
         .filter(Boolean),
     },
@@ -558,23 +563,23 @@ flowchart LR
         LOGS[Structured Logs]
         TRACES[Traces]
     end
-    
+
     subgraph Collection["Collection"]
         PROM[Prometheus]
         LOKI[Loki]
         TEMPO[Tempo]
     end
-    
+
     subgraph Visualization["Visualization"]
         GRAF[Grafana]
     end
-    
+
     subgraph Alerting["Alerting"]
         AM[AlertManager]
         SLACK[Slack]
         EMAIL[Email]
     end
-    
+
     METRICS --> PROM --> GRAF
     LOGS --> LOKI --> GRAF
     TRACES --> TEMPO --> GRAF
@@ -601,7 +606,7 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.retention.time=30d'
     ports:
-      - "9090:9090"
+      - '9090:9090'
     restart: unless-stopped
 
   grafana:
@@ -614,7 +619,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
     ports:
-      - "3001:3000"
+      - '3001:3000'
     depends_on:
       - prometheus
       - loki
@@ -627,7 +632,7 @@ services:
       - loki-data:/loki
     command: -config.file=/etc/loki/local-config.yaml
     ports:
-      - "3100:3100"
+      - '3100:3100'
     restart: unless-stopped
 
   promtail:
@@ -646,7 +651,7 @@ services:
     volumes:
       - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml
     ports:
-      - "9093:9093"
+      - '9093:9093'
     restart: unless-stopped
 
   node-exporter:
@@ -659,7 +664,7 @@ services:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
     ports:
-      - "9100:9100"
+      - '9100:9100'
     restart: unless-stopped
 
 volumes:
@@ -722,8 +727,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "OpenWA service is down"
-          description: "The OpenWA application is not responding"
+          summary: 'OpenWA service is down'
+          description: 'The OpenWA application is not responding'
 
       # Session(s) disconnected
       - alert: SessionDisconnected
@@ -732,8 +737,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "WhatsApp session disconnected"
-          description: "{{ $value }} session(s) in disconnected state"
+          summary: 'WhatsApp session disconnected'
+          description: '{{ $value }} session(s) in disconnected state'
 
       # Failed messages currently stored
       - alert: FailedMessagesPresent
@@ -742,8 +747,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "Messages are failing"
-          description: "{{ $value }} message(s) are currently in FAILED state"
+          summary: 'Messages are failing'
+          description: '{{ $value }} message(s) are currently in FAILED state'
 
       # Process memory growth (app-exported RSS; ~2GB example threshold)
       - alert: HighProcessMemory
@@ -752,8 +757,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "High OpenWA process memory"
-          description: "RSS is {{ $value | humanize1024 }}B"
+          summary: 'High OpenWA process memory'
+          description: 'RSS is {{ $value | humanize1024 }}B'
 
       # Host memory pressure — EXTERNAL (node-exporter), not exported by OpenWA
       - alert: HighHostMemoryUsage
@@ -764,8 +769,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "High host memory usage"
-          description: "Host memory usage is {{ $value | humanizePercentage }}"
+          summary: 'High host memory usage'
+          description: 'Host memory usage is {{ $value | humanizePercentage }}'
 ```
 
 ### AlertManager Configuration
@@ -815,16 +820,16 @@ receivers:
 All health endpoints are `@Public()` (no API key) and `@SkipThrottle()`, and live under the global
 `api` prefix. There is **no** `/health/detailed` endpoint.
 
-| Endpoint | Purpose | Body | Codes |
-|----------|---------|------|-------|
-| `GET /api/health` | Basic check | `{ status, timestamp, version }` (version from `package.json`) | 200 |
-| `GET /api/health/live` | Liveness (deliberately static — a transient dependency outage must not KILL the pod) | `{ status: 'ok' }` | 200 |
-| `GET /api/health/ready` | Readiness — probes **both** databases (`main` + `data`, `SELECT 1`, 3s timeout each) and reports 503 while draining (graceful shutdown) | `{ status, details: { mainDatabase, dataDatabase } }` | 200 / 503 |
+| Endpoint                | Purpose                                                                                                                                 | Body                                                           | Codes     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | --------- |
+| `GET /api/health`       | Basic check                                                                                                                             | `{ status, timestamp, version }` (version from `package.json`) | 200       |
+| `GET /api/health/live`  | Liveness (deliberately static — a transient dependency outage must not KILL the pod)                                                    | `{ status: 'ok' }`                                             | 200       |
+| `GET /api/health/ready` | Readiness — probes **both** databases (`main` + `data`, `SELECT 1`, 3s timeout each) and reports 503 while draining (graceful shutdown) | `{ status, details: { mainDatabase, dataDatabase } }`          | 200 / 503 |
 
 ```typescript
 // health/health.controller.ts
 @Controller('health')
-@Public()       // no API key required
+@Public() // no API key required
 @SkipThrottle()
 export class HealthController {
   @Get()
@@ -899,17 +904,17 @@ export class MetricsService {
 
 **Exported metric names** (the complete set — nothing else is emitted):
 
-| Metric | Type | Labels | Meaning |
-|--------|------|--------|---------|
-| `openwa_up` | gauge | — | Always `1` when scraped |
-| `openwa_process_uptime_seconds` | gauge | — | Process uptime |
-| `openwa_process_resident_memory_bytes` | gauge | — | RSS |
-| `openwa_process_heap_used_bytes` | gauge | — | V8 heap used |
-| `openwa_sessions_total` | gauge | — | Configured sessions |
-| `openwa_sessions_active` | gauge | — | READY (active) sessions |
-| `openwa_sessions` | gauge | `status` | Session count per status |
-| `openwa_messages_total` | gauge | `direction` (`incoming`/`outgoing`) | Current stored messages by direction |
-| `openwa_messages_failed_total` | gauge | — | Current messages in FAILED state |
+| Metric                                 | Type  | Labels                              | Meaning                              |
+| -------------------------------------- | ----- | ----------------------------------- | ------------------------------------ |
+| `openwa_up`                            | gauge | —                                   | Always `1` when scraped              |
+| `openwa_process_uptime_seconds`        | gauge | —                                   | Process uptime                       |
+| `openwa_process_resident_memory_bytes` | gauge | —                                   | RSS                                  |
+| `openwa_process_heap_used_bytes`       | gauge | —                                   | V8 heap used                         |
+| `openwa_sessions_total`                | gauge | —                                   | Configured sessions                  |
+| `openwa_sessions_active`               | gauge | —                                   | READY (active) sessions              |
+| `openwa_sessions`                      | gauge | `status`                            | Session count per status             |
+| `openwa_messages_total`                | gauge | `direction` (`incoming`/`outgoing`) | Current stored messages by direction |
+| `openwa_messages_failed_total`         | gauge | —                                   | Current messages in FAILED state     |
 
 ### Grafana Dashboard Definition
 
@@ -923,41 +928,31 @@ export class MetricsService {
       "title": "Active Sessions",
       "type": "stat",
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
-      "targets": [
-        { "expr": "openwa_sessions_active" }
-      ]
+      "targets": [{ "expr": "openwa_sessions_active" }]
     },
     {
       "title": "Stored Outgoing Messages",
       "type": "stat",
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
-      "targets": [
-        { "expr": "openwa_messages_total{direction=\"outgoing\"}" }
-      ]
+      "targets": [{ "expr": "openwa_messages_total{direction=\"outgoing\"}" }]
     },
     {
       "title": "Failed Messages",
       "type": "stat",
       "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
-      "targets": [
-        { "expr": "openwa_messages_failed_total" }
-      ]
+      "targets": [{ "expr": "openwa_messages_failed_total" }]
     },
     {
       "title": "Sessions by Status",
       "type": "timeseries",
       "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
-      "targets": [
-        { "expr": "openwa_sessions", "legendFormat": "{{status}}" }
-      ]
+      "targets": [{ "expr": "openwa_sessions", "legendFormat": "{{status}}" }]
     },
     {
       "title": "Stored Messages by Direction",
       "type": "timeseries",
       "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
-      "targets": [
-        { "expr": "openwa_messages_total", "legendFormat": "{{direction}}" }
-      ]
+      "targets": [{ "expr": "openwa_messages_total", "legendFormat": "{{direction}}" }]
     },
     {
       "title": "Process Memory",
@@ -972,9 +967,7 @@ export class MetricsService {
       "title": "Uptime",
       "type": "stat",
       "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
-      "targets": [
-        { "expr": "openwa_process_uptime_seconds" }
-      ]
+      "targets": [{ "expr": "openwa_process_uptime_seconds" }]
     }
   ]
 }
@@ -1018,24 +1011,23 @@ export class MessageService {
 
 These are the metrics OpenWA actually exports at `GET /api/metrics`:
 
-| Category | Metric | Description | Alert Idea |
-|----------|--------|-------------|------------|
-| **Liveness** | `openwa_up` | Always `1` when scraped (absence/scrape-failure = down) | Target down |
-| **Sessions** | `openwa_sessions_total` | Configured sessions | Near your expected session count |
-| **Sessions** | `openwa_sessions_active` | READY (active) sessions | Drops below expected |
-| **Sessions** | `openwa_sessions{status="..."}` | Per-status counts (e.g. `disconnected`, `failed`) | `disconnected`/`failed` > 0 |
-| **Messages** | `openwa_messages_total{direction="outgoing"}` | Current stored outgoing messages | Unexpected change |
-| **Messages** | `openwa_messages_total{direction="incoming"}` | Current stored incoming messages | Unexpected change |
-| **Messages** | `openwa_messages_failed_total` | Current messages in FAILED state | Above acceptable threshold |
-| **System** | `openwa_process_resident_memory_bytes` | RSS | Growth / near limit |
-| **System** | `openwa_process_heap_used_bytes` | V8 heap used | Growth |
-| **System** | `openwa_process_uptime_seconds` | Process uptime | Frequent restarts (resets) |
+| Category     | Metric                                        | Description                                             | Alert Idea                       |
+| ------------ | --------------------------------------------- | ------------------------------------------------------- | -------------------------------- |
+| **Liveness** | `openwa_up`                                   | Always `1` when scraped (absence/scrape-failure = down) | Target down                      |
+| **Sessions** | `openwa_sessions_total`                       | Configured sessions                                     | Near your expected session count |
+| **Sessions** | `openwa_sessions_active`                      | READY (active) sessions                                 | Drops below expected             |
+| **Sessions** | `openwa_sessions{status="..."}`               | Per-status counts (e.g. `disconnected`, `failed`)       | `disconnected`/`failed` > 0      |
+| **Messages** | `openwa_messages_total{direction="outgoing"}` | Current stored outgoing messages                        | Unexpected change                |
+| **Messages** | `openwa_messages_total{direction="incoming"}` | Current stored incoming messages                        | Unexpected change                |
+| **Messages** | `openwa_messages_failed_total`                | Current messages in FAILED state                        | Above acceptable threshold       |
+| **System**   | `openwa_process_resident_memory_bytes`        | RSS                                                     | Growth / near limit              |
+| **System**   | `openwa_process_heap_used_bytes`              | V8 heap used                                            | Growth                           |
+| **System**   | `openwa_process_uptime_seconds`               | Process uptime                                          | Frequent restarts (resets)       |
 
 > OpenWA does **not** expose request-rate, latency-histogram, webhook, queue, or Node default
 > (`nodejs_*`) metrics. For host/container-level signals (CPU, memory pressure, event-loop), scrape
 > external exporters: `up` and `container_memory_usage_bytes` come from blackbox/cAdvisor, and
 > `node_*` from node-exporter — not from the app.
-
 
 ## 10.7 Backup & Recovery
 
@@ -1049,7 +1041,7 @@ flowchart TB
         COMPRESS --> ENCRYPT[encrypt]
         ENCRYPT --> S3[S3 Storage]
     end
-    
+
     subgraph Retention["Retention Policy"]
         D7[Daily: 7 days]
         W4[Weekly: 4 weeks]
@@ -1080,12 +1072,12 @@ starting guidance**, not measured figures; actual usage depends heavily on engin
 (whatsapp-web.js spawns a Chromium per session; Baileys is far lighter), message volume, and media.
 Size up from your own monitoring.
 
-| Sessions | RAM | CPU | Storage |
-|----------|-----|-----|---------|
-| 1-5 | 2GB | 2 cores | 20GB |
-| 5-10 | 4GB | 4 cores | 50GB |
-| 10-20 | 8GB | 8 cores | 100GB |
-| 20+ | 16GB+ | 16+ cores | 200GB+ |
+| Sessions | RAM   | CPU       | Storage |
+| -------- | ----- | --------- | ------- |
+| 1-5      | 2GB   | 2 cores   | 20GB    |
+| 5-10     | 4GB   | 4 cores   | 50GB    |
+| 10-20    | 8GB   | 8 cores   | 100GB   |
+| 20+      | 16GB+ | 16+ cores | 200GB+  |
 
 ### Horizontal Scaling
 

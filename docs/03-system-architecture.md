@@ -11,38 +11,38 @@ flowchart TB
         C2[Dashboard]
         C3[n8n/Automation]
     end
-    
+
     subgraph OpenWA["OpenWA Platform"]
         subgraph API["API Layer"]
             REST[REST API<br/>NestJS]
             WS[WebSocket<br/>Real-time]
             SWAGGER[Swagger<br/>Documentation]
         end
-        
+
         subgraph Core["Core Services"]
             SM[Session<br/>Manager]
             MM[Message<br/>Manager]
             WH[Webhook<br/>Manager]
             QM[Queue<br/>Manager]
         end
-        
+
         subgraph Engine["WhatsApp Engine (pluggable)"]
             WW[whatsapp-web.js<br/>Puppeteer/Chromium]
             BY[Baileys<br/>WebSocket/No browser]
         end
-        
+
         subgraph Storage["Storage Layer"]
             DB[(Database<br/>PostgreSQL/SQLite)]
             REDIS[(Redis<br/>Cache/Queue)]
             FS[File Storage<br/>Media Files]
         end
     end
-    
+
     subgraph External["External"]
         WA[WhatsApp<br/>Servers]
         WEBHOOK[Webhook<br/>Endpoints]
     end
-    
+
     Clients --> API
     API --> Core
     Core --> Engine
@@ -61,7 +61,7 @@ sequenceDiagram
     participant Engine as WA Engine
     participant DB as Database
     participant WA as WhatsApp
-    
+
     Client->>API: Create Session
     API->>SM: createSession()
     SM->>DB: Save session config
@@ -108,12 +108,12 @@ flowchart TB
 
 **Key Principles:**
 
-| Principle | Description | Example |
-|-----------|-------------|---------|
-| **Program to Interfaces** | Core code depends on the `IWhatsAppEngine` abstraction, never on a concrete library | `IWhatsAppEngine` instead of `whatsapp-web.js` `Client` |
-| **Dependency Injection** | Services are wired via NestJS DI (constructor injection of `EngineFactory`, `StorageService`, `CacheService`) | `constructor(private engineFactory: EngineFactory)` |
-| **Configuration-driven** | Backend selection via environment variables | `STORAGE_TYPE=s3`, `ENGINE_TYPE=baileys` |
-| **Zero Code Changes** | Switch backends without modifying application code | Change `.env`, restart |
+| Principle                 | Description                                                                                                   | Example                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| **Program to Interfaces** | Core code depends on the `IWhatsAppEngine` abstraction, never on a concrete library                           | `IWhatsAppEngine` instead of `whatsapp-web.js` `Client` |
+| **Dependency Injection**  | Services are wired via NestJS DI (constructor injection of `EngineFactory`, `StorageService`, `CacheService`) | `constructor(private engineFactory: EngineFactory)`     |
+| **Configuration-driven**  | Backend selection via environment variables                                                                   | `STORAGE_TYPE=s3`, `ENGINE_TYPE=baileys`                |
+| **Zero Code Changes**     | Switch backends without modifying application code                                                            | Change `.env`, restart                                  |
 
 ### Adapter Categories
 
@@ -171,12 +171,12 @@ REST/webhook payloads, and plugins free of that, the **engine boundary is an ant
 every WhatsApp id an engine emits in a neutral field (`from` / `to` / `chatId` / `author`, contact and
 chat `id`) is reduced to one small **neutral dialect**:
 
-| Neutral form | Meaning |
-| --- | --- |
-| `<phone>@c.us` | a user, by phone (the raw `@s.whatsapp.net` form folds into this) |
-| `<id>@g.us` | a group |
-| `<lid>@lid` | a user known **only** by privacy id - phone genuinely unknown (a first-class state) |
-| `status@broadcast`, `<id>@newsletter`, `<id>@broadcast` | special channels |
+| Neutral form                                            | Meaning                                                                             |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `<phone>@c.us`                                          | a user, by phone (the raw `@s.whatsapp.net` form folds into this)                   |
+| `<id>@g.us`                                             | a group                                                                             |
+| `<lid>@lid`                                             | a user known **only** by privacy id - phone genuinely unknown (a first-class state) |
+| `status@broadcast`, `<id>@newsletter`, `<id>@broadcast` | special channels                                                                    |
 
 Never `@s.whatsapp.net`, never a `:device` suffix. **Resolution rule:** prefer `@c.us` (resolve a lid
 to its phone when the mapping is known), and fall back to `@lid` only when it can't be resolved - an
@@ -252,15 +252,17 @@ their respective modules.
     ConfigModule.forRoot({ isGlobal: true, load: [configuration], validate: validateEnv }),
 
     // Auth + audit — always SQLite
-    TypeOrmModule.forRootAsync({ name: 'main', /* ... ./data/main.sqlite ... */ }),
+    TypeOrmModule.forRootAsync({ name: 'main' /* ... ./data/main.sqlite ... */ }),
 
     // Pluggable user data — sqlite | postgres via DATABASE_TYPE
-    TypeOrmModule.forRootAsync({ name: 'data', /* ... */ }),
+    TypeOrmModule.forRootAsync({ name: 'data' /* ... */ }),
 
-    CacheModule,     // provides CacheService
-    StorageModule,   // provides StorageService
-    EngineModule,    // provides EngineFactory
-    SessionModule, MessageModule, WebhookModule, /* ...other feature modules... */
+    CacheModule, // provides CacheService
+    StorageModule, // provides StorageService
+    EngineModule, // provides EngineFactory
+    SessionModule,
+    MessageModule,
+    WebhookModule /* ...other feature modules... */,
   ],
 })
 export class AppModule {}
@@ -276,11 +278,11 @@ Services receive the backends by **constructor injection of the concrete class**
 export class SomeService {
   constructor(
     private readonly storage: StorageService, // branches local vs s3 internally
-    private readonly cache: CacheService,      // Redis when enabled, else a no-op
+    private readonly cache: CacheService, // Redis when enabled, else a no-op
   ) {}
 
   async saveMedia(filePath: string, data: Buffer) {
-    await this.storage.putFile(filePath, data);     // path-safety guarded
+    await this.storage.putFile(filePath, data); // path-safety guarded
     await this.cache.setSessionStatus('id', 'READY'); // no-op if Redis disabled
   }
 }
@@ -304,20 +306,21 @@ sequenceDiagram
 
 ### Backend Selection Matrix
 
-| Environment | Database | Storage | Cache | Engine | Use Case |
-|-------------|----------|---------|-------|--------|----------|
-| **Development** | SQLite | Local | Disabled | whatsapp-web.js | Fast iteration, testing |
-| **Testing** | SQLite | Local | Disabled | whatsapp-web.js | CI/CD, unit tests |
-| **Staging** | PostgreSQL | Local | Redis | whatsapp-web.js | Pre-production validation |
-| **Production (Small)** | SQLite | Local | Disabled | whatsapp-web.js | 1-3 sessions, VPS |
-| **Production (Medium)** | PostgreSQL | Local | Redis | whatsapp-web.js | 5-10 sessions |
-| **Production (Large)** | PostgreSQL | S3/MinIO | Redis | whatsapp-web.js | 10+ sessions, HA |
+| Environment             | Database   | Storage  | Cache    | Engine          | Use Case                  |
+| ----------------------- | ---------- | -------- | -------- | --------------- | ------------------------- |
+| **Development**         | SQLite     | Local    | Disabled | whatsapp-web.js | Fast iteration, testing   |
+| **Testing**             | SQLite     | Local    | Disabled | whatsapp-web.js | CI/CD, unit tests         |
+| **Staging**             | PostgreSQL | Local    | Redis    | whatsapp-web.js | Pre-production validation |
+| **Production (Small)**  | SQLite     | Local    | Disabled | whatsapp-web.js | 1-3 sessions, VPS         |
+| **Production (Medium)** | PostgreSQL | Local    | Redis    | whatsapp-web.js | 5-10 sessions             |
+| **Production (Large)**  | PostgreSQL | S3/MinIO | Redis    | whatsapp-web.js | 10+ sessions, HA          |
 
 ### Hot-Swap Considerations
 
 > **Note:** Adapter hot-swap (changing adapter without restart) is **not supported** in v1.0. Changing adapter requires application restart.
 
 Future considerations for hot-swap:
+
 - Graceful connection draining
 - State migration between adapters
 - Zero-downtime switching
@@ -347,7 +350,7 @@ flowchart TB
         WS[WebSocket Gateways]
         SWAGGER[OpenAPI Docs]
     end
-    
+
     subgraph Application["Application Layer"]
         direction LR
         SESS[Session Service]
@@ -355,14 +358,14 @@ flowchart TB
         WH[Webhook Service]
         AUTH[Auth Service]
     end
-    
+
     subgraph Domain["Domain Layer"]
         direction LR
         ENT[Entities]
         REPO[Repository Interfaces]
         EVT[Domain Events]
     end
-    
+
     subgraph Infrastructure["Infrastructure Layer"]
         direction LR
         DB[Database]
@@ -370,7 +373,7 @@ flowchart TB
         ENGINE[WA Engine]
         HTTP[HTTP Client]
     end
-    
+
     Presentation --> Application
     Application --> Domain
     Application --> Infrastructure
@@ -454,7 +457,7 @@ classDiagram
         +getAllSessions(): Session[]
         +restoreSessions(): void
     }
-    
+
     class Session {
         +id: string
         +name: string
@@ -466,7 +469,7 @@ classDiagram
         +stop(): void
         +getQR(): string
     }
-    
+
     class SessionStatus {
         <<enumeration>>
         CREATED
@@ -477,7 +480,7 @@ classDiagram
         DISCONNECTED
         FAILED
     }
-    
+
     class WhatsAppEngine {
         <<interface>>
         +initialize(callbacks): Promise~void~
@@ -486,7 +489,7 @@ classDiagram
         +getContacts(): Promise~Contact[]~
         +disconnect(): Promise~void~
     }
-    
+
     SessionManager --> Session
     Session --> SessionStatus
     Session --> WhatsAppEngine
@@ -503,7 +506,7 @@ flowchart TB
         P1 --> E1[Engine Send]
         E1 --> R1[Response]
     end
-    
+
     subgraph Inbound["Inbound Message Flow"]
         E2[Engine Event] --> P2[Process]
         P2 --> S2[Store]
@@ -525,7 +528,7 @@ classDiagram
         +dispatch(event): void
         -deliverWithRetry(webhook, payload): void
     }
-    
+
     class Webhook {
         +id: string
         +url: string
@@ -535,7 +538,7 @@ classDiagram
         +retryCount: number
         +headers: Record
     }
-    
+
     class WebhookPayload {
         +event: EventType
         +timestamp: Date
@@ -543,7 +546,7 @@ classDiagram
         +data: any
         +signature: string
     }
-    
+
     class EventType {
         <<enumeration>>
         MESSAGE_RECEIVED
@@ -552,7 +555,7 @@ classDiagram
         SESSION_STATUS
         QR_CODE
     }
-    
+
     WebhookManager --> Webhook
     WebhookManager --> WebhookPayload
     Webhook --> EventType
@@ -567,26 +570,26 @@ flowchart LR
     subgraph Request["1. Request"]
         A[Client] -->|POST /messages| B[Controller]
     end
-    
+
     subgraph Validation["2. Validation"]
         B --> C{Valid?}
         C -->|No| D[400 Error]
         C -->|Yes| E[Service]
     end
-    
+
     subgraph Processing["3. Processing"]
         E --> F[Get Session]
         F --> G{Session Ready?}
         G -->|No| H[400 Error]
         G -->|Yes| I[Queue Job]
     end
-    
+
     subgraph Execution["4. Execution"]
         I --> J[Worker]
         J --> K[Engine]
         K --> L[WhatsApp]
     end
-    
+
     subgraph Response["5. Response"]
         L --> M[Success]
         M --> N[Store]
@@ -622,19 +625,19 @@ flowchart TB
             NEST[NestJS Application]
             WW[whatsapp-web.js<br/>or Baileys]
         end
-        
+
         subgraph Browser["Headless Browser (wwebjs only)"]
             CHROME[Chromium]
         end
-        
+
         Node -.->|ENGINE_TYPE=whatsapp-web.js| Browser
     end
-    
+
     subgraph External["External Services"]
         PG[(PostgreSQL)]
         RD[(Redis)]
     end
-    
+
     Container --> External
 ```
 
@@ -677,14 +680,14 @@ flowchart LR
         G["/api/sessions/:sessionId/groups"]
         H["/api/health"]
     end
-    
+
     subgraph Methods["HTTP Methods"]
         GET
         POST
         PUT
         DELETE
     end
-    
+
     subgraph Format["Response Format"]
         JSON[JSON Response]
         ERR[Error Format]
@@ -727,7 +730,7 @@ flowchart TB
     subgraph External["External Request"]
         R[Request]
     end
-    
+
     subgraph Security["Security Layers"]
         R --> HTTPS[HTTPS/TLS]
         HTTPS --> CORS[CORS Check]
@@ -736,7 +739,7 @@ flowchart TB
         AUTH --> VAL[Input Validation]
         VAL --> APP[Application]
     end
-    
+
     subgraph Internal["Internal Security"]
         APP --> ENC[Data Encryption]
         ENC --> LOG[Audit Logging]
@@ -790,23 +793,23 @@ flowchart TB
 flowchart TB
     subgraph Scaling["Scaling Strategy"]
         direction TB
-        
+
         subgraph Stateless["Stateless Components"]
             API[API Servers]
             WORKER[Queue Workers]
         end
-        
+
         subgraph Stateful["Stateful Components"]
             SESSION[Session Instances]
         end
-        
+
         subgraph Shared["Shared State"]
             DB[(Database)]
             REDIS[(Redis)]
             S3[(Object Storage)]
         end
     end
-    
+
     Stateless --> Shared
     Stateful --> Shared
 ```
@@ -820,7 +823,7 @@ flowchart LR
         H -->|Yes| A[Route to Affinity]
         H -->|No| B[Round Robin]
     end
-    
+
     A --> I1[Instance 1<br/>Session A, B]
     A --> I2[Instance 2<br/>Session C, D]
     B --> I1
@@ -903,7 +906,7 @@ export interface EngineEventCallbacks {
   onMessageRevoked?: (message: RevokedMessage) => void;
   onMessageReaction?: (event: ReactionEvent) => void;
   onMessageEdited?: (message: EditedMessage) => void;
-  onGroupEvent?: (event: GroupEvent) => void;  // kind selects group.join / group.leave / group.update
+  onGroupEvent?: (event: GroupEvent) => void; // kind selects group.join / group.leave / group.update
   onCall?: (event: IncomingCallEvent) => void; // incoming call ringing; rejectCall() while it rings
   onHistoryMessages?: (messages: IncomingMessage[]) => void; // bulk initial sync; persist, don't dispatch
   onDisconnected?: (reason: string) => void; // recoverable -> reconnect
@@ -916,14 +919,14 @@ export interface IWhatsAppEngine {
   // Lifecycle — connecting happens inside initialize(); callbacks are registered here.
   initialize(callbacks: EngineEventCallbacks): Promise<void>;
   disconnect(): Promise<void>; // close, keep session (reconnect without QR)
-  logout(): Promise<void>;     // clear session (requires QR scan again)
+  logout(): Promise<void>; // clear session (requires QR scan again)
   destroy(): Promise<void>;
   forceDestroy(): Promise<void>; // kill this engine's own resources, then graceful teardown
 
   // Status / auth
   getStatus(): EngineStatus;
   probeLiveness?(): Promise<boolean>; // optional active round-trip against the live connection
-  getQRCode(): string | null;  // synchronous
+  getQRCode(): string | null; // synchronous
   requestPairingCode(phoneNumber: string): Promise<string>;
   getPhoneNumber(): string | null;
   getPushName(): string | null;
@@ -1055,7 +1058,7 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
   }
 
   private setupEventHandlers(): void {
-    this.client!.on('qr', (qr) => {
+    this.client!.on('qr', qr => {
       this.setStatus(EngineStatus.QR_READY);
       this.callbacks.onQRCode?.(qr);
     });
@@ -1063,11 +1066,11 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
       this.setStatus(EngineStatus.READY);
       this.callbacks.onReady?.(this.phoneNumber ?? '', this.pushName ?? '');
     });
-    this.client!.on('disconnected', (reason) => {
+    this.client!.on('disconnected', reason => {
       this.setStatus(EngineStatus.DISCONNECTED);
       this.callbacks.onDisconnected?.(String(reason));
     });
-    this.client!.on('message', (message) => {
+    this.client!.on('message', message => {
       this.callbacks.onMessage?.(this.toIncomingMessage(message)); // mapped to the neutral shape
     });
   }
@@ -1120,7 +1123,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
   }
 
   private setupEventHandlers(): void {
-    this.socket!.ev.on('connection.update', (update) => {
+    this.socket!.ev.on('connection.update', update => {
       const { connection, lastDisconnect, qr } = update;
       if (qr) {
         this.setStatus(EngineStatus.QR_READY);
@@ -1176,21 +1179,21 @@ flowchart TB
         A[whatsapp-web.js\nPuppeteer-based\ndefault]
         A2[Baileys\nWebSocket-based\nENGINE_TYPE=baileys]
     end
-    
+
     subgraph Risk["Risk Detection"]
         B{Protocol\nBreaking?}
     end
-    
+
     subgraph Migration["Migration Path"]
         C[Update whatsapp-web.js]
         D[Switch to Baileys]
         E[Community Fork]
     end
-    
+
     subgraph Resolution["Resolution"]
         F[Service Restored]
     end
-    
+
     A --> B
     B -->|Minor| C --> F
     B -->|Major wwebjs| D --> F
@@ -1199,16 +1202,16 @@ flowchart TB
 
 ### Engine Comparison
 
-| Feature | whatsapp-web.js | Baileys |
-|---------|-----------------|---------|
-| **Protocol** | Web (Puppeteer) | Native WebSocket |
+| Feature            | whatsapp-web.js       | Baileys             |
+| ------------------ | --------------------- | ------------------- |
+| **Protocol**       | Web (Puppeteer)       | Native WebSocket    |
 | **Resource Usage** | High (~500MB/session) | Low (~50MB/session) |
-| **Stability** | Good | Good |
-| **Community** | Large | Large |
-| **Multi-device** | ✅ | ✅ |
-| **QR Code** | ✅ | ✅ |
-| **Phone Link** | ✅ | ✅ |
-| **Maintenance** | Active | Active |
+| **Stability**      | Good                  | Good                |
+| **Community**      | Large                 | Large               |
+| **Multi-device**   | ✅                    | ✅                  |
+| **QR Code**        | ✅                    | ✅                  |
+| **Phone Link**     | ✅                    | ✅                  |
+| **Maintenance**    | Active                | Active              |
 
 ### Benefits of Abstraction
 
@@ -1262,12 +1265,12 @@ flowchart TB
 
 ### Adapter Options
 
-| Component | Options (`ENV`) | Default | Notes |
-|-----------|---------|---------|-------|
-| **WhatsApp Engine** | whatsapp-web.js, Baileys (`ENGINE_TYPE`) | whatsapp-web.js | Baileys is browser-free |
-| **Database** | SQLite, PostgreSQL (`DATABASE_TYPE`) | SQLite | PostgreSQL for large-scale production |
-| **Media Storage** | local, s3 (`STORAGE_TYPE`) | local | MinIO is the `s3` backend (`S3_ENDPOINT` enables path-style) |
-| **Cache** | Redis or disabled (`REDIS_ENABLED`) | Disabled | When disabled/unreachable, cache fails open (no-op) |
+| Component           | Options (`ENV`)                          | Default         | Notes                                                        |
+| ------------------- | ---------------------------------------- | --------------- | ------------------------------------------------------------ |
+| **WhatsApp Engine** | whatsapp-web.js, Baileys (`ENGINE_TYPE`) | whatsapp-web.js | Baileys is browser-free                                      |
+| **Database**        | SQLite, PostgreSQL (`DATABASE_TYPE`)     | SQLite          | PostgreSQL for large-scale production                        |
+| **Media Storage**   | local, s3 (`STORAGE_TYPE`)               | local           | MinIO is the `s3` backend (`S3_ENDPOINT` enables path-style) |
+| **Cache**           | Redis or disabled (`REDIS_ENABLED`)      | Disabled        | When disabled/unreachable, cache fails open (no-op)          |
 
 ### 3.13.1 Storage Service
 
@@ -1299,8 +1302,8 @@ export class StorageService {
     this.localPath = this.configService.get<string>('storage.localPath') || './data/media';
 
     if (this.storageType === 's3') {
-      const endpoint = process.env.S3_ENDPOINT;             // optional: S3-compatible stores only
-      const accessKeyId = process.env.S3_ACCESS_KEY_ID;     // legacy S3_ACCESS_KEY also read
+      const endpoint = process.env.S3_ENDPOINT; // optional: S3-compatible stores only
+      const accessKeyId = process.env.S3_ACCESS_KEY_ID; // legacy S3_ACCESS_KEY also read
       const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
       // Credentials alone are enough — AWS S3 derives its endpoint from the region.
       if (accessKeyId && secretAccessKey) {
@@ -1320,12 +1323,16 @@ export class StorageService {
   async putFile(filePath: string, data: Buffer): Promise<void> {
     if (!isSafeStorageKey(filePath)) throw new Error(`Refusing unsafe storage key: ${filePath}`);
     return this.storageType === 's3' && this.s3Client
-      ? this.putS3File(filePath, data)   // keyed under media/<filePath>
+      ? this.putS3File(filePath, data) // keyed under media/<filePath>
       : this.putLocalFile(filePath, data);
   }
 
-  async getFile(filePath: string): Promise<Buffer> { /* mirrors putFile */ }
-  async listFiles(): Promise<string[]> { /* local recurse, or S3 ListObjectsV2 under media/ */ }
+  async getFile(filePath: string): Promise<Buffer> {
+    /* mirrors putFile */
+  }
+  async listFiles(): Promise<string[]> {
+    /* local recurse, or S3 ListObjectsV2 under media/ */
+  }
   // createExportStream(): tar.gz of all files; importFromStream(): extract with zip-bomb caps
 }
 ```
@@ -1336,15 +1343,15 @@ OpenWA supports SQLite for lightweight deployments and PostgreSQL for high-volum
 
 #### Database Comparison
 
-| Feature | SQLite | PostgreSQL |
-|---------|--------|------------|
-| **Setup** | Zero config | Requires server |
-| **Concurrent writes** | Limited (1 writer) | Excellent |
-| **Horizontal scaling** | ❌ | ✅ |
-| **Table partitioning** | ❌ | ✅ |
-| **Memory footprint** | ~10MB | ~100MB+ |
-| **Backup** | Copy file | pg_dump |
-| **Best for** | 1-5 sessions | 5+ sessions |
+| Feature                | SQLite             | PostgreSQL      |
+| ---------------------- | ------------------ | --------------- |
+| **Setup**              | Zero config        | Requires server |
+| **Concurrent writes**  | Limited (1 writer) | Excellent       |
+| **Horizontal scaling** | ❌                 | ✅              |
+| **Table partitioning** | ❌                 | ✅              |
+| **Memory footprint**   | ~10MB              | ~100MB+         |
+| **Backup**             | Copy file          | pg_dump         |
+| **Best for**           | 1-5 sessions       | 5+ sessions     |
 
 #### TypeORM Configuration
 
@@ -1364,7 +1371,9 @@ const baseConfig = {
 
 if (dbType === 'postgres') {
   return {
-    ...baseConfig, name: 'data', type: 'postgres',
+    ...baseConfig,
+    name: 'data',
+    type: 'postgres',
     host: configService.get('dataDatabase.host'),
     port: configService.get('dataDatabase.port'),
     username: configService.get('dataDatabase.username'),
@@ -1379,7 +1388,9 @@ if (dbType === 'postgres') {
 // SQLite (default): migration-managed unless DATABASE_SYNCHRONIZE=true
 const synchronize = configService.get<boolean>('dataDatabase.synchronize', false);
 return {
-  ...baseConfig, name: 'data', type: 'better-sqlite3' as const, // DATABASE_TYPE=sqlite -> this driver
+  ...baseConfig,
+  name: 'data',
+  type: 'better-sqlite3' as const, // DATABASE_TYPE=sqlite -> this driver
   database: configService.get('dataDatabase.database', './data/openwa.sqlite'),
   synchronize,
   migrationsRun: !synchronize,
@@ -1444,22 +1455,28 @@ export class CacheService implements OnModuleDestroy {
   }
 
   async isAvailable(): Promise<boolean> {
-    if (!this.enabled) return false;  // disabled -> always "no cache"
-    this.ensureClient();              // create on first use; ioredis handles (re)connecting
-    return this.ping();               // reflects live state: false during an outage, true once back
+    if (!this.enabled) return false; // disabled -> always "no cache"
+    this.ensureClient(); // create on first use; ioredis handles (re)connecting
+    return this.ping(); // reflects live state: false during an outage, true once back
   }
 
   // Fail-open reads/writes: unavailable Redis is a no-op, never an error to the caller.
   async getSessionStatus(id: string): Promise<string | null> {
     if (!(await this.isAvailable())) return null;
-    try { return await this.redis!.get(`session:${id}:status`); }
-    catch { return null; }
+    try {
+      return await this.redis!.get(`session:${id}:status`);
+    } catch {
+      return null;
+    }
   }
 
   async setSessionStatus(id: string, status: string): Promise<void> {
     if (!(await this.isAvailable())) return; // no-op when disabled/unreachable
-    try { await this.redis!.setex(`session:${id}:status`, /* TTL */ 300, status); }
-    catch { /* logged + swallowed */ }
+    try {
+      await this.redis!.setex(`session:${id}:status`, /* TTL */ 300, status);
+    } catch {
+      /* logged + swallowed */
+    }
   }
 }
 ```
@@ -1492,11 +1509,11 @@ flowchart LR
     end
 ```
 
-| Profile | Database | Storage | Cache | Sessions | RAM | Use Case |
-|---------|----------|---------|-------|----------|-----|----------|
-| **Minimal** | SQLite | Local | None | 1-3 | 512MB | Personal bot, testing |
-| **Standard** | PostgreSQL | Local | Redis | 5-10 | 2GB | Small business |
-| **Enterprise** | PostgreSQL | S3/MinIO | Redis | 10+ | 4GB+ | Agency, high volume |
+| Profile        | Database   | Storage  | Cache | Sessions | RAM   | Use Case              |
+| -------------- | ---------- | -------- | ----- | -------- | ----- | --------------------- |
+| **Minimal**    | SQLite     | Local    | None  | 1-3      | 512MB | Personal bot, testing |
+| **Standard**   | PostgreSQL | Local    | Redis | 5-10     | 2GB   | Small business        |
+| **Enterprise** | PostgreSQL | S3/MinIO | Redis | 10+      | 4GB+  | Agency, high volume   |
 
 > Session counts are guidance only by default. Set `MAX_CONCURRENT_SESSIONS` to a positive integer
 > to cap concurrently running or initializing engines; the default `0` keeps the historical
@@ -1576,11 +1593,11 @@ REDIS_PORT=6379
 
 OpenWA does not auto-detect a profile at runtime; pick one by available resources and expected load:
 
-| Available RAM | Suggested profile | Backends |
-|---------------|-------------------|----------|
-| < ~1 GB | Minimal | SQLite + Local Storage, Redis disabled (no cache) |
-| ~1–4 GB | Standard | PostgreSQL + Local Storage + Redis |
-| > ~4 GB | Enterprise | PostgreSQL + S3/MinIO + Redis |
+| Available RAM | Suggested profile | Backends                                          |
+| ------------- | ----------------- | ------------------------------------------------- |
+| < ~1 GB       | Minimal           | SQLite + Local Storage, Redis disabled (no cache) |
+| ~1–4 GB       | Standard          | PostgreSQL + Local Storage + Redis                |
+| > ~4 GB       | Enterprise        | PostgreSQL + S3/MinIO + Redis                     |
 
 All profiles still run as a single API instance per session-data volume (see §3.2). Enterprise here
 means more vertical headroom and external backends, not multi-replica clustering.
