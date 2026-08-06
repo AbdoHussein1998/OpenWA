@@ -192,7 +192,7 @@ authoritative gate. Current policy:
 | `src/engine/identity/`      | 85%      | 95%       | 94%   | 93%        |
 | `src/modules/audit/`        | 59%      | 45%       | 72%   | 68%        |
 | `src/modules/auth/`         | 75%      | 85%       | 86%   | 85%        |
-| `src/modules/automation/`   | 60%      | 55%       | 75%   | 70%        |
+| `src/modules/automation/`   | 67%      | 57%       | 83%   | 79%        |
 | `src/modules/chat-media/`   | 78%      | 81%       | 92%   | 90%        |
 | `src/modules/contact/`      | 79%      | 90%       | 89%   | 88%        |
 | `src/modules/docker/`       | 88%      | 99%       | 96%   | 96%        |
@@ -210,11 +210,11 @@ authoritative gate. Current policy:
 | `src/modules/session/`      | 75%      | 79%       | 88%   | 87%        |
 | `src/modules/stats/`        | 67%      | 63%       | 71%   | 69%        |
 | `src/modules/status-store/` | 79%      | 83%       | 92%   | 91%        |
-| `src/modules/status/`       | 47%      | 45%       | 62%   | 60%        |
+| `src/modules/status/`       | 70%      | 58%       | 79%   | 78%        |
 | `src/modules/template/`     | 77%      | 99%       | 92%   | 89%        |
 | `src/modules/webhook/`      | 72%      | 89%       | 90%   | 87%        |
 
-Each floor sits a point or two below that scope's measured coverage, so it catches a real
+Set each floor about five points below that scope's measured coverage, so it catches a real
 regression without failing on ordinary churn. Raise a floor when coverage rises; never lower one.
 
 Two behaviours of Jest's threshold matching are worth knowing before adding a scope:
