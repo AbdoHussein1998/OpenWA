@@ -288,7 +288,7 @@ export class InfraDataController {
   @ApiResponse({
     status: 409,
     description:
-      'Refused. code IMPORT_ALREADY_RUNNING: another import is running — wait for it. code IMPORT_NESTED_TRANSACTION: another database transaction holds this connection, so a restore could not be made durable — retry with nothing else in flight. Otherwise: live engines exist for sessions the backup would remove (retry with stopOrphans=true to stop them in-request, or force=true to proceed and restart after)',
+      'Refused, with the reason in `code`. IMPORT_ALREADY_RUNNING: another import is running — wait for it. IMPORT_NESTED_TRANSACTION: another database transaction holds this connection, so a restore could not be made durable — retry with nothing else in flight. IMPORT_WOULD_ORPHAN_ENGINES: live engines exist for sessions the backup would remove — retry with stopOrphans=true to stop them in-request, or force=true to proceed and restart after. Only the last of these is retryable with stopOrphans; the others leave nothing to decide',
   })
   async importData(
     @Body()
@@ -422,12 +422,23 @@ export class InfraDataController {
         );
       }
     } else if (orphanedEngines.length > 0 && !data.force) {
-      throw new ConflictException(
-        `Import would orphan ${orphanedEngines.length} running engine(s) for session(s) ` +
+      // Carries a code like the other two refusals, and for a stronger reason: this is the ONLY 409
+      // on this route whose documented retry (stopOrphans=true) is destructive — it stops live
+      // engines — and dashboard/src/utils/importRefusal.ts decides whether to offer that retry by
+      // matching this code. Renaming it there and here together is required; renaming it here alone
+      // leaves both suites green and withdraws the operator's only route to stopOrphans. Were the
+      // case identified by the ABSENCE of a code instead, every unrecognised 409 (a proxy's, a body
+      // that never parsed) would open a confirm whose OK tears down engines and replaces every table.
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        message:
+          `Import would orphan ${orphanedEngines.length} running engine(s) for session(s) ` +
           `${orphanedEngines.join(', ')} that the backup does not contain. Stop them first, retry with ` +
           `stopOrphans=true (stops them inside this request), or retry with force=true ` +
           `(a server restart is then required to stop the orphaned engines).`,
-      );
+        code: 'IMPORT_WOULD_ORPHAN_ENGINES',
+      });
     } else if (orphanedEngines.length > 0 && data.force) {
       // Legacy escape hatch: proceed and leave the engines running until restart.
       restartRequired = true;
