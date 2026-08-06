@@ -146,8 +146,10 @@ One-time setup (repository secrets):
 - `GPG_PRIVATE_KEY` — ASCII-armored signing key.
 - `GPG_PASSPHRASE` — passphrase for that key.
 
-Until the secrets exist the workflow cleanly no-ops (it prints a notice and
-skips the deploy), so tagging early is harmless.
+All four secrets are checked before anything is built, and a missing one **fails
+the run**. That is deliberate: skipping the deploy and reporting green is
+indistinguishable from a real release in the run list, so configure the secrets
+before tagging rather than tagging to see what happens.
 
 Cutting a release:
 
