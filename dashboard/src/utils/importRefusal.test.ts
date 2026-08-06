@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { shouldOfferStopOrphansRetry } from './importRefusal.ts';
 
 // The retry this predicate gates is DESTRUCTIVE: it re-POSTs the replace-all with stopOrphans=true,
@@ -44,4 +45,20 @@ test('an unknown future 409 code does not get the destructive retry', () => {
 
 test('only the 409 status can offer it, whatever the code says', () => {
   assert.equal(shouldOfferStopOrphansRetry(500, 'IMPORT_WOULD_ORPHAN_ENGINES', false), false);
+});
+
+// The assertion below guards the WIRING, which is this design's single point of failure. Matching the
+// code positively means "no code" withholds the confirm — so if the api client ever stops copying the
+// body's code onto the Error, every 409 arrives code-less, the predicate returns false for all of
+// them, and the stop-orphans confirm becomes unreachable. It is the only control in the dashboard
+// that can send stopOrphans, and nothing else in the suite would notice its loss: every test above
+// hands the predicate a code directly.
+const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+
+test('the api client carries the machine code onto the error this predicate reads', () => {
+  assert.match(
+    read('../services/api.ts'),
+    /err\.code = error\.code/,
+    'api.ts must copy the response body `code` onto the thrown Error — update this guard, do not delete it',
+  );
 });

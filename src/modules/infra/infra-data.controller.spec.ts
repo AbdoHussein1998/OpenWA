@@ -181,6 +181,9 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     // The dashboard decides whether to offer the destructive stop-orphans retry by matching this
     // code positively, so which code this refusal carries is a cross-tier contract, not a detail.
     expect((refusal as ConflictException).getResponse()).toMatchObject({ code: 'IMPORT_NESTED_TRANSACTION' });
+    // Asserted alongside the code because `message` is the field the dashboard renders when it
+    // withholds the retry — dropping it degrades the operator's toast to a bare "HTTP 409".
+    expect((refusal as ConflictException).message).toContain('Another database transaction');
 
     // The decisive assertion: nothing was destroyed on the way to the refusal.
     const survived = await ds.getRepository(Session).findOneBy({ id: 's1' });
@@ -222,6 +225,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     const refusal = await second.catch((e: unknown) => e);
     expect((refusal as ConflictException).getStatus()).toBe(409);
     expect((refusal as ConflictException).getResponse()).toMatchObject({ code: 'IMPORT_ALREADY_RUNNING' });
+    expect((refusal as ConflictException).message).toContain('already running');
     await expect(first).resolves.toMatchObject({ imported: true });
   });
 

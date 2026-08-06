@@ -50,8 +50,8 @@ export function useDataBackup(): DataBackup {
   // which stops them inside the request, so that one is offered as a confirm. Every other 409 leaves
   // nothing to decide (another restore in flight, another transaction holding the connection), and
   // retrying one with stopOrphans would run a second destructive replace the operator never asked
-  // for. force=true is deliberately not offered (the api
-  // client does not even send it): it leaves the engines running until a restart.
+  // for. force=true is deliberately not offered (the api client does not even send it): it leaves
+  // the engines running until a restart.
   const runImport = async (tables: Record<string, unknown[]>, stopOrphans = false): Promise<void> => {
     try {
       const res = await infraApi.importData(tables, stopOrphans ? { stopOrphans: true } : undefined);

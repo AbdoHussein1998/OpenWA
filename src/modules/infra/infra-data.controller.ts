@@ -424,8 +424,10 @@ export class InfraDataController {
     } else if (orphanedEngines.length > 0 && !data.force) {
       // Carries a code like the other two refusals, and for a stronger reason: this is the ONLY 409
       // on this route whose documented retry (stopOrphans=true) is destructive — it stops live
-      // engines — and the dashboard decides whether to offer that retry by matching this code. Were
-      // it identified by the ABSENCE of a code instead, every unrecognised 409 (a proxy's, a body
+      // engines — and dashboard/src/utils/importRefusal.ts decides whether to offer that retry by
+      // matching this code. Renaming it there and here together is required; renaming it here alone
+      // leaves both suites green and withdraws the operator's only route to stopOrphans. Were the
+      // case identified by the ABSENCE of a code instead, every unrecognised 409 (a proxy's, a body
       // that never parsed) would open a confirm whose OK tears down engines and replaces every table.
       throw new ConflictException({
         statusCode: 409,

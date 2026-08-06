@@ -12,9 +12,14 @@
  * Matching positively rather than excluding known codes is load-bearing. A 409 with no code is the
  * DEFAULT state, not evidence of the orphan case: a reverse proxy, a gateway error page or a body
  * that never parsed all produce one, and so would any refusal added later by an author who does not
- * know a destructive confirm keys on this. Withholding costs nothing — the refusal is still shown
- * as an error toast carrying the server's own message. The backend pins its half of this contract
- * in the infra-data controller spec.
+ * know a destructive confirm keys on this. Withholding costs only the retry button: where the body
+ * survived, the error toast still carries the server's own message; where it did not, there was no
+ * message to lose and the alternative was offering a destructive OK under a bare "HTTP 409".
+ *
+ * A gateway older than this code refuses orphans without the code, so a split-origin dashboard
+ * (VITE_API_URL) pointed at one withholds the confirm for a legitimate orphan refusal. That
+ * degradation is deliberate and recoverable — the message still says to stop the sessions first.
+ * The backend pins its half of the contract in the infra-data controller spec.
  */
 export function shouldOfferStopOrphansRetry(
   status: number | undefined,
