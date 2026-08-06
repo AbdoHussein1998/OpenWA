@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, ConflictException, HttpCode, HttpStatus, Optional } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { RequireRole, RequireUnscopedKey } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
@@ -31,6 +31,56 @@ import type {
   AutomationRuleRow,
 } from './migration-tables.types';
 import { TABLE_IMPORTERS } from './table-importers';
+
+/**
+ * The ownership quartet SessionOwnershipService maintains: which process holds a session's engine and
+ * until when. Cluster RUNTIME state — it belongs to the machines currently running, never to a backup.
+ */
+export interface SessionOwnershipRow {
+  id: string;
+  nodeId: string | null;
+  claimedAt: unknown;
+  leaseExpiresAt: unknown;
+  nodeUrl: string | null;
+}
+
+/**
+ * Read the live claims through the caller's queryRunner, so the read sits inside the import's own
+ * transaction. The columns are PROBED rather than SELECTed-and-caught: on PostgreSQL any failed
+ * statement aborts the surrounding transaction (25P02), so catching a missing-column error would
+ * still poison every statement after it — including the DELETE this read precedes. Absent columns
+ * mean a database whose ownership migration was rolled back; there is simply nothing to carry.
+ */
+async function readSessionOwnership(queryRunner: QueryRunner): Promise<SessionOwnershipRow[] | null> {
+  if (!(await queryRunner.hasColumn('sessions', 'nodeId'))) return null;
+  return (await queryRunner.query(
+    'SELECT id, "nodeId", "claimedAt", "leaseExpiresAt", "nodeUrl" FROM sessions WHERE "nodeId" IS NOT NULL',
+  )) as SessionOwnershipRow[];
+}
+
+/**
+ * Re-apply the claims verbatim for ids present in both the pre-import database and the restored set.
+ * Values are re-bound exactly as they were read (ISO text on SQLite, Date on Postgres) rather than
+ * reconstructed, and go through the caller's `insert` so the `$N`→`?` rewrite applies on SQLite. An
+ * id the backup did not restore simply matches no row.
+ *
+ * Errors are NOT swallowed. On PostgreSQL a failed statement aborts the transaction, and the COMMIT
+ * that followed would silently execute as a ROLLBACK — reporting a fully-discarded import as a
+ * success with per-table counts. The caller routes a failure into `warnings`, which is the existing
+ * all-or-nothing gate.
+ */
+export async function restoreSessionOwnership(
+  preserved: SessionOwnershipRow[] | null,
+  insert: (text: string, params: unknown[]) => Promise<unknown>,
+): Promise<void> {
+  if (!preserved?.length) return;
+  for (const row of preserved) {
+    await insert(
+      'UPDATE sessions SET "nodeId" = $1, "claimedAt" = $2, "leaseExpiresAt" = $3, "nodeUrl" = $4 WHERE id = $5',
+      [row.nodeId, row.claimedAt, row.leaseExpiresAt, row.nodeUrl, row.id],
+    );
+  }
+}
 
 @ApiTags('infrastructure')
 @Controller('infra')
@@ -401,6 +451,22 @@ export class InfraDataController {
       await clearTable('integration_delivery_failures');
       // status_updates has no FK to sessions; clear it explicitly so the replace is complete.
       await clearTable('status_updates');
+      // Session ownership is CLUSTER RUNTIME STATE, not backup payload: which process currently holds
+      // a session's engine, and until when. The replace below deletes it along with everything else,
+      // and the sessions importer does not restore it (deliberately — see below), so without this the
+      // committed rows come back unclaimed and the next lease renewal reads "claim lost" and tears
+      // down engines that never stopped running.
+      //
+      // It must NOT be restored from the payload instead. export-data does `SELECT *`, so real backups
+      // DO carry these columns even though SessionRow does not declare them — restoring them would
+      // install the SOURCE host's nodeId with its still-future lease, and every start would then 409
+      // "running on another node" until that lease lapsed. Strictly worse than the bug.
+      //
+      // Read through the SAME queryRunner (a repository would take a second connection and self-
+      // deadlock on Postgres) and tolerate the columns being absent, so a database whose ownership
+      // migration has been rolled back still imports.
+      const preservedOwnership = await readSessionOwnership(queryRunner);
+
       await queryRunner.query('DELETE FROM sessions');
 
       // Restore table by table in TABLE_IMPORTERS order (FK-safe: sessions first). The descriptors
@@ -430,6 +496,18 @@ export class InfraDataController {
             );
           }
         }
+      }
+
+      // Re-apply the claims read before the DELETE, for ids that exist in both. This runs BEFORE the
+      // all-or-nothing gate below on purpose: a failure here must take the same rollback the gate
+      // already implements. Degrading it to a notice and committing anyway would be worse than the
+      // bug it fixes — on PostgreSQL a failed statement aborts the transaction, so the COMMIT would
+      // execute as a ROLLBACK and the endpoint would report a fully discarded import as a success,
+      // with per-table counts, to an operator restoring after data loss.
+      try {
+        await restoreSessionOwnership(preservedOwnership, insert);
+      } catch (error) {
+        warnings.push(`Failed to restore session ownership: ${error instanceof Error ? error.message : String(error)}`);
       }
 
       // "Replace all data" must be all-or-nothing: the import already DELETEd every row, so if any
