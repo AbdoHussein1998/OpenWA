@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A long data import no longer expires the session claims it restores** — the ownership lease was written back with its original deadline, so a restore that ran longer than the lease had left committed an expiry that had already passed while the owning node was still recorded and still running the engine.
 - **A refused data import no longer offers a retry that stops live engines** — the one refusal whose retry is destructive now carries `IMPORT_WOULD_ORPHAN_ENGINES` and the dashboard matches it positively, so a refusal that only asks the operator to wait can no longer present a confirm whose OK re-runs the replace-all with `stopOrphans=true`.
 - **A data import is refused with `409` when another transaction holds the connection** — on SQLite it would otherwise nest inside that transaction and commit into it rather than to disk, so a restore reported as successful could vanish with that transaction's rollback.
 - **A second data import while one is running is now refused with `409`** — on SQLite both shared a single transaction, so the second one's rollback discarded a restore the first had already reported as successful.

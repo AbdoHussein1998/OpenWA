@@ -90,8 +90,12 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
 
   it('keeps the session ownership lease across a replace, and never takes it from the payload', async () => {
     await seedSession('s1');
-    const claimedAt = new Date('2026-08-06T10:00:00.000Z');
-    const leaseExpiresAt = new Date('2026-08-06T10:05:00.000Z');
+    // Seeded far in the past ON PURPOSE, so the claim is unambiguously LAPSED whatever day the suite
+    // runs: a lapsed claim must survive verbatim, because shifting it would resurrect a dead node's
+    // hold on the session. (The previous fixture used a same-day stamp, so whether this exercised the
+    // lapsed or the live path depended on the wall clock.) The live path is covered below.
+    const claimedAt = new Date('2020-01-01T10:00:00.000Z');
+    const leaseExpiresAt = new Date('2020-01-01T10:05:00.000Z');
     // A live claim held by THIS node, exactly as SessionOwnershipService would have written it.
     await ds
       .getRepository(Session)
@@ -116,6 +120,56 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     expect(restored.nodeUrl).toBe('http://10.0.0.5:2785');
     expect(new Date(restored.claimedAt as unknown as string).toISOString()).toBe(claimedAt.toISOString());
     expect(new Date(restored.leaseExpiresAt as unknown as string).toISOString()).toBe(leaseExpiresAt.toISOString());
+  });
+
+  it('carries a LIVE claim forward by its remaining time, not by its original expiry stamp', async () => {
+    await seedSession('s1');
+    const readAt = Date.now();
+    // A live claim whose remaining time the transaction below deliberately outlives. Scaled down from
+    // the real 60s TTL so the test costs a second, not a minute — the ordering is what matters.
+    const remainingMs = 1_000;
+    await ds.getRepository(Session).update(
+      { id: 's1' },
+      {
+        nodeId: 'node-a',
+        claimedAt: new Date(readAt),
+        leaseExpiresAt: new Date(readAt + remainingMs),
+        nodeUrl: 'http://10.0.0.5:2785',
+      },
+    );
+    const dump = await controller.exportData();
+
+    // Hold the transaction open past the original expiry, the way a large restore does. Re-binding
+    // the stamp verbatim would then commit a lease this request already knows has expired: nodeId
+    // still names the live owner, so the row reads as an adoptable orphan to a peer's takeover sweep
+    // — a lapse manufactured by the restore, on a claim it observed live moments earlier.
+    const realCreate = ds.createQueryRunner.bind(ds);
+    let stalled = false;
+    jest.spyOn(ds, 'createQueryRunner').mockImplementation(() => {
+      const runner = realCreate();
+      const realQuery = runner.query.bind(runner) as (...args: unknown[]) => Promise<unknown>;
+      runner.query = (async (...args: unknown[]): Promise<unknown> => {
+        if (!stalled && typeof args[0] === 'string' && args[0].startsWith('DELETE FROM sessions')) {
+          stalled = true;
+          await new Promise(resolve => setTimeout(resolve, remainingMs * 1.5));
+        }
+        return realQuery(...args);
+      }) as typeof runner.query;
+      return runner;
+    });
+
+    const res = await controller.importData({ tables: dump.tables });
+    jest.restoreAllMocks();
+    expect(res.imported).toBe(true);
+
+    const restored = await ds.getRepository(Session).findOneByOrFail({ id: 's1' });
+    const committed = new Date(restored.leaseExpiresAt as unknown as string).getTime();
+    expect(restored.nodeId).toBe('node-a');
+    // Still in the future: the claim was live when read, so it must be live when written back.
+    expect(committed).toBeGreaterThan(Date.now());
+    // Carried, not renewed: the remaining time is preserved rather than reset to a full TTL, so the
+    // restore cannot extend anyone's hold — least of all a peer's.
+    expect(committed).toBeLessThanOrEqual(Date.now() + remainingMs);
   });
 
   it('holds the ownership loss-detection token for the whole transaction, and releases it', async () => {
@@ -1495,9 +1549,9 @@ describe('restoreSessionOwnership', () => {
     // Swallowing it would be worse than the bug: on PostgreSQL a failed statement aborts the
     // transaction, so the COMMIT that followed would execute as a ROLLBACK and the endpoint would
     // report a fully discarded import as a success.
-    await expect(restoreSessionOwnership([claim], () => Promise.reject(new Error('db went away')))).rejects.toThrow(
-      'db went away',
-    );
+    await expect(
+      restoreSessionOwnership([claim], () => Promise.reject(new Error('db went away')), new Date()),
+    ).rejects.toThrow('db went away');
   });
 
   it('does nothing when there is no ownership to carry', async () => {
@@ -1507,8 +1561,8 @@ describe('restoreSessionOwnership', () => {
       return Promise.resolve();
     };
 
-    await restoreSessionOwnership(null, insert);
-    await restoreSessionOwnership([], insert);
+    await restoreSessionOwnership(null, insert, new Date());
+    await restoreSessionOwnership([], insert, new Date());
 
     expect(calls).toEqual([]);
   });
@@ -1522,12 +1576,54 @@ describe('restoreSessionOwnership', () => {
       return Promise.resolve();
     };
 
-    await restoreSessionOwnership([claim], insert);
+    await restoreSessionOwnership([claim], insert, new Date());
 
+    // 'l' is not a parseable deadline, so it is written back untouched: a value this function cannot
+    // interpret is not one it may rewrite.
     expect(bound).toEqual([['node-a', 'c', 'l', 'u', 's1']]);
     expect(statements[0]).toContain('UPDATE sessions SET "nodeId"');
     expect(statements[0]).toContain('"claimedAt"');
     expect(statements[0]).toContain('"leaseExpiresAt"');
     expect(statements[0]).toContain('"nodeUrl"');
+  });
+
+  // The lease is a DEADLINE, and the transaction re-applying it can outlive what the deadline has
+  // left. These three cases pin which way each kind of claim moves.
+  const bindLease = async (leaseExpiresAt: unknown, readAt: Date, now: Date): Promise<unknown> => {
+    const bound: unknown[][] = [];
+    await restoreSessionOwnership(
+      [{ id: 's1', nodeId: 'node-a', claimedAt: 'c', leaseExpiresAt, nodeUrl: 'u' }],
+      (_sql, params) => {
+        bound.push(params);
+        return Promise.resolve();
+      },
+      readAt,
+      now,
+    );
+    return bound[0][2];
+  };
+
+  it('carries a live claim by its remaining time, so a long import cannot expire it', async () => {
+    const readAt = new Date('2026-08-06T10:00:00.000Z');
+    const commitAt = new Date('2026-08-06T10:02:00.000Z'); // a two-minute restore
+    // 30s left when read → 30s left when written, not an expiry two minutes in the past.
+    expect(await bindLease('2026-08-06T10:00:30.000Z', readAt, commitAt)).toBe('2026-08-06T10:02:30.000Z');
+  });
+
+  it('leaves an already-lapsed claim exactly where it was, so a dead node stays dead', async () => {
+    const readAt = new Date('2026-08-06T10:00:00.000Z');
+    const commitAt = new Date('2026-08-06T10:02:00.000Z');
+    // Shifting this one would resurrect a crashed peer's hold on the session.
+    expect(await bindLease('2026-08-06T09:59:00.000Z', readAt, commitAt)).toBe('2026-08-06T09:59:00.000Z');
+  });
+
+  it('preserves the stored shape — Date in, Date out (Postgres); text in, text out (SQLite)', async () => {
+    const readAt = new Date('2026-08-06T10:00:00.000Z');
+    const commitAt = new Date('2026-08-06T10:02:00.000Z');
+    const asDate = await bindLease(new Date('2026-08-06T10:00:30.000Z'), readAt, commitAt);
+    expect(asDate).toBeInstanceOf(Date);
+    expect((asDate as Date).toISOString()).toBe('2026-08-06T10:02:30.000Z');
+    expect(typeof (await bindLease('2026-08-06T10:00:30.000Z', readAt, commitAt))).toBe('string');
+    expect(await bindLease(null, readAt, commitAt)).toBeNull();
   });
 });
