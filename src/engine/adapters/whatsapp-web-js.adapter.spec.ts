@@ -1245,6 +1245,7 @@ describe('WhatsAppWebJsAdapter credential-teardown observation', () => {
     expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('session-sess-1'), {
       recursive: true,
       force: true,
+      maxRetries: 4,
     });
   });
 
@@ -1258,6 +1259,57 @@ describe('WhatsAppWebJsAdapter credential-teardown observation', () => {
     client.emit('disconnected', 'LOGOUT');
 
     expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
+  });
+
+  // #1072: whatsapp-web.js emits 'disconnected' from a `.on('framenavigated')` listener with no guard
+  // of its own — it resets `lastLoggedOut` only after three awaits and never filters on the main frame
+  // — so one unlink can raise the event more than once. The registration above is keyed on
+  // `logoutInitiated`, which stays false throughout a WhatsApp-initiated unlink, and it sits ABOVE the
+  // duplicate-event latch on purpose (#994), so every repeat used to start another rm of the same
+  // profile. The reporter's log is that signature exactly: two deletion lines, one disconnect, one
+  // reconnect — with the two rms racing each other and a still-open Chromium.
+  it('removes the credentials once for a repeated WhatsApp LOGOUT (one unlink can raise the event twice)', () => {
+    const adapter = newAdapter();
+    const { client, onCredentialTeardownStarted } = attach(adapter);
+
+    client.emit('disconnected', 'LOGOUT');
+    client.emit('disconnected', 'LOGOUT');
+
+    // One unlink, one removal — and one fence for the lifecycle to await.
+    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
+    expect(rmSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // The latch is one-shot per adapter, not a coalescing window: it must hold even when the repeat
+  // arrives after the rest of the handler has latched, which is the ordering the reporter hit.
+  it('holds the once-only removal when the repeat lands after the disconnect was reported', () => {
+    const adapter = newAdapter();
+    const { client, onCredentialTeardownStarted } = attach(adapter);
+
+    client.emit('disconnected', 'LOGOUT');
+    (adapter as unknown as { disconnectReported: boolean }).disconnectReported = true;
+    client.emit('disconnected', 'LOGOUT');
+
+    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
+    expect(rmSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // #1072: the reporter's second cycle logged ENOTEMPTY on the leveldb dir. On a WhatsApp-initiated
+  // unlink whatsapp-web.js does NOT close the browser first (Client.js emits from `framenavigated`;
+  // only the explicit Client.logout() closes it), so Chromium is still rotating IndexedDB files while
+  // the removal walks the tree. LocalAuth's own rm survives that with `rmMaxRetries ?? 4`; ours passed
+  // no budget at all, leaving Node's default of 0 — which is why the error surfaced on ours and not
+  // the library's.
+  it('gives the removal the retry budget LocalAuth uses, so a live Chromium cannot fail it', async () => {
+    const adapter = newAdapter();
+
+    await (adapter as unknown as { clearLocalAuth: () => Promise<void> }).clearLocalAuth.call(adapter);
+
+    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('session-sess-1'), {
+      recursive: true,
+      force: true,
+      maxRetries: 4,
+    });
   });
 
   it('still reports nothing else for a latched LOGOUT — no status change and no onDisconnected', () => {
@@ -1906,7 +1958,11 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     expect(jest.getTimerCount()).toBe(0); // gave up at the 90s deadline
     expect(client.getState).toHaveBeenCalledTimes(1); // at-most-one-in-flight guard held
     // Self-heal: the broken auth is cleared and a disconnect surfaced so the lifecycle re-pairs (QR).
-    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('session-sess-1'), { recursive: true, force: true });
+    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('session-sess-1'), {
+      recursive: true,
+      force: true,
+      maxRetries: 4,
+    });
     expect(onDisconnected).toHaveBeenCalled();
 
     rmSpy.mockRestore();

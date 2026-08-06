@@ -215,6 +215,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   // registering one for a WhatsApp-initiated logout, including one that lands after another teardown
   // path has already latched the flags below.
   private logoutInitiated = false;
+  // Set once a WhatsApp-initiated LOGOUT has started this session's credential removal, so a repeat of
+  // the same unlink cannot start a second one (#1072). Never reset — an adapter is single-use, and the
+  // profile is gone after the first removal either way.
+  private credentialTeardownStarted = false;
   // Set once the adapter ACTIVELY transitions to DISCONNECTED (engine disconnect, puppeteer death,
   // stuck-auth recovery, teardown). Same single-use contract as `tearingDown`, but it latches earlier:
   // on LOGOUT whatsapp-web.js keeps the browser and re-runs inject(), while the lifecycle only replaces
@@ -602,18 +606,23 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.client.on('call', call => this.handleIncomingCall(call));
 
     this.client.on('disconnected', reason => {
-      // A LOGOUT means whatsapp-web.js is ABOUT to delete this session's profile: `Client.logout()`
-      // ends in `authStrategy.logout()` → `LocalAuth.logout()` → `fs.rm(userDataDir)`, and the
-      // library emits this event BEFORE that await (Client.js: emit DISCONNECTED 'LOGOUT', then
-      // `pupBrowser.close()`, then `authStrategy.logout()`). That rm happens whatever this listener
-      // does, so it MUST be surfaced to the lifecycle before the latch check below can drop out —
-      // otherwise a stop()/destroy() that latched first hides an in-flight rm, the name fence sees
-      // nothing pending, and a later start() under the same name can have its freshly written
-      // profile deleted by it (the #994 hazard, through a narrower window).
+      // A LOGOUT means whatsapp-web.js is ABOUT to delete this session's profile. The only site that
+      // emits this reason is the `framenavigated` listener, which emits and THEN awaits
+      // `authStrategy.logout()` → `LocalAuth.logout()` → `fs.rm(userDataDir)` — with the browser still
+      // open (only the explicit `Client.logout()` closes it first, and that path emits nothing). That
+      // rm happens whatever this listener does, so it MUST be surfaced to the lifecycle before the
+      // latch check below can drop out — otherwise a stop()/destroy() that latched first hides an
+      // in-flight rm, the name fence sees nothing pending, and a later start() under the same name can
+      // have its freshly written profile deleted by it (the #994 hazard, through a narrower window).
       //
-      // Skipped only when THIS adapter's logout() started it: that path already registered the real
-      // `client.logout()` promise, which covers the same rm and settles no earlier.
-      if (reason === 'LOGOUT' && !this.logoutInitiated) {
+      // Skipped when THIS adapter's logout() started it: that path already registered the real
+      // `client.logout()` promise, which covers the same rm and settles no earlier. Skipped again on
+      // every repeat, because the listener above carries no guard of its own — it resets its
+      // `lastLoggedOut` flag only after three awaits and never checks for the main frame, so one unlink
+      // can raise this event more than once (#1072). Sitting above the duplicate-event latch is what
+      // makes that reachable, so the guard has to be its own one-shot rather than that latch.
+      if (reason === 'LOGOUT' && !this.logoutInitiated && !this.credentialTeardownStarted) {
+        this.credentialTeardownStarted = true;
         // Idempotent stand-in for the library's own rm, which we cannot get a handle on:
         // `fs.rm(force: true)` races it safely and gives the lifecycle something to await.
         this.callbacks.onCredentialTeardownStarted?.(this.clearLocalAuth());
@@ -1173,7 +1182,11 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   private async clearLocalAuth(): Promise<void> {
     const dir = path.join(path.resolve(this.config.sessionDataPath), `session-${this.config.sessionId}`);
     await fs.promises
-      .rm(dir, { recursive: true, force: true })
+      // maxRetries mirrors LocalAuth's own default: on a WhatsApp-initiated unlink the library never
+      // closes the browser, so Chromium is still rotating IndexedDB files while this walks the tree and
+      // a bare rm reports ENOTEMPTY (#1072). Node's default is 0 retries, which is why the failure
+      // surfaced here and never on the library's removal of the same directory.
+      .rm(dir, { recursive: true, force: true, maxRetries: 4 })
       .then(() => {
         // #981: this is the only copy of the session's WhatsApp credentials, and removing it is not
         // recoverable — every later start finds an empty profile and can do nothing but show a QR. Say
