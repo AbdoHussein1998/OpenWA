@@ -54,35 +54,35 @@ timeline
 
 ### Release Summary
 
-| Version | Focus                                                      | Status      |
-| ------- | ---------------------------------------------------------- | ----------- |
-| v0.0.1  | MVP - Basic API                                            | ✅ Released |
-| v0.0.2  | Production Ready                                           | ✅ Released |
-| v0.1.0  | Initial Stable Release                                     | ✅ Released |
-| v0.1.7  | Maintenance & fixes                                        | ✅ Released |
-| v0.1.8  | Maintenance & fixes                                        | ✅ Released |
-| v0.2.0  | i18n, Real-time Chats & Hardening                          | ✅ Released |
-| v0.2.1  | Dashboard split-origin fix                                 | ✅ Released |
-| v0.2.2  | Security hardening (SSRF, secrets, Prometheus metrics)     | ✅ Released |
-| v0.2.3  | Plain-HTTP / LAN dashboard fixes                           | ✅ Released |
-| v0.2.4  | CORS LAN fix, pinnable WA-Web version                      | ✅ Released |
-| v0.2.5  | Pairing-code linking                                       | ✅ Released |
-| v0.2.6  | Chromium hardened-container (read-only) fix                | ✅ Released |
-| v0.2.7  | Typing simulation, delete-chat, engine-agnostic groundwork | ✅ Released |
-| v0.2.8  | Engine decoupling (ack/type/JID), templates, @lid→phone    | ✅ Released |
-| v0.2.9  | Reliability/security/a11y hardening (RBAC, deps, shutdown, retention) | ✅ Released |
-| v0.2.10 | Dashboard/CI follow-ups (MessageTester JID, neutral MessageType, qemu v4) | ✅ Released |
-| v0.3.0  | Engine pluggability (Baileys engine, plugin layer)                              | ✅ Released |
-| v0.4.0  | Single-port deployment (dashboard on API port, Traefik removed)                 | ✅ Released |
-| v0.5.x  | Plugin/dashboard hardening and SDK/docs increments                              | ✅ Released |
-| v0.6.x  | Operational hardening, API surface refinements, dashboard follow-ups            | ✅ Released |
-| v0.7.x  | Dashboard chat UX, infra backup/restore, media-download toggle, infra follow-ups | ✅ Released |
-| v0.8.x  | Integration Fabric provisioning (instance API + dashboard tab), Java & Go SDKs   | ✅ Released |
-| v0.9.0  | Live message-edit events; `general.sessionTimeout` dropped from settings         | ✅ Released |
-| v0.10.x | Chat `kind` discriminator, 24-hour status store, Docker Hub dual-publish         | ✅ Released |
-| v0.11.0 | SDK poll / profile-picture / status-media coverage, security & reliability hardening | ✅ Released |
+| Version | Focus                                                                                                | Status      |
+| ------- | ---------------------------------------------------------------------------------------------------- | ----------- |
+| v0.0.1  | MVP - Basic API                                                                                      | ✅ Released |
+| v0.0.2  | Production Ready                                                                                     | ✅ Released |
+| v0.1.0  | Initial Stable Release                                                                               | ✅ Released |
+| v0.1.7  | Maintenance & fixes                                                                                  | ✅ Released |
+| v0.1.8  | Maintenance & fixes                                                                                  | ✅ Released |
+| v0.2.0  | i18n, Real-time Chats & Hardening                                                                    | ✅ Released |
+| v0.2.1  | Dashboard split-origin fix                                                                           | ✅ Released |
+| v0.2.2  | Security hardening (SSRF, secrets, Prometheus metrics)                                               | ✅ Released |
+| v0.2.3  | Plain-HTTP / LAN dashboard fixes                                                                     | ✅ Released |
+| v0.2.4  | CORS LAN fix, pinnable WA-Web version                                                                | ✅ Released |
+| v0.2.5  | Pairing-code linking                                                                                 | ✅ Released |
+| v0.2.6  | Chromium hardened-container (read-only) fix                                                          | ✅ Released |
+| v0.2.7  | Typing simulation, delete-chat, engine-agnostic groundwork                                           | ✅ Released |
+| v0.2.8  | Engine decoupling (ack/type/JID), templates, @lid→phone                                              | ✅ Released |
+| v0.2.9  | Reliability/security/a11y hardening (RBAC, deps, shutdown, retention)                                | ✅ Released |
+| v0.2.10 | Dashboard/CI follow-ups (MessageTester JID, neutral MessageType, qemu v4)                            | ✅ Released |
+| v0.3.0  | Engine pluggability (Baileys engine, plugin layer)                                                   | ✅ Released |
+| v0.4.0  | Single-port deployment (dashboard on API port, Traefik removed)                                      | ✅ Released |
+| v0.5.x  | Plugin/dashboard hardening and SDK/docs increments                                                   | ✅ Released |
+| v0.6.x  | Operational hardening, API surface refinements, dashboard follow-ups                                 | ✅ Released |
+| v0.7.x  | Dashboard chat UX, infra backup/restore, media-download toggle, infra follow-ups                     | ✅ Released |
+| v0.8.x  | Integration Fabric provisioning (instance API + dashboard tab), Java & Go SDKs                       | ✅ Released |
+| v0.9.0  | Live message-edit events; `general.sessionTimeout` dropped from settings                             | ✅ Released |
+| v0.10.x | Chat `kind` discriminator, 24-hour status store, Docker Hub dual-publish                             | ✅ Released |
+| v0.11.0 | SDK poll / profile-picture / status-media coverage, security & reliability hardening                 | ✅ Released |
 | v0.12.x | Session/engine decomposition (`EngineRegistry`), plugin lifecycle and configuration-precedence fixes | ✅ Released |
-| v1.0.0  | Enterprise Ready (K8s Operator, multi-tenant)                                   | 📋 Planned  |
+| v1.0.0  | Enterprise Ready (K8s Operator, multi-tenant)                                                        | 📋 Planned  |
 
 > SDK / docs-site / observability features are delivered **incrementally** as they're additive — they no
 > longer gate a single version. The five client SDKs landed this way across `0.7.3`–`0.8.19`; the docs
@@ -473,11 +473,11 @@ gantt
 
 #### Scaling & Infrastructure
 
-| Feature            | Priority | Status |
-| ------------------ | -------- | ------ |
-| Horizontal scaling | P2       | 📄 Design reference only; single active owner per session remains required |
+| Feature            | Priority | Status                                                                      |
+| ------------------ | -------- | --------------------------------------------------------------------------- |
+| Horizontal scaling | P2       | 📄 Design reference only; single active owner per session remains required  |
 | Session affinity   | P2       | 📄 Documented for future topology, not implemented as multi-replica runtime |
-| Security audit     | P0       | ✅     |
+| Security audit     | P0       | ✅                                                                          |
 
 #### Community & Tooling
 
@@ -570,27 +570,27 @@ vars are removed. Ships with a migration guide.
 Delivered additively whenever ready, per SemVer (not gated to one version). Prometheus metrics shipped
 in `0.2.2` and the five client SDKs across `0.7.3`–`0.8.19`; the rest remain open.
 
-| Feature                | Priority | Status | Description                     |
-| ---------------------- | -------- | ------ | ------------------------------- |
-| JavaScript/Node.js SDK | P1       | ✅ Shipped (`@rmyndharis/openwa`) | Official client library |
-| Python SDK             | P2       | ✅ Shipped (`rmyndharis-openwa`) | Python client library |
-| PHP SDK                | P2       | ✅ Shipped (`rmyndharis/openwa`) | PHP client library |
-| Java SDK               | P2       | ✅ Shipped (`com.rmyndharis:openwa`) | Java client library |
-| Go SDK                 | P2       | ✅ Shipped (`github.com/rmyndharis/OpenWA/sdk/go`) | Go client library |
-| Postman Collection     | P1       | ◐ cURL collection (doc 07); Postman export TBD | Ready-to-use API collection |
-| Docs Site              | P1       | ☐ Open | Documentation website |
-| Video Tutorials        | P2       | ☐ Open | Getting started video series    |
-| Example Projects       | P1       | ◐ A few under `docs/examples/` | Real-world integration examples |
+| Feature                | Priority | Status                                             | Description                     |
+| ---------------------- | -------- | -------------------------------------------------- | ------------------------------- |
+| JavaScript/Node.js SDK | P1       | ✅ Shipped (`@rmyndharis/openwa`)                  | Official client library         |
+| Python SDK             | P2       | ✅ Shipped (`rmyndharis-openwa`)                   | Python client library           |
+| PHP SDK                | P2       | ✅ Shipped (`rmyndharis/openwa`)                   | PHP client library              |
+| Java SDK               | P2       | ✅ Shipped (`com.rmyndharis:openwa`)               | Java client library             |
+| Go SDK                 | P2       | ✅ Shipped (`github.com/rmyndharis/OpenWA/sdk/go`) | Go client library               |
+| Postman Collection     | P1       | ◐ cURL collection (doc 07); Postman export TBD     | Ready-to-use API collection     |
+| Docs Site              | P1       | ☐ Open                                             | Documentation website           |
+| Video Tutorials        | P2       | ☐ Open                                             | Getting started video series    |
+| Example Projects       | P1       | ◐ A few under `docs/examples/`                     | Real-world integration examples |
 
 **Performance & Observability**
 
-| Feature                | Priority | Status | Description                      |
-| ---------------------- | -------- | ------ | -------------------------------- |
+| Feature                | Priority | Status                                      | Description                      |
+| ---------------------- | -------- | ------------------------------------------- | -------------------------------- |
 | Prometheus Metrics     | P1       | ✅ Shipped (`GET /api/metrics`, `openwa_*`) | /metrics endpoint for monitoring |
-| Grafana Dashboard      | P2       | ☐ Open | Pre-built monitoring dashboard   |
-| OpenTelemetry Tracing  | P2       | ☐ Open | Distributed tracing support      |
-| Performance Benchmarks | P1       | ☐ Open | Documented performance metrics   |
-| Memory Optimization    | P1       | ☐ Open | Reduced memory per session       |
+| Grafana Dashboard      | P2       | ☐ Open                                      | Pre-built monitoring dashboard   |
+| OpenTelemetry Tracing  | P2       | ☐ Open                                      | Distributed tracing support      |
+| Performance Benchmarks | P1       | ☐ Open                                      | Documented performance metrics   |
+| Memory Optimization    | P1       | ☐ Open                                      | Reduced memory per session       |
 
 ### Integration Fabric — inbound integrations for plugins (in progress)
 
@@ -605,13 +605,13 @@ through a stable, versioned **Integration SDK (v1)**. Motivated by #553.
 Delivered in phases (additive; see [25 - Integration Fabric](./25-integration-fabric.md) for the
 architecture and design rationale):
 
-| Phase | Scope                                                                                                                                                                          | Status                         |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ |
-| P0    | Core substrate: inbound webhook RPC, `@Public` ingress endpoint with HMAC-over-raw-body verification, plugin-instance primitive, normalized send capability, identity/dedup/DLQ tables, ingress queue. SDK v1 frozen. | ✅ Merged (internal substrate) |
-| P1    | Scale-correctness: per-conversation FIFO ordering, per-instance fairness, DLQ redrive, bot/human handover.                                                                    | ✅ Merged (internal substrate) |
-| P2    | Operator provisioning (mint plugin instances and secrets, dashboard) + the first adapter (helpdesk inbox) shipped as a marketplace plugin — closes #553 end-to-end.           | ✅ Shipped (provisioning `0.8.0`; adapter needs `0.8.7`+) |
-| P3    | A second ingress adapter — validates the substrate generalizes beyond the first consumer.                                                                                     | ✅ Shipped (`supabase-otp-hook`) |
-| P4    | Developer experience: SDK reference docs, compatibility test suite, multi-node routing.                                                                                       | 📋 Planned                     |
+| Phase | Scope                                                                                                                                                                                                                 | Status                                                    |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| P0    | Core substrate: inbound webhook RPC, `@Public` ingress endpoint with HMAC-over-raw-body verification, plugin-instance primitive, normalized send capability, identity/dedup/DLQ tables, ingress queue. SDK v1 frozen. | ✅ Merged (internal substrate)                            |
+| P1    | Scale-correctness: per-conversation FIFO ordering, per-instance fairness, DLQ redrive, bot/human handover.                                                                                                            | ✅ Merged (internal substrate)                            |
+| P2    | Operator provisioning (mint plugin instances and secrets, dashboard) + the first adapter (helpdesk inbox) shipped as a marketplace plugin — closes #553 end-to-end.                                                   | ✅ Shipped (provisioning `0.8.0`; adapter needs `0.8.7`+) |
+| P3    | A second ingress adapter — validates the substrate generalizes beyond the first consumer.                                                                                                                             | ✅ Shipped (`supabase-otp-hook`)                          |
+| P4    | Developer experience: SDK reference docs, compatibility test suite, multi-node routing.                                                                                                                               | 📋 Planned                                                |
 
 > **Provisioning is operator-facing since `0.8.0`.** An ADMIN key mints a per-plugin instance and its
 > ingress secret through `POST /api/integration/plugins/:pluginId/instances`, and rotates that secret
@@ -628,13 +628,13 @@ architecture and design rationale):
 
 ### v1.0.0 - Enterprise Ready
 
-| Feature             | Priority | Description                    |
-| ------------------- | -------- | ------------------------------ |
-| Kubernetes Operator | P3       | Native K8s deployment          |
-| Multi-tenant        | P3       | Enterprise SaaS features       |
-| Encryption at rest  | P2       | Full data encryption           |
-| Audit compliance    | P2       | SOC2, GDPR compliance          |
-| WhatsApp Pay        | P3       | Payment links integration      |
+| Feature             | Priority | Description               |
+| ------------------- | -------- | ------------------------- |
+| Kubernetes Operator | P3       | Native K8s deployment     |
+| Multi-tenant        | P3       | Enterprise SaaS features  |
+| Encryption at rest  | P2       | Full data encryption      |
+| Audit compliance    | P2       | SOC2, GDPR compliance     |
+| WhatsApp Pay        | P3       | Payment links integration |
 
 ## 15.7 Cutting a Release
 
@@ -779,26 +779,26 @@ a no-op for OpenWA itself.
 
 ### Phase 2 Success Criteria
 
-| Metric                | Target       | Actual            | Type     |
-| --------------------- | ------------ | ----------------- | -------- |
-| Multi-session support | 10+ sessions | ✅ Achieved       | Internal |
-| Dashboard functional  | All features | ✅ Achieved       | Internal |
-| PostgreSQL stable     | ✅           | ✅ Achieved       | Internal |
-| Webhook delivery rate | > 99%        | ✅ Achieved       | Internal |
+| Metric                | Target       | Actual                                               | Type     |
+| --------------------- | ------------ | ---------------------------------------------------- | -------- |
+| Multi-session support | 10+ sessions | ✅ Achieved                                          | Internal |
+| Dashboard functional  | All features | ✅ Achieved                                          | Internal |
+| PostgreSQL stable     | ✅           | ✅ Achieved                                          | Internal |
+| Webhook delivery rate | > 99%        | ✅ Achieved                                          | Internal |
 | Test coverage         | > 70%        | ⚠️ 66.87% line coverage; 80% improvement plan active | Internal |
-| GitHub stars          | 100+         | 📋 Pending        | External |
+| GitHub stars          | 100+         | 📋 Pending                                           | External |
 
 ### Phase 3 Success Criteria
 
-| Metric                        | Target  | Actual            | Type     |
-| ----------------------------- | ------- | ----------------- | -------- |
-| Feature parity with WAHA Plus | 90%+    | ✅ Achieved       | Internal |
-| API response time (p95)       | < 200ms | ✅ Achieved       | Internal |
+| Metric                        | Target  | Actual                               | Type     |
+| ----------------------------- | ------- | ------------------------------------ | -------- |
+| Feature parity with WAHA Plus | 90%+    | ✅ Achieved                          | Internal |
+| API response time (p95)       | < 200ms | ✅ Achieved                          | Internal |
 | Test coverage                 | > 80%   | ⚠️ 66.87% line coverage; in progress | Internal |
-| Documentation coverage        | 100%    | ✅ 95%+           | Internal |
-| Production users              | 50+     | 📋 Pending        | External |
-| GitHub stars                  | 500+    | 📋 Pending        | External |
-| Community contributors        | 5+      | 📋 Pending        | External |
+| Documentation coverage        | 100%    | ✅ 95%+                              | Internal |
+| Production users              | 50+     | 📋 Pending                           | External |
+| GitHub stars                  | 500+    | 📋 Pending                           | External |
+| Community contributors        | 5+      | 📋 Pending                           | External |
 
 ---
 

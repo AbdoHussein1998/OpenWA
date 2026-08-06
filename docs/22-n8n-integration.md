@@ -73,28 +73,28 @@ Start workflows when WhatsApp events occur.
 
 #### Supported Events
 
-| Event                   | Description                         | Use Case                  |
-| ----------------------- | ----------------------------------- | ------------------------- |
-| `message.received`      | New incoming message                | Auto-reply, lead capture  |
-| `message.sent`          | Message sent successfully           | Delivery confirmation     |
-| `message.ack`           | Delivery/read status advanced       | Read receipts             |
-| `message.failed`        | Outgoing message failed             | Failure alerting          |
-| `message.revoked`       | Message deleted for everyone        | Deletion tracking         |
-| `message.reaction`      | Reaction added / changed / removed  | Reaction tracking         |
-| `message.edited`        | Message body or caption edited      | Content synchronization   |
-| `status.received`       | Contact posted a Status update      | Status archiving          |
-| `session.status`        | Session status changed              | Lifecycle tracking        |
-| `session.qr`            | QR code generated                   | Reconnection alerts       |
-| `session.authenticated` | Session logged in (phone available) | Startup notifications     |
-| `session.disconnected`  | Session lost connection             | Alert monitoring          |
-| `session.reconnect_loop` | Every 5th consecutive reconnect attempt | Stuck-session alerting |
-| `session.restriction` | WhatsApp restricted the account, or lifted it | Pausing outreach while an account is limited |
-| `presence.update` | A watched chat's online/typing state changed | Live agent hand-off, presence-aware routing |
-| `call.accepted` / `call.rejected` / `call.missed` | A ringing call ended | Missed-call follow-up, call logging |
-| `group.join`           | Participant(s) joined a group          | Welcome messages        |
-| `group.leave`          | Participant(s) left a group            | Churn tracking          |
-| `group.update`         | Group subject/description/settings changed | Group administration |
-| `call.received`        | Incoming call started ringing          | Auto-reject + auto-reply bots |
+| Event                                             | Description                                   | Use Case                                     |
+| ------------------------------------------------- | --------------------------------------------- | -------------------------------------------- |
+| `message.received`                                | New incoming message                          | Auto-reply, lead capture                     |
+| `message.sent`                                    | Message sent successfully                     | Delivery confirmation                        |
+| `message.ack`                                     | Delivery/read status advanced                 | Read receipts                                |
+| `message.failed`                                  | Outgoing message failed                       | Failure alerting                             |
+| `message.revoked`                                 | Message deleted for everyone                  | Deletion tracking                            |
+| `message.reaction`                                | Reaction added / changed / removed            | Reaction tracking                            |
+| `message.edited`                                  | Message body or caption edited                | Content synchronization                      |
+| `status.received`                                 | Contact posted a Status update                | Status archiving                             |
+| `session.status`                                  | Session status changed                        | Lifecycle tracking                           |
+| `session.qr`                                      | QR code generated                             | Reconnection alerts                          |
+| `session.authenticated`                           | Session logged in (phone available)           | Startup notifications                        |
+| `session.disconnected`                            | Session lost connection                       | Alert monitoring                             |
+| `session.reconnect_loop`                          | Every 5th consecutive reconnect attempt       | Stuck-session alerting                       |
+| `session.restriction`                             | WhatsApp restricted the account, or lifted it | Pausing outreach while an account is limited |
+| `presence.update`                                 | A watched chat's online/typing state changed  | Live agent hand-off, presence-aware routing  |
+| `call.accepted` / `call.rejected` / `call.missed` | A ringing call ended                          | Missed-call follow-up, call logging          |
+| `group.join`                                      | Participant(s) joined a group                 | Welcome messages                             |
+| `group.leave`                                     | Participant(s) left a group                   | Churn tracking                               |
+| `group.update`                                    | Group subject/description/settings changed    | Group administration                         |
+| `call.received`                                   | Incoming call started ringing                 | Auto-reject + auto-reply bots                |
 
 #### How It Works
 

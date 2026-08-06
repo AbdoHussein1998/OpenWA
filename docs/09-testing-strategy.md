@@ -32,35 +32,35 @@ npm --prefix dashboard run test:unit
 
 ## 9.2 Test Commands
 
-| Command                                                           | Purpose                                                                 |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `npm test`                                                        | Run backend Jest unit tests from `src/`                                 |
-| `npm test -- --runInBand`                                         | Run backend tests serially; useful for local debugging and clean output |
-| `npm run test:cov`                                                | Run backend tests with coverage and coverage thresholds                 |
-| `npm run test:e2e`                                                | Run smoke-level e2e tests from `test/`                                  |
-| `npm run test:pg-smoke`                                           | Run the PostgreSQL migration and UUID-default smoke test                |
-| `npm run test:scripts`                                            | Run the repo-level script tests on the Node test runner                 |
-| `./scripts/smoke-test-backup-restore.sh`                          | Run the backup/restore smoke test used by the `scripts-smoke` job       |
-| `npm run lint`                                                    | Run backend ESLint with type-aware rules                                |
-| `npm run format:check`                                            | Check Prettier formatting for backend source and specs                  |
-| `npx tsc --noEmit -p tsconfig.json`                               | Type-check backend source, unit specs, and e2e specs                    |
-| `npm run openapi:check`                                           | Verify the committed OpenAPI snapshot                                   |
-| `npm run check:versions`                                          | Verify documentation and package version consistency                    |
-| `npm run check:dockerignore`                                      | Verify the Docker build context that `.dockerignore` defines            |
-| `cd dashboard && npm run lint`                                    | Run dashboard ESLint                                                    |
-| `cd dashboard && npm run typecheck`                               | Type-check dashboard test files                                         |
-| `cd dashboard && npm run test:unit`                               | Run dashboard pure utility/unit tests                                   |
-| `cd dashboard && npm run i18n:check`                              | Verify dashboard locale key parity                                      |
-| `cd dashboard && npm run build`                                   | Type-check and build the dashboard                                      |
-| `cd sdk/javascript && npm test && npm run typecheck`              | Type-check and unit-test the JavaScript SDK                             |
-| `cd sdk/javascript && npm run build && npm run smoke`             | Build and dual CJS/ESM package-smoke the JavaScript SDK                 |
-| `cd sdk/python && pytest`                                         | Run the Python SDK tests                                                |
-| `cd sdk/php && ./vendor/bin/phpunit`                              | Run the PHP SDK tests                                                   |
-| `cd sdk/java && mvn -B verify`                                    | Run the Java SDK tests                                                  |
-| `cd sdk/go && gofmt -l . && go vet ./... && go test -race ./...`  | List unformatted files, vet, and race-test the Go SDK                   |
-| `npm run test:scripts`                                            | Run the install-script tests (`node --test scripts/postinstall.spec.js`) |
-| `npm run check:dockerignore`                                      | Verify `.dockerignore` still excludes what the image must not carry      |
-| `npm run check:versions`                                          | Verify docs and Swagger track the `package.json` version                |
+| Command                                                          | Purpose                                                                  |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `npm test`                                                       | Run backend Jest unit tests from `src/`                                  |
+| `npm test -- --runInBand`                                        | Run backend tests serially; useful for local debugging and clean output  |
+| `npm run test:cov`                                               | Run backend tests with coverage and coverage thresholds                  |
+| `npm run test:e2e`                                               | Run smoke-level e2e tests from `test/`                                   |
+| `npm run test:pg-smoke`                                          | Run the PostgreSQL migration and UUID-default smoke test                 |
+| `npm run test:scripts`                                           | Run the repo-level script tests on the Node test runner                  |
+| `./scripts/smoke-test-backup-restore.sh`                         | Run the backup/restore smoke test used by the `scripts-smoke` job        |
+| `npm run lint`                                                   | Run backend ESLint with type-aware rules                                 |
+| `npm run format:check`                                           | Check Prettier formatting for backend source and specs                   |
+| `npx tsc --noEmit -p tsconfig.json`                              | Type-check backend source, unit specs, and e2e specs                     |
+| `npm run openapi:check`                                          | Verify the committed OpenAPI snapshot                                    |
+| `npm run check:versions`                                         | Verify documentation and package version consistency                     |
+| `npm run check:dockerignore`                                     | Verify the Docker build context that `.dockerignore` defines             |
+| `cd dashboard && npm run lint`                                   | Run dashboard ESLint                                                     |
+| `cd dashboard && npm run typecheck`                              | Type-check dashboard test files                                          |
+| `cd dashboard && npm run test:unit`                              | Run dashboard pure utility/unit tests                                    |
+| `cd dashboard && npm run i18n:check`                             | Verify dashboard locale key parity                                       |
+| `cd dashboard && npm run build`                                  | Type-check and build the dashboard                                       |
+| `cd sdk/javascript && npm test && npm run typecheck`             | Type-check and unit-test the JavaScript SDK                              |
+| `cd sdk/javascript && npm run build && npm run smoke`            | Build and dual CJS/ESM package-smoke the JavaScript SDK                  |
+| `cd sdk/python && pytest`                                        | Run the Python SDK tests                                                 |
+| `cd sdk/php && ./vendor/bin/phpunit`                             | Run the PHP SDK tests                                                    |
+| `cd sdk/java && mvn -B verify`                                   | Run the Java SDK tests                                                   |
+| `cd sdk/go && gofmt -l . && go vet ./... && go test -race ./...` | List unformatted files, vet, and race-test the Go SDK                    |
+| `npm run test:scripts`                                           | Run the install-script tests (`node --test scripts/postinstall.spec.js`) |
+| `npm run check:dockerignore`                                     | Verify `.dockerignore` still excludes what the image must not carry      |
+| `npm run check:versions`                                         | Verify docs and Swagger track the `package.json` version                 |
 
 ## 9.3 Backend Unit Tests
 
@@ -234,16 +234,16 @@ on broad integration coverage.
 
 Main CI is defined in `.github/workflows/ci.yml`.
 
-| Job             | Checks                                                                                          |
-| --------------- | ----------------------------------------------------------------------------------------------- |
+| Job             | Checks                                                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `lint`          | backend ESLint, full-program TypeScript check, formatting, version consistency, .dockerignore context, OpenAPI snapshot |
-| `audit`         | dependency security audit                                                                        |
-| `test`          | backend coverage run, script unit tests (node:test), e2e smoke tests, Codecov upload            |
-| `test-postgres` | real PostgreSQL 16 service, backend build, migration smoke, and PostgreSQL FTS provider spec     |
-| `dashboard`     | dashboard install, lint, test type-check, unit tests, i18n parity, build                         |
-| `scripts-smoke` | shellcheck on the backup/restore scripts plus the backup/restore smoke test                      |
-| `build`         | backend build after lint/audit/test/dashboard/scripts-smoke jobs pass                            |
-| `docker`        | multi-arch Docker build on pushes and pull requests; publish only where workflow permissions allow |
+| `audit`         | dependency security audit                                                                                               |
+| `test`          | backend coverage run, script unit tests (node:test), e2e smoke tests, Codecov upload                                    |
+| `test-postgres` | real PostgreSQL 16 service, backend build, migration smoke, and PostgreSQL FTS provider spec                            |
+| `dashboard`     | dashboard install, lint, test type-check, unit tests, i18n parity, build                                                |
+| `scripts-smoke` | shellcheck on the backup/restore scripts plus the backup/restore smoke test                                             |
+| `build`         | backend build after lint/audit/test/dashboard/scripts-smoke jobs pass                                                   |
+| `docker`        | multi-arch Docker build on pushes and pull requests; publish only where workflow permissions allow                      |
 
 SDK CI is defined in `.github/workflows/sdk-ci.yml` and is path-filtered to SDK sources plus server
 contract surfaces that SDKs mirror (`src/**/dto/**`, `src/**/*.controller.ts`, `src/**/*.service.ts`, and

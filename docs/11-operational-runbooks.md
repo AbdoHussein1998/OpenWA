@@ -27,6 +27,7 @@ Each runbook follows this format:
 **Impact:** All sessions affected, messages not processing
 
 **Prerequisites:**
+
 - SSH access to server
 - Docker CLI access
 - Database access
@@ -108,6 +109,7 @@ curl -X POST http://localhost:2785/api/sessions/{sessionId}/messages/send-text \
 **Impact:** Single session affected
 
 **Prerequisites:**
+
 - API Key
 - Physical access to phone (if QR needed)
 
@@ -172,6 +174,7 @@ curl -X POST http://localhost:2785/api/sessions/{sessionId}/messages/send-text \
 **Impact:** Performance degradation, potential OOM
 
 **Prerequisites:**
+
 - SSH access
 - Docker CLI
 
@@ -237,6 +240,7 @@ as a delivery failure rather than retaining payloads without limit.
 **Impact:** External systems not receiving events
 
 **Prerequisites:**
+
 - API Key
 - Access to webhook endpoint
 
@@ -330,6 +334,7 @@ curl -H "X-API-Key: $API_KEY" \
 **Impact:** Service downtime during maintenance
 
 **Prerequisites:**
+
 - Scheduled maintenance window
 - Backup verified
 - User notification sent
@@ -405,6 +410,7 @@ curl -H "X-API-Key: $API_KEY" \
 **Impact:** Brief downtime during upgrade
 
 **Prerequisites:**
+
 - Backup completed
 - Release notes reviewed
 - Breaking changes identified
@@ -509,6 +515,7 @@ curl -H "X-API-Key: $API_KEY" http://localhost:2785/api/health
 **Impact:** None (online backup)
 
 **Prerequisites:**
+
 - Sufficient disk space
 - Backup storage accessible
 
@@ -578,6 +585,7 @@ tar -tzf ./backups/openwa-backup-*.tar.gz
 **Impact:** Service downtime during restore
 
 **Prerequisites:**
+
 - Valid backup file
 - Sufficient disk space
 - SSH access
@@ -635,14 +643,14 @@ curl -H "X-API-Key: $API_KEY" \
 
 ### Alert Response Matrix
 
-| Alert | Severity | Response Time | Runbook |
-|-------|----------|---------------|---------|
-| Service Down | Critical | 5 min | Service Down |
-| High Memory | Warning | 30 min | High Memory Usage |
-| Session Disconnected | Warning | 15 min | Session Disconnected |
-| Webhook Failures > 5% | Warning | 30 min | Webhook Delivery Failure |
-| Disk Space < 10% | Critical | 15 min | Disk Space Low |
-| Certificate Expiry < 7 days | Warning | 24 hours | Certificate Renewal |
+| Alert                       | Severity | Response Time | Runbook                  |
+| --------------------------- | -------- | ------------- | ------------------------ |
+| Service Down                | Critical | 5 min         | Service Down             |
+| High Memory                 | Warning  | 30 min        | High Memory Usage        |
+| Session Disconnected        | Warning  | 15 min        | Session Disconnected     |
+| Webhook Failures > 5%       | Warning  | 30 min        | Webhook Delivery Failure |
+| Disk Space < 10%            | Critical | 15 min        | Disk Space Low           |
+| Certificate Expiry < 7 days | Warning  | 24 hours      | Certificate Renewal      |
 
 ### Runbook: Certificate Renewal
 
@@ -772,6 +780,7 @@ External Contacts:
 - Domain registrar: [support email]
 - SSL provider: [support portal]
 ```
+
 ---
 
 <div align="center">

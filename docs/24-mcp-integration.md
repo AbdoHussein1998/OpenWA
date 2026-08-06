@@ -20,13 +20,13 @@
 | **Per-key rate limiter**                     | ✅ Implemented | `src/modules/mcp/mcp-rate-limit.ts`                  |
 | **Result shaping (smart/json)**              | ✅ Implemented | `src/modules/mcp/tool-result.ts`                     |
 
-| Capability                        | Status         | Notes                                                                   |
-| --------------------------------- | -------------- | ----------------------------------------------------------------------- |
-| **Read-only mode**                | ✅ Implemented | **Default read-only**; set `MCP_READONLY=false` to expose write tools   |
-| **OAuth 2.1 (public exposure)**   | 🔜 Planned     | Static API key is used today (suitable for self-hosted/internal)        |
-| **Agent-action audit provenance** | 🔜 Planned     | Mark audited actions as agent-initiated                                 |
-| **Env-tunable rate limits**       | ✅ Implemented | `MCP_RATE_LIMIT_MAX` / `MCP_RATE_LIMIT_WINDOW_MS`                       |
-| **Additional tool domains**       | 🔜 Planned     | templates / channels / catalog / status (labels/automation now ship)    |
+| Capability                        | Status         | Notes                                                                 |
+| --------------------------------- | -------------- | --------------------------------------------------------------------- |
+| **Read-only mode**                | ✅ Implemented | **Default read-only**; set `MCP_READONLY=false` to expose write tools |
+| **OAuth 2.1 (public exposure)**   | 🔜 Planned     | Static API key is used today (suitable for self-hosted/internal)      |
+| **Agent-action audit provenance** | 🔜 Planned     | Mark audited actions as agent-initiated                               |
+| **Env-tunable rate limits**       | ✅ Implemented | `MCP_RATE_LIMIT_MAX` / `MCP_RATE_LIMIT_WINDOW_MS`                     |
+| **Additional tool domains**       | 🔜 Planned     | templates / channels / catalog / status (labels/automation now ship)  |
 
 ---
 

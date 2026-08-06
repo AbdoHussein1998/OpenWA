@@ -148,17 +148,7 @@ export class ExampleModule {}
 
 ```typescript
 // modules/example/example.controller.ts
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Headers,
-  Param,
-  Delete,
-  HttpCode,
-  HttpStatus,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Headers, Param, Delete, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ExampleService } from './example.service';
 import { CreateExampleDto } from './dto/create-example.dto';
@@ -175,7 +165,7 @@ export class ExampleController {
   @ApiResponse({ status: 201, type: ExampleResponseDto })
   async create(
     @Body() dto: CreateExampleDto,
-    @Headers('x-request-id') requestId?: string
+    @Headers('x-request-id') requestId?: string,
   ): Promise<ExampleResponseDto> {
     return this.exampleService.create(dto, { requestId });
   }
@@ -202,7 +192,7 @@ resolve an engine directly from a controller. Engine-specific details belong beh
 services and engine adapters.
 
 A capability service reaches the live engine through `EngineRegistry`, the narrow port exported by
-the (global) `EngineModule` — not through `SessionService`, which drives the session *lifecycle*
+the (global) `EngineModule` — not through `SessionService`, which drives the session _lifecycle_
 (start/stop/delete/reconnect, owned by `SessionEngineLifecycle`) and should only be injected by code
 that actually drives it:
 
@@ -234,30 +224,27 @@ export class ExampleService {
 
   constructor(private readonly repository: ExampleRepository) {}
 
-  async create(
-    dto: CreateExampleDto,
-    context?: { requestId?: string }
-  ): Promise<Example> {
+  async create(dto: CreateExampleDto, context?: { requestId?: string }): Promise<Example> {
     this.logger.log(`Creating example: ${dto.name}`, context);
-    
+
     const example = this.repository.create(dto);
     return this.repository.save(example);
   }
 
   async findOne(id: string): Promise<Example> {
     const example = await this.repository.findOne({ where: { id } });
-    
+
     if (!example) {
       throw new NotFoundException(`Example with ID ${id} not found`);
     }
-    
+
     return example;
   }
 
   async remove(id: string): Promise<void> {
     const example = await this.findOne(id);
     await this.repository.remove(example);
-    
+
     this.logger.log(`Deleted example: ${id}`);
   }
 }
@@ -375,15 +362,18 @@ Fixes #456
 
 ```markdown
 ## Description
+
 Brief description of changes
 
 ## Type of Change
+
 - [ ] Bug fix
 - [ ] New feature
 - [ ] Breaking change
 - [ ] Documentation update
 
 ## Checklist
+
 - [ ] Tests added/updated
 - [ ] Documentation updated
 - [ ] Lint passes
@@ -392,6 +382,7 @@ Brief description of changes
 ## Screenshots (if applicable)
 
 ## Related Issues
+
 Closes #
 ```
 
@@ -464,7 +455,7 @@ describe('App (e2e)', () => {
       return request(app.getHttpServer())
         .get('/api/health')
         .expect(200)
-        .expect((res) => {
+        .expect(res => {
           expect(res.body.status).toBe('ok');
         });
     });
@@ -489,10 +480,10 @@ Coverage thresholds are enforced by Jest in `package.json`. Security-sensitive c
 
 ### Code Documentation
 
-```typescript
+````typescript
 /**
  * Session service handles all session-related operations.
- * 
+ *
  * @example
  * ```typescript
  * const session = await sessionService.create({ name: 'my-bot' });
@@ -503,7 +494,7 @@ Coverage thresholds are enforced by Jest in `package.json`. Security-sensitive c
 export class SessionService {
   /**
    * Creates a new WhatsApp session.
-   * 
+   *
    * @param dto - Session creation parameters
    * @returns The created session with QR code if applicable
    * @throws {ConflictException} If session name already exists
@@ -513,7 +504,7 @@ export class SessionService {
     // Implementation
   }
 }
-```
+````
 
 ### API Documentation (Swagger)
 
@@ -559,15 +550,15 @@ Where a failure mode recurs across engines, `src/common/errors/` defines a named
 the NestJS exception carrying the right status, so throwing it from an adapter maps to the intended
 HTTP code with no filter involved:
 
-| Error | Extends | Status |
-| --- | --- | --- |
-| `EngineNotSupportedError` | `NotImplementedException` | 501 |
-| `ChannelMediaNotSupportedError` | `NotImplementedException` | 501 |
-| `EngineNotReadyError` | `ConflictException` | 409 |
-| `EngineRefusedError` | `ForbiddenException` | 403 |
-| `EngineTransportError` | `ServiceUnavailableException` | 503 |
-| `ChatLabelsUnsupportedError` | `UnprocessableEntityException` | 422 |
-| `CallNotFoundError` / `ChannelNotFoundError` / `GroupNotFoundError` / `MessageNotFoundError` | `NotFoundException` | 404 |
+| Error                                                                                        | Extends                        | Status |
+| -------------------------------------------------------------------------------------------- | ------------------------------ | ------ |
+| `EngineNotSupportedError`                                                                    | `NotImplementedException`      | 501    |
+| `ChannelMediaNotSupportedError`                                                              | `NotImplementedException`      | 501    |
+| `EngineNotReadyError`                                                                        | `ConflictException`            | 409    |
+| `EngineRefusedError`                                                                         | `ForbiddenException`           | 403    |
+| `EngineTransportError`                                                                       | `ServiceUnavailableException`  | 503    |
+| `ChatLabelsUnsupportedError`                                                                 | `UnprocessableEntityException` | 422    |
+| `CallNotFoundError` / `ChannelNotFoundError` / `GroupNotFoundError` / `MessageNotFoundError` | `NotFoundException`            | 404    |
 
 Add a new one only when the condition is engine-agnostic and recurs; a one-off stays an inline
 `throw new BadRequestException(...)`.
@@ -807,7 +798,7 @@ export class MyService {
     // Log entry with context
     const requestId = this.request?.requestId;
     this.logger.log(`Processing item`, { id, requestId });
-    
+
     try {
       await this.process(id);
       this.logger.log(`Item processed successfully`, { id, requestId });
@@ -866,7 +857,7 @@ async function bootstrap() {
 const client = new Client({
   puppeteer: {
     headless: false, // See browser window
-    devtools: true,  // Open DevTools automatically
+    devtools: true, // Open DevTools automatically
   },
 });
 
@@ -958,19 +949,13 @@ const contact2 = await getContact('id2');
 const contact3 = await getContact('id3');
 
 // ✅ Good: Parallel execution
-const [contact1, contact2, contact3] = await Promise.all([
-  getContact('id1'),
-  getContact('id2'),
-  getContact('id3'),
-]);
+const [contact1, contact2, contact3] = await Promise.all([getContact('id1'), getContact('id2'), getContact('id3')]);
 
 // ✅ Good: Batch processing with concurrency limit
 import pLimit from 'p-limit';
 
 const limit = pLimit(5); // Max 5 concurrent
-const results = await Promise.all(
-  chatIds.map(id => limit(() => sendMessage(id, text)))
-);
+const results = await Promise.all(chatIds.map(id => limit(() => sendMessage(id, text))));
 ```
 
 ### Memory Management
@@ -1005,6 +990,7 @@ export class EngineTeardownService {
 **Symptom:** Session stuck in 'initializing' status
 
 **Causes & Solutions:**
+
 1. **Chrome/Puppeteer issue**
    - Ensure Chrome for Testing is installed: `ls /usr/local/bin/puppeteer-chrome`
    - Check Puppeteer args: `--no-sandbox --disable-setuid-sandbox`
@@ -1019,6 +1005,7 @@ export class EngineTeardownService {
 ## Session Disconnects Randomly
 
 **Causes & Solutions:**
+
 1. **Memory pressure**
    - Monitor memory: `docker stats`
    - Increase container memory limit
@@ -1034,12 +1021,13 @@ export class EngineTeardownService {
 
 ### Database Issues
 
-```markdown
+````markdown
 ## Connection Pool Exhausted
 
 **Symptom:** "too many clients already" error
 
 **Solution:**
+
 ```typescript
 // config/typeorm.config.ts
 {
@@ -1052,12 +1040,14 @@ export class EngineTeardownService {
   },
 }
 ```
+````
 
 ## Migration Fails
 
 **Symptom:** "relation already exists" error
 
 **Solution:**
+
 ```bash
 # Check migration status
 npm run migration:show
@@ -1068,7 +1058,8 @@ npm run migration:revert
 # Regenerate migration
 npm run migration:generate --name=FixMigration
 ```
-```
+
+````
 
 ### TypeScript/NestJS Issues
 
@@ -1092,17 +1083,19 @@ constructor(
   @Inject(forwardRef(() => SessionService))
   private readonly sessionService: SessionService,
 ) {}
-```
+````
 
 ## DI Token Not Found
 
 **Symptom:** "Nest can't resolve dependencies"
 
 **Solution:**
+
 - Ensure provider is exported from its module
 - Check if module is imported where needed
 - Use @Injectable() decorator on services
-```
+
+````
 
 ### Docker Issues
 
@@ -1112,9 +1105,10 @@ constructor(
 **Check logs:**
 ```bash
 docker compose logs openwa-api --tail 100
-```
+````
 
 **Common causes:**
+
 1. Missing environment variables
 2. Database not ready (use depends_on + healthcheck)
 3. Port already in use
@@ -1122,18 +1116,21 @@ docker compose logs openwa-api --tail 100
 ## Chrome Crashes in Docker
 
 **Solution:**
+
 ```dockerfile
 # Add shared memory size
 docker run --shm-size=2gb openwa
 ```
 
 Or in docker-compose.yml:
+
 ```yaml
 services:
   openwa-api:
     shm_size: '2gb'
 ```
-```
+
+````
 
 ## 8.12 Contributing Guide
 
@@ -1149,7 +1146,7 @@ services:
 7. Commit: `git commit -m 'feat(scope): add amazing feature'`
 8. Push: `git push origin feature/amazing-feature`
 9. Open Pull Request
-```
+````
 
 ### Code Review Checklist
 
@@ -1168,6 +1165,7 @@ services:
 
 ```markdown
 **Bug Report Template:**
+
 - **Description:** Clear description of the bug
 - **Steps to Reproduce:** Numbered steps
 - **Expected Behavior:** What should happen
@@ -1175,6 +1173,7 @@ services:
 - **Environment:** Node version, OS, Docker version
 - **Logs:** Relevant error logs
 ```
+
 ---
 
 <div align="center">
