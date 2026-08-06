@@ -253,10 +253,10 @@
         "statements": 85
       },
       "./src/modules/automation/": {
-        "branches": 60,
-        "functions": 55,
-        "lines": 75,
-        "statements": 70
+        "branches": 67,
+        "functions": 57,
+        "lines": 83,
+        "statements": 79
       },
       "./src/modules/chat-media/": {
         "branches": 78,
@@ -361,10 +361,10 @@
         "statements": 91
       },
       "./src/modules/status/": {
-        "branches": 47,
-        "functions": 45,
-        "lines": 62,
-        "statements": 60
+        "branches": 70,
+        "functions": 58,
+        "lines": 79,
+        "statements": 78
       },
       "./src/modules/template/": {
         "branches": 77,
