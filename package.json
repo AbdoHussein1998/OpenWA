@@ -301,10 +301,10 @@
         "statements": 89
       },
       "./src/modules/mcp/": {
-        "branches": 45,
-        "functions": 55,
-        "lines": 53,
-        "statements": 53
+        "branches": 62,
+        "functions": 81,
+        "lines": 78,
+        "statements": 78
       },
       "./src/modules/media/": {
         "branches": 71,
