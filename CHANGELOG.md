@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - The webhook troubleshooting runbook told operators there was no webhook-delivery log API and to grep container logs instead; that was true when written but `GET /api/webhooks/delivery-failures` shipped four days later, so the one page reached when a webhook is silent denied the endpoint exists. It now carries the real call, names the fields that gate dispatch (`active`, `events`, `filters`), and notes that `lastTriggeredAt` is never set by the Test button.
+- The n8n trigger event table advertised `call.accepted` / `call.rejected` / `call.missed` with no engine caveat, so a whatsapp-web.js user could build a missed-call workflow on events that engine never emits; they are now marked Baileys only, and the troubleshooting section names n8n's test-versus-production webhook URL, which silently delivers a single event and then stops.
 
 ## [0.14.4] - 2026-08-07
 
