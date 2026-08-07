@@ -152,6 +152,37 @@ describe('validateEnv', () => {
     expect(() => validateEnv({})).not.toThrow();
   });
 
+  it('rejects a mistyped value for the datastore, webhook and engine booleans too', () => {
+    // Read with the same bare `=== 'true'` / `!== 'false'` comparison but absent from the strict list,
+    // so a typo configured the opposite of what the operator asked for, in silence. DATABASE_SSL is
+    // the one that fails OPEN: `require` is the natural Postgres spelling and reads as OFF, so a
+    // connection the operator believed was TLS-protected runs in plaintext.
+    expect(() => validateEnv({ DATABASE_SSL: 'require' })).toThrow(/DATABASE_SSL/);
+    expect(() => validateEnv({ DATABASE_SSL_REJECT_UNAUTHORIZED: '0' })).toThrow(/DATABASE_SSL_REJECT_UNAUTHORIZED/);
+    expect(() => validateEnv({ MAIN_DATABASE_SYNCHRONIZE: 'False' })).toThrow(/MAIN_DATABASE_SYNCHRONIZE/);
+    expect(() => validateEnv({ ALLOW_UNSIGNED_INGRESS: 'yes' })).toThrow(/ALLOW_UNSIGNED_INGRESS/);
+    expect(() => validateEnv({ ALLOW_DEV_API_KEY: '1' })).toThrow(/ALLOW_DEV_API_KEY/);
+    expect(() => validateEnv({ WEBHOOK_SSRF_PROTECT: 'off' })).toThrow(/WEBHOOK_SSRF_PROTECT/);
+    expect(() => validateEnv({ WEBHOOK_CONTACT_DETAILS: 'on' })).toThrow(/WEBHOOK_CONTACT_DETAILS/);
+    expect(() => validateEnv({ BAILEYS_SYNC_FULL_HISTORY: 'True' })).toThrow(/BAILEYS_SYNC_FULL_HISTORY/);
+    expect(() => validateEnv({ BAILEYS_MARK_ONLINE_ON_CONNECT: 'ture' })).toThrow(/BAILEYS_MARK_ONLINE_ON_CONNECT/);
+    expect(() => validateEnv({ POSTGRES_BUILTIN: 'yes' })).toThrow(/POSTGRES_BUILTIN/);
+    expect(() => validateEnv({ REDIS_BUILTIN: 'yes' })).toThrow(/REDIS_BUILTIN/);
+    expect(() => validateEnv({ MINIO_BUILTIN: 'yes' })).toThrow(/MINIO_BUILTIN/);
+    expect(() => validateEnv({ CACHE_ENABLED: '1' })).toThrow(/CACHE_ENABLED/);
+    expect(() => validateEnv({ DATABASE_LOGGING: '1' })).toThrow(/DATABASE_LOGGING/);
+
+    // Canonical values, and the blank a compose `${KEY:-}` forward renders, both stay legal.
+    expect(() => validateEnv({ DATABASE_SSL: 'true', MAIN_DATABASE_SYNCHRONIZE: 'false' })).not.toThrow();
+    expect(() => validateEnv({ DATABASE_SSL: '', WEBHOOK_SSRF_PROTECT: '' })).not.toThrow();
+
+    // Deliberately still tolerant, because both fail toward the SAFE state and the repo tests that
+    // tolerance: mcp.server.spec.ts asserts MCP_READONLY='yes' stays read-only, and
+    // PUPPETEER_HEADLESS='new' is a real Puppeteer value that works today.
+    expect(() => validateEnv({ MCP_READONLY: 'yes' })).not.toThrow();
+    expect(() => validateEnv({ PUPPETEER_HEADLESS: 'new' })).not.toThrow();
+  });
+
   it('rejects a REDIS_ENABLED typo instead of silently downgrading throttler+cache to in-memory', () => {
     // REDIS_ENABLED is read at boot with `=== 'true'` (throttler storage in app.module.ts,
     // CacheService), so a typo flips rate limiting + caching to per-process in-memory with zero
