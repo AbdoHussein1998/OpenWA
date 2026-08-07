@@ -54,6 +54,12 @@ export class GroupController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiQuery({ name: 'code', description: 'Group invite code (the part after the invite link)' })
   @ApiResponse({ status: 200, description: 'What the invite discloses about the group', type: GroupJoinInfoDto })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. Deliberately not folded into the 404 above — ' +
+      'a query that never came back is not the same claim as a group that does not exist.',
+  })
   @ApiResponse({ status: 400, description: 'Session not started, or no code supplied' })
   @ApiResponse({ status: 404, description: 'No such invite — invalid, expired or revoked' })
   async joinInfo(@Param('sessionId') sessionId: string, @Query('code') code: string) {
@@ -65,6 +71,12 @@ export class GroupController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'groupId', description: 'Group ID (e.g., 120363xxx@g.us)' })
   @ApiResponse({ status: 200, description: 'Group details with participants', type: GroupInfoDto })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. Deliberately not folded into the 404 above — ' +
+      'a query that never came back is not the same claim as a group that does not exist.',
+  })
   @ApiResponse({ status: 404, description: 'Group not found' })
   async findOne(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
     return this.groupService.getGroupInfo(sessionId, groupId);

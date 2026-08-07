@@ -120,7 +120,11 @@ export class BaileysGroups {
   async getGroupInfo(groupId: string): Promise<GroupInfo | null> {
     this.host.ensureReady();
     try {
-      const metadata = await this.sock().groupMetadata(groupId);
+      const metadata = await withQueryDeadline(
+        this.sock().groupMetadata(groupId),
+        this.queryBudgetMs,
+        'WhatsApp did not answer the group metadata query in time',
+      );
       return mapBaileysGroupInfo(metadata, jid => this.host.toNeutralJid(jid));
     } catch (err) {
       // Only a SERVER refusal may become null (→ service 404): the group does not exist or the
@@ -138,9 +142,18 @@ export class BaileysGroups {
     }
   }
 
+  /**
+   * Deliberately NOT bounded by a deadline, unlike the reads either side of it. Creating a group is
+   * the one non-idempotent operation here, and 503 is a backpressure status the Go SDK retries three
+   * times for POST (sdk/go/retry.go) — an OpenWA deadline abandons the call without cancelling it,
+   * so a slow-but-succeeding create could be issued four times and leave duplicate groups. An
+   * unanswered query therefore still surfaces opaquely rather than as something retryable.
+   */
   async createGroup(name: string, participants: string[]): Promise<Group> {
     this.host.ensureReady();
-    const metadata = await this.sock().groupCreate(name, this.toEngineParticipants(participants));
+    const metadata = await mapServerRefusal('Creating the group', () =>
+      this.sock().groupCreate(name, this.toEngineParticipants(participants)),
+    );
     return mapBaileysGroup(metadata, this.host.normalizedSelfJid(), jid => this.host.toNeutralJid(jid));
   }
 
@@ -250,7 +263,11 @@ export class BaileysGroups {
     this.host.ensureReady();
     let meta: Awaited<ReturnType<WASocket['groupGetInviteInfo']>>;
     try {
-      meta = await this.sock().groupGetInviteInfo(inviteCode);
+      meta = await withQueryDeadline(
+        this.sock().groupGetInviteInfo(inviteCode),
+        this.queryBudgetMs,
+        'WhatsApp did not answer the invite-info query in time',
+      );
     } catch (error) {
       // Baileys throws a Boom carrying the WA code for an invalid/expired/revoked invite — the
       // route's documented 404 (matching whatsapp-web.js), not a 500. Transport failures propagate.
