@@ -300,6 +300,45 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     // conversion/archive endpoints answer as if nothing was configured. Same class as the above.
     'MEDIA_CONVERSION_ENABLED',
     'CHAT_MEDIA_ARCHIVE_ENABLED',
+    // Read with `=== 'true'` in BOTH configuration.ts and data-source.ts, and this is the one whose
+    // typo fails OPEN: `DATABASE_SSL=require` is the natural Postgres spelling and reads as OFF, so
+    // credentials and message bodies cross the wire in plaintext to a server the operator believed
+    // was TLS-protected. Nothing logs it.
+    'DATABASE_SSL',
+    // `!== 'false'`, so a typo keeps the SECURE value — but it is still not the flag the operator set,
+    // and it is only meaningful alongside DATABASE_SSL above.
+    'DATABASE_SSL_REJECT_UNAUTHORIZED',
+    // `!== 'false'`, so a typo keeps synchronize ON — and app.module.ts derives `migrationsRun` from
+    // its negation, so the main connection's migration ledger silently never advances for an operator
+    // who deliberately opted into migration-managed api_keys/audit_logs.
+    'MAIN_DATABASE_SYNCHRONIZE',
+    // Read with `=== 'true'` by the plugin ingress gate: a typo turns an intentional
+    // `ALLOW_UNSIGNED_INGRESS=true` back off, and a route the operator meant to open stops loading.
+    'ALLOW_UNSIGNED_INGRESS',
+    // `=== 'true'`; already refused outright in production, but a typo in development silently
+    // withholds the dev key the operator asked for.
+    'ALLOW_DEV_API_KEY',
+    // `!== 'false'`: a typo keeps SSRF protection on (safe) or contact enrichment off — either way
+    // the webhook payload an integrator receives is not the one the operator configured.
+    'WEBHOOK_SSRF_PROTECT',
+    'WEBHOOK_CONTACT_DETAILS',
+    // Engine behaviour flags: a typo leaves full-history sync off, or leaves the account marked
+    // online on connect (#871 — it suppresses notifications on the operator's own phone).
+    'BAILEYS_SYNC_FULL_HISTORY',
+    'BAILEYS_MARK_ONLINE_ON_CONNECT',
+    // Read with `=== 'true'` by DockerService. A typo does not fail silently here — it voids the
+    // built-in-datastore credential exemption and the production boot refuses with a confusing
+    // complaint about DATABASE_PASSWORD instead of naming the real cause.
+    'POSTGRES_BUILTIN',
+    'REDIS_BUILTIN',
+    'MINIO_BUILTIN',
+    // Perf/observability only, but same silent-typo class.
+    'CACHE_ENABLED',
+    'DATABASE_LOGGING',
+    // DELIBERATELY NOT LISTED. `MCP_READONLY` is read `!== 'false'` and mcp.server.spec.ts asserts
+    // that `yes` keeps it read-only — a tolerance the repo tests on purpose. `PUPPETEER_HEADLESS` is
+    // read `!== 'false'` and `new` is a real Puppeteer value that works today. Both fail toward the
+    // safe state, so strictness here would refuse working deployments to no benefit.
   ]) {
     checkBool(key);
   }

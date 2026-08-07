@@ -1074,6 +1074,10 @@ export const infraApi = {
       // Optional tables absent from an older schema. Always present in the response; a non-empty
       // list means the backup is partial, not that those tables were empty.
       skippedTables: string[];
+      // Inline media payloads the export budget refused. Always present; non-zero means the rows are
+      // all there but some of their media is not — a state a restored archive cannot express, since
+      // the omitted marker is the same one media skipped on the way in gets.
+      omittedInlineMedia: { messages: number; messageBatches: number };
     }>('/infra/export-data'),
   // 200 contract includes the orphan-engine reconciliation result (restartRequired / notices /
   // stopped+failed ids). 409 has several causes and the error's `code` distinguishes them:

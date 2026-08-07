@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A data export now reports the media it had to leave behind** — an over-budget attachment is replaced with the same omitted marker that media skipped on the way in gets, so a truncated backup was indistinguishable from a complete one both on inspection and on restore; the response now carries `omittedInlineMedia` alongside `skippedTables`, and the dashboard warns after a download that dropped anything.
+- **A node that has observed the loss of its session lease no longer writes `FAILED` for that session** — engine callbacks were fenced only by a local liveness check, so between a heartbeat detecting the loss and the teardown it schedules, a dying generation could park a row a peer already owned in `FAILED`, which is excluded from both the boot reset and the takeover sweep by design and so left the session outside every automatic recovery path on every node until an operator restarted it by hand. The fence engages from the heartbeat tick that detects the loss, not from the moment the lease lapses, so a window remains.
+- **Thirteen settings that did nothing under Docker now take effect** — Compose forwards environment explicitly and has no `env_file`, so `BAILEYS_MARK_ONLINE_ON_CONNECT`, `BAILEYS_SYNC_FULL_HISTORY`, `WEBHOOK_CONTACT_DETAILS`, `ALLOW_UNSIGNED_INGRESS`, `STORE_EPHEMERAL_MESSAGES`, `RESOLVE_LID_TO_PHONE`, `SIMULATE_TYPING`, `MCP_ENABLED`, `SEARCH_ENABLED`, `SERVE_DASHBOARD`, `CACHE_ENABLED`, `DATABASE_LOGGING` and `MAIN_DATABASE_SYNCHRONIZE` never reached the container however the operator's `.env` was written — the MCP server could not be enabled at all, `SEARCH_ENABLED=false` did not disable the search route it documents, and `BAILEYS_MARK_ONLINE_ON_CONNECT` left the paired phone's notifications suppressed for as long as the gateway stayed connected.
+
+### Changed
+
+- **Fourteen more boolean environment variables are now validated at boot** — they are read with a bare `=== 'true'` / `!== 'false'` comparison, so a spelling like `DATABASE_SSL=require` silently configured the opposite of what was asked for; `DATABASE_SSL` in particular read as OFF and sent credentials in plaintext to a server the operator believed was TLS-protected. Only `true`/`false` (or blank) are accepted now, so a deployment using another spelling will fail startup until it is corrected. `MCP_READONLY` and `PUPPETEER_HEADLESS` stay tolerant deliberately — both fail toward the safe state.
+- **The API description now documents the two statuses middleware returns before routing** — `415` for a compressed request body and `503` with `Retry-After` when too much body data is already in flight, neither of which appeared anywhere in the OpenAPI document despite applying to every operation.
+- **The Helm chart now states the reason `replicaCount` must stay 1 that actually applies today** — the warning described two pods corrupting shared session auth, which a session lease and per-pod volumes already prevent, so an operator acting on it would mitigate the wrong thing.
+
 ## [0.14.4] - 2026-08-07
 
 ### Fixed

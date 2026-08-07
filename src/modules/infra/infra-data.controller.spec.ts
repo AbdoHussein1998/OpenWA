@@ -727,6 +727,10 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     expect(exported?.type).toBe('image');
     expect(exported?.waMessageId).toBe('WA-MEDIA');
 
+    // The count is what tells a truncated backup from a complete one: the marker alone is
+    // indistinguishable from media that was never downloaded in the first place.
+    expect(dump.omittedInlineMedia).toEqual({ messages: 1, messageBatches: 0 });
+
     // And the backup still restores.
     const res = await controller.importData({ tables: dump.tables });
     expect(res.imported).toBe(true);
@@ -783,6 +787,9 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
       expect(msgs[0].content.image).not.toHaveProperty('base64');
       expect(msgs[0].content.image).toMatchObject({ mimetype: 'image/png', caption: 'hi' });
       expect(msgs[1].content.image).toEqual({ url: 'https://cdn.example.com/x.png', mimetype: 'image/png' });
+      // Attributed to the batches arm, not lumped in with messages — an operator restoring this needs
+      // to know WHICH history came back without its media.
+      expect(dump.omittedInlineMedia).toEqual({ messages: 0, messageBatches: 1 });
     });
   });
 

@@ -56,7 +56,21 @@ export function createSwaggerConfig(): Omit<OpenAPIObject, 'paths'> {
   return (
     new DocumentBuilder()
       .setTitle('OpenWA API')
-      .setDescription('Open Source WhatsApp API Gateway - Free, Self-Hosted HTTP API')
+      // Two refusals are issued by middleware BEFORE routing, so they apply to every operation
+      // below and cannot be expressed as a per-operation @ApiResponse without repeating them 187
+      // times. Documenting them here keeps the contract honest for clients that would otherwise
+      // meet an undocumented status.
+      .setDescription(
+        'Open Source WhatsApp API Gateway - Free, Self-Hosted HTTP API\n\n' +
+          '**Gateway-wide responses.** Two statuses are returned by middleware before routing, ' +
+          'so any operation can emit them:\n\n' +
+          '- `415 Unsupported Media Type` — the request body carries a `Content-Encoding` other ' +
+          'than `identity`. The aggregate in-flight body cap counts wire bytes, so a compressed ' +
+          'body would be admitted on its compressed size and then inflated past the memory it is ' +
+          'meant to bound. Send the body uncompressed.\n' +
+          '- `503 Service Unavailable` with `Retry-After` — the gateway already has too much ' +
+          'request body data in flight. The body is not read; retry after the given delay.',
+      )
       .setVersion(version)
       .addApiKey({ type: 'apiKey', name: 'X-API-Key', in: 'header' }, API_KEY_SECURITY_SCHEME)
       // The METRICS_TOKEN bearer gates only GET /api/metrics (applied per-operation there —

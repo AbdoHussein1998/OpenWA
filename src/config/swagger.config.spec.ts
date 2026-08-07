@@ -123,15 +123,19 @@ describe('PUBLIC_PATHS drift guard', () => {
     expect(usingPublic).toEqual([...EXPECTED_PUBLIC_CONTROLLERS].sort());
   });
 
-  it('PUBLIC_PATHS contains the expected @Public route paths', () => {
-    expect(PUBLIC_PATHS).toEqual(
-      expect.arrayContaining([
+  // Exact, not arrayContaining: the file-set test above catches a new @Public CONTROLLER, but a
+  // new @Public ROUTE on an already-listed controller (a fourth @Get on HealthController, say)
+  // changes neither the file set nor a superset assertion — it would just be missing from
+  // PUBLIC_PATHS, and the published document would claim the route needs an API key it does not.
+  it('PUBLIC_PATHS is exactly the expected @Public route paths', () => {
+    expect([...PUBLIC_PATHS].sort()).toEqual(
+      [
         '/api/health',
         '/api/health/live',
         '/api/health/ready',
         '/api/infra/health',
         '/api/ingress/{pluginId}/{instanceId}/{path}',
-      ]),
+      ].sort(),
     );
   });
 });

@@ -1,6 +1,8 @@
-# replicaCount MUST stay 1. OpenWA is a single-process application: live WhatsApp
-# engine state is in-memory, and two pods driving the same session data corrupt the
-# session auth (forced logout / ban). See docs/13-horizontal-scaling.md.
+# replicaCount MUST stay 1. A session lease now stops two pods from launching the same
+# session, so the shared-auth corruption this warning used to describe can no longer
+# happen. What is still process-local is the reason: API-key socket eviction, the WS
+# rate-limit buckets, the liveness watchdog and reconnect timers, and in-flight bulk
+# batches. See docs/13-horizontal-scaling.md.
 replicaCount: 1
 
 image:
