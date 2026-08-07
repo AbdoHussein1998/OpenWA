@@ -302,10 +302,7 @@ export function Sessions() {
       // Revert: an optimistic toggle left flipped would tell the operator calls are being rejected
       // when the gateway never accepted the change.
       setSessionConfig(previous);
-      toast.error(
-        t('sessions.details.autoRejectCalls'),
-        err instanceof Error ? err.message : t('common.unknownError'),
-      );
+      toast.error(t('sessions.details.autoRejectCalls'), err instanceof Error ? err.message : t('common.unknownError'));
     } finally {
       setSavingConfig(false);
     }
