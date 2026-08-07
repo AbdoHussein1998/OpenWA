@@ -100,6 +100,15 @@ function planSteps(root, env = process.env) {
       options: { stdio: 'inherit', cwd: root, env: cleanEnv },
     });
   }
+  const baileysAppStatePatcher = path.join(root, 'scripts', 'patch-baileys-appstate.js');
+  if (fs.existsSync(baileysAppStatePatcher)) {
+    steps.push({
+      name: 'Baileys app-state resync bound (scripts/patch-baileys-appstate.js --best-effort)',
+      command: process.execPath,
+      args: [baileysAppStatePatcher, '--best-effort'],
+      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
+    });
+  }
   return steps;
 }
 
