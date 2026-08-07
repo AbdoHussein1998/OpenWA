@@ -25,6 +25,7 @@
                 "session_force_killed",
                 "session_logged_out",
                 "session_deleted",
+                "session_config_updated",
                 "session_qr_generated",
                 "session_connected",
                 "session_disconnected",
@@ -467,6 +468,88 @@
           }
         },
         "summary": "Delete a session",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/sessions/{id}/config": {
+      "get": {
+        "operationId": "SessionController_getConfig",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Effective session configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionConfigResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found"
+          }
+        },
+        "summary": "Get the tunable configuration for a session",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "patch": {
+        "description": "Merges the supplied keys into the session config; omitted keys are left unchanged and an explicit null clears a key back to its default. No restart is required or performed. `autoRejectCalls` is re-read on every incoming call, so it applies immediately; the two reconnect settings are read once per start and therefore apply on the next start.",
+        "operationId": "SessionController_updateConfig",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSessionConfigDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated session configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionConfigResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A supplied value is outside its accepted range"
+          },
+          "404": {
+            "description": "Session not found"
+          }
+        },
+        "summary": "Update the tunable configuration for a session",
         "tags": [
           "sessions"
         ]
@@ -8329,9 +8412,11 @@
           },
           "config": {
             "type": "object",
-            "description": "Session configuration options. Set autoRejectCalls (boolean, default false) to automatically reject incoming calls — the call.received event is still emitted.",
+            "description": "Session configuration. Only three keys are read: autoRejectCalls (boolean, default false) rejects incoming calls as soon as they ring — the call.received event is still emitted first; maxReconnectAttempts (0-20, default unlimited) caps consecutive reconnects; and reconnectBaseDelay (1000-300000 ms, default 5000) sets the backoff base. Anything else is stored but ignored. All three can be changed later with PATCH /api/sessions/{id}/config, without restarting the session.",
             "example": {
-              "autoReconnect": true
+              "autoRejectCalls": false,
+              "maxReconnectAttempts": 5,
+              "reconnectBaseDelay": 5000
             }
           },
           "proxyUrl": {
@@ -8472,6 +8557,59 @@
           "updatedAt",
           "engineLoaded"
         ]
+      },
+      "SessionConfigResponseDto": {
+        "type": "object",
+        "properties": {
+          "autoRejectCalls": {
+            "type": "boolean",
+            "description": "Whether incoming calls are auto-rejected",
+            "example": false
+          },
+          "maxReconnectAttempts": {
+            "type": "object",
+            "description": "Reconnect attempt cap; `null` means unlimited",
+            "example": 5,
+            "nullable": true
+          },
+          "reconnectBaseDelay": {
+            "type": "number",
+            "description": "Base reconnect backoff in milliseconds",
+            "example": 5000
+          }
+        },
+        "required": [
+          "autoRejectCalls",
+          "maxReconnectAttempts",
+          "reconnectBaseDelay"
+        ]
+      },
+      "UpdateSessionConfigDto": {
+        "type": "object",
+        "properties": {
+          "autoRejectCalls": {
+            "type": "object",
+            "description": "Auto-reject every incoming call as soon as it rings. The call.received event is still emitted first, so a webhook consumer sees the call regardless. Takes effect on the next incoming call — the session is not restarted.",
+            "example": true,
+            "nullable": true
+          },
+          "maxReconnectAttempts": {
+            "type": "object",
+            "description": "Cap on consecutive reconnect attempts (`0` disables reconnect entirely). Send `null` for unlimited, which is the default. Applies on the next session start, not to a reconnect sequence already in flight.",
+            "minimum": 0,
+            "maximum": 20,
+            "example": 5,
+            "nullable": true
+          },
+          "reconnectBaseDelay": {
+            "type": "object",
+            "description": "Base delay of the reconnect backoff in milliseconds. Applies on the next session start, not to a reconnect sequence already in flight.",
+            "minimum": 1000,
+            "maximum": 300000,
+            "example": 5000,
+            "nullable": true
+          }
+        }
       },
       "QRCodeResponseDto": {
         "type": "object",

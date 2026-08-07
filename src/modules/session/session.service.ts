@@ -11,16 +11,17 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, Not, IsNull, DataSource, FindManyOptions } from 'typeorm';
+import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Session, SessionStatus } from './entities/session.entity';
 import { Message } from '../message/entities/message.entity';
-import { CreateSessionDto } from './dto';
+import { CreateSessionDto, SessionConfigResponseDto, UpdateSessionConfigDto } from './dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SessionLidResolver } from './session-lid-resolver.service';
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
 import { PresenceStore, type ChatPresence } from './presence-store.service';
-import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
+import { SessionEngineLifecycle, resolveReconnectConfig } from './session-engine-lifecycle.service';
 import { SessionOwnershipService } from './session-ownership.service';
 import { paginate, ListOptions, resolveListWindow } from '../../common/utils/paginate';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
@@ -272,6 +273,62 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       throw new NotFoundException(`Session with name '${name}' not found`);
     }
     return session;
+  }
+
+  /**
+   * Project the opaque `config` column onto the three keys the engine actually reads, resolved
+   * through the same clamp the engine uses — so a legacy row holding an out-of-range value reports
+   * what will really happen rather than what someone once wrote.
+   */
+  private projectConfig(config: Record<string, unknown>): SessionConfigResponseDto {
+    const { maxAttempts, baseDelay } = resolveReconnectConfig(config);
+    return {
+      // Strict `=== true` mirrors maybeAutoRejectCall: a truthy string or 1 left in the opaque blob
+      // must not read as opted in here when it would not opt in there.
+      autoRejectCalls: config?.autoRejectCalls === true,
+      maxReconnectAttempts: Number.isFinite(maxAttempts) ? maxAttempts : null,
+      reconnectBaseDelay: baseDelay,
+    };
+  }
+
+  async getConfig(id: string): Promise<SessionConfigResponseDto> {
+    const session = await this.findOne(id);
+    return this.projectConfig(session.config ?? {});
+  }
+
+  /**
+   * Merge the supplied keys into `config` and persist. Merge rather than replace: the column is
+   * documented as an opaque blob, so a key this endpoint does not know about belongs to the
+   * operator and must survive a write that never mentioned it.
+   *
+   * An explicit `null` deletes the key, which is the only way back to a default that no in-range
+   * value can express (`maxReconnectAttempts` unlimited). `undefined` — the key simply absent from
+   * the request — leaves the stored value alone.
+   *
+   * No restart, and deliberately no engine call: `autoRejectCalls` is re-read from this row on
+   * every incoming call, so the write alone is what takes effect. The reconnect pair is read once
+   * per start() into reconnectStates, so it lands on the next start; that asymmetry is documented
+   * on the DTO rather than papered over by forcing a reconnect nobody asked for.
+   */
+  async updateConfig(id: string, dto: UpdateSessionConfigDto): Promise<SessionConfigResponseDto> {
+    const session = await this.findOne(id);
+    const config = { ...(session.config ?? {}) };
+
+    for (const key of ['autoRejectCalls', 'maxReconnectAttempts', 'reconnectBaseDelay'] as const) {
+      const value = dto[key];
+      if (value === undefined) continue;
+      if (value === null) {
+        delete config[key];
+      } else {
+        config[key] = value;
+      }
+    }
+
+    // update() with an explicit object rather than save() on the loaded entity: the entity carries
+    // runtime-attached fields (lastError, restriction) that no column backs, and save() would try to
+    // write the whole row back from a snapshot taken before this await.
+    await this.sessionRepository.update(id, { config: config as QueryDeepPartialEntity<Record<string, unknown>> });
+    return this.projectConfig(config);
   }
 
   /** Record removal + engine retirement + credential purge: owned by the lifecycle service. */

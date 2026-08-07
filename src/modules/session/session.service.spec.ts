@@ -5894,4 +5894,84 @@ describe('SessionService', () => {
       expect(replacement.initialize).not.toHaveBeenCalled();
     });
   });
+
+  describe('session config', () => {
+    const writtenConfig = (): Record<string, unknown> => {
+      const calls = (repository.update as jest.Mock).mock.calls as unknown[][];
+      return (calls[0][1] as { config: Record<string, unknown> }).config;
+    };
+
+    beforeEach(() => {
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+    });
+
+    it('reports the documented defaults for a session that has never been configured', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ config: {} }));
+
+      // maxReconnectAttempts is unlimited by default, which no in-range number can express — it has
+      // to serialise as null, not as the cap.
+      await expect(service.getConfig('sess-uuid-1')).resolves.toEqual({
+        autoRejectCalls: false,
+        maxReconnectAttempts: null,
+        reconnectBaseDelay: 5000,
+      });
+    });
+
+    it('merges into the opaque column, leaving keys it does not own untouched', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        createMockSession({ config: { autoRejectCalls: false, somethingOperatorPutHere: 'keep me' } }),
+      );
+
+      await service.updateConfig('sess-uuid-1', { autoRejectCalls: true });
+
+      expect(writtenConfig()).toEqual({ autoRejectCalls: true, somethingOperatorPutHere: 'keep me' });
+    });
+
+    it('deletes a key on an explicit null, which is the only route back to unlimited reconnects', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        createMockSession({ config: { maxReconnectAttempts: 5, autoRejectCalls: true } }),
+      );
+
+      const result = await service.updateConfig('sess-uuid-1', { maxReconnectAttempts: null });
+
+      // Deleted outright rather than written as null: resolveReconnectConfig reads Number(null) as 0,
+      // so a stored null would mean "never reconnect" — the exact opposite of the default it restores.
+      expect(writtenConfig()).not.toHaveProperty('maxReconnectAttempts');
+      expect(writtenConfig()).toEqual({ autoRejectCalls: true });
+      expect(result.maxReconnectAttempts).toBeNull();
+    });
+
+    it('leaves a key alone when the request simply omits it', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        createMockSession({ config: { maxReconnectAttempts: 5, reconnectBaseDelay: 9000 } }),
+      );
+
+      await service.updateConfig('sess-uuid-1', { autoRejectCalls: true });
+
+      expect(writtenConfig()).toEqual({ maxReconnectAttempts: 5, reconnectBaseDelay: 9000, autoRejectCalls: true });
+    });
+
+    it('does not read a truthy non-boolean as opted in, matching maybeAutoRejectCall', async () => {
+      // The column is opaque, so a legacy row can hold anything. maybeAutoRejectCall gates on
+      // `=== true`; reporting 'yes' as enabled here would tell an operator calls are being rejected
+      // when the engine will never reject one.
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ config: { autoRejectCalls: 'yes' } }));
+
+      await expect(service.getConfig('sess-uuid-1')).resolves.toMatchObject({ autoRejectCalls: false });
+    });
+
+    it('reports an out-of-range legacy value as the engine will actually apply it', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        createMockSession({ config: { maxReconnectAttempts: 999, reconnectBaseDelay: 1 } }),
+      );
+
+      // Written before this endpoint existed, so it never passed the DTO bounds. The clamp is still
+      // the authority at use time, and this must agree with it rather than echo the stored value.
+      await expect(service.getConfig('sess-uuid-1')).resolves.toEqual({
+        autoRejectCalls: false,
+        maxReconnectAttempts: 20,
+        reconnectBaseDelay: 1000,
+      });
+    });
+  });
 });

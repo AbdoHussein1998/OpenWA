@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Session config can now be changed without re-linking the account** — `PATCH /api/sessions/{id}/config` sets `autoRejectCalls`, `maxReconnectAttempts` and `reconnectBaseDelay` on a session that is already running, where all three were previously fixed at creation and turning one on meant creating a new session and scanning the QR again.
+
 ### Fixed
 
 - **A dead socket is no longer reported as a permissions problem** — the helper that decides whether a Baileys failure was a server refusal or a transport death guarded on `data !== undefined`, but Boom's constructor defaults `data` to `null`, so the guard matched every Boom ever thrown and a `Connection Closed` (428) was classified as a 4xx refusal: twelve group and profile writes answered `403 admin rights or permissions may be missing`, joining by invite answered `400 invalid invite code`, and reading invite info answered `404`, all for a socket that was simply down. The numeric code that `assertNodeErrorFree` attaches is the only discriminator needed and every genuine refusal still maps as before, so transport failures now propagate as a 5xx instead — **a change of status code on the gateway surface for those cases**. The tests that were meant to cover this passed because their fixture was a bare `Error` rather than a real `Boom`, and now use one.

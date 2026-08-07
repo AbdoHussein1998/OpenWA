@@ -1,4 +1,5 @@
 export * from './create-session.dto';
+export * from './session-config.dto';
 export * from './session-response.dto';
 export * from './mark-chat-read.dto';
 export * from './archive-chat.dto';
