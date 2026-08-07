@@ -655,12 +655,17 @@ version bump lands as a single commit on `main`, and pushing the tag hands every
 
 ### The release commit
 
-Exactly four files change. Nothing else belongs in this commit.
+Exactly five files change. Nothing else belongs in this commit.
 
 ```bash
 npm version --no-git-tag-version <version>   # package.json + package-lock.json
 npm run openapi:export                        # openapi.json info.version follows package.json
 ```
+
+Then bump `appVersion` in `charts/openwa/Chart.yaml` to the same version — the chart defaults its
+image tag to `appVersion`, so a stale one deploys a tag that does not exist yet. Leave the chart's
+own `version:` alone; it tracks packaging changes on its own cadence. `npm run check:versions`
+fails if `appVersion` and `package.json` disagree.
 
 Then in `CHANGELOG.md`, insert the new heading directly under the retained, now-empty
 `## [Unreleased]` — the accumulated entries fall under it by position:
@@ -688,7 +693,7 @@ cd dashboard && npm run lint && npm run typecheck && npm run i18n:check && npm r
 ```
 
 ```bash
-git add package.json package-lock.json openapi.json CHANGELOG.md
+git add package.json package-lock.json openapi.json CHANGELOG.md charts/openwa/Chart.yaml
 git commit -m "chore(release): v<version>"
 git tag -a v<version> -m "v<version>"
 git push origin main --follow-tags
