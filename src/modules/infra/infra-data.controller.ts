@@ -183,14 +183,28 @@ function newestFirst<T>(rows: readonly T[], at: (row: T) => number): T[] {
   return [...rows].sort((a, b) => key(b) - key(a));
 }
 
-/** Spends the shared budget. Returns true when this payload does not fit and must be dropped. */
-function createInlineMediaBudget(): (encodedBytes: number) => boolean {
+/**
+ * Spends the shared budget, and remembers what it refused.
+ *
+ * `exceeds` returns true when this payload does not fit and must be dropped. The tally matters as
+ * much as the bound: an over-budget payload is replaced with the engine's own omitted marker, which
+ * is deliberately the same shape a payload skipped on the way in gets — so without a count, a
+ * truncated backup is indistinguishable from a complete one, both on inspection and on restore.
+ */
+function createInlineMediaBudget(): { exceeds: (encodedBytes: number) => boolean; droppedPayloads: () => number } {
   const budget = exportInlineMediaBudgetBytes();
   let spent = 0;
-  return (encodedBytes: number): boolean => {
-    if (spent + encodedBytes > budget) return true;
-    spent += encodedBytes;
-    return false;
+  let dropped = 0;
+  return {
+    exceeds: (encodedBytes: number): boolean => {
+      if (spent + encodedBytes > budget) {
+        dropped += 1;
+        return true;
+      }
+      spent += encodedBytes;
+      return false;
+    },
+    droppedPayloads: () => dropped,
   };
 }
 
@@ -336,6 +350,12 @@ export class InfraDataController {
     };
     /** Optional tables that were skipped because they genuinely do not exist in this DB (older schema). */
     skippedTables: string[];
+    /**
+     * Inline media payloads the export budget refused, so a truncated backup can be told apart from
+     * a complete one. Zeroes mean everything fitted. Restoring an archive with a non-zero count is
+     * still valid — the rows come back, their media does not.
+     */
+    omittedInlineMedia: { messages: number; messageBatches: number };
   }> {
     // Get all entities from Data DB
     const sessions = await this.dataDataSource.query<SessionRow[]>('SELECT * FROM sessions');
@@ -362,7 +382,8 @@ export class InfraDataController {
 
     // One budget shared by the two tables that carry a full inline payload — `messages` and
     // `message_batches` — so the total is what is bounded rather than each table separately.
-    const exceedsBudget = createInlineMediaBudget();
+    const inlineMediaBudget = createInlineMediaBudget();
+    const exceedsBudget = inlineMediaBudget.exceeds;
 
     const messages = await queryOptionalTable<MessageRow>('messages');
     // Postgres carries a STORED generated tsvector column `body_ts` (FTS) that `SELECT *` picks up.
@@ -374,6 +395,9 @@ export class InfraDataController {
     for (const row of newestFirst(messages, row => Number(row.timestamp))) {
       stripInlineMediaPayload(row, exceedsBudget);
     }
+    // Snapshot between the two loops so the report can say WHICH table lost payloads — messages are
+    // served first, batches spend what is left.
+    const omittedMessageMedia = inlineMediaBudget.droppedPayloads();
     const messageBatches = await queryOptionalTable<MessageBatchRow>('message_batches');
     // Batches spend what the messages left, and by the same newest-first rule: a run left PROCESSING
     // keeps its payloads indefinitely, so a stale one must not outbid a current one.
@@ -438,6 +462,10 @@ export class InfraDataController {
       },
       counts,
       skippedTables,
+      omittedInlineMedia: {
+        messages: omittedMessageMedia,
+        messageBatches: inlineMediaBudget.droppedPayloads() - omittedMessageMedia,
+      },
     };
   }
 
