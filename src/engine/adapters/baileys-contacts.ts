@@ -64,27 +64,30 @@ export class BaileysContacts {
     // chatModify keys the addressbook app-state patch by the raw jid (no jidNormalizedUser, unlike
     // the send path), so a raw @c.us index would land under a key WhatsApp never reads and the
     // write would silently target nothing while the endpoint reports success.
-    await this.sock().addOrEditContact(this.host.toEngineJid(contactId), {
-      firstName,
-      fullName,
-      saveOnPrimaryAddressbook: false,
-    });
+    await this.confirmed(
+      this.sock().addOrEditContact(this.host.toEngineJid(contactId), {
+        firstName,
+        fullName,
+        saveOnPrimaryAddressbook: false,
+      }),
+      'the contact save',
+    );
   }
 
   async deleteContact(contactId: string): Promise<void> {
     this.host.ensureReady();
     // Same app-state key fold as upsertContact — a raw @c.us removal targets a phantom entry.
-    await this.sock().removeContact(this.host.toEngineJid(contactId));
+    await this.confirmed(this.sock().removeContact(this.host.toEngineJid(contactId)), 'the contact removal');
   }
 
   async blockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().updateBlockStatus(contactId, 'block');
+    await this.confirmed(this.sock().updateBlockStatus(contactId, 'block'), 'the block');
   }
 
   async unblockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().updateBlockStatus(contactId, 'unblock');
+    await this.confirmed(this.sock().updateBlockStatus(contactId, 'unblock'), 'the unblock');
   }
 
   async setProfileName(name: string): Promise<void> {
@@ -152,9 +155,12 @@ export class BaileysContacts {
     if (!last) {
       return false; // Baileys' unread toggle needs the last message; can't synthesize it
     }
-    await this.sock().chatModify(
-      { markRead: false, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      this.host.toEngineJid(chatId),
+    await this.confirmed(
+      this.sock().chatModify(
+        { markRead: false, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
+        this.host.toEngineJid(chatId),
+      ),
+      'the unread mark',
     );
     return true;
   }
@@ -165,9 +171,12 @@ export class BaileysContacts {
     if (!last) {
       return false; // Baileys' clear needs the last message; can't synthesize it
     }
-    await this.sock().chatModify(
-      { clear: true, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      this.host.toEngineJid(chatId),
+    await this.confirmed(
+      this.sock().chatModify(
+        { clear: true, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
+        this.host.toEngineJid(chatId),
+      ),
+      'the chat clear',
     );
     return true;
   }
@@ -178,9 +187,12 @@ export class BaileysContacts {
     if (!last) {
       return false; // Baileys' archive toggle needs the last message; can't synthesize it
     }
-    await this.sock().chatModify(
-      { archive, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      this.host.toEngineJid(chatId),
+    await this.confirmed(
+      this.sock().chatModify(
+        { archive, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
+        this.host.toEngineJid(chatId),
+      ),
+      'the archive change',
     );
     return true;
   }
@@ -191,9 +203,12 @@ export class BaileysContacts {
     if (!last) {
       return false; // Baileys' delete needs the last message; can't synthesize it
     }
-    await this.sock().chatModify(
-      { delete: true, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
-      this.host.toEngineJid(chatId),
+    await this.confirmed(
+      this.sock().chatModify(
+        { delete: true, lastMessages: [{ key: last.key, messageTimestamp: last.timestamp }] },
+        this.host.toEngineJid(chatId),
+      ),
+      'the chat delete',
     );
     return true;
   }
