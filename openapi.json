@@ -853,6 +853,9 @@
           },
           "404": {
             "description": "Session not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer the group-list query. Deliberately not reported as an empty list — the engine returns the same empty value for \"you are in no groups\", and a caller cannot tell those apart from the body."
           }
         },
         "summary": "Get all groups for a session",

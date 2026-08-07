@@ -14,7 +14,7 @@ import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { type createLogger } from '../../common/services/logger.service';
-import { BAILEYS_WRITE_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
+import { BAILEYS_QUERY_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
 
 /**
  * Group-domain operations extracted from BaileysAdapter. The adapter keeps the public
@@ -85,12 +85,12 @@ export function toEngineParticipants(participants: string[], toEngineJid: (jid: 
 export class BaileysGroups {
   constructor(
     private readonly host: BaileysGroupsHost,
-    private readonly writeBudgetMs: number = BAILEYS_WRITE_BUDGET_MS,
+    private readonly queryBudgetMs: number = BAILEYS_QUERY_BUDGET_MS,
   ) {}
 
   /** Bound a write whose confirmation the library discards; see baileys-query-deadline.ts. */
   private confirmed<T>(work: Promise<T>, operation: string): Promise<T> {
-    return withQueryDeadline(work, this.writeBudgetMs, `WhatsApp did not confirm ${operation} in time`);
+    return withQueryDeadline(work, this.queryBudgetMs, `WhatsApp did not confirm ${operation} in time`);
   }
 
   /** Post-ensureReady socket handle. */
@@ -105,7 +105,14 @@ export class BaileysGroups {
 
   async getGroups(): Promise<Group[]> {
     this.host.ensureReady();
-    const all = await this.sock().groupFetchAllParticipating();
+    // groupFetchAllParticipating yields {} for BOTH an unanswered query and an account with no
+    // groups, so the empty list carries no signal — only our own clock separates them, and an
+    // empty list is the shape a caller is least able to question.
+    const all = await withQueryDeadline(
+      this.sock().groupFetchAllParticipating(),
+      this.queryBudgetMs,
+      'WhatsApp did not answer the group list query in time',
+    );
     const self = this.host.normalizedSelfJid();
     return Object.values(all).map(metadata => mapBaileysGroup(metadata, self, jid => this.host.toNeutralJid(jid)));
   }

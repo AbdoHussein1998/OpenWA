@@ -2,7 +2,7 @@ import type { WAMessageKey, WASocket } from '@whiskeysockets/baileys';
 import { ChatSummary, Contact, MediaInput } from '../interfaces/whatsapp-engine.interface';
 import { resolveMediaBuffer } from './baileys-messaging';
 import { type createLogger } from '../../common/services/logger.service';
-import { BAILEYS_WRITE_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
+import { BAILEYS_QUERY_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
 
 /**
  * Contacts/profile/chats-domain operations extracted from BaileysAdapter. The adapter keeps the
@@ -28,12 +28,12 @@ export interface BaileysContactsHost {
 export class BaileysContacts {
   constructor(
     private readonly host: BaileysContactsHost,
-    private readonly writeBudgetMs: number = BAILEYS_WRITE_BUDGET_MS,
+    private readonly queryBudgetMs: number = BAILEYS_QUERY_BUDGET_MS,
   ) {}
 
   /** Bound a write whose confirmation the library discards; see baileys-query-deadline.ts. */
   private confirmed<T>(work: Promise<T>, operation: string): Promise<T> {
-    return withQueryDeadline(work, this.writeBudgetMs, `WhatsApp did not confirm ${operation} in time`);
+    return withQueryDeadline(work, this.queryBudgetMs, `WhatsApp did not confirm ${operation} in time`);
   }
 
   /** Post-ensureReady socket handle. */

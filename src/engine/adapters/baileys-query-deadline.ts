@@ -43,7 +43,7 @@ export async function withQueryDeadline<T>(work: Promise<T>, timeoutMs: number, 
 }
 
 /**
- * Budget for a single Baileys write. Anchored to MEDIA_DOWNLOAD_TIMEOUT_MS (inbound-media-cap.ts),
+ * Budget for a single bounded Baileys call, read or write. Anchored to MEDIA_DOWNLOAD_TIMEOUT_MS (inbound-media-cap.ts),
  * this repo's existing figure for one bounded network round trip over WhatsApp. It must stay under
  * Baileys' 60s `defaultQueryTimeoutMs` to be observable at all, and under `session.proxyTimeoutMs`
  * so a multi-node deployment does not race two deadlines against each other.
@@ -53,4 +53,4 @@ export async function withQueryDeadline<T>(work: Promise<T>, timeoutMs: number, 
  * unconfirmed. That is the deliberate trade: an honest "not confirmed" beats a "done" for a change
  * WhatsApp never acknowledged, and every write bounded here is safe to repeat.
  */
-export const BAILEYS_WRITE_BUDGET_MS = 30_000;
+export const BAILEYS_QUERY_BUDGET_MS = 30_000;

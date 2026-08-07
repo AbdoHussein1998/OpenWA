@@ -368,6 +368,13 @@ export class SessionController {
   })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer the group-list query. Deliberately not reported as an empty list — ' +
+      'the engine returns the same empty value for "you are in no groups", and a caller cannot tell ' +
+      'those apart from the body.',
+  })
   @ApiQuery({ name: 'limit', required: false, description: 'Max groups to return (1–1000, default 1000)' })
   @ApiQuery({ name: 'offset', required: false, description: 'Number of groups to skip (for paging)' })
   async getGroups(
