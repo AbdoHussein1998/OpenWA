@@ -49,6 +49,7 @@ import { BaileysAdapterConfig } from '../types/baileys.types';
 import { BaileysSessionStore } from './baileys-session-store';
 import { inboundMediaConcurrency } from './inbound-media-cap';
 import { ConcurrencyLimiter } from '../../common/utils/concurrency-limiter';
+import { BAILEYS_QUERY_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
 
 // The implementation moved with connectInner to BaileysLifecycle; it remains part of this module's
 // public surface (imported from './baileys.adapter' by the spec).
@@ -577,11 +578,19 @@ export class BaileysAdapter implements IWhatsAppEngine {
   // reads — reported as success. Same class of no-op the deleteForMe/star folds fixed.
   async addLabelToChat(chatId: string, labelId: string): Promise<void> {
     this.ensureReady();
-    await this.sock!.addChatLabel(this.sessionStore.toEngineJid(chatId), labelId);
+    await withQueryDeadline(
+      this.sock!.addChatLabel(this.sessionStore.toEngineJid(chatId), labelId),
+      BAILEYS_QUERY_BUDGET_MS,
+      'WhatsApp did not confirm the chat label add in time',
+    );
   }
   async removeLabelFromChat(chatId: string, labelId: string): Promise<void> {
     this.ensureReady();
-    await this.sock!.removeChatLabel(this.sessionStore.toEngineJid(chatId), labelId);
+    await withQueryDeadline(
+      this.sock!.removeChatLabel(this.sessionStore.toEngineJid(chatId), labelId),
+      BAILEYS_QUERY_BUDGET_MS,
+      'WhatsApp did not confirm the chat label removal in time',
+    );
   }
   /**
    * Create or update a label.
@@ -601,13 +610,21 @@ export class BaileysAdapter implements IWhatsAppEngine {
     // LabelEditAction.encode), so an omitted name really does leave the stored name alone. Colour 0
     // is a real WhatsApp colour and survives that check — which is why it must never be tested for
     // truthiness on the way here.
-    await this.sock!.addLabel(this.ownJidForAppState(), { id: label.id, name: label.name, color: label.color });
+    await withQueryDeadline(
+      this.sock!.addLabel(this.ownJidForAppState(), { id: label.id, name: label.name, color: label.color }),
+      BAILEYS_QUERY_BUDGET_MS,
+      'WhatsApp did not confirm the label save in time',
+    );
   }
 
   /** Delete a label. The same `label_edit` write, with the tombstone flag set. */
   async deleteLabel(labelId: string): Promise<void> {
     this.ensureReady();
-    await this.sock!.addLabel(this.ownJidForAppState(), { id: labelId, deleted: true });
+    await withQueryDeadline(
+      this.sock!.addLabel(this.ownJidForAppState(), { id: labelId, deleted: true }),
+      BAILEYS_QUERY_BUDGET_MS,
+      'WhatsApp did not confirm the label delete in time',
+    );
   }
 
   /**

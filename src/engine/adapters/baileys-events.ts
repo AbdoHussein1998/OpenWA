@@ -34,6 +34,7 @@ import {
 import type { ConcurrencyLimiter } from '../../common/utils/concurrency-limiter';
 import { type createLogger } from '../../common/services/logger.service';
 import { createSilentLogger } from './baileys-logger';
+import { BAILEYS_QUERY_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
 
 /**
  * Inbound event handling extracted from BaileysAdapter: the socket event handlers
@@ -616,7 +617,11 @@ export class BaileysEvents {
     if (!sock) {
       throw new EngineNotReadyError('Cannot reject a call before the engine is initialized.');
     }
-    await sock.rejectCall(callId, entry.callFrom);
+    await withQueryDeadline(
+      sock.rejectCall(callId, entry.callFrom),
+      BAILEYS_QUERY_BUDGET_MS,
+      'WhatsApp did not confirm the call rejection in time',
+    );
     // A rejection made HERE produces no inbound `reject` signal to observe, so without this the
     // one outcome the caller definitely knows about — the one they asked for — was the only one
     // never published. Emitted only after the socket accepted it, and the entry is already evicted,

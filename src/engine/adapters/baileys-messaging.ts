@@ -21,6 +21,7 @@ import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
 import { type createLogger } from '../../common/services/logger.service';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
+import { BAILEYS_QUERY_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
 
 /**
  * Messaging-domain operations extracted from BaileysAdapter. The adapter keeps the public
@@ -75,7 +76,15 @@ export async function resolveMediaBuffer(media: MediaInput): Promise<{ data: Buf
 }
 
 export class BaileysMessaging {
-  constructor(private readonly host: BaileysMessagingHost) {}
+  constructor(
+    private readonly host: BaileysMessagingHost,
+    private readonly queryBudgetMs: number = BAILEYS_QUERY_BUDGET_MS,
+  ) {}
+
+  /** Bound a write whose confirmation the library discards; see baileys-query-deadline.ts. */
+  private confirmed<T>(work: Promise<T>, operation: string): Promise<T> {
+    return withQueryDeadline(work, this.queryBudgetMs, `WhatsApp did not confirm ${operation} in time`);
+  }
 
   /** Post-ensureReady socket handle. */
   private sock(): WASocket {
@@ -323,15 +332,18 @@ export class BaileysMessaging {
     }
     // Delete-for-me (revoke on this device only): Baileys exposes it as a chat modification, not a
     // sendMessage. The stored message timestamp (epoch seconds) is part of the payload.
-    await this.sock().chatModify(
-      {
-        deleteForMe: {
-          deleteMedia: true,
-          key: target.key,
-          timestamp: this.host.toUnixSeconds(target.messageTimestamp),
+    await this.confirmed(
+      this.sock().chatModify(
+        {
+          deleteForMe: {
+            deleteMedia: true,
+            key: target.key,
+            timestamp: this.host.toUnixSeconds(target.messageTimestamp),
+          },
         },
-      },
-      this.host.toEngineJid(chatId),
+        this.host.toEngineJid(chatId),
+      ),
+      'the delete-for-me',
     );
   }
 
@@ -489,9 +501,12 @@ export class BaileysMessaging {
     // Fold @c.us -> @s.whatsapp.net: chatModify keys the star app-state index by the raw jid (no
     // jidNormalizedUser, unlike the send path), so a neutral @c.us would index a phantom chat and
     // the star would silently apply to nothing on a 1:1 conversation.
-    await this.sock().chatModify(
-      { star: { messages: [{ id: target.key.id!, fromMe: target.key.fromMe ?? false }], star } },
-      this.host.toEngineJid(chatId),
+    await this.confirmed(
+      this.sock().chatModify(
+        { star: { messages: [{ id: target.key.id!, fromMe: target.key.fromMe ?? false }], star } },
+        this.host.toEngineJid(chatId),
+      ),
+      'the star change',
     );
   }
 
