@@ -1,8 +1,22 @@
-import { Controller, Get, Post, Delete, Param, Query, Body, HttpCode, HttpStatus, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Query,
+  Body,
+  HttpCode,
+  HttpStatus,
+  ParseUUIDPipe,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { SessionService } from './session.service';
 import {
   CreateSessionDto,
+  SessionConfigResponseDto,
+  UpdateSessionConfigDto,
   SessionResponseDto,
   QRCodeResponseDto,
   MarkChatReadDto,
@@ -96,6 +110,51 @@ export class SessionController {
   async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.findOne(id);
     return this.transformSession(session);
+  }
+
+  @Get(':id/config')
+  @ApiOperation({ summary: 'Get the tunable configuration for a session' })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Effective session configuration',
+    type: SessionConfigResponseDto,
+  })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  async getConfig(@Param('id', ParseUUIDPipe) id: string): Promise<SessionConfigResponseDto> {
+    return this.sessionService.getConfig(id);
+  }
+
+  @Patch(':id/config')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({
+    summary: 'Update the tunable configuration for a session',
+    description:
+      'Merges the supplied keys into the session config; omitted keys are left unchanged and an ' +
+      'explicit null clears a key back to its default. No restart is required or performed. ' +
+      '`autoRejectCalls` is re-read on every incoming call, so it applies immediately; the two ' +
+      'reconnect settings are read once per start and therefore apply on the next start.',
+  })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated session configuration',
+    type: SessionConfigResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'A supplied value is outside its accepted range' })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  async updateConfig(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSessionConfigDto,
+  ): Promise<SessionConfigResponseDto> {
+    const config = await this.sessionService.updateConfig(id, dto);
+    await this.auditService.logInfo(AuditAction.SESSION_CONFIG_UPDATED, {
+      sessionId: id,
+      // The resulting state, not the request: a merge patch is meaningless in an audit trail without
+      // knowing what it merged into. Only the three recognised keys, never the raw column.
+      metadata: { ...config },
+    });
+    return config;
   }
 
   @Delete(':id')
