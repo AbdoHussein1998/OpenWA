@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Auto-reject calls can be turned on from the dashboard** — the session detail panel now carries a toggle wired to the config endpoint, so the setting no longer requires an API call to reach, and it states that `call.received` still fires and that no restart is needed.
 - **Session config can now be changed without re-linking the account** — `PATCH /api/sessions/{id}/config` sets `autoRejectCalls`, `maxReconnectAttempts` and `reconnectBaseDelay` on a session that is already running, where all three were previously fixed at creation and turning one on meant creating a new session and scanning the QR again.
 
 ### Fixed

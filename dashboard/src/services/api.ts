@@ -22,6 +22,17 @@ if (API_ORIGIN) warnIfInsecureHttpUrl(API_ORIGIN, 'VITE_API_URL');
 // Types
 // =============================================================================
 
+/**
+ * The three tunable keys, as the gateway resolves them — not the raw stored column, which the API
+ * never returns. `maxReconnectAttempts` is null when reconnects are unlimited, which is the default
+ * and which no number in the accepted 0-20 range can express.
+ */
+export interface SessionConfig {
+  autoRejectCalls: boolean;
+  maxReconnectAttempts: number | null;
+  reconnectBaseDelay: number;
+}
+
 export interface Session {
   id: string;
   name: string;
@@ -709,6 +720,13 @@ export const sessionApi = {
       body: JSON.stringify({ name }),
     }),
   delete: (id: string) => request<void>(`/sessions/${id}`, { method: 'DELETE' }),
+  getConfig: (id: string) => request<SessionConfig>(`/sessions/${id}/config`),
+  // PATCH merges: only the keys sent are touched. Send null to clear one back to its default.
+  updateConfig: (id: string, patch: Partial<Record<keyof SessionConfig, boolean | number | null>>) =>
+    request<SessionConfig>(`/sessions/${id}/config`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   start: (id: string) => request<Session>(`/sessions/${id}/start`, { method: 'POST' }),
   stop: (id: string) => request<Session>(`/sessions/${id}/stop`, { method: 'POST' }),
   logout: (id: string) => request<Session>(`/sessions/${id}/logout`, { method: 'POST' }),
