@@ -142,6 +142,7 @@ import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { GroupNotFoundError } from '../../common/errors/group-not-found.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
+import { Boom } from '@hapi/boom';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
 
@@ -2953,7 +2954,7 @@ describe('BaileysAdapter group management', () => {
   it('getGroupInfo does NOT fold a transport death into null — a dead socket is not "group not found"', async () => {
     const adapter = await ready();
     // Local Boom, no server error node: DisconnectReason-shaped 428 Connection Closed.
-    const connectionClosed = Object.assign(new Error('Connection Closed'), { output: { statusCode: 428 } });
+    const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
     fakeSock.groupMetadata.mockRejectedValueOnce(connectionClosed);
     await expect(adapter.getGroupInfo('123-456@g.us')).rejects.toBe(connectionClosed);
     // A non-boom failure (programming/protocol error) propagates too.
@@ -3087,7 +3088,7 @@ describe('BaileysAdapter group management', () => {
 
   it('joinGroupViaInviteCode does NOT fold a transport death into a 400 — a dead socket is not a bad invite', async () => {
     // Local Boom, no server error node: DisconnectReason-shaped 428 Connection Closed.
-    const connectionClosed = Object.assign(new Error('Connection Closed'), { output: { statusCode: 428 } });
+    const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
     fakeSock.groupAcceptInvite.mockRejectedValue(connectionClosed);
     const adapter = await ready();
     await expect(adapter.joinGroupViaInviteCode('CODE123')).rejects.toBe(connectionClosed);
@@ -3122,7 +3123,7 @@ describe('BaileysAdapter group management', () => {
   });
 
   it('getGroupJoinInfo lets a transport death propagate — a dead socket is not a bad invite', async () => {
-    const connectionClosed = Object.assign(new Error('Connection Closed'), { output: { statusCode: 428 } });
+    const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
     fakeSock.groupGetInviteInfo.mockRejectedValue(connectionClosed);
     const adapter = await ready();
     await expect(adapter.getGroupJoinInfo('CODE123')).rejects.toBe(connectionClosed);
@@ -3166,7 +3167,7 @@ describe('BaileysAdapter group management', () => {
   });
 
   it('a transport death on a group write propagates untouched — not folded into a 403', async () => {
-    const connectionClosed = Object.assign(new Error('Connection Closed'), { output: { statusCode: 428 } });
+    const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
     fakeSock.groupUpdateSubject.mockRejectedValueOnce(connectionClosed);
     const adapter = await ready();
     await expect(adapter.setGroupSubject('123-456@g.us', 'X')).rejects.toBe(connectionClosed);

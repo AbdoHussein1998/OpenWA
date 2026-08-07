@@ -33,21 +33,24 @@ export interface BaileysGroupsHost {
 
 /**
  * WA error code of a SERVER-refused Baileys query, or undefined for a transport/local failure.
- * Baileys carries a refusal two ways: `assertNodeErrorFree` puts the numeric WA code on Boom's
- * `data` (WABinary/generic-utils.js:57), and `extractGroupMetadata` puts it on `output.statusCode`
- * with the error node as `data` (Socket/groups.js:280). Transport deaths ('Connection Closed',
- * 'Timed Out') are LOCAL Booms with DisconnectReason statusCodes (408/428) and no server error
- * node — so a numeric `data` (or an object `data` alongside a statusCode) is the discriminator.
+ *
+ * A numeric `data` is the whole discriminator, and it is sufficient: `query()` runs
+ * `assertNodeErrorFree(result)` before it returns (Socket/socket.js:133-135), and that throws
+ * `new Boom(text, { data: +errNode.attrs.code })` (WABinary/generic-utils.js:57). So every refusal
+ * that can reach a caller through `query()` already carries its WA code as a number.
+ *
+ * There used to be a second branch reading `output.statusCode` whenever `data !== undefined`,
+ * meant for `extractGroupMetadata`'s error-node throw (Socket/groups.js). It did the opposite of
+ * its purpose: Boom's constructor destructures `data = null` (@hapi/boom lib/index.js:77), so NO
+ * Boom ever has `data === undefined` and the guard was always true. Every transport Boom therefore
+ * matched — `Boom('Connection Closed', { statusCode: 428 })` returned 428, inside the 4xx window,
+ * so a dead socket was reported as `403 admin rights or permissions may be missing`. The branch was
+ * also unnecessary: its target throw cannot be reached through `query()`, because a result carrying
+ * an `<error>` child has already thrown from assertNodeErrorFree's identical lookup.
  */
 export function refusedStatusCode(error: unknown): number | undefined {
-  const err = error as { data?: unknown; output?: { statusCode?: unknown } } | null | undefined;
-  if (typeof err?.data === 'number') {
-    return err.data;
-  }
-  if (err?.data !== undefined && typeof err.output?.statusCode === 'number') {
-    return err.output.statusCode;
-  }
-  return undefined;
+  const err = error as { data?: unknown } | null | undefined;
+  return typeof err?.data === 'number' ? err.data : undefined;
 }
 
 /**
