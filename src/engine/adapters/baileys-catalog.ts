@@ -1,5 +1,7 @@
 import type { Product as BaileysProduct, WASocket } from '@whiskeysockets/baileys';
 import { Catalog, PaginatedProducts, Product, ProductQueryOptions } from '../interfaces/whatsapp-engine.interface';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
+import { type createLogger } from '../../common/services/logger.service';
 
 /**
  * Catalog-domain operations extracted from BaileysAdapter (#905). makeBusinessSocket already
@@ -11,14 +13,73 @@ export interface BaileysCatalogHost {
   ensureReady(): void;
   /** Post-ensureReady socket handle — call host.ensureReady() first. */
   getSocket(): WASocket;
+  readonly logger: ReturnType<typeof createLogger>;
   normalizedSelfJid(): string;
 }
 
 /** Fetch page size for the catalog walk; larger pages mean fewer round trips to WhatsApp. */
 const CATALOG_PAGE_SIZE = 50;
 
+/**
+ * Whole-request budget for a catalog read, spent across every page of the walk rather than
+ * per query. Anchored to MEDIA_DOWNLOAD_TIMEOUT_MS (inbound-media-cap.ts), this repo's existing
+ * number for one bounded network round trip over WhatsApp. It must stay below Baileys'
+ * defaultQueryTimeoutMs (60s) to be observable at all, and below session.proxyTimeoutMs so a
+ * multi-node deployment does not race two deadlines.
+ */
+export const CATALOG_QUERY_BUDGET_MS = 30_000;
+
+/**
+ * Bound one catalog query against the request's remaining budget.
+ *
+ * Baileys catches its own query timeout and resolves `undefined` rather than throwing
+ * (Socket/socket.js: "Catch timeout and return undefined instead of throwing"), and the catalog
+ * parsers are null-safe, so an unanswered IQ is byte-identical to a genuinely empty catalog. No
+ * inspection of the value can separate them — only a clock we own. Shape follows
+ * withInboundDownloadTimeout (inbound-media-cap.ts): unref'd timer, cleared in a finally, and the
+ * abandoned query's late rejection defused.
+ */
+async function withDeadline<T>(work: Promise<T>, remainingMs: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  // Defuse a post-settle rejection from the query we may stop awaiting.
+  work.catch(() => undefined);
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new EngineTransportError('WhatsApp did not answer the catalog query in time')),
+          Math.max(0, remainingMs),
+        );
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export class BaileysCatalog {
-  constructor(private readonly host: BaileysCatalogHost) {}
+  constructor(
+    private readonly host: BaileysCatalogHost,
+    private readonly budgetMs: number = CATALOG_QUERY_BUDGET_MS,
+  ) {}
+
+  /** Spend part of one request-wide budget on a single query, and say so when it runs out. */
+  private async bounded<T>(work: Promise<T>, deadline: number): Promise<T> {
+    try {
+      return await withDeadline(work, deadline - Date.now());
+    } catch (error) {
+      if (error instanceof EngineTransportError) {
+        // Baileys' own "timed out waiting for message" warn is silent at the default
+        // BAILEYS_LOG_LEVEL, so without this line the 503 has no explanation anywhere.
+        this.host.logger.warn('Catalog query exceeded its budget', { budgetMs: this.budgetMs });
+      }
+      throw error;
+    }
+  }
 
   /** Post-ensureReady socket handle. */
   private sock(): WASocket {
@@ -33,7 +94,7 @@ export class BaileysCatalog {
   async getCatalog(): Promise<Catalog | null> {
     this.host.ensureReady();
     const jid = this.host.normalizedSelfJid();
-    const { collections } = await this.sock().getCollections(jid);
+    const { collections } = await this.bounded(this.sock().getCollections(jid), Date.now() + this.budgetMs);
     const first = collections[0];
     if (!first) {
       return null;
@@ -71,15 +132,24 @@ export class BaileysCatalog {
    * ponytail: walks the whole cursor chain on every call (no cursor cache), so page N costs the
    * full catalog. WhatsApp caps catalogs at ~500 products; if profiling shows the walk matters,
    * cache pages keyed by cursor and serve offsets from the cache.
+   *
+   * The budget is computed once and shared by every page: a per-query deadline would multiply by
+   * the page count, making a ten-page walk slower than the 60s stall it replaces.
    */
   private async fetchAllProducts(): Promise<BaileysProduct[]> {
     this.host.ensureReady();
     const jid = this.host.normalizedSelfJid();
+    const deadline = Date.now() + this.budgetMs;
     const products: BaileysProduct[] = [];
     let cursor: string | undefined;
     do {
-      const page = await this.sock().getCatalog({ jid, limit: CATALOG_PAGE_SIZE, cursor });
+      const page = await this.bounded(this.sock().getCatalog({ jid, limit: CATALOG_PAGE_SIZE, cursor }), deadline);
       products.push(...page.products);
+      // A server echoing back the cursor it was handed would otherwise spin this loop until the
+      // process runs out of heap — the accumulator grows on every pass.
+      if (page.nextPageCursor === cursor) {
+        break;
+      }
       cursor = page.nextPageCursor;
     } while (cursor);
     return products;

@@ -189,6 +189,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
     this.catalog = new BaileysCatalog({
       ensureReady: () => this.ensureReady(),
       getSocket: () => this.sock!,
+      logger: this.logger,
       normalizedSelfJid: () => this.normalizedSelfJid(),
     });
     this.history = new BaileysHistory({

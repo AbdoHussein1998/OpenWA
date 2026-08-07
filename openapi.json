@@ -5884,6 +5884,9 @@
         "responses": {
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js has no catalog API."
+          },
+          "503": {
+            "description": "WhatsApp did not answer the catalog query within the request budget — retry shortly."
           }
         },
         "summary": "Get business catalog info (Baileys engine only)",
@@ -5930,6 +5933,9 @@
         "responses": {
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js has no catalog API."
+          },
+          "503": {
+            "description": "WhatsApp did not answer the catalog query within the request budget — retry shortly."
           }
         },
         "summary": "List catalog products (Baileys engine only)",
@@ -5962,6 +5968,9 @@
         "responses": {
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js has no catalog API."
+          },
+          "503": {
+            "description": "WhatsApp did not answer the catalog query within the request budget — retry shortly."
           }
         },
         "summary": "Get a specific product (Baileys engine only)",
@@ -6002,6 +6011,9 @@
           },
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js cannot send product messages."
+          },
+          "503": {
+            "description": "WhatsApp did not answer the catalog query within the request budget — retry shortly."
           }
         },
         "summary": "Send a product message (Baileys engine only)",
