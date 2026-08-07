@@ -12,7 +12,7 @@ export class AuditLogDto {
   @ApiProperty({ description: 'What happened.', example: 'session.create' })
   action!: string;
 
-  @ApiProperty({ enum: ['info', 'warning', 'error'], example: 'info' })
+  @ApiProperty({ enum: ['info', 'warn', 'error'], example: 'info' })
   severity!: string;
 
   @ApiProperty({ type: String, nullable: true, description: 'Null for an unauthenticated or system action.' })

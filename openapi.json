@@ -8115,7 +8115,7 @@
             "type": "string",
             "enum": [
               "info",
-              "warning",
+              "warn",
               "error"
             ],
             "example": "info"
@@ -11143,6 +11143,25 @@
           "automationRules"
         ]
       },
+      "OmittedInlineMediaDto": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "number",
+            "description": "Message attachments replaced with an omitted marker.",
+            "example": 0
+          },
+          "messageBatches": {
+            "type": "number",
+            "description": "Batch attachments replaced with an omitted marker.",
+            "example": 0
+          }
+        },
+        "required": [
+          "messages",
+          "messageBatches"
+        ]
+      },
       "InfraExportDataResponseDto": {
         "type": "object",
         "properties": {
@@ -11166,13 +11185,31 @@
                 "$ref": "#/components/schemas/TableCountsDto"
               }
             ]
+          },
+          "skippedTables": {
+            "description": "Tables the running database does not have, which were skipped rather than exported. A restore from this file will not repopulate them.",
+            "example": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "omittedInlineMedia": {
+            "description": "Inline media dropped for exceeding the export budget. Non-zero means the archive is TRUNCATED — the rows are present but their attachments are replaced with an omitted marker.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmittedInlineMediaDto"
+              }
+            ]
           }
         },
         "required": [
           "exportedAt",
           "dataDbType",
           "tables",
-          "counts"
+          "counts",
+          "skippedTables",
+          "omittedInlineMedia"
         ]
       },
       "InfraImportDataResponseDto": {
@@ -11575,16 +11612,6 @@
             "type": "string",
             "description": "Group subject.",
             "example": "Engineering"
-          },
-          "participantsCount": {
-            "type": "number",
-            "description": "Member count, when the engine reports it.",
-            "example": 42
-          },
-          "isAdmin": {
-            "type": "boolean",
-            "description": "Whether this account is an admin of the group.",
-            "example": true
           },
           "linkedParentJID": {
             "type": "string",
@@ -13551,10 +13578,10 @@
           "direction": {
             "type": "string",
             "enum": [
-              "inbound",
-              "outbound"
+              "incoming",
+              "outgoing"
             ],
-            "example": "inbound"
+            "example": "incoming"
           },
           "from": {
             "type": "string",
@@ -13602,7 +13629,7 @@
           "provider": {
             "type": "string",
             "description": "Which provider answered.",
-            "example": "builtin-db"
+            "example": "builtin-fts"
           }
         },
         "required": [

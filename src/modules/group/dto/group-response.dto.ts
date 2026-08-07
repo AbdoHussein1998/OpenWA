@@ -48,7 +48,26 @@ export class GroupSummaryDto {
   linkedParentJID?: string | null;
 }
 
-export class GroupInfoDto extends GroupSummaryDto {
+/**
+ * Deliberately NOT extending GroupSummaryDto. The summary carries participantsCount and isAdmin,
+ * which the group LIST computes and this route does not send at all — advertising them here would
+ * offer a client an admin flag that is always undefined.
+ */
+export class GroupInfoDto {
+  @ApiProperty({ description: 'Group id.', example: '120363000000000000@g.us' })
+  id!: string;
+
+  @ApiProperty({ description: 'Group subject.', example: 'Engineering' })
+  name!: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'JID of the parent community, or null when the group is standalone.',
+    example: null,
+  })
+  linkedParentJID?: string | null;
+
   @ApiPropertyOptional({ description: 'Group description.', example: 'Release coordination' })
   description?: string;
 

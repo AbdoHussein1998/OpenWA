@@ -407,6 +407,14 @@ export class TableCountsDto {
   @ApiProperty({ example: 2 }) automationRules!: number;
 }
 
+export class OmittedInlineMediaDto {
+  @ApiProperty({ description: 'Message attachments replaced with an omitted marker.', example: 0 })
+  messages!: number;
+
+  @ApiProperty({ description: 'Batch attachments replaced with an omitted marker.', example: 0 })
+  messageBatches!: number;
+}
+
 export class InfraExportDataResponseDto {
   @ApiProperty({ description: 'ISO-8601 timestamp the export was taken.', example: '2026-08-07T12:00:00.000Z' })
   exportedAt!: string;
@@ -419,6 +427,23 @@ export class InfraExportDataResponseDto {
 
   @ApiProperty({ type: TableCountsDto, description: 'Row counts, so a truncated restore is detectable.' })
   counts!: TableCountsDto;
+
+  @ApiProperty({
+    type: [String],
+    description:
+      'Tables the running database does not have, which were skipped rather than exported. A restore ' +
+      'from this file will not repopulate them.',
+    example: [],
+  })
+  skippedTables!: string[];
+
+  @ApiProperty({
+    type: OmittedInlineMediaDto,
+    description:
+      'Inline media dropped for exceeding the export budget. Non-zero means the archive is TRUNCATED — ' +
+      'the rows are present but their attachments are replaced with an omitted marker.',
+  })
+  omittedInlineMedia!: OmittedInlineMediaDto;
 }
 
 export class InfraImportDataResponseDto {
