@@ -5079,7 +5079,17 @@
         ],
         "responses": {
           "200": {
-            "description": "List of labels"
+            "description": "List of labels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LabelDto"
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready or not a business account"
@@ -5119,7 +5129,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Label details"
+            "description": "Label details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelDto"
+                }
+              }
+            }
           },
           "404": {
             "description": "Label not found"
@@ -5165,7 +5182,14 @@
         },
         "responses": {
           "200": {
-            "description": "Label created or updated"
+            "description": "Label created or updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelAckResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not started, or validation failed"
@@ -5204,7 +5228,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Label deleted"
+            "description": "Label deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelAckResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not started"
@@ -5245,7 +5276,17 @@
         ],
         "responses": {
           "200": {
-            "description": "Chats carrying the label"
+            "description": "Chats carrying the label",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LabelChatDto"
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not started"
@@ -5285,7 +5326,17 @@
         ],
         "responses": {
           "200": {
-            "description": "List of labels for the chat"
+            "description": "List of labels for the chat",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LabelDto"
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "Get labels for a specific chat",
@@ -5336,7 +5387,14 @@
         },
         "responses": {
           "200": {
-            "description": "Label added to chat"
+            "description": "Label added to chat",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelAckResponseDto"
+                }
+              }
+            }
           },
           "422": {
             "description": "Labels require a WhatsApp Business account, or the chat type has no labels"
@@ -5382,7 +5440,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Label removed from chat"
+            "description": "Label removed from chat",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelAckResponseDto"
+                }
+              }
+            }
           },
           "422": {
             "description": "Labels require a WhatsApp Business account, or the chat type has no labels"
@@ -5410,7 +5475,17 @@
         ],
         "responses": {
           "200": {
-            "description": "List of subscribed channels"
+            "description": "List of subscribed channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChannelDto"
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready"
@@ -5447,7 +5522,14 @@
         },
         "responses": {
           "201": {
-            "description": "The created channel"
+            "description": "The created channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not started, or validation failed"
@@ -5487,7 +5569,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Channel details"
+            "description": "Channel details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelDto"
+                }
+              }
+            }
           },
           "404": {
             "description": "Channel not found"
@@ -5522,7 +5611,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Successfully unsubscribed from channel"
+            "description": "Successfully unsubscribed from channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelAckResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Unsubscribe from a channel",
@@ -5565,7 +5661,17 @@
         ],
         "responses": {
           "200": {
-            "description": "List of channel messages"
+            "description": "List of channel messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChannelMessageDto"
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "Get messages from a channel",
@@ -5600,7 +5706,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Channel deleted"
+            "description": "Channel deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelAckResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not started"
@@ -5651,7 +5764,14 @@
         },
         "responses": {
           "200": {
-            "description": "Channel muted or unmuted"
+            "description": "Channel muted or unmuted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelAckResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not started, or validation failed"
@@ -5702,7 +5822,14 @@
         },
         "responses": {
           "201": {
-            "description": "Successfully subscribed to channel"
+            "description": "Successfully subscribed to channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelDto"
+                }
+              }
+            }
           }
         },
         "summary": "Subscribe to a channel using invite code",
@@ -5806,7 +5933,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Status updates visible to the session, grouped by contact."
+            "description": "Status updates visible to the session, grouped by contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusListResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Get all contact status updates",
@@ -5838,7 +5972,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Status updates from the requested contact."
+            "description": "Status updates from the requested contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusListResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Get status updates from a specific contact",
@@ -5870,7 +6011,15 @@
         ],
         "responses": {
           "200": {
-            "description": "The status image/video bytes."
+            "description": "The status image/video bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "404": {
             "description": "No stored media (text status, omitted, or expired)."
@@ -5907,7 +6056,14 @@
         },
         "responses": {
           "201": {
-            "description": "Text status posted. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience."
+            "description": "Text status posted. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResultDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request, or the post was blocked by a plugin."
@@ -5944,7 +6100,14 @@
         },
         "responses": {
           "201": {
-            "description": "Image status posted. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience."
+            "description": "Image status posted. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResultDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Neither url nor base64 provided, or the post was blocked by a plugin."
@@ -5984,7 +6147,14 @@
         },
         "responses": {
           "201": {
-            "description": "Video status posted. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience."
+            "description": "Video status posted. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResultDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Neither url nor base64 provided, or the post was blocked by a plugin."
@@ -6024,7 +6194,14 @@
         },
         "responses": {
           "201": {
-            "description": "Voice status posted. WhatsApp plays a status voice note only as Ogg/Opus and neither engine transcodes, so convert first via POST /media/convert/voice. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience."
+            "description": "Voice status posted. WhatsApp plays a status voice note only as Ogg/Opus and neither engine transcodes, so convert first via POST /media/convert/voice. The recipients allow-list is honored on Baileys only; whatsapp-web.js broadcasts to the account's status-privacy audience.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResultDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Neither url nor base64 provided, or the post was blocked by a plugin."
@@ -6062,7 +6239,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Status deleted."
+            "description": "Status deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusDeletedResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Delete own status",
@@ -11295,6 +11479,79 @@
           }
         }
       },
+      "LabelDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Label id, assigned by WhatsApp.",
+            "example": "1"
+          },
+          "name": {
+            "type": "string",
+            "description": "Label text.",
+            "example": "Paid"
+          },
+          "hexColor": {
+            "type": "string",
+            "description": "Display colour as hex. The write path takes a colour INDEX (0-19) instead — neither engine exposes the index-to-hex mapping, so the two directions deliberately differ.",
+            "example": "#5bc0de"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "hexColor"
+        ]
+      },
+      "LabelChatDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Chat id in the engine's native format.",
+            "example": "628123456789@c.us"
+          },
+          "name": {
+            "type": "string",
+            "description": "Chat title — contact name or group subject.",
+            "example": "Ada Lovelace"
+          },
+          "isGroup": {
+            "type": "boolean",
+            "description": "Retained for back-compat; `kind` is the full discriminator.",
+            "example": false
+          },
+          "kind": {
+            "type": "string",
+            "description": "User-facing chat kind.",
+            "example": "individual"
+          },
+          "unreadCount": {
+            "type": "number",
+            "description": "Unread messages in this chat.",
+            "example": 0
+          },
+          "timestamp": {
+            "type": "number",
+            "description": "Unix SECONDS of the most recent activity.",
+            "example": 1786000000
+          },
+          "lastMessage": {
+            "type": "string",
+            "description": "Preview of the last message, when there is one.",
+            "example": "See you then"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "isGroup",
+          "kind",
+          "unreadCount",
+          "timestamp"
+        ]
+      },
       "UpsertLabelDto": {
         "type": "object",
         "properties": {
@@ -11313,6 +11570,101 @@
             "maximum": 19
           }
         }
+      },
+      "LabelAckResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Always true — a failure is reported as a non-2xx status, not as false.",
+            "example": true
+          }
+        },
+        "required": [
+          "success"
+        ]
+      },
+      "ChannelDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Channel (newsletter) id.",
+            "example": "120363000000000000@newsletter"
+          },
+          "name": {
+            "type": "string",
+            "description": "Channel name.",
+            "example": "Release notes"
+          },
+          "description": {
+            "type": "string",
+            "description": "Channel description, when set."
+          },
+          "inviteCode": {
+            "type": "string",
+            "description": "Invite code, when the engine discloses one. Absent does not mean the channel is private.",
+            "example": "0029Va..."
+          },
+          "subscriberCount": {
+            "type": "number",
+            "description": "Subscriber count, when the engine reports it.",
+            "example": 1024
+          },
+          "picture": {
+            "type": "string",
+            "description": "Channel picture URL, when set."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether WhatsApp marks the channel verified.",
+            "example": false
+          },
+          "createdAt": {
+            "type": "number",
+            "description": "Unix SECONDS the channel was created, when reported.",
+            "example": 1786000000
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "ChannelMessageDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Message id.",
+            "example": "ABCD1234"
+          },
+          "body": {
+            "type": "string",
+            "description": "Message text. Empty for a media-only post.",
+            "example": "v0.14.4 is out"
+          },
+          "timestamp": {
+            "type": "number",
+            "description": "Unix SECONDS the message was posted.",
+            "example": 1786000000
+          },
+          "hasMedia": {
+            "type": "boolean",
+            "description": "Whether the post carries media.",
+            "example": false
+          },
+          "mediaUrl": {
+            "type": "string",
+            "description": "Media URL, when the engine resolved one."
+          }
+        },
+        "required": [
+          "id",
+          "body",
+          "timestamp",
+          "hasMedia"
+        ]
       },
       "CreateChannelDto": {
         "type": "object",
@@ -11333,6 +11685,19 @@
           "name"
         ]
       },
+      "ChannelAckResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Always true — a failure is reported as a non-2xx status, not as false.",
+            "example": true
+          }
+        },
+        "required": [
+          "success"
+        ]
+      },
       "MuteChannelDto": {
         "type": "object",
         "properties": {
@@ -11344,6 +11709,111 @@
         },
         "required": [
           "mute"
+        ]
+      },
+      "StatusContactDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Poster id.",
+            "example": "628123456789@c.us"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name from the account's addressbook, when saved."
+          },
+          "pushName": {
+            "type": "string",
+            "description": "Name the poster set for themselves.",
+            "example": "Ada"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "StatusDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Status id.",
+            "example": "ABCD1234"
+          },
+          "contact": {
+            "description": "Who posted it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StatusContactDto"
+              }
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "video",
+              "voice"
+            ],
+            "description": "`voice` is an audio status posted as a voice note. Before voice posting existed, such a status read back as `text`, because anything that was not an image or a video collapsed to it.",
+            "example": "image"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Caption, for an image or video status."
+          },
+          "mediaUrl": {
+            "type": "string",
+            "description": "Media URL as the engine reported it."
+          },
+          "media": {
+            "type": "object",
+            "description": "Downloaded media bytes, present only when the engine fetched them and they fit the inbound media cap. Absent is not an error — fetch the bytes from the media route instead."
+          },
+          "backgroundColor": {
+            "type": "string",
+            "description": "Background colour of a text or voice status.",
+            "example": "#0a5c36"
+          },
+          "font": {
+            "type": "number",
+            "description": "Font index of a text or voice status.",
+            "example": 2
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "ISO-8601 timestamp the status was posted.",
+            "example": "2026-08-07T12:00:00.000Z"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp the status expires.",
+            "example": "2026-08-08T12:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "contact",
+          "type",
+          "timestamp",
+          "expiresAt"
+        ]
+      },
+      "StatusListResponseDto": {
+        "type": "object",
+        "properties": {
+          "statuses": {
+            "description": "Statuses, newest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusDto"
+            }
+          }
+        },
+        "required": [
+          "statuses"
         ]
       },
       "SendTextStatusDto": {
@@ -11389,6 +11859,31 @@
         },
         "required": [
           "text"
+        ]
+      },
+      "StatusResultDto": {
+        "type": "object",
+        "properties": {
+          "statusId": {
+            "type": "string",
+            "description": "Id of the status that was posted.",
+            "example": "ABCD1234"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "ISO-8601 timestamp the engine stamped on it.",
+            "example": "2026-08-07T12:00:00.000Z"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp it expires — 24 hours later.",
+            "example": "2026-08-08T12:00:00.000Z"
+          }
+        },
+        "required": [
+          "statusId",
+          "timestamp",
+          "expiresAt"
         ]
       },
       "StatusMediaInput": {
@@ -11507,6 +12002,18 @@
         },
         "required": [
           "audio"
+        ]
+      },
+      "StatusDeletedResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "Status deleted successfully"
+          }
+        },
+        "required": [
+          "message"
         ]
       },
       "ConvertMediaDto": {
