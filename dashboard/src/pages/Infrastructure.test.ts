@@ -78,6 +78,18 @@ const ENGINES: Engine[] = [
 
 const CURRENT_ENGINE = { engineType: 'whatsapp-web.js' };
 
+// Per-test fixture swaps for the three responses whose disagreement the engine-pin tests turn on
+// (running engine vs saved engine vs whether ENGINE_TYPE is pinned). Reset in afterEach so the
+// smoke tests above keep seeing the stock fixtures.
+let overrides: { status?: InfraStatus; saved?: SavedConfig; currentEngine?: { engineType: string } } = {};
+
+// ENGINE_TYPE supplied by the container environment, so the dashboard cannot change it.
+const PINNED_STATUS: InfraStatus = { ...INFRA_STATUS, envPinned: ['ENGINE_TYPE'] };
+
+// The operator's saved choice, deliberately DIFFERENT from the running engine — that disagreement is
+// the whole subject of these tests, and the stock fixtures agree on whatsapp-web.js.
+const SAVED_BAILEYS: SavedConfig = { ...SAVED_CONFIG, engine: { ...SAVED_CONFIG.engine, type: 'baileys' } };
+
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -123,10 +135,13 @@ function installFetchStub(): void {
     }
     fetchCalls.push({ method, path, body });
 
-    if (method === 'GET' && path === '/api/infra/status') return Promise.resolve(jsonResponse(INFRA_STATUS));
-    if (method === 'GET' && path === '/api/infra/config') return Promise.resolve(jsonResponse(SAVED_CONFIG));
+    if (method === 'GET' && path === '/api/infra/status')
+      return Promise.resolve(jsonResponse(overrides.status ?? INFRA_STATUS));
+    if (method === 'GET' && path === '/api/infra/config')
+      return Promise.resolve(jsonResponse(overrides.saved ?? SAVED_CONFIG));
     if (method === 'GET' && path === '/api/infra/engines') return Promise.resolve(jsonResponse(ENGINES));
-    if (method === 'GET' && path === '/api/infra/engines/current') return Promise.resolve(jsonResponse(CURRENT_ENGINE));
+    if (method === 'GET' && path === '/api/infra/engines/current')
+      return Promise.resolve(jsonResponse(overrides.currentEngine ?? CURRENT_ENGINE));
     if (method === 'PUT' && path === '/api/infra/config') {
       return Promise.resolve(
         jsonResponse({ message: 'Configuration saved', saved: true, envPath: '.env.generated', profiles: [] }),
@@ -202,6 +217,7 @@ afterEach(() => {
   rtl.cleanup();
   queryClient?.clear();
   queryClient = undefined;
+  overrides = {};
 });
 
 function renderInfrastructure(): { container: HTMLElement } {
@@ -289,4 +305,74 @@ test('a successful save opens the restart modal', async () => {
   // this test clear of handleRestart's uncancelled setInterval/setTimeout chain.
   within(dialog).getByRole('button', { name: 'Restart Now' });
   within(dialog).getByRole('button', { name: 'Restart Later' });
+});
+
+// ── The engine radio's seed source (#1082) ───────────────────────────────────
+// ENGINES fixture order fixes the radio order: [0] whatsapp-web.js, [1] baileys.
+
+function engineRadios(container: HTMLElement): HTMLInputElement[] {
+  return Array.from(container.querySelectorAll('input[name="engineType"]'));
+}
+
+// Waits for the /config hydrate effect, which is the last of the two seeding effects to land. Uses a
+// DATABASE field on purpose: the engine detail fields render only for whatsapp-web.js, so waiting on
+// one of those would vanish the moment a test seeds the radio to baileys.
+async function awaitConfigHydrated(container: HTMLElement): Promise<void> {
+  await rtl.waitFor(() => assert.equal(fieldInput(container, 'Username').value, 'openwa_admin'));
+}
+
+test('the engine radio seeds from the running engine when ENGINE_TYPE is not pinned', async () => {
+  const { screen } = rtl;
+  resetFetchCalls();
+  // Running and saved disagree, but nothing pins ENGINE_TYPE — the running engine still wins, because
+  // a save IS able to change it and the radio should show what is actually in effect. Pins the
+  // pre-existing behaviour, so an implementation that always seeded from the saved file would fail here.
+  overrides = { saved: SAVED_BAILEYS };
+  const { container } = renderInfrastructure();
+
+  await screen.findByText('Database Configuration');
+  await awaitConfigHydrated(container);
+
+  assert.equal(
+    engineRadios(container)[0].checked,
+    true,
+    'expected the running engine (whatsapp-web.js) to be selected',
+  );
+});
+
+test('the engine radio seeds from the saved engine when ENGINE_TYPE is pinned', async () => {
+  const { screen, waitFor } = rtl;
+  resetFetchCalls();
+  overrides = { status: PINNED_STATUS, saved: SAVED_BAILEYS };
+  const { container } = renderInfrastructure();
+
+  await screen.findByText('Database Configuration');
+  await awaitConfigHydrated(container);
+
+  // The running engine is the PINNED value, not a choice the operator made, so showing it would
+  // present the pin as their selection.
+  await waitFor(() =>
+    assert.equal(engineRadios(container)[1].checked, true, 'expected the saved engine (baileys) to be selected'),
+  );
+});
+
+test('saving while ENGINE_TYPE is pinned does not write the running engine over the saved one', async () => {
+  const { screen, waitFor, fireEvent } = rtl;
+  resetFetchCalls();
+  overrides = { status: PINNED_STATUS, saved: SAVED_BAILEYS };
+  const { container } = renderInfrastructure();
+
+  await screen.findByText('Database Configuration');
+  await awaitConfigHydrated(container);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+  // The operator never touched the engine here. Persisting the pinned value would destroy the choice
+  // held in data/.env.generated, so unsetting the variable later could not restore it.
+  await waitFor(() => {
+    const call = findFetchCall('PUT', '/api/infra/config');
+    assert.ok(call, 'expected a PUT to /infra/config');
+    const body = call!.body as { engine?: { type?: string } };
+    assert.equal(body.engine?.type, 'baileys');
+  });
 });
