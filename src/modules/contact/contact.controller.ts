@@ -91,6 +91,13 @@ export class ContactController {
     description: 'Number existence check result',
     type: NumberCheckResponseDto,
   })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer the lookup. Deliberately not reported as `exists: false` — that ' +
+      'would be a claim about the number rather than about the query, and this route exists to be ' +
+      'trusted before a send.',
+  })
   async checkNumber(@Param('sessionId') sessionId: string, @Param('number') number: string) {
     // The engine returns the canonical chat id in its native format; we don't build the JID here
     // (decoupled from the whatsapp-web.js `@c.us` scheme).
