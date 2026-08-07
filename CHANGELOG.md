@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Seven settings that did nothing under Docker now take effect** — Compose forwards environment explicitly and has no `env_file`, so `BAILEYS_MARK_ONLINE_ON_CONNECT`, `BAILEYS_SYNC_FULL_HISTORY`, `WEBHOOK_CONTACT_DETAILS`, `ALLOW_UNSIGNED_INGRESS`, `STORE_EPHEMERAL_MESSAGES`, `RESOLVE_LID_TO_PHONE` and `SIMULATE_TYPING` never reached the container however the operator's `.env` was written; the first of those left the paired phone's notifications suppressed for as long as the gateway stayed connected.
+
 ### Changed
 
 - **Fourteen more boolean environment variables are now validated at boot** — they are read with a bare `=== 'true'` / `!== 'false'` comparison, so a spelling like `DATABASE_SSL=require` silently configured the opposite of what was asked for; `DATABASE_SSL` in particular read as OFF and sent credentials in plaintext to a server the operator believed was TLS-protected. Only `true`/`false` (or blank) are accepted now, so a deployment using another spelling will fail startup until it is corrected. `MCP_READONLY` and `PUPPETEER_HEADLESS` stay tolerant deliberately — both fail toward the safe state.
