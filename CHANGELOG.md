@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Infrastructure page's "saved, but not applied yet" notice no longer disappears for the rest of the session** — it was suppressed by a latch that is set when a save succeeds and cleared only by a restart's page reload, so from the first successful save none of the four cards could report a setting that was still waiting on a restart, which is the one state the notice exists for.
+- **A dashboard save no longer overwrites the saved engine with a stale running one** — the engine radio seeded from the running engine, which the gateway resolves once at boot, so after an engine change that had not been restarted yet a save of any unrelated field wrote the old engine back over the operator's choice; the radio now seeds from the saved configuration, which the previous release only did when an environment variable pinned the setting.
+- **The send-pacing documentation now matches the code on bulk sends** — `.env.example` and the API specification said bulk sends were counted exactly against the warm-up cap, but a bulk item the engine refuses is checked against the cap without ever being counted into it, because bulk writes its row only after the send succeeds.
+
 ## [0.14.3] - 2026-08-07
 
 ### Added

@@ -90,6 +90,11 @@ const PINNED_STATUS: InfraStatus = { ...INFRA_STATUS, envPinned: ['ENGINE_TYPE']
 // the whole subject of these tests, and the stock fixtures agree on whatsapp-web.js.
 const SAVED_BAILEYS: SavedConfig = { ...SAVED_CONFIG, engine: { ...SAVED_CONFIG.engine, type: 'baileys' } };
 
+// Saved storage differs from the running one — the "saved, awaiting restart" state, with no pin.
+const SAVED_STORAGE_DRIFT: SavedConfig = { ...SAVED_CONFIG, storage: { ...SAVED_CONFIG.storage, type: 's3' } };
+
+const PENDING_RESTART_NOTE = 'Saved, but not applied yet — restart the server for this change to take effect.';
+
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -321,23 +326,81 @@ async function awaitConfigHydrated(container: HTMLElement): Promise<void> {
   await rtl.waitFor(() => assert.equal(fieldInput(container, 'Username').value, 'openwa_admin'));
 }
 
-test('the engine radio seeds from the running engine when ENGINE_TYPE is not pinned', async () => {
-  const { screen } = rtl;
+test('the engine radio seeds from the saved engine even when nothing pins ENGINE_TYPE', async () => {
+  const { screen, waitFor } = rtl;
   resetFetchCalls();
-  // Running and saved disagree, but nothing pins ENGINE_TYPE — the running engine still wins, because
-  // a save IS able to change it and the radio should show what is actually in effect. Pins the
-  // pre-existing behaviour, so an implementation that always seeded from the saved file would fail here.
+  // Running and saved disagree with no pin at all — the ordinary "saved but not restarted yet" state.
+  // The running engine is stale here (the gateway resolves ENGINE_TYPE once at boot), so seeding from
+  // it would show an engine nobody currently wants and write it back on the next save.
   overrides = { saved: SAVED_BAILEYS };
   const { container } = renderInfrastructure();
 
   await screen.findByText('Database Configuration');
   await awaitConfigHydrated(container);
 
-  assert.equal(
-    engineRadios(container)[0].checked,
-    true,
-    'expected the running engine (whatsapp-web.js) to be selected',
+  await waitFor(() =>
+    assert.equal(engineRadios(container)[1].checked, true, 'expected the saved engine (baileys) to be selected'),
   );
+});
+
+test('saving after an unrestarted engine change does not write the running engine back', async () => {
+  const { screen, waitFor, fireEvent } = rtl;
+  resetFetchCalls();
+  // No pin anywhere. The operator changed the engine earlier and has not restarted, so /engines/current
+  // still reports the old one. Saving an unrelated field must not resurrect it over the saved choice.
+  overrides = { saved: SAVED_BAILEYS };
+  const { container } = renderInfrastructure();
+
+  await screen.findByText('Database Configuration');
+  await awaitConfigHydrated(container);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+  await waitFor(() => {
+    const call = findFetchCall('PUT', '/api/infra/config');
+    assert.ok(call, 'expected a PUT to /infra/config');
+    const body = call!.body as { engine?: { type?: string } };
+    assert.equal(body.engine?.type, 'baileys');
+  });
+});
+
+test('an operator selection wins over the seed and is what gets saved', async () => {
+  const { screen, waitFor, fireEvent } = rtl;
+  resetFetchCalls();
+  const { container } = renderInfrastructure();
+
+  await screen.findByText('Database Configuration');
+  await awaitConfigHydrated(container);
+
+  // Guards the #735 invariant through the seeding rewrite: whatever the seed chose, a click owns the
+  // field afterwards and the payload must carry the click.
+  fireEvent.click(engineRadios(container)[1]);
+  fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+  await waitFor(() => {
+    const call = findFetchCall('PUT', '/api/infra/config');
+    assert.ok(call, 'expected a PUT to /infra/config');
+    const body = call!.body as { engine?: { type?: string } };
+    assert.equal(body.engine?.type, 'baileys');
+  });
+});
+
+test('the pending-restart note survives a successful save', async () => {
+  const { screen, waitFor, fireEvent } = rtl;
+  resetFetchCalls();
+  // Storage differs between running and saved: the exact "saved, awaiting restart" state the note
+  // describes. It must still be readable AFTER a save — that is the operator who chose Restart Later.
+  overrides = { saved: SAVED_STORAGE_DRIFT };
+  const { container } = renderInfrastructure();
+
+  await screen.findByText('Database Configuration');
+  await awaitConfigHydrated(container);
+  await screen.findByText(PENDING_RESTART_NOTE);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+  await waitFor(() => assert.ok(findFetchCall('PUT', '/api/infra/config'), 'expected a PUT to /infra/config'));
+
+  assert.ok(screen.queryByText(PENDING_RESTART_NOTE), 'the pending-restart note must not vanish once a save succeeds');
 });
 
 test('the engine radio seeds from the saved engine when ENGINE_TYPE is pinned', async () => {
