@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, ConflictException, HttpCode, HttpStatus, Optional } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { InfraExportDataResponseDto, InfraImportDataResponseDto } from './dto/infra-response.dto';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, QueryRunner } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -327,7 +328,7 @@ export class InfraDataController {
   @Get('export-data')
   @RequireRole(ApiKeyRole.ADMIN)
   @ApiOperation({ summary: 'Export all data from Data DB for migration' })
-  @ApiResponse({ status: 200, description: 'Exported data as JSON' })
+  @ApiResponse({ status: 200, description: 'Exported data as JSON', type: InfraExportDataResponseDto })
   async exportData(): Promise<{
     exportedAt: string;
     dataDbType: string;
@@ -512,7 +513,7 @@ export class InfraDataController {
       },
     },
   })
-  @ApiResponse({ status: 200, description: 'Data imported successfully' })
+  @ApiResponse({ status: 200, description: 'Data imported successfully', type: InfraImportDataResponseDto })
   @ApiResponse({
     status: 409,
     description:
