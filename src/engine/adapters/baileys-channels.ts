@@ -15,6 +15,31 @@ export interface BaileysChannelsHost {
   getSocket(): WASocket;
 }
 
+/**
+ * WA error code of a w:mex refusal, or undefined for anything else.
+ *
+ * executeWMexQuery (lib/Socket/mex.js) parses a GraphQL payload out of a SUCCESSFUL iq, so a
+ * refusal never reaches assertNodeErrorFree and never carries the numeric `data` refusedStatusCode
+ * reads. It throws `Boom(msg, { statusCode: errorCode, data: firstError })` instead — the code on
+ * the Boom, the error node as `data`.
+ *
+ * A non-null OBJECT `data` is the discriminator, and it is safe here specifically: Boom defaults
+ * `data` to null, so every transport failure carries null, and so does executeWMexQuery's OTHER
+ * throw for an unanswered query (`data: result` with result undefined). Kept local to this file
+ * rather than folded into refusedStatusCode, because promiseTimeout's Boom also carries an object
+ * `data` with a 4xx code and must never be read as a refusal.
+ */
+export function wmexRefusalCode(error: unknown): number | undefined {
+  const err = error as { data?: unknown; output?: { statusCode?: unknown } } | null | undefined;
+  if (typeof err?.data === 'number') {
+    return err.data;
+  }
+  if (err?.data !== null && typeof err?.data === 'object' && typeof err.output?.statusCode === 'number') {
+    return err.output.statusCode;
+  }
+  return undefined;
+}
+
 export class BaileysChannels {
   constructor(
     private readonly host: BaileysChannelsHost,
@@ -59,24 +84,33 @@ export class BaileysChannels {
    */
   async createChannel(name: string, description?: string): Promise<Channel> {
     this.host.ensureReady();
-    const meta = await mapServerRefusal('Creating the channel', () => this.sock().newsletterCreate(name, description));
+    const meta = await mapServerRefusal(
+      'Creating the channel',
+      () => this.sock().newsletterCreate(name, description),
+      wmexRefusalCode,
+    );
     return this.toChannel(meta);
   }
 
   async deleteChannel(channelId: string): Promise<void> {
     this.host.ensureReady();
-    await mapServerRefusal('Deleting the channel', () =>
-      this.bounded(this.sock().newsletterDelete(channelId), 'the channel delete'),
+    await mapServerRefusal(
+      'Deleting the channel',
+      () => this.bounded(this.sock().newsletterDelete(channelId), 'the channel delete'),
+      wmexRefusalCode,
     );
   }
 
   async muteChannel(channelId: string, mute: boolean): Promise<void> {
     this.host.ensureReady();
-    await mapServerRefusal(mute ? 'Muting the channel' : 'Unmuting the channel', () =>
-      this.bounded(
-        mute ? this.sock().newsletterMute(channelId) : this.sock().newsletterUnmute(channelId),
-        mute ? 'the channel mute' : 'the channel unmute',
-      ),
+    await mapServerRefusal(
+      mute ? 'Muting the channel' : 'Unmuting the channel',
+      () =>
+        this.bounded(
+          mute ? this.sock().newsletterMute(channelId) : this.sock().newsletterUnmute(channelId),
+          mute ? 'the channel mute' : 'the channel unmute',
+        ),
+      wmexRefusalCode,
     );
   }
 

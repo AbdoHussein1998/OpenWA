@@ -47,6 +47,12 @@ export interface BaileysGroupsHost {
  * so a dead socket was reported as `403 admin rights or permissions may be missing`. The branch was
  * also unnecessary: its target throw cannot be reached through `query()`, because a result carrying
  * an `<error>` child has already thrown from assertNodeErrorFree's identical lookup.
+ *
+ * Only the IQ error channel is decoded here. WhatsApp's w:mex surface reports a refusal as a
+ * GraphQL error inside a SUCCESSFUL iq, which never passes through assertNodeErrorFree and carries
+ * an object rather than a numeric `data` — see wmexRefusalCode in baileys-channels.ts. Widening this
+ * function to accept an object `data` would also swallow promiseTimeout's Boom, which carries
+ * `{ stack }` alongside a 4xx DisconnectReason code, so the two channels stay separate.
  */
 export function refusedStatusCode(error: unknown): number | undefined {
   const err = error as { data?: unknown } | null | undefined;
@@ -60,11 +66,15 @@ export function refusedStatusCode(error: unknown): number | undefined {
  * failures (dropped socket, timeout) propagate untouched: folding them in would report a dead
  * connection as a permissions problem.
  */
-export async function mapServerRefusal<T>(operation: string, op: () => Promise<T>): Promise<T> {
+export async function mapServerRefusal<T>(
+  operation: string,
+  op: () => Promise<T>,
+  classify: (error: unknown) => number | undefined = refusedStatusCode,
+): Promise<T> {
   try {
     return await op();
   } catch (error) {
-    const code = refusedStatusCode(error);
+    const code = classify(error);
     if (code !== undefined && code >= 400 && code < 500) {
       throw new EngineRefusedError(
         `${operation} was refused by WhatsApp (code ${code}) — admin rights or permissions may be missing`,
