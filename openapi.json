@@ -3537,7 +3537,17 @@
         ],
         "responses": {
           "200": {
-            "description": "List of contacts"
+            "description": "List of contacts, windowed by limit/offset. A bare array — there is no envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ContactDto"
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready"
@@ -3578,7 +3588,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "Picture URL per requested id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilePicturesResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Batch-resolve profile picture URLs for up to 50 contacts",
@@ -3612,7 +3629,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Contact details"
+            "description": "Contact details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactDto"
+                }
+              }
+            }
           },
           "404": {
             "description": "Contact not found"
@@ -3657,7 +3681,14 @@
         },
         "responses": {
           "200": {
-            "description": "Contact saved"
+            "description": "Contact saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactAckResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not active or invalid request"
@@ -3692,7 +3723,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Contact deleted"
+            "description": "Contact deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactAckResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not active"
@@ -3730,7 +3768,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Number existence check result"
+            "description": "Number existence check result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NumberCheckResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Check if a phone number exists on WhatsApp",
@@ -3764,7 +3809,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Profile picture URL"
+            "description": "Profile picture URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilePictureResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Get profile picture URL for a contact",
@@ -3798,7 +3850,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Resolved phone number (MSISDN digits), or null when the engine cannot map it"
+            "description": "Resolved phone number (MSISDN digits), or null when the engine cannot map it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedPhoneResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Resolve a contact id (e.g. an @lid) to a phone number — best-effort",
@@ -3832,7 +3891,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Contact blocked"
+            "description": "Contact blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactAckResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Block a contact",
@@ -3864,7 +3930,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Contact unblocked"
+            "description": "Contact unblocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactAckResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Unblock a contact",
@@ -9387,6 +9460,131 @@
           }
         }
       },
+      "ContactDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Contact id in the active engine's native format. On Baileys this is frequently an `@lid` rather than a phone-number JID; use GET /contacts/{contactId}/phone to resolve one.",
+            "example": "628123456789@c.us"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name from the account's own addressbook. Absent for a contact that was never saved.",
+            "example": "Ada Lovelace"
+          },
+          "pushName": {
+            "type": "string",
+            "description": "The display name the contact set for themselves. Present even when the contact is not saved.",
+            "example": "Ada"
+          },
+          "number": {
+            "type": "string",
+            "description": "MSISDN digits, without a leading + or any separators.",
+            "example": "628123456789"
+          },
+          "isMyContact": {
+            "type": "boolean",
+            "description": "Whether the entry exists in the account's addressbook.",
+            "example": true
+          },
+          "isBlocked": {
+            "type": "boolean",
+            "description": "Whether this account has blocked the contact.",
+            "example": false
+          },
+          "profilePicUrl": {
+            "type": "string",
+            "description": "Profile picture URL. Absent when the contact has none or their privacy settings hide it.",
+            "example": "https://pps.whatsapp.net/v/t61.24694-24/12345_678_910_n.jpg"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "isMyContact",
+          "isBlocked"
+        ]
+      },
+      "ProfilePicturesResponseDto": {
+        "type": "object",
+        "properties": {
+          "pictures": {
+            "type": "object",
+            "description": "Map of the requested contact ids to their picture URL. An id resolves to null when the contact has no picture, hides it, or its individual lookup failed — a per-id failure does not fail the batch. Ids beyond the first 50 are not looked up and are absent from the map.",
+            "example": {
+              "628123456789@c.us": "https://pps.whatsapp.net/v/t61.24694-24/12345_678_910_n.jpg"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "pictures"
+        ]
+      },
+      "NumberCheckResponseDto": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "The number exactly as supplied in the path.",
+            "example": "628123456789"
+          },
+          "exists": {
+            "type": "boolean",
+            "description": "Whether the number is a registered WhatsApp account.",
+            "example": true
+          },
+          "whatsappId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The canonical chat id in the engine's native format, or null when the number is not registered.",
+            "example": "628123456789@c.us"
+          }
+        },
+        "required": [
+          "number",
+          "exists",
+          "whatsappId"
+        ]
+      },
+      "ProfilePictureResponseDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "nullable": true,
+            "description": "Profile picture URL, or null when the contact has none or their privacy settings hide it.",
+            "example": "https://pps.whatsapp.net/v/t61.24694-24/12345_678_910_n.jpg"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "ResolvedPhoneResponseDto": {
+        "type": "object",
+        "properties": {
+          "contactId": {
+            "type": "string",
+            "description": "The contact id exactly as supplied in the path.",
+            "example": "12345678901234@lid"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "description": "MSISDN digits for the contact, or null when the engine has not learned the mapping. Best-effort: a null here is not a statement that the contact has no number.",
+            "example": "628123456789"
+          }
+        },
+        "required": [
+          "contactId",
+          "phone"
+        ]
+      },
       "UpsertContactDto": {
         "type": "object",
         "properties": {
@@ -9403,6 +9601,25 @@
         },
         "required": [
           "firstName"
+        ]
+      },
+      "ContactAckResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Always true — a failure is reported as a non-2xx status, not as false.",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable confirmation of what was done.",
+            "example": "Contact saved"
+          }
+        },
+        "required": [
+          "success",
+          "message"
         ]
       },
       "GroupJoinInfoDto": {
