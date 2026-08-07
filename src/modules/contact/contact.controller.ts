@@ -4,6 +4,14 @@ import { ContactService } from './contact.service';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import { UpsertContactDto } from './dto/upsert-contact.dto';
+import {
+  ContactAckResponseDto,
+  ContactDto,
+  NumberCheckResponseDto,
+  ProfilePictureResponseDto,
+  ProfilePicturesResponseDto,
+  ResolvedPhoneResponseDto,
+} from './dto/contact-response.dto';
 
 @ApiTags('contacts')
 @Controller('sessions/:sessionId/contacts')
@@ -15,7 +23,8 @@ export class ContactController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({
     status: 200,
-    description: 'List of contacts',
+    description: 'List of contacts, windowed by limit/offset. A bare array — there is no envelope.',
+    type: [ContactDto],
   })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
@@ -41,6 +50,7 @@ export class ContactController {
   })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiQuery({ name: 'ids', required: true, description: 'Comma-separated contact ids (max 50 used)' })
+  @ApiResponse({ status: 200, description: 'Picture URL per requested id', type: ProfilePicturesResponseDto })
   // NOTE: declared BEFORE @Get(':contactId') so the literal segment wins over the param route.
   async getProfilePictures(@Param('sessionId') sessionId: string, @Query('ids') ids?: string) {
     const list = (ids ?? '')
@@ -58,6 +68,7 @@ export class ContactController {
   @ApiResponse({
     status: 200,
     description: 'Contact details',
+    type: ContactDto,
   })
   @ApiResponse({ status: 404, description: 'Contact not found' })
   async findOne(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
@@ -78,6 +89,7 @@ export class ContactController {
   @ApiResponse({
     status: 200,
     description: 'Number existence check result',
+    type: NumberCheckResponseDto,
   })
   async checkNumber(@Param('sessionId') sessionId: string, @Param('number') number: string) {
     // The engine returns the canonical chat id in its native format; we don't build the JID here
@@ -99,6 +111,7 @@ export class ContactController {
   @ApiResponse({
     status: 200,
     description: 'Profile picture URL',
+    type: ProfilePictureResponseDto,
   })
   async getProfilePicture(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
     const url = await this.contactService.getProfilePicture(sessionId, contactId);
@@ -112,6 +125,7 @@ export class ContactController {
   @ApiResponse({
     status: 200,
     description: 'Resolved phone number (MSISDN digits), or null when the engine cannot map it',
+    type: ResolvedPhoneResponseDto,
   })
   async resolvePhone(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
     const phone = await this.contactService.resolveContactPhone(sessionId, contactId);
@@ -124,7 +138,7 @@ export class ContactController {
   @ApiOperation({ summary: "Save a contact to the account's addressbook, or edit an existing entry" })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'contactId', description: 'Contact ID (e.g., 628xxx@c.us)' })
-  @ApiResponse({ status: 200, description: 'Contact saved' })
+  @ApiResponse({ status: 200, description: 'Contact saved', type: ContactAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not active or invalid request' })
   async upsertContact(
     @Param('sessionId') sessionId: string,
@@ -142,7 +156,7 @@ export class ContactController {
   @ApiOperation({ summary: "Remove a contact from the account's addressbook" })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'contactId', description: 'Contact ID (e.g., 628xxx@c.us)' })
-  @ApiResponse({ status: 200, description: 'Contact deleted' })
+  @ApiResponse({ status: 200, description: 'Contact deleted', type: ContactAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not active' })
   async deleteContact(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
     await this.contactService.deleteContact(sessionId, contactId);
@@ -158,6 +172,7 @@ export class ContactController {
   @ApiResponse({
     status: 200,
     description: 'Contact blocked',
+    type: ContactAckResponseDto,
   })
   async blockContact(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
     await this.contactService.blockContact(sessionId, contactId);
@@ -172,6 +187,7 @@ export class ContactController {
   @ApiResponse({
     status: 200,
     description: 'Contact unblocked',
+    type: ContactAckResponseDto,
   })
   async unblockContact(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
     await this.contactService.unblockContact(sessionId, contactId);
