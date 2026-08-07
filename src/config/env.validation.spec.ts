@@ -179,6 +179,27 @@ describe('validateEnv', () => {
     },
   );
 
+  it('rejects a MEDIA_DOWNLOAD_ENABLED typo instead of silently keeping the expensive default on', () => {
+    // The odd one out of the boolean family: it is read with `!== 'false' && !== '0' && !== 'no'`
+    // (inbound-media-cap.ts), so a typo does not disable a feature — it leaves inbound media being
+    // decrypted and base64-inlined into every message row, up to MEDIA_DOWNLOAD_MAX_BYTES apiece.
+    // An operator who typed it to turn that OFF gets the most expensive behaviour the gateway has,
+    // with no diagnostics anywhere.
+    expect(() => validateEnv({ MEDIA_DOWNLOAD_ENABLED: 'fasle' })).toThrow(/MEDIA_DOWNLOAD_ENABLED/);
+    expect(() => validateEnv({ MEDIA_DOWNLOAD_ENABLED: 'ture' })).toThrow(/MEDIA_DOWNLOAD_ENABLED/);
+    // Unlike the strict family this flag is read through a NORMALISING parser — inbound-media-cap.ts
+    // trims and lowercases, and inbound-media-cap.spec.ts asserts 'FALSE' / ' false ' disable. Those
+    // spellings demonstrably work, so validation must not reject them; only a value the read site
+    // cannot recognise at all is a mistake worth failing the boot for.
+    expect(() => validateEnv({ MEDIA_DOWNLOAD_ENABLED: 'False' })).not.toThrow();
+    expect(() => validateEnv({ MEDIA_DOWNLOAD_ENABLED: ' false ' })).not.toThrow();
+    expect(() => validateEnv({ MEDIA_DOWNLOAD_ENABLED: '0' })).not.toThrow();
+    expect(() => validateEnv({ MEDIA_DOWNLOAD_ENABLED: 'no' })).not.toThrow();
+    expect(() => validateEnv({ MEDIA_DOWNLOAD_ENABLED: 'true' })).not.toThrow();
+    expect(() => validateEnv({ MEDIA_DOWNLOAD_ENABLED: 'false' })).not.toThrow();
+    expect(() => validateEnv({ MEDIA_DOWNLOAD_ENABLED: '' })).not.toThrow();
+  });
+
   it('rejects a SEARCH_PROVIDER typo instead of silently falling back to auto', () => {
     // A bogus / typo value must fail fast at boot rather than silently selecting the default provider.
     expect(() => validateEnv({ SEARCH_PROVIDER: 'bogus' })).toThrow(/SEARCH_PROVIDER/);

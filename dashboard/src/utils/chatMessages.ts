@@ -149,6 +149,24 @@ export function mergeDeliveryStatus(
 }
 
 /**
+ * The reaction map to store after a `message.reaction` event.
+ *
+ * The gateway OMITS `reactions` when it holds no stored copy of the message to snapshot from — an
+ * ephemeral message, or one that predates the session going live. Absent means "unknown", so the map
+ * already on screen survives, including the optimistic reaction the local user just added under the
+ * `me` key. An empty object is a different claim: every reaction was withdrawn, and that must clear
+ * the badge. `??` draws that line where `||` would not, which is the whole reason this is a named
+ * function rather than an inline expression — the socket layer carries the absence through
+ * deliberately (useWebSocket.ts) and flattening it anywhere in between makes this dead code.
+ */
+export function mergeReactionSnapshot(
+  existing: Record<string, string> | undefined,
+  incoming: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  return incoming ?? existing;
+}
+
+/**
  * Merge two metadata bags field-by-field. The incoming copy wins per field only when it actually
  * carries a value — a live `message.sent` echo is built as `{media, quotedMessage, call}` with
  * undefined leaves, and a wholesale `incoming ?? existing` swap would wipe the optimistic bubble's

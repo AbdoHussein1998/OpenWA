@@ -528,6 +528,200 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     expect(b.status).toBe(BatchStatus.COMPLETED);
   });
 
+  // The export is unbounded while the import rides the 25mb body limit, so inline base64 can produce
+  // a backup this gateway cannot restore. What bounds it is an aggregate budget, not a blanket strip:
+  // a small photo costs nothing and is the ONLY copy when the chat-media archive is off (the default),
+  // so dropping it would trade a 413 for silent data loss.
+  const withBudget = async (bytes: number, run: () => Promise<void>): Promise<void> => {
+    const prev = process.env.EXPORT_INLINE_MEDIA_BUDGET_BYTES;
+    process.env.EXPORT_INLINE_MEDIA_BUDGET_BYTES = String(bytes);
+    try {
+      await run();
+    } finally {
+      if (prev === undefined) delete process.env.EXPORT_INLINE_MEDIA_BUDGET_BYTES;
+      else process.env.EXPORT_INLINE_MEDIA_BUDGET_BYTES = prev;
+    }
+  };
+
+  const exportedMeta = (
+    dump: Awaited<ReturnType<typeof controller.exportData>>,
+    id: string,
+  ): Record<string, unknown> => {
+    const row = dump.tables.messages.find(r => r.id === id);
+    return (typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata) as Record<string, unknown>;
+  };
+
+  it('keeps inline media that fits the export budget — it is the only copy when the archive is off', async () => {
+    const base64 = Buffer.from('a small photo, three orders of magnitude under any limit').toString('base64');
+    await seedSession('s1');
+    await ds.getRepository(Message).save(
+      ds.getRepository(Message).create({
+        id: 'm-small',
+        sessionId: 's1',
+        waMessageId: 'WA-SMALL',
+        chatId: 'c1@s.whatsapp.net',
+        from: 'a@s.whatsapp.net',
+        to: 'b@s.whatsapp.net',
+        body: null as never,
+        type: 'image',
+        direction: MessageDirection.INCOMING,
+        timestamp: 1700000000,
+        metadata: { media: { mimetype: 'image/jpeg', data: base64 }, ack: 2 },
+        status: MessageStatus.DELIVERED,
+      }),
+    );
+
+    await withBudget(1_000_000, async () => {
+      const meta = exportedMeta(await controller.exportData(), 'm-small');
+      expect(meta.media).toEqual({ mimetype: 'image/jpeg', data: base64 });
+    });
+  });
+
+  it('never strips a URL-referenced payload — `data` holds either base64 OR a URL', async () => {
+    // message.service.ts persists `data: base64 || dto.url!`, and the URL form is the only one the
+    // Swagger examples offer. A URL is a pointer, not bytes: stripping it destroys the reference and
+    // reports a sizeBytes that is Buffer.byteLength of URL text read as base64 — the size of nothing.
+    const url = 'https://cdn.example.com/promo.png';
+    await seedSession('s1');
+    await ds.getRepository(Message).save(
+      ds.getRepository(Message).create({
+        id: 'm-url',
+        sessionId: 's1',
+        waMessageId: 'WA-URL',
+        chatId: 'c1@s.whatsapp.net',
+        from: 'a@s.whatsapp.net',
+        to: 'b@s.whatsapp.net',
+        body: null as never,
+        type: 'image',
+        direction: MessageDirection.OUTGOING,
+        timestamp: 1700000000,
+        metadata: { media: { mimetype: 'image/png', filename: 'promo.png', data: url } },
+        status: MessageStatus.SENT,
+      }),
+    );
+
+    // Budget of zero: everything strippable WOULD be stripped, so surviving proves the URL guard.
+    await withBudget(0, async () => {
+      const meta = exportedMeta(await controller.exportData(), 'm-url');
+      expect(meta.media).toEqual({ mimetype: 'image/png', filename: 'promo.png', data: url });
+    });
+  });
+
+  it('does not 500 the export when a metadata column holds the JSON text `null`', async () => {
+    // The import accepts a hand-edited archive verbatim (table-importers.ts), so this row is
+    // reachable — and `JSON.parse('null')` returns null, whose `.media` read throws.
+    await seedSession('s1');
+    await ds.query(
+      `INSERT INTO messages (id, "sessionId", "waMessageId", "chatId", "from", "to", body, type, direction, timestamp, metadata, status, "createdAt")
+       VALUES ('m-null', 's1', 'WA-NULL', 'c1@s.whatsapp.net', 'a@x', 'b@x', 'hi', 'text', 'incoming', 1700000000, 'null', 'delivered', '2026-01-01T00:00:00.000Z')`,
+    );
+
+    await withBudget(0, async () => {
+      const dump = await controller.exportData();
+      expect(dump.tables.messages.find(r => r.id === 'm-null')?.metadata).toBe('null');
+    });
+  });
+
+  it('drops inline media past the export budget, leaving the omitted marker and the rest intact', async () => {
+    // The marker shape is the engine's own (capInboundMedia), so a restored row is indistinguishable
+    // from one whose media was skipped on the way in: the schema survives, only the pixels go.
+    const base64 = Buffer.from('not really a jpeg, but bytes all the same').toString('base64');
+    await seedSession('s1');
+    await ds.getRepository(Message).save(
+      ds.getRepository(Message).create({
+        id: 'm-media',
+        sessionId: 's1',
+        waMessageId: 'WA-MEDIA',
+        chatId: 'c1@s.whatsapp.net',
+        from: 'a@s.whatsapp.net',
+        to: 'b@s.whatsapp.net',
+        body: null as never,
+        type: 'image',
+        direction: MessageDirection.INCOMING,
+        timestamp: 1700000000,
+        metadata: { media: { mimetype: 'image/jpeg', filename: 'holiday.jpg', data: base64 }, ack: 2 },
+        status: MessageStatus.DELIVERED,
+      }),
+    );
+
+    let dump!: Awaited<ReturnType<typeof controller.exportData>>;
+    await withBudget(0, async () => {
+      dump = await controller.exportData();
+    });
+    const exported = dump.tables.messages.find(r => r.id === 'm-media');
+    const meta = exportedMeta(dump, 'm-media') as { media: Record<string, unknown>; ack: number };
+
+    expect(meta.media).not.toHaveProperty('data');
+    expect(meta.media).toEqual({
+      mimetype: 'image/jpeg',
+      filename: 'holiday.jpg',
+      omitted: true,
+      sizeBytes: Buffer.byteLength(base64, 'base64'),
+    });
+    // Everything else on the row, and everything else in metadata, is untouched.
+    expect(meta.ack).toBe(2);
+    expect(exported?.type).toBe('image');
+    expect(exported?.waMessageId).toBe('WA-MEDIA');
+
+    // And the backup still restores.
+    const res = await controller.importData({ tables: dump.tables });
+    expect(res.imported).toBe(true);
+    const restored = await ds.getRepository(Message).findOneByOrFail({ id: 'm-media' });
+    expect(restored.metadata).toEqual({
+      media: {
+        mimetype: 'image/jpeg',
+        filename: 'holiday.jpg',
+        omitted: true,
+        sizeBytes: Buffer.byteLength(base64, 'base64'),
+      },
+      ack: 2,
+    });
+  });
+
+  it('drops base64 from a bulk batch past the budget but keeps its URL and descriptive fields', async () => {
+    // message_batches carries the whole outbound list, base64 included, for the WHOLE duration of a
+    // run — stripBatchMediaPayloads only fires on the four terminal transitions. So the export has to
+    // bound it too, or the 413 the messages strip was written for simply arrives by another route.
+    await seedSession('s1');
+    await ds.getRepository(MessageBatch).save(
+      ds.getRepository(MessageBatch).create({
+        id: 'b-media',
+        batchId: 'BATCH-MEDIA',
+        sessionId: 's1',
+        status: BatchStatus.PROCESSING,
+        messages: [
+          {
+            chatId: 'c1',
+            type: 'image',
+            content: { image: { base64: 'QUJDREVG', mimetype: 'image/png', caption: 'hi' } },
+          },
+          {
+            chatId: 'c2',
+            type: 'image',
+            content: { image: { url: 'https://cdn.example.com/x.png', mimetype: 'image/png' } },
+          },
+        ] as never,
+        options: null as never,
+        progress: null as never,
+        results: null as never,
+        currentIndex: 0,
+        startedAt: null,
+        completedAt: null,
+      }),
+    );
+
+    await withBudget(0, async () => {
+      const dump = await controller.exportData();
+      const row = dump.tables.messageBatches.find(r => r.id === 'b-media');
+      const msgs = (typeof row?.messages === 'string' ? JSON.parse(row.messages) : row?.messages) as Array<{
+        content: { image: Record<string, unknown> };
+      }>;
+      expect(msgs[0].content.image).not.toHaveProperty('base64');
+      expect(msgs[0].content.image).toMatchObject({ mimetype: 'image/png', caption: 'hi' });
+      expect(msgs[1].content.image).toEqual({ url: 'https://cdn.example.com/x.png', mimetype: 'image/png' });
+    });
+  });
+
   it('round-trips plugin instances + integration delivery failures (Integration Fabric + DLQ)', async () => {
     await seedSession('s1');
     await ds.getRepository(PluginInstance).save(
