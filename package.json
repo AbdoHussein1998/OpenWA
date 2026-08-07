@@ -35,7 +35,7 @@
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "lint:fix": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
-    "test:scripts": "node --test scripts/postinstall.spec.js scripts/patch-wwebjs-newsletter-preview.spec.js scripts/patch-wwebjs-status.spec.js scripts/patch-wwebjs-ready-sync.spec.js scripts/patch-baileys-appstate.spec.js",
+    "test:scripts": "node --test scripts/postinstall.spec.js scripts/patch-wwebjs-newsletter-preview.spec.js scripts/patch-wwebjs-status.spec.js scripts/patch-wwebjs-ready-sync.spec.js scripts/patch-baileys-appstate.spec.js scripts/dockerfile-patchers.spec.js",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
