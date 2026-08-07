@@ -577,7 +577,7 @@ CREATE INDEX "IDX_c69efb19bf127c97e6740ad530" ON audit_logs("createdAt");
 `api_key_updated`, `api_key_used`, `api_key_revoked`, `api_key_deleted`, `api_key_auth_failed`), session
 lifecycle (`session_created`, `session_started`, `session_stopped`, `session_force_killed`,
 `session_logged_out`, `session_deleted`, `session_qr_generated`, `session_connected`,
-`session_disconnected`), WhatsApp-imposed account restrictions (`session_restricted`,
+`session_disconnected`, `session_config_updated`), WhatsApp-imposed account restrictions (`session_restricted`,
 `session_restriction_lifted`), messages
 (`message_sent`, `message_failed`), send-pacing enforcement (`send_pacing_blocked`, sampled to at
 most one row per session per minute; `send_breaker_tripped`, never sampled), webhooks (`webhook_created`, `webhook_deleted`,

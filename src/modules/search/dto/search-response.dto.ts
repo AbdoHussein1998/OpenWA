@@ -31,7 +31,7 @@ export class SearchHitDto {
   timestamp!: number;
 
   @ApiProperty({ example: 'text' }) type!: string;
-  @ApiProperty({ enum: ['inbound', 'outbound'], example: 'inbound' }) direction!: string;
+  @ApiProperty({ enum: ['incoming', 'outgoing'], example: 'incoming' }) direction!: string;
 
   @ApiProperty({ description: 'Sender id.', example: '628123456789@c.us' })
   from!: string;
@@ -50,6 +50,6 @@ export class SearchResultsResponseDto {
   @ApiProperty({ description: 'How long the provider took, in milliseconds.', example: 12 })
   tookMs!: number;
 
-  @ApiProperty({ description: 'Which provider answered.', example: 'builtin-db' })
+  @ApiProperty({ description: 'Which provider answered.', example: 'builtin-fts' })
   provider!: string;
 }
