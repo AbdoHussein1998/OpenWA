@@ -76,19 +76,58 @@ describe('engine status writes are fenced by ownership', () => {
 });
 
 describe('SessionOwnershipService.owns', () => {
-  const build = (): SessionOwnershipService =>
-    new SessionOwnershipService({ createQueryBuilder: jest.fn() } as never, undefined);
+  /**
+   * Populated through the REAL claim()/release() path, not by poking the Set.
+   *
+   * An earlier version of this suite asserted only against a freshly built service, whose `owned`
+   * is empty — so `owns()` hardcoded to `return false` passed every assertion. That is the
+   * catastrophic direction (it silences every engine-driven status write on every node), so the
+   * test has to drive a claim before it can claim to pin anything.
+   */
+  const build = (affected: number): SessionOwnershipService => {
+    const execute = jest.fn().mockResolvedValue({ affected });
+    const qb = {
+      update: () => qb,
+      set: () => qb,
+      where: () => qb,
+      andWhere: () => qb,
+      execute,
+    };
+    return new SessionOwnershipService({ createQueryBuilder: () => qb } as never, undefined);
+  };
 
   it('is false for a session this process never claimed', () => {
-    expect(build().owns('never-claimed')).toBe(false);
+    expect(build(1).owns('never-claimed')).toBe(false);
   });
 
-  it('tracks exactly what ownedIds reports, so the fence and the register cannot disagree', () => {
-    const svc = build();
-    // ownedIds() is the existing test seam; owns() must be its membership test, not a second source
-    // of truth that could drift from it.
-    for (const id of svc.ownedIds()) expect(svc.owns(id)).toBe(true);
-    expect(svc.owns('absent')).toBe(svc.ownedIds().includes('absent'));
+  it('is true only after a claim actually succeeds', async () => {
+    const svc = build(1);
+    expect(svc.owns('sess-1')).toBe(false);
+
+    await svc.claim('sess-1');
+
+    expect(svc.owns('sess-1')).toBe(true);
+    expect(svc.ownedIds()).toContain('sess-1');
+    // A claim is per-session, never a blanket "this node owns everything".
+    expect(svc.owns('sess-2')).toBe(false);
+  });
+
+  it('stays false when the conditional claim matches no row (a peer holds it)', async () => {
+    const svc = build(0);
+
+    await svc.claim('sess-1');
+
+    expect(svc.owns('sess-1')).toBe(false);
+  });
+
+  it('goes back to false once the session is released', async () => {
+    const svc = build(1);
+    await svc.claim('sess-1');
+
+    await svc.release('sess-1');
+
+    expect(svc.owns('sess-1')).toBe(false);
+    expect(svc.ownedIds()).not.toContain('sess-1');
   });
 });
 

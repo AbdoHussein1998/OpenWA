@@ -331,6 +331,7 @@ export class SessionEngineLifecycle {
     // runtime — delete()'s transaction must read the current value at call time), and the core
     // call-ins are NON-async passthrough closures (the Task-1 delegate rule above).
     this.controls = new SessionEngineControls({
+      ownsSession: (id: string) => this.ownsSession(id),
       sessionRepository: this.sessionRepository,
       engineFactory: this.engineFactory,
       engines: this.engineRegistry,
@@ -501,9 +502,16 @@ export class SessionEngineLifecycle {
    * the expensive one: it is excluded from the boot reset AND from the takeover sweep, so a session
    * pushed into it is out of every automatic recovery path on every node until an operator acts.
    *
-   * Defaults TRUE when no ownership service is wired (single-process deployments and the
-   * direct-construction specs) — there is no peer to protect the row from, and defaulting false
-   * would silence every engine-driven status write there.
+   * Defaults TRUE only when no ownership service is wired, which in practice means a
+   * direct-construction spec — the service is an unconditional SessionModule provider, so a running
+   * gateway always has one and this fence is live single-node too.
+   *
+   * SCOPE, stated plainly so the guarantee is not read wider than it is. Fenced: the three status
+   * writes in the event wiring, the exhausted-reconnect FAILED, and the start-path FAILED in
+   * controls. NOT fenced: handleEngineReady's direct row write and handleEngineDisconnected's
+   * DISCONNECTED — both statuses are in the boot reset's activeStatuses AND in TAKEOVER_STATUSES,
+   * so a wrong one self-heals, unlike FAILED. The gate is also a point-in-time read: `owned` can
+   * change while the awaited write is in flight, so this narrows the window rather than closing it.
    */
   private ownsSession(id: string): boolean {
     return nodeOwnsSession(this.ownership, id);

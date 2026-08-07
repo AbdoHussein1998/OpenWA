@@ -379,9 +379,11 @@ export class SessionOwnershipService {
  * "May this node write for `sessionId`?" with the no-ownership case decided in one place.
  *
  * Exported as a function rather than inlined at the call sites because the DEFAULT is the part that
- * carries the risk: an absent ownership service means a single-process deployment (and every
- * direct-construction spec), where every session is ours and the answer must be TRUE. Inverting it
- * would silence every engine-driven status write instead of fencing a few — a far worse failure than
+ * carries the risk. Note what it does NOT mean: SessionOwnershipService is an unconditional provider
+ * in SessionModule, so a running gateway ALWAYS has one and this fence is live in single-node
+ * deployments too — every started session is claimed there, so `owns()` answers truthfully. The TRUE
+ * default therefore serves direct-construction specs, not production. Inverting it would silence
+ * every engine-driven status write everywhere instead of fencing a few — a far worse failure than
  * the one the fence exists to prevent, and invisible without a test that pins the default.
  */
 export const nodeOwnsSession = (
