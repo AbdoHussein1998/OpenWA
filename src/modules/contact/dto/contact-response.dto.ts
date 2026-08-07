@@ -61,7 +61,10 @@ export class ProfilePicturesResponseDto {
     example: { '628123456789@c.us': 'https://pps.whatsapp.net/v/t61.24694-24/12345_678_910_n.jpg' },
     additionalProperties: { type: 'string', nullable: true },
   })
-  pictures!: Record<string, string | null>;
+  // An inline index signature, not Record<>: emitDecoratorMetadata wraps a NAMED type in a
+  // `typeof X !== "undefined" && X ? … : Object` runtime guard, and since a type-only name is never
+  // a value one arm of that guard can never execute — an uncoverable branch in every DTO that uses one.
+  pictures!: { [contactId: string]: string | null };
 }
 
 export class NumberCheckResponseDto {
