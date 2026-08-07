@@ -5,6 +5,13 @@ import { SendProductDto, SendCatalogDto, ProductQueryDto } from './dto/send-prod
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 
+/**
+ * Every catalog read walks WhatsApp's business-catalog IQ, which the server simply leaves
+ * unanswered for an account without a catalog. The adapter bounds that walk with its own budget
+ * rather than reporting an unanswered query as an empty catalog.
+ */
+const CATALOG_TIMEOUT_503 = 'WhatsApp did not answer the catalog query within the request budget — retry shortly.';
+
 @ApiTags('catalog')
 @Controller('sessions/:sessionId')
 export class CatalogController {
@@ -16,6 +23,7 @@ export class CatalogController {
     status: 501,
     description: 'Not supported by the active engine: whatsapp-web.js has no catalog API.',
   })
+  @ApiResponse({ status: 503, description: CATALOG_TIMEOUT_503 })
   async getCatalog(@Param('sessionId') sessionId: string) {
     return this.catalogService.getCatalog(sessionId);
   }
@@ -26,6 +34,7 @@ export class CatalogController {
     status: 501,
     description: 'Not supported by the active engine: whatsapp-web.js has no catalog API.',
   })
+  @ApiResponse({ status: 503, description: CATALOG_TIMEOUT_503 })
   async getProducts(@Param('sessionId') sessionId: string, @Query() query: ProductQueryDto) {
     return this.catalogService.getProducts(sessionId, query.page, query.limit);
   }
@@ -36,6 +45,7 @@ export class CatalogController {
     status: 501,
     description: 'Not supported by the active engine: whatsapp-web.js has no catalog API.',
   })
+  @ApiResponse({ status: 503, description: CATALOG_TIMEOUT_503 })
   async getProduct(@Param('sessionId') sessionId: string, @Param('productId') productId: string) {
     return this.catalogService.getProduct(sessionId, productId);
   }
@@ -49,6 +59,7 @@ export class CatalogController {
     status: 501,
     description: 'Not supported by the active engine: whatsapp-web.js cannot send product messages.',
   })
+  @ApiResponse({ status: 503, description: CATALOG_TIMEOUT_503 })
   async sendProduct(@Param('sessionId') sessionId: string, @Body() dto: SendProductDto) {
     return this.catalogService.sendProduct(sessionId, dto.chatId, dto.productId, dto.body);
   }

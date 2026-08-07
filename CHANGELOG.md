@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A catalog read no longer stalls for a minute and then reports an empty catalog** — Baileys answers an unanswered query with `undefined` rather than an error and its catalog parsers are null-safe, so a request WhatsApp never replied to was indistinguishable from a business with no products: `GET /catalog` and `/catalog/products` returned `200` with nothing in them after a silent 60 seconds, and `send-product` reported `404 Product not found` for a product it had simply never heard about. The walk now spends one 30-second budget across every page and answers `503`, and a server that repeats a page cursor instead of advancing no longer spins the walk until the process exhausts its heap.
 - **A benign whatsapp-web.js rejection no longer reads like a crash** — the same un-awaited `framenavigated` re-injection that already logs at `WARN` when the page goes away was logged at `ERROR` in its other shape, where the navigation lands before WhatsApp Web has defined its module registry; it appears at the first boot after the pinned WhatsApp Web build moves under a warm profile, and the session reaches ready unaided.
 
 ### Fixed
