@@ -124,10 +124,10 @@ export function useInfraConfigForm(
   // operator's in-progress, unsaved edits. A successful save restarts → full page reload, re-arming it.
   const formHydrated = useRef(false);
 
-  // The engine radio seeds ONCE from the running engine (which honours a real ENGINE_TYPE env override
-  // over the saved .env.generated value — see the effect below), then is never re-stamped by a background
-  // refetch. `engineTouched` additionally wins over a late first resolution: if the operator clicked a
-  // different engine before /engines/current resolved, the delayed seed must not revert their selection (#735).
+  // The engine radio seeds ONCE — from the running engine, or from the saved file when ENGINE_TYPE is
+  // pinned (see the effect below) — then is never re-stamped by a background refetch. `engineTouched`
+  // additionally wins over a late first resolution: if the operator clicked a different engine before
+  // the seed resolved, the delayed seed must not revert their selection (#735).
   const engineHydrated = useRef(false);
   const engineTouched = useRef(false);
 
@@ -209,15 +209,23 @@ export function useInfraConfigForm(
     if (infraStatus && savedConfig) formHydrated.current = true;
   }, [infraStatus, savedConfig]);
 
-  // The active engine reflects what's actually running (honours a real-env ENGINE_TYPE override),
-  // so seed the selected radio from it rather than the saved .env.generated value — but only ONCE, and
-  // never after the operator has touched it. Without this guard a background refetch (or a late first
-  // resolution racing an early click) re-stamps the running engine over an in-progress selection (#735).
+  // The active engine reflects what's actually running, so seed the selected radio from it rather than
+  // the saved .env.generated value — but only ONCE, and never after the operator has touched it. Without
+  // that guard a background refetch (or a late first resolution racing an early click) re-stamps the
+  // running engine over an in-progress selection (#735).
+  //
+  // When ENGINE_TYPE is PINNED by the environment the running engine is that pin, not a choice anyone
+  // made here. Seeding from it would present the pin as the operator's own selection and then persist it
+  // over their saved engine on the next save of any field on this page — so unsetting the variable could
+  // no longer restore what they picked. A pinned deployment seeds from the saved file instead; the card
+  // badge still reports what is actually running (#1082).
   useEffect(() => {
-    if (!currentEngine || engineHydrated.current || engineTouched.current) return;
+    if (!infraStatus || engineHydrated.current || engineTouched.current) return;
+    const seed = infraStatus.envPinned?.includes('ENGINE_TYPE') ? savedConfig?.engine.type : currentEngine;
+    if (!seed) return;
     engineHydrated.current = true;
-    setEngineConfig(prev => (prev.type === currentEngine ? prev : { ...prev, type: currentEngine }));
-  }, [currentEngine]);
+    setEngineConfig(prev => (prev.type === seed ? prev : { ...prev, type: seed }));
+  }, [currentEngine, infraStatus, savedConfig]);
 
   const updateDbConfig = (key: keyof DatabaseConfig, value: string | number | boolean) =>
     setDbConfig(prev => ({ ...prev, [key]: value }));
