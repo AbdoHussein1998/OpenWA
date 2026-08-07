@@ -4197,6 +4197,9 @@
           },
           "404": {
             "description": "No such invite — invalid, expired or revoked"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. Deliberately not folded into the 404 above — a query that never came back is not the same claim as a group that does not exist."
           }
         },
         "summary": "Preview a group from its invite code, without joining",
@@ -4241,6 +4244,9 @@
           },
           "404": {
             "description": "Group not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. Deliberately not folded into the 404 above — a query that never came back is not the same claim as a group that does not exist."
           }
         },
         "summary": "Get detailed group info",
