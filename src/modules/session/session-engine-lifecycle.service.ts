@@ -952,7 +952,14 @@ export class SessionEngineLifecycle {
       // (after 10s on a hang), so reconnection proceeds either way.
       const oldEngine = this.engines.get(id);
       if (oldEngine) {
-        await this.teardownEngineSafely(id, oldEngine, e => e.destroy(), 'destroy');
+        const destroyed = await this.teardownEngineSafely(id, oldEngine, e => e.destroy(), 'destroy');
+        if (!destroyed) {
+          // A timed-out destroy() leaves the wedged Chromium process alive (the raced promise never
+          // kills it — see start()'s catch), and this path relaunches on the SAME profile dir in the
+          // same tick. Escalate to a SIGKILL so the replacement browser can't collide with the
+          // orphan (#1081); bounded again by teardownEngineSafely, so it can't wedge a second time.
+          await this.teardownEngineSafely(id, oldEngine, e => e.forceDestroy(), 'force-destroy');
+        }
         this.engines.deleteIfLive(id, oldEngine);
       }
 

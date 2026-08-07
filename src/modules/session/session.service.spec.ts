@@ -1277,6 +1277,38 @@ describe('SessionService', () => {
       expect(intern().engines.has('sess-uuid-1')).toBe(false);
       expect(mockEngine.forceDestroy).toHaveBeenCalled();
     });
+
+    it('executeReconnect escalates a timed-out destroy() to forceDestroy() before relaunching (a wedged Chromium must not survive into the relaunch)', async () => {
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      // Register the old engine the way a live session would have.
+      await intern().initializeEngine('sess-uuid-1', createMockSession());
+      const initCallsBeforeReconnect = mockEngine.initialize.mock.calls.length;
+      // The wedge: graceful destroy() never settles, so the teardown race can only time out.
+      mockEngine.destroy.mockReturnValue(new Promise<void>(() => undefined));
+
+      jest.useFakeTimers();
+      try {
+        const run = intern().executeReconnect('sess-uuid-1', createMockSession(), {
+          attempts: 1,
+          timer: null,
+          maxAttempts: 5,
+          baseDelay: 5000,
+        });
+        await jest.advanceTimersByTimeAsync(10_000); // the graceful-destroy teardown race is lost
+        await run;
+
+        // The wedged browser must be reaped before a replacement launches against the same profile
+        // dir — the invariant start()'s catch and the init-timeout path already enforce.
+        expect(mockEngine.forceDestroy).toHaveBeenCalledTimes(1);
+        expect(mockEngine.initialize.mock.calls.length).toBe(initCallsBeforeReconnect + 1); // relaunch happened
+        const killOrder = mockEngine.forceDestroy.mock.invocationCallOrder[0];
+        const relaunchOrder = mockEngine.initialize.mock.invocationCallOrder[initCallsBeforeReconnect];
+        expect(killOrder).toBeLessThan(relaunchOrder);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
   // ── initializeEngine init-timeout race (#667 follow-up) ───────────
@@ -1777,7 +1809,12 @@ describe('SessionService', () => {
       try {
         const i = internals();
         // A wedged Chromium: destroy() never resolves — the exact condition that triggers a reconnect.
-        const stuck = { destroy: jest.fn(() => new Promise<void>(() => undefined)) };
+        // The timed-out destroy escalates to a SIGKILL before the relaunch, so the stuck engine needs
+        // the forceDestroy the real interface guarantees.
+        const stuck = {
+          destroy: jest.fn(() => new Promise<void>(() => undefined)),
+          forceDestroy: jest.fn().mockResolvedValue(undefined),
+        };
         i.engines.set('sess-uuid-1', stuck);
 
         const done = i.executeReconnect('sess-uuid-1', createMockSession(), reconnectState);
