@@ -4059,7 +4059,14 @@
         ],
         "responses": {
           "200": {
-            "description": "What the invite discloses about the group"
+            "description": "What the invite discloses about the group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupJoinInfoDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not started, or no code supplied"
@@ -4099,7 +4106,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Group details with participants"
+            "description": "Group details with participants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupInfoDto"
+                }
+              }
+            }
           },
           "404": {
             "description": "Group not found"
@@ -4137,7 +4151,14 @@
         },
         "responses": {
           "200": {
-            "description": "Joined the group"
+            "description": "Joined the group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupJoinedResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid or expired invite code, or session is not started"
@@ -4174,7 +4195,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Group settings"
+            "description": "Group settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupSettingsResponseDto"
+                }
+              }
+            }
           },
           "404": {
             "description": "Group not found"
@@ -4219,7 +4247,14 @@
         },
         "responses": {
           "200": {
-            "description": "Group settings updated"
+            "description": "Group settings updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAckResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "No setting provided, or a value is not a boolean"
@@ -4266,7 +4301,14 @@
         },
         "responses": {
           "201": {
-            "description": "Group created"
+            "description": "Group created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupSummaryDto"
+                }
+              }
+            }
           }
         },
         "summary": "Create a new group",
@@ -4310,7 +4352,14 @@
         },
         "responses": {
           "200": {
-            "description": "Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)"
+            "description": "Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParticipantsOperationResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Add participants to a group",
@@ -4352,7 +4401,14 @@
         },
         "responses": {
           "200": {
-            "description": "Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)"
+            "description": "Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParticipantsOperationResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Remove participants from a group",
@@ -4396,7 +4452,14 @@
         },
         "responses": {
           "200": {
-            "description": "Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)"
+            "description": "Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParticipantsOperationResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Promote participants to admin",
@@ -4440,7 +4503,14 @@
         },
         "responses": {
           "200": {
-            "description": "Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)"
+            "description": "Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParticipantsOperationResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Demote participants from admin",
@@ -4484,7 +4554,14 @@
         },
         "responses": {
           "200": {
-            "description": "Subject updated"
+            "description": "Subject updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAckResponseDto"
+                }
+              }
+            }
           },
           "403": {
             "description": "The engine refused the change — admin rights are required"
@@ -4531,7 +4608,14 @@
         },
         "responses": {
           "200": {
-            "description": "Description updated"
+            "description": "Description updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAckResponseDto"
+                }
+              }
+            }
           },
           "403": {
             "description": "The engine refused the change — admin rights are required"
@@ -4568,7 +4652,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Left the group"
+            "description": "Left the group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAckResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Leave a group",
@@ -4602,7 +4693,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Picture URL, or null when the group has none"
+            "description": "Picture URL, or null when the group has none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupPictureResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Get the group's picture URL",
@@ -4644,7 +4742,14 @@
         },
         "responses": {
           "200": {
-            "description": "Group picture updated"
+            "description": "Group picture updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAckResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not active, or neither url nor base64 supplied"
@@ -4682,7 +4787,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Group picture removed"
+            "description": "Group picture removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAckResponseDto"
+                }
+              }
+            }
           },
           "403": {
             "description": "The engine refused the change — admin rights required"
@@ -4719,7 +4831,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Group invite code"
+            "description": "Group invite code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupInviteCodeResponseDto"
+                }
+              }
+            }
           },
           "403": {
             "description": "The engine refused the request — admin rights required for this group"
@@ -4759,7 +4878,14 @@
         ],
         "responses": {
           "200": {
-            "description": "New invite code generated"
+            "description": "New invite code generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupInviteCodeRevokedResponseDto"
+                }
+              }
+            }
           },
           "403": {
             "description": "The engine refused the request — admin rights required for this group"
@@ -10579,6 +10705,173 @@
           "message"
         ]
       },
+      "GroupJoinInfoDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Group id.",
+            "example": "120363000000000000@g.us"
+          },
+          "name": {
+            "type": "string",
+            "description": "Group subject.",
+            "example": "Engineering"
+          },
+          "description": {
+            "type": "string",
+            "description": "Group description.",
+            "example": "Release coordination"
+          },
+          "owner": {
+            "type": "string",
+            "description": "Owner id in the engine's native format.",
+            "example": "628123456789@c.us"
+          },
+          "createdAt": {
+            "type": "number",
+            "description": "Unix SECONDS the group was created.",
+            "example": 1786000000
+          },
+          "participantCount": {
+            "type": "number",
+            "description": "Member count, when disclosed.",
+            "example": 42
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "GroupParticipantDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Participant id in the engine's native format.",
+            "example": "628123456789@c.us"
+          },
+          "number": {
+            "type": "string",
+            "description": "MSISDN digits, without a leading + or separators.",
+            "example": "628123456789"
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name, when the engine reports one.",
+            "example": "Ada Lovelace"
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "description": "Whether the participant is a group admin.",
+            "example": false
+          },
+          "isSuperAdmin": {
+            "type": "boolean",
+            "description": "Whether the participant created the group.",
+            "example": false
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "isAdmin",
+          "isSuperAdmin"
+        ]
+      },
+      "GroupInfoDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Group id.",
+            "example": "120363000000000000@g.us"
+          },
+          "name": {
+            "type": "string",
+            "description": "Group subject.",
+            "example": "Engineering"
+          },
+          "participantsCount": {
+            "type": "number",
+            "description": "Member count, when the engine reports it.",
+            "example": 42
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "description": "Whether this account is an admin of the group.",
+            "example": true
+          },
+          "linkedParentJID": {
+            "type": "string",
+            "nullable": true,
+            "description": "JID of the parent community, or null when the group is standalone.",
+            "example": null
+          },
+          "description": {
+            "type": "string",
+            "description": "Group description.",
+            "example": "Release coordination"
+          },
+          "owner": {
+            "type": "string",
+            "description": "Owner id in the engine's native format.",
+            "example": "628123456789@c.us"
+          },
+          "createdAt": {
+            "type": "number",
+            "description": "Unix SECONDS the group was created.",
+            "example": 1786000000
+          },
+          "participants": {
+            "description": "Members of the group.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupParticipantDto"
+            }
+          },
+          "isReadOnly": {
+            "type": "boolean",
+            "description": "Whether this account can no longer post (left or removed).",
+            "example": false
+          },
+          "isAnnounce": {
+            "type": "boolean",
+            "description": "Engine-reported announce flag.",
+            "example": false
+          },
+          "announce": {
+            "type": "boolean",
+            "description": "Only admins may send messages.",
+            "example": false
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "Only admins may edit subject, description and picture.",
+            "example": false
+          },
+          "ephemeralSeconds": {
+            "type": "number",
+            "description": "Disappearing-messages timer in seconds; 0 or absent means off.",
+            "example": 0
+          },
+          "memberAddMode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "admins"
+            ],
+            "description": "Who may add participants. Absent when the engine did not report it.",
+            "example": "admins"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "participants"
+        ]
+      },
       "JoinGroupDto": {
         "type": "object",
         "properties": {
@@ -10591,6 +10884,54 @@
         "required": [
           "inviteCode"
         ]
+      },
+      "GroupJoinedResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Always true — a failure is reported as a non-2xx status.",
+            "example": true
+          },
+          "groupId": {
+            "type": "string",
+            "description": "Id of the group that was joined.",
+            "example": "120363000000000000@g.us"
+          }
+        },
+        "required": [
+          "success",
+          "groupId"
+        ]
+      },
+      "GroupSettingsResponseDto": {
+        "type": "object",
+        "properties": {
+          "announce": {
+            "type": "boolean",
+            "description": "Only admins may send messages.",
+            "example": false
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "Only admins may edit subject, description and picture.",
+            "example": false
+          },
+          "ephemeralSeconds": {
+            "type": "number",
+            "description": "Disappearing-messages timer in seconds. Absent when the engine did not report it.",
+            "example": 0
+          },
+          "memberAddMode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "admins"
+            ],
+            "description": "Who may add participants. Absent when the engine did not report it.",
+            "example": "admins"
+          }
+        }
       },
       "GroupSettingsDto": {
         "type": "object",
@@ -10618,6 +10959,25 @@
           }
         }
       },
+      "GroupAckResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Always true — a failure is reported as a non-2xx status, not as false.",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable confirmation of what was done.",
+            "example": "Group subject updated"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ]
+      },
       "CreateGroupDto": {
         "type": "object",
         "properties": {
@@ -10640,6 +11000,41 @@
           "participants"
         ]
       },
+      "GroupSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Group id.",
+            "example": "120363000000000000@g.us"
+          },
+          "name": {
+            "type": "string",
+            "description": "Group subject.",
+            "example": "Engineering"
+          },
+          "participantsCount": {
+            "type": "number",
+            "description": "Member count, when the engine reports it.",
+            "example": 42
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "description": "Whether this account is an admin of the group.",
+            "example": true
+          },
+          "linkedParentJID": {
+            "type": "string",
+            "nullable": true,
+            "description": "JID of the parent community, or null when the group is standalone.",
+            "example": null
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
       "ParticipantsDto": {
         "type": "object",
         "properties": {
@@ -10654,6 +11049,62 @@
         },
         "required": [
           "participants"
+        ]
+      },
+      "ParticipantOperationResultDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Neutral participant id the outcome belongs to.",
+            "example": "628123456789@c.us"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "True only when the engine confirmed the change for this participant.",
+            "example": true
+          },
+          "status": {
+            "type": "number",
+            "description": "The engine's own status code, when it gave one.",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "Engine-reported reason, when it gave one.",
+            "example": "ok"
+          }
+        },
+        "required": [
+          "id",
+          "success"
+        ]
+      },
+      "ParticipantsOperationResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Always true — a failure is reported as a non-2xx status, not as false.",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable confirmation of what was done.",
+            "example": "Group subject updated"
+          },
+          "results": {
+            "description": "One entry per requested participant.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParticipantOperationResultDto"
+            }
+          }
+        },
+        "required": [
+          "success",
+          "message",
+          "results"
         ]
       },
       "GroupSubjectDto": {
@@ -10682,6 +11133,20 @@
           "description"
         ]
       },
+      "GroupPictureResponseDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "nullable": true,
+            "description": "Group picture URL, or null when the group has none.",
+            "example": "https://pps.whatsapp.net/v/t61.24694-24/12345_678_910_n.jpg"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
       "SetGroupPictureDto": {
         "type": "object",
         "properties": {
@@ -10700,6 +11165,50 @@
             "example": "image/jpeg"
           }
         }
+      },
+      "GroupInviteCodeResponseDto": {
+        "type": "object",
+        "properties": {
+          "inviteCode": {
+            "type": "string",
+            "description": "The invite code on its own.",
+            "example": "GTvX9c8H8l718ewOH22Zk5"
+          },
+          "inviteLink": {
+            "type": "string",
+            "description": "The same code as a joinable link.",
+            "example": "https://chat.whatsapp.com/GTvX9c8H8l718ewOH22Zk5"
+          }
+        },
+        "required": [
+          "inviteCode",
+          "inviteLink"
+        ]
+      },
+      "GroupInviteCodeRevokedResponseDto": {
+        "type": "object",
+        "properties": {
+          "inviteCode": {
+            "type": "string",
+            "description": "The invite code on its own.",
+            "example": "GTvX9c8H8l718ewOH22Zk5"
+          },
+          "inviteLink": {
+            "type": "string",
+            "description": "The same code as a joinable link.",
+            "example": "https://chat.whatsapp.com/GTvX9c8H8l718ewOH22Zk5"
+          },
+          "message": {
+            "type": "string",
+            "description": "Confirmation that the previous code was revoked.",
+            "example": "Invite code revoked and new one generated"
+          }
+        },
+        "required": [
+          "inviteCode",
+          "inviteLink",
+          "message"
+        ]
       },
       "SetProfileNameDto": {
         "type": "object",
