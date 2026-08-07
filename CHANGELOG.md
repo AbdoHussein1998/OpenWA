@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The API description now documents the two statuses middleware returns before routing** — `415` for a compressed request body and `503` with `Retry-After` when too much body data is already in flight, neither of which appeared anywhere in the OpenAPI document despite applying to every operation.
 - **The Helm chart now states the reason `replicaCount` must stay 1 that actually applies today** — the warning described two pods corrupting shared session auth, which a session lease and per-pod volumes already prevent, so an operator acting on it would mitigate the wrong thing.
 
+### Documentation
+
+- The webhook troubleshooting runbook told operators there was no webhook-delivery log API and to grep container logs instead; that was true when written but `GET /api/webhooks/delivery-failures` shipped four days later, so the one page reached when a webhook is silent denied the endpoint exists. It now carries the real call, names the fields that gate dispatch (`active`, `events`, `filters`), and notes that `lastTriggeredAt` is never set by the Test button.
+
 ## [0.14.4] - 2026-08-07
 
 ### Fixed

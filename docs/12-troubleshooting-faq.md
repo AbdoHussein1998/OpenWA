@@ -713,11 +713,20 @@ curl -X POST http://localhost:2785/api/sessions/{id}/messages/send-image \
 **Diagnostic:**
 
 ```bash
-# Check webhook configuration
+# Check webhook configuration — `active` must be true, `events` must list the event (or "*"),
+# and `filters` must not exclude it. `lastTriggeredAt` stays null until a real 2xx delivery:
+# the Test button never sets it, so a green Test proves nothing about real events.
 curl -H "X-API-Key: $API_KEY" \
   http://localhost:2785/api/sessions/{sessionId}/webhooks
 
-# No webhook-delivery log API — check the server logs / audit trail instead
+# Abandoned deliveries, most recent first: those that exhausted every retry, plus those never
+# attempted at all (recorded with `attempts: 0`). Requires an ADMIN key — an OPERATOR key gets
+# a 403, which reads like the endpoint does not exist. Rows older than
+# WEBHOOK_FAILURE_RETENTION_DAYS (default 90) are pruned.
+curl -H "X-API-Key: $ADMIN_API_KEY" \
+  "http://localhost:2785/api/webhooks/delivery-failures?sessionId={sessionId}&limit=20"
+
+# Attempts still in flight (not yet exhausted) appear only in the server logs:
 docker compose logs openwa-api 2>&1 | grep -i webhook
 
 # Test webhook endpoint
@@ -727,6 +736,12 @@ curl -X POST http://your-webhook-url \
 ```
 
 **Solutions:**
+
+Read the two lists together before changing anything. A delivery-failure row carrying an HTTP
+`lastStatusCode` means the gateway delivered and your receiver rejected it — fix the receiver. An
+empty list with `lastTriggeredAt` still null means nothing has ever been delivered and nothing has
+permanently failed: the event either never matched this webhook (`active`, `events`, `filters`) or
+was never emitted for the session at all.
 
 Webhooks are rows created through the API — there is no webhook config file:
 
