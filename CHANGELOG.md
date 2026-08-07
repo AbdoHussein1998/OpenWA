@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-08-07
+
 ### Added
 
 - **A WhatsApp-initiated unlink now leaves a durable audit record** — the disconnect reason previously reached only the log, the webhook and the socket, so once the process restarted an unlink was indistinguishable over the API from an ordinary network drop; transient drops stay unaudited, so a reconnect storm still writes nothing.
