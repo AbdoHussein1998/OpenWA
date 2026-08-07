@@ -160,7 +160,20 @@ function exportInlineMediaBudgetBytes(): number {
  * 413 risk, and reports a `sizeBytes` that is URL text measured as base64, the size of nothing.
  */
 function isMediaPointer(data: string): boolean {
-  return data.startsWith('http://') || data.startsWith('https://');
+  // Case-insensitive to match the two adapters that actually fetch these (`isHttpUrl` in
+  // wwebjs-messaging.ts, `resolveMediaBuffer` in baileys-messaging.ts). `@IsUrl()` accepts an
+  // uppercase scheme, so a row can hold one; disagreeing with the senders here would destroy a
+  // reference to media they had just delivered.
+  return /^https?:\/\//i.test(data);
+}
+
+/**
+ * Sort key for the media budget: newest first, so a budget that cannot hold everything keeps the
+ * most recent media. `Number(null)` is 0, which sorts an undated row last — the least worth keeping.
+ */
+function newestFirstKey(row: MessageRow): number {
+  const timestamp = Number(row.timestamp);
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 /** Spends the shared budget. Returns true when this payload does not fit and must be dropped. */
@@ -350,6 +363,13 @@ export class InfraDataController {
     // (and small). The import's explicit column list already ignores it in older archives.
     for (const row of messages) {
       delete row.body_ts;
+    }
+    // Spend the budget newest-first. `SELECT *` carries no ORDER BY, so rows arrive in rowid order on
+    // SQLite — oldest first, so an exhausted budget would keep the oldest photos and omit every recent
+    // one — and in physical-tuple order on Postgres, which routine UPDATEs (ack, edits, reactions,
+    // archive pointers) reshuffle, so two exports of an unchanged DB need not agree on which media
+    // they carry. Sorting a COPY leaves the exported array's own order untouched.
+    for (const row of [...messages].sort((a, b) => newestFirstKey(b) - newestFirstKey(a))) {
       stripInlineMediaPayload(row, exceedsBudget);
     }
     const messageBatches = await queryOptionalTable<MessageBatchRow>('message_batches');
