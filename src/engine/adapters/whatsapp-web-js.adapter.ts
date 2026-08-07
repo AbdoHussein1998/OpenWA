@@ -117,7 +117,18 @@ export interface WhatsAppWebJsConfig {
 }
 
 const READY_RECONCILE_INTERVAL_MS = 2000;
-const READY_RECONCILE_TIMEOUT_MS = 90_000;
+export const READY_RECONCILE_TIMEOUT_MS = 90_000;
+
+// How long after `authenticated` the event bridge is allowed to still be attaching before a reload is
+// considered. whatsapp-web.js clears `eventsAttached` in its constructor (Client.js:109) and sets it
+// only once attachEventListeners() resolves (Client.js:373); in between it evaluates LoadUtils, polls
+// up to 30s for window.WWebJS (Client.js:334), then builds ClientInfo and InterfaceController. So a
+// false flag is the NORMAL reading for most of a minute on a loaded host, and reloading on it aborts
+// a healthy attach — the page navigates out from under the in-flight inject(), which then dies before
+// re-exposing the bridge and cannot be retried (#1081). Must exceed upstream's own 30s poll with room
+// for the rest of the pipeline, and stay well under READY_RECONCILE_TIMEOUT_MS so a reload that IS
+// warranted still has time to reinject before the deadline.
+export const READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS = 45_000;
 
 // WhatsApp Web states that mean WhatsApp has judged the account or its egress, mapped to the neutral
 // restriction kinds. This is the ONLY channel the library offers: there is no dedicated event, error
@@ -1239,6 +1250,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     if (!this.client || !this.lastProbeStateConnected) return;
     const client = this.client as Client & { eventsAttached?: boolean };
     if (client.eventsAttached !== false) return;
+    // An attach still inside upstream's own budget is slow, not dead — navigating now would abort it.
+    if (Date.now() - this.readyReconcileStartedAt < READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS) return;
     this.readyReconcileReloadAttempted = true;
     this.logger.warn('WhatsApp Web is connected but its event bridge never attached; reloading the page to reinject', {
       sessionId: this.config.sessionId,
