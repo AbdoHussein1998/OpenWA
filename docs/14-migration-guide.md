@@ -142,7 +142,8 @@ curl -X POST 'http://localhost:2785/api/infra/import-data' \
     "ingressEvents": [...],
     "webhookDeliveryFailures": [...],
     "integrationDeliveryFailures": [...],
-    "statusUpdates": [...]
+    "statusUpdates": [...],
+    "automationRules": [...]
   },
   "counts": {
     "sessions": 5,
@@ -157,7 +158,8 @@ curl -X POST 'http://localhost:2785/api/infra/import-data' \
     "ingressEvents": 12,
     "webhookDeliveryFailures": 0,
     "integrationDeliveryFailures": 0,
-    "statusUpdates": 19
+    "statusUpdates": 19,
+    "automationRules": 7
   },
   "skippedTables": []
 }
@@ -337,6 +339,8 @@ async function migrateSqliteToPostgres(config: MigrationConfig): Promise<Migrati
     'webhook_delivery_failures',
     'integration_delivery_failures',
     'status_updates',
+    // ON DELETE CASCADE FK to sessions, so it must follow them.
+    'automation_rules',
   ];
 
   // 4. Migrate each table
