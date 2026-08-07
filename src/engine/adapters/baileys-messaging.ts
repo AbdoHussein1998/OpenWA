@@ -20,6 +20,7 @@ import { BadRequestException } from '@nestjs/common';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
 import { type createLogger } from '../../common/services/logger.service';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
 
 /**
  * Messaging-domain operations extracted from BaileysAdapter. The adapter keeps the public
@@ -146,7 +147,15 @@ export class BaileysMessaging {
   async getNumberId(number: string): Promise<string | null> {
     this.host.ensureReady();
     const results = await this.sock().onWhatsApp(number);
-    const hit = results?.[0];
+    // onWhatsApp has no else branch after `if (results)`, so it resolves undefined when the usync
+    // query goes unanswered — and Baileys' query() swallows its own timeout rather than throwing.
+    // An empty ARRAY is a real answer; undefined is the absence of one, and coalescing the two
+    // turns "we never heard back" into "this number is not on WhatsApp", which the caller then
+    // acts on. The two are distinguishable here, so they are distinguished.
+    if (results === undefined) {
+      throw new EngineTransportError('WhatsApp did not answer the number-check query');
+    }
+    const hit = results[0];
     // Baileys returns a raw `<phone>@s.whatsapp.net`; neutralize it before it crosses the engine
     // boundary so the value matches whatsapp-web.js (`<phone>@c.us`) and the IWhatsAppEngine contract
     // (no raw `@s.whatsapp.net` in a neutral field). It also round-trips back to a send on either engine.

@@ -3898,6 +3898,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer the lookup. Deliberately not reported as `exists: false` — that would be a claim about the number rather than about the query, and this route exists to be trusted before a send."
           }
         },
         "summary": "Check if a phone number exists on WhatsApp",

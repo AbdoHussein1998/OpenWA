@@ -1307,6 +1307,23 @@ describe('BaileysAdapter messaging', () => {
     await expect(adapter.checkNumberExists('628111')).resolves.toBe(false);
   });
 
+  // Baileys' onWhatsApp resolves undefined when the usync query goes unanswered — it has no else
+  // branch after `if (results)`. Coalescing that to null reports "this number is not on WhatsApp",
+  // which is a claim about the number rather than about the query that never came back.
+  it('getNumberId reports an unanswered lookup instead of claiming the number is not on WhatsApp', async () => {
+    fakeSock.onWhatsApp.mockResolvedValue(undefined);
+    const adapter = await readyAdapter();
+    await expect(adapter.getNumberId('628111')).rejects.toBeInstanceOf(EngineTransportError);
+    await expect(adapter.checkNumberExists('628111')).rejects.toBeInstanceOf(EngineTransportError);
+  });
+
+  // An empty array is a real answer: Baileys returns [] when there is nothing to query.
+  it('getNumberId still returns null for an empty result, which is an answer and not a failure', async () => {
+    fakeSock.onWhatsApp.mockResolvedValue([]);
+    const adapter = await readyAdapter();
+    await expect(adapter.getNumberId('628111')).resolves.toBeNull();
+  });
+
   it('sendChatState maps typing -> composing presence', async () => {
     const adapter = await readyAdapter();
     await adapter.sendChatState('628111@s.whatsapp.net', 'typing');
