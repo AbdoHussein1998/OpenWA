@@ -30,6 +30,7 @@ import { SessionStatusBroadcaster } from './session-status-broadcaster';
 import { SessionEngineLeafEvents } from './session-engine-leaf-events';
 import { SessionEngineEventWiring, SessionEngineWiringHost } from './session-engine-event-wiring';
 import { SessionEngineControls } from './session-engine-controls';
+import { SessionOwnershipService, nodeOwnsSession } from './session-ownership.service';
 
 /**
  * Eager status-history reads are opt-in. On affected freshly paired whatsapp-web.js accounts,
@@ -255,6 +256,11 @@ export class SessionEngineLifecycle {
     // running gateway always has it.
     @Optional()
     private readonly auditService?: AuditService,
+    // @Optional for the same reason as the three above: direct-construction specs omit it, and an
+    // absent ownership service means a single-process deployment where every session is ours. The
+    // ownsSession() default below therefore has to be TRUE, not false.
+    @Optional()
+    private readonly ownership?: SessionOwnershipService,
   ) {
     // The fence Maps are handed over BY REFERENCE: they stay lifecycle fields (specs poke them
     // through the lifecycle), while the fence logic operates on the same instances.
@@ -286,6 +292,7 @@ export class SessionEngineLifecycle {
     // promise and add settlement hops the retirement-race specs assert against).
     this.wiringHost = {
       isLiveEngine: (id, engine) => this.isLiveEngine(id, engine),
+      ownsSession: id => this.ownsSession(id),
       handleEngineReady: (id, engine, phone, pushName) => this.handleEngineReady(id, engine, phone, pushName),
       handleEngineDisconnected: (id, engine, reason) => this.handleEngineDisconnected(id, engine, reason),
       updateStatus: (id, status) => this.updateStatus(id, status),
@@ -482,6 +489,24 @@ export class SessionEngineLifecycle {
    */
   private isLiveEngine(id: string, engine: IWhatsAppEngine): boolean {
     return this.engines.isLive(id, engine);
+  }
+
+  /**
+   * May this node still write for `id`? Orthogonal to isLiveEngine, and both are required before a
+   * status is persisted from an engine callback.
+   *
+   * A lease can lapse while the process is perfectly healthy — a slow query is enough. The heartbeat
+   * notices at its next tick and tears the local engine down, but until that finishes isLiveEngine
+   * is still true, so a dying generation can persist a status onto a row a peer now owns. FAILED is
+   * the expensive one: it is excluded from the boot reset AND from the takeover sweep, so a session
+   * pushed into it is out of every automatic recovery path on every node until an operator acts.
+   *
+   * Defaults TRUE when no ownership service is wired (single-process deployments and the
+   * direct-construction specs) — there is no peer to protect the row from, and defaulting false
+   * would silence every engine-driven status write there.
+   */
+  private ownsSession(id: string): boolean {
+    return nodeOwnsSession(this.ownership, id);
   }
 
   private async initializeEngine(id: string, session: Session): Promise<void> {
@@ -845,7 +870,10 @@ export class SessionEngineLifecycle {
       // Don't leave the session silently stuck DISCONNECTED — mark it terminally FAILED with a reason
       // so findOne/findAll surface it via `lastError` and the dashboard shows it needs a restart.
       this.sessionErrors.set(id, decision.reason);
-      void this.updateStatus(id, SessionStatus.FAILED);
+      // Same ownership fence as the engine callbacks: a reconnect chain that exhausts itself after
+      // this node's lease lapsed must not park a peer's session in FAILED, which nothing resets
+      // automatically. The in-memory error above is per-process and harmless either way.
+      if (this.ownsSession(id)) void this.updateStatus(id, SessionStatus.FAILED);
       // Terminal path — evict the dead engine so it neither holds a concurrency slot nor makes a
       // subsequent start() reject the session as "already started". This mirrors onError's terminal
       // path (the same rationale: leaving the engine in the map wedges the session). The engine may

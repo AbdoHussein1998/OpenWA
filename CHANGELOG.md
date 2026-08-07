@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A node that has lost its session lease can no longer park that session in `FAILED`** — engine callbacks were fenced only by a local liveness check, so during the window between a lapsed lease and the teardown the heartbeat schedules, a dying generation could persist a status onto a row a peer already owned; `FAILED` is excluded from both the boot reset and the takeover sweep by design, so a session pushed into it left every automatic recovery path on every node until an operator restarted it by hand.
 - **Thirteen settings that did nothing under Docker now take effect** — Compose forwards environment explicitly and has no `env_file`, so `BAILEYS_MARK_ONLINE_ON_CONNECT`, `BAILEYS_SYNC_FULL_HISTORY`, `WEBHOOK_CONTACT_DETAILS`, `ALLOW_UNSIGNED_INGRESS`, `STORE_EPHEMERAL_MESSAGES`, `RESOLVE_LID_TO_PHONE`, `SIMULATE_TYPING`, `MCP_ENABLED`, `SEARCH_ENABLED`, `SERVE_DASHBOARD`, `CACHE_ENABLED`, `DATABASE_LOGGING` and `MAIN_DATABASE_SYNCHRONIZE` never reached the container however the operator's `.env` was written — the MCP server could not be enabled at all, `SEARCH_ENABLED=false` did not disable the search route it documents, and `BAILEYS_MARK_ONLINE_ON_CONNECT` left the paired phone's notifications suppressed for as long as the gateway stayed connected.
 
 ### Changed

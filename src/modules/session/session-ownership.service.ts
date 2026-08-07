@@ -356,4 +356,35 @@ export class SessionOwnershipService {
   ownedIds(): string[] {
     return [...this.owned];
   }
+
+  /**
+   * Does THIS process still hold `sessionId`? Synchronous and in-memory on purpose.
+   *
+   * Callers are engine callbacks on the hot path that must not introduce an await: an extra
+   * suspension point there would re-open the very retirement race the surrounding `isLiveEngine`
+   * fence closes. The in-memory set is also the right authority here — it is what `renew()` clears
+   * the moment it observes the claim is gone, which is exactly the transition this answers.
+   *
+   * The two fences are orthogonal and both are needed. `isLiveEngine` asks "is this engine object
+   * still the registered one" (generation safety, local); this asks "may this node still speak for
+   * the session at all" (ownership, cluster-wide). Between losing a lease and finishing the teardown
+   * the heartbeat schedules, the first is still true while the second is already false.
+   */
+  owns(sessionId: string): boolean {
+    return this.owned.has(sessionId);
+  }
 }
+
+/**
+ * "May this node write for `sessionId`?" with the no-ownership case decided in one place.
+ *
+ * Exported as a function rather than inlined at the call sites because the DEFAULT is the part that
+ * carries the risk: an absent ownership service means a single-process deployment (and every
+ * direct-construction spec), where every session is ours and the answer must be TRUE. Inverting it
+ * would silence every engine-driven status write instead of fencing a few — a far worse failure than
+ * the one the fence exists to prevent, and invisible without a test that pins the default.
+ */
+export const nodeOwnsSession = (
+  ownership: Pick<SessionOwnershipService, 'owns'> | undefined,
+  sessionId: string,
+): boolean => !ownership || ownership.owns(sessionId);
