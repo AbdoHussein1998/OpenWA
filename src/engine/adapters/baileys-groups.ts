@@ -186,7 +186,13 @@ export class BaileysGroups {
     action: 'add' | 'remove' | 'promote' | 'demote',
   ): Promise<ParticipantOperationResult[]> {
     this.host.ensureReady();
-    const raw = await this.sock().groupParticipantsUpdate(groupId, this.toEngineParticipants(participants), action);
+    // An unanswered query yields [], which the empty-results guard below would report as a refusal
+    // — a dead transport sold to the caller as a permissions problem.
+    const raw = await withQueryDeadline(
+      this.sock().groupParticipantsUpdate(groupId, this.toEngineParticipants(participants), action),
+      this.queryBudgetMs,
+      `WhatsApp did not answer the participant ${action} in time`,
+    );
     const results: ParticipantOperationResult[] = (raw ?? []).map(entry => ({
       id: entry.jid ? this.host.toNeutralJid(entry.jid) : '',
       success: entry.status === '200',
@@ -299,9 +305,17 @@ export class BaileysGroups {
     // and rejects with an IQ error (e.g. not-authorized / gone) for the same client-facing cause.
     // Both map to a 400. A transport failure (dropped socket, timeout) is NOT a refused invite:
     // folding it into the 400 makes a dead connection look like a bad code, so it propagates.
+    //
+    // That guarantee needs the deadline to hold at all. An UNANSWERED query also resolves undefined
+    // — it never reaches the catch — so without a clock of our own it lands on the same `if (!jid)`
+    // as a genuinely bad code and answers 400, which is precisely what the paragraph above forbids.
     let jid: string | undefined;
     try {
-      jid = await this.sock().groupAcceptInvite(inviteCode);
+      jid = await withQueryDeadline(
+        this.sock().groupAcceptInvite(inviteCode),
+        this.queryBudgetMs,
+        'WhatsApp did not answer the group join in time',
+      );
     } catch (error) {
       const code = refusedStatusCode(error);
       if (code === undefined || code < 400 || code >= 500) {
