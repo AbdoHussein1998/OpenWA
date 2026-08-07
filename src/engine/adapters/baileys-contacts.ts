@@ -2,6 +2,7 @@ import type { WAMessageKey, WASocket } from '@whiskeysockets/baileys';
 import { ChatSummary, Contact, MediaInput } from '../interfaces/whatsapp-engine.interface';
 import { resolveMediaBuffer } from './baileys-messaging';
 import { type createLogger } from '../../common/services/logger.service';
+import { BAILEYS_WRITE_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
 
 /**
  * Contacts/profile/chats-domain operations extracted from BaileysAdapter. The adapter keeps the
@@ -25,7 +26,15 @@ export interface BaileysContactsHost {
 }
 
 export class BaileysContacts {
-  constructor(private readonly host: BaileysContactsHost) {}
+  constructor(
+    private readonly host: BaileysContactsHost,
+    private readonly writeBudgetMs: number = BAILEYS_WRITE_BUDGET_MS,
+  ) {}
+
+  /** Bound a write whose confirmation the library discards; see baileys-query-deadline.ts. */
+  private confirmed<T>(work: Promise<T>, operation: string): Promise<T> {
+    return withQueryDeadline(work, this.writeBudgetMs, `WhatsApp did not confirm ${operation} in time`);
+  }
 
   /** Post-ensureReady socket handle. */
   private sock(): WASocket {
@@ -80,12 +89,12 @@ export class BaileysContacts {
 
   async setProfileName(name: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().updateProfileName(name);
+    await this.confirmed(this.sock().updateProfileName(name), 'the profile name change');
   }
 
   async setProfileStatus(status: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().updateProfileStatus(status);
+    await this.confirmed(this.sock().updateProfileStatus(status), 'the profile status change');
   }
 
   async setProfilePicture(media: MediaInput): Promise<void> {
@@ -97,7 +106,7 @@ export class BaileysContacts {
     // updateProfilePicture takes a WAMediaUpload; resolveMediaBuffer covers Buffer | base64 | URL,
     // the same conversion the media sends use.
     const { data } = await resolveMediaBuffer(media);
-    await this.sock().updateProfilePicture(selfJid, data);
+    await this.confirmed(this.sock().updateProfilePicture(selfJid, data), 'the profile picture change');
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
