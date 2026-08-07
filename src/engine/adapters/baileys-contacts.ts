@@ -139,7 +139,10 @@ export class BaileysContacts {
     if (!last) {
       return false; // nothing known to mark read
     }
-    await this.sock().readMessages([last.key]);
+    // readMessages reaches fetchPrivacySettings, which destructures the query result and throws a
+    // raw TypeError on an unanswered one — no Boom, so nothing downstream can classify it. Marking
+    // a chat read is idempotent, so bounding it is safe: a repeat costs nothing.
+    await this.confirmed(this.sock().readMessages([last.key]), 'the read receipt');
     return true;
   }
 
