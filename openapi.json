@@ -6168,6 +6168,16 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "Catalog summary, or an empty body when the account has no collection to describe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogDto"
+                }
+              }
+            }
+          },
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js has no catalog API."
           },
@@ -6217,6 +6227,16 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "One page of catalog products",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedProductsDto"
+                }
+              }
+            }
+          },
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js has no catalog API."
           },
@@ -6252,6 +6272,16 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "The product, or an empty body when no product in the catalog carries that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDto"
+                }
+              }
+            }
+          },
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js has no catalog API."
           },
@@ -6289,6 +6319,16 @@
           }
         },
         "responses": {
+          "201": {
+            "description": "Product message accepted for sending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductMessageResponseDto"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Product has no image — a product card requires one."
           },
@@ -11484,6 +11524,154 @@
           }
         }
       },
+      "CatalogDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Catalog id. Synthesized from the first collection — the only named grouping the engine exposes.",
+            "example": "1234567890123456"
+          },
+          "name": {
+            "type": "string",
+            "description": "Collection name.",
+            "example": "Default"
+          },
+          "description": {
+            "type": "string",
+            "description": "Collection description, when the engine reports one."
+          },
+          "productCount": {
+            "type": "number",
+            "description": "How many products the first collection holds.",
+            "example": 12
+          },
+          "url": {
+            "type": "string",
+            "description": "Public catalog link for the account.",
+            "example": "https://wa.me/c/628123456789"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "productCount",
+          "url"
+        ]
+      },
+      "ProductDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Product id in the engine's native format.",
+            "example": "7891234567890"
+          },
+          "name": {
+            "type": "string",
+            "description": "Product name.",
+            "example": "Kopi Gayo 200g"
+          },
+          "description": {
+            "type": "string",
+            "description": "Product description, when set."
+          },
+          "price": {
+            "type": "number",
+            "description": "Price in the currency’s minor-unit-free numeric form.",
+            "example": 85000
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO currency code.",
+            "example": "IDR"
+          },
+          "priceFormatted": {
+            "type": "string",
+            "description": "Price rendered for display. Synthesized by the gateway from price + currency, so an unrecognised currency code falls back to a plain \"CODE amount\" pair.",
+            "example": "IDR 85,000.00"
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "First product image URL. Absent when the product carries no image.",
+            "example": "https://pps.whatsapp.net/v/t61.24694-24/12345_678_910_n.jpg"
+          },
+          "url": {
+            "type": "string",
+            "description": "Product link, empty when the engine reports none.",
+            "example": "https://wa.me/p/123/628"
+          },
+          "isAvailable": {
+            "type": "boolean",
+            "description": "Whether the engine reports the product as in stock.",
+            "example": true
+          },
+          "retailerId": {
+            "type": "string",
+            "description": "The merchant's own SKU, when set.",
+            "example": "SKU-001"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "price",
+          "currency",
+          "priceFormatted",
+          "url",
+          "isAvailable"
+        ]
+      },
+      "ProductPaginationDto": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "number",
+            "description": "Page that was returned (1-based).",
+            "example": 1
+          },
+          "limit": {
+            "type": "number",
+            "description": "Page size that was applied.",
+            "example": 20
+          },
+          "total": {
+            "type": "number",
+            "description": "Total products in the catalog, not on this page.",
+            "example": 12
+          },
+          "totalPages": {
+            "type": "number",
+            "description": "Total pages at this page size.",
+            "example": 1
+          }
+        },
+        "required": [
+          "page",
+          "limit",
+          "total",
+          "totalPages"
+        ]
+      },
+      "PaginatedProductsDto": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "description": "Products on the requested page.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductDto"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/ProductPaginationDto"
+          }
+        },
+        "required": [
+          "products",
+          "pagination"
+        ]
+      },
       "SendProductDto": {
         "type": "object",
         "properties": {
@@ -11506,6 +11694,25 @@
         "required": [
           "chatId",
           "productId"
+        ]
+      },
+      "ProductMessageResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The message id, assigned when the gateway accepts the message for sending. Note the field name: the send routes served by MessageService answer `messageId` for the same value. A 2xx here means the message was handed to the WhatsApp client, not that it was delivered.",
+            "example": "true_628123456789@c.us_3EB0123456789"
+          },
+          "timestamp": {
+            "type": "number",
+            "description": "Unix SECONDS the engine stamped on the outgoing message.",
+            "example": 1786000000
+          }
+        },
+        "required": [
+          "id",
+          "timestamp"
         ]
       },
       "SendCatalogDto": {
