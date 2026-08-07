@@ -1,6 +1,7 @@
 import type { Product as BaileysProduct, WASocket } from '@whiskeysockets/baileys';
 import { Catalog, PaginatedProducts, Product, ProductQueryOptions } from '../interfaces/whatsapp-engine.interface';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
+import { withQueryDeadline } from './baileys-query-deadline';
 import { type createLogger } from '../../common/services/logger.service';
 
 /**
@@ -29,38 +30,6 @@ const CATALOG_PAGE_SIZE = 50;
  */
 export const CATALOG_QUERY_BUDGET_MS = 30_000;
 
-/**
- * Bound one catalog query against the request's remaining budget.
- *
- * Baileys catches its own query timeout and resolves `undefined` rather than throwing
- * (Socket/socket.js: "Catch timeout and return undefined instead of throwing"), and the catalog
- * parsers are null-safe, so an unanswered IQ is byte-identical to a genuinely empty catalog. No
- * inspection of the value can separate them — only a clock we own. Shape follows
- * withInboundDownloadTimeout (inbound-media-cap.ts): unref'd timer, cleared in a finally, and the
- * abandoned query's late rejection defused.
- */
-async function withDeadline<T>(work: Promise<T>, remainingMs: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  // Defuse a post-settle rejection from the query we may stop awaiting.
-  work.catch(() => undefined);
-  try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new EngineTransportError('WhatsApp did not answer the catalog query in time')),
-          Math.max(0, remainingMs),
-        );
-        timer.unref?.();
-      }),
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
-
 export class BaileysCatalog {
   constructor(
     private readonly host: BaileysCatalogHost,
@@ -70,7 +39,7 @@ export class BaileysCatalog {
   /** Spend part of one request-wide budget on a single query, and say so when it runs out. */
   private async bounded<T>(work: Promise<T>, deadline: number): Promise<T> {
     try {
-      return await withDeadline(work, deadline - Date.now());
+      return await withQueryDeadline(work, deadline - Date.now(), 'WhatsApp did not answer the catalog query in time');
     } catch (error) {
       if (error instanceof EngineTransportError) {
         // Baileys' own "timed out waiting for message" warn is silent at the default

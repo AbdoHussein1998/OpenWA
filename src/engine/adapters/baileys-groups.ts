@@ -14,6 +14,7 @@ import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { type createLogger } from '../../common/services/logger.service';
+import { BAILEYS_WRITE_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
 
 /**
  * Group-domain operations extracted from BaileysAdapter. The adapter keeps the public
@@ -79,7 +80,15 @@ export function toEngineParticipants(participants: string[], toEngineJid: (jid: 
 }
 
 export class BaileysGroups {
-  constructor(private readonly host: BaileysGroupsHost) {}
+  constructor(
+    private readonly host: BaileysGroupsHost,
+    private readonly writeBudgetMs: number = BAILEYS_WRITE_BUDGET_MS,
+  ) {}
+
+  /** Bound a write whose confirmation the library discards; see baileys-query-deadline.ts. */
+  private confirmed<T>(work: Promise<T>, operation: string): Promise<T> {
+    return withQueryDeadline(work, this.writeBudgetMs, `WhatsApp did not confirm ${operation} in time`);
+  }
 
   /** Post-ensureReady socket handle. */
   private sock(): WASocket {
@@ -176,18 +185,20 @@ export class BaileysGroups {
 
   async leaveGroup(groupId: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().groupLeave(groupId);
+    await this.confirmed(this.sock().groupLeave(groupId), 'leaving the group');
   }
 
   async setGroupSubject(groupId: string, subject: string): Promise<void> {
     this.host.ensureReady();
-    await mapServerRefusal('Setting the group subject', () => this.sock().groupUpdateSubject(groupId, subject));
+    await mapServerRefusal('Setting the group subject', () =>
+      this.confirmed(this.sock().groupUpdateSubject(groupId, subject), 'the group subject change'),
+    );
   }
 
   async setGroupDescription(groupId: string, description: string): Promise<void> {
     this.host.ensureReady();
     await mapServerRefusal('Setting the group description', () =>
-      this.sock().groupUpdateDescription(groupId, description),
+      this.confirmed(this.sock().groupUpdateDescription(groupId, description), 'the group description change'),
     );
   }
 
@@ -282,14 +293,20 @@ export class BaileysGroups {
   async setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
     this.host.ensureReady();
     await mapServerRefusal('Setting who may send messages', () =>
-      this.sock().groupSettingUpdate(groupId, adminsOnly ? 'announcement' : 'not_announcement'),
+      this.confirmed(
+        this.sock().groupSettingUpdate(groupId, adminsOnly ? 'announcement' : 'not_announcement'),
+        'the who-may-send change',
+      ),
     );
   }
 
   async setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
     this.host.ensureReady();
     await mapServerRefusal('Setting who may edit group info', () =>
-      this.sock().groupSettingUpdate(groupId, adminsOnly ? 'locked' : 'unlocked'),
+      this.confirmed(
+        this.sock().groupSettingUpdate(groupId, adminsOnly ? 'locked' : 'unlocked'),
+        'the who-may-edit change',
+      ),
     );
   }
 
@@ -297,26 +314,33 @@ export class BaileysGroups {
     this.host.ensureReady();
     // Same socket call as the own-account picture, addressed at the group JID.
     const { data } = await resolveMediaBuffer(media);
-    await mapServerRefusal('Setting the group picture', () => this.sock().updateProfilePicture(groupId, data));
+    await mapServerRefusal('Setting the group picture', () =>
+      this.confirmed(this.sock().updateProfilePicture(groupId, data), 'the group picture change'),
+    );
   }
 
   async deleteGroupPicture(groupId: string): Promise<void> {
     this.host.ensureReady();
-    await mapServerRefusal('Removing the group picture', () => this.sock().removeProfilePicture(groupId));
+    await mapServerRefusal('Removing the group picture', () =>
+      this.confirmed(this.sock().removeProfilePicture(groupId), 'the group picture removal'),
+    );
   }
 
   async setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void> {
     this.host.ensureReady();
     // A dedicated socket call, not a groupSettingUpdate option.
     await mapServerRefusal('Setting the member-add mode', () =>
-      this.sock().groupMemberAddMode(groupId, mode === 'admins' ? 'admin_add' : 'all_member_add'),
+      this.confirmed(
+        this.sock().groupMemberAddMode(groupId, mode === 'admins' ? 'admin_add' : 'all_member_add'),
+        'the member-add-mode change',
+      ),
     );
   }
 
   async setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
     this.host.ensureReady();
     await mapServerRefusal('Setting the disappearing-message timer', () =>
-      this.sock().groupToggleEphemeral(groupId, durationSec),
+      this.confirmed(this.sock().groupToggleEphemeral(groupId, durationSec), 'the disappearing-message timer change'),
     );
   }
 }
