@@ -120,6 +120,12 @@ export class ContactController {
     description: 'Profile picture URL',
     type: ProfilePictureResponseDto,
   })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer the lookup. Deliberately not reported as `url: null` — that is the ' +
+      'same answer a contact with no picture gives, and a caller cannot tell them apart.',
+  })
   async getProfilePicture(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
     const url = await this.contactService.getProfilePicture(sessionId, contactId);
     return { url };
