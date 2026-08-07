@@ -56,6 +56,11 @@ jobs:
       - name: Check OpenAPI snapshot is up to date
         run: npm run openapi:check
 
+      # Lives here, not in sdk-ci.yml: that workflow is path-filtered and does not list openapi.json,
+      # so a contract change alone runs none of it — and it never runs on a release tag at all.
+      - name: Check SDK routes against the contract
+        run: npm run check:sdk-routes
+
   # Deliberately its own job rather than a step inside Lint. `npm audit` reports against the
   # advisory database, not against the diff, so a newly published advisory turns red on unrelated
   # PRs. While it lived as the first step of Lint, that failure aborted the job before ESLint, the
