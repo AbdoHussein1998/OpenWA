@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Seven settings that did nothing under Docker now take effect** — Compose forwards environment explicitly and has no `env_file`, so `BAILEYS_MARK_ONLINE_ON_CONNECT`, `BAILEYS_SYNC_FULL_HISTORY`, `WEBHOOK_CONTACT_DETAILS`, `ALLOW_UNSIGNED_INGRESS`, `STORE_EPHEMERAL_MESSAGES`, `RESOLVE_LID_TO_PHONE` and `SIMULATE_TYPING` never reached the container however the operator's `.env` was written; the first of those left the paired phone's notifications suppressed for as long as the gateway stayed connected.
+- **Thirteen settings that did nothing under Docker now take effect** — Compose forwards environment explicitly and has no `env_file`, so `BAILEYS_MARK_ONLINE_ON_CONNECT`, `BAILEYS_SYNC_FULL_HISTORY`, `WEBHOOK_CONTACT_DETAILS`, `ALLOW_UNSIGNED_INGRESS`, `STORE_EPHEMERAL_MESSAGES`, `RESOLVE_LID_TO_PHONE`, `SIMULATE_TYPING`, `MCP_ENABLED`, `SEARCH_ENABLED`, `SERVE_DASHBOARD`, `CACHE_ENABLED`, `DATABASE_LOGGING` and `MAIN_DATABASE_SYNCHRONIZE` never reached the container however the operator's `.env` was written — the MCP server could not be enabled at all, `SEARCH_ENABLED=false` did not disable the search route it documents, and `BAILEYS_MARK_ONLINE_ON_CONNECT` left the paired phone's notifications suppressed for as long as the gateway stayed connected.
 
 ### Changed
 

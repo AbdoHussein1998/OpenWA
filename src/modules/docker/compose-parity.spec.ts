@@ -282,15 +282,6 @@ describe('DockerService managed specs ↔ docker-compose.yml parity', () => {
       ALLOW_DEV_API_KEY: 'refused outright in production',
       // MCP_READONLY is deliberately absent: env.validation.ts leaves it out of the strict list on
       // purpose (mcp.server.spec.ts asserts 'yes' keeps read-only on), so it is not in scope here.
-      // Pre-existing and not yet reviewed: these are module-level or diagnostic toggles that an
-      // operator currently cannot set under compose. Listed so the gate is honest about them rather
-      // than silently green; each needs its own decision before being forwarded.
-      MCP_ENABLED: 'pending review',
-      SEARCH_ENABLED: 'pending review',
-      SERVE_DASHBOARD: 'pending review',
-      CACHE_ENABLED: 'pending review',
-      DATABASE_LOGGING: 'pending review',
-      MAIN_DATABASE_SYNCHRONIZE: 'pending review',
     };
 
     const src = readFileSync(join(__dirname, '..', '..', 'config/env.validation.ts'), 'utf8');
