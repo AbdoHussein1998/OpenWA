@@ -27,6 +27,10 @@ export class ChannelController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'channelId', description: 'Channel ID' })
   @ApiResponse({ status: 200, description: 'Channel details', type: ChannelDto })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
+  })
   @ApiResponse({ status: 404, description: 'Channel not found' })
   async findOne(@Param('sessionId') sessionId: string, @Param('channelId') channelId: string) {
     return this.channelService.getChannelById(sessionId, channelId);
@@ -85,6 +89,10 @@ export class ChannelController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'channelId', description: 'Channel ID' })
   @ApiResponse({ status: 200, description: 'Channel deleted', type: ChannelAckResponseDto })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
+  })
   @ApiResponse({ status: 400, description: 'Session not started' })
   @ApiResponse({ status: 403, description: 'The engine refused — not found, or this account does not own it' })
   async remove(
@@ -106,6 +114,10 @@ export class ChannelController {
   @ApiParam({ name: 'channelId', description: 'Channel ID' })
   @ApiBody({ type: MuteChannelDto })
   @ApiResponse({ status: 200, description: 'Channel muted or unmuted', type: ChannelAckResponseDto })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
+  })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
   @ApiResponse({ status: 403, description: 'The engine refused' })
   async mute(
@@ -135,6 +147,10 @@ export class ChannelController {
     },
   })
   @ApiResponse({ status: 201, description: 'Successfully subscribed to channel', type: ChannelDto })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
+  })
   async subscribe(@Param('sessionId') sessionId: string, @Body() body: SubscribeChannelDto) {
     return this.channelService.subscribeToChannel(sessionId, body.inviteCode);
   }
@@ -145,6 +161,10 @@ export class ChannelController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'channelId', description: 'Channel ID to unsubscribe from' })
   @ApiResponse({ status: 200, description: 'Successfully unsubscribed from channel', type: ChannelAckResponseDto })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
+  })
   async unsubscribe(@Param('sessionId') sessionId: string, @Param('channelId') channelId: string) {
     await this.channelService.unsubscribeFromChannel(sessionId, channelId);
     return { success: true };

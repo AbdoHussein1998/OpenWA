@@ -5738,6 +5738,9 @@
           },
           "404": {
             "description": "Channel not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
           }
         },
         "summary": "Get a specific channel by ID",
@@ -5777,6 +5780,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
           }
         },
         "summary": "Unsubscribe from a channel",
@@ -5878,6 +5884,9 @@
           },
           "403": {
             "description": "The engine refused — not found, or this account does not own it"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
           }
         },
         "summary": "Delete a channel this account owns",
@@ -5936,6 +5945,9 @@
           },
           "403": {
             "description": "The engine refused"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
           }
         },
         "summary": "Mute or unmute a channel",
@@ -5988,6 +6000,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
           }
         },
         "summary": "Subscribe to a channel using invite code",
