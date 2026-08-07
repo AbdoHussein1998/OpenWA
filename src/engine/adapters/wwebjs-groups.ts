@@ -314,9 +314,15 @@ export class WwebjsGroups {
     if (!chat.isGroup) {
       throw new Error(`${groupId} is not a group`);
     }
+    // Typed Promise<string>, but WA Web yields nothing when the account is not an admin of the
+    // group — and String(undefined) is the literal 'undefined', which the caller renders as the
+    // link "https://chat.whatsapp.com/undefined". Same refusal contract as setDescription.
     const inviteCode = await (chat as unknown as GroupChat).getInviteCode();
+    if (!inviteCode) {
+      throw new EngineRefusedError(`Failed to get the invite code for group ${groupId} — admin rights required`);
+    }
     this.host.logger.log(`Got invite code for group ${groupId}`);
-    return String(inviteCode);
+    return inviteCode;
   }
 
   async revokeGroupInviteCode(groupId: string): Promise<string> {
@@ -326,8 +332,11 @@ export class WwebjsGroups {
       throw new Error(`${groupId} is not a group`);
     }
     const newCode = await (chat as unknown as GroupChat).revokeInvite();
+    if (!newCode) {
+      throw new EngineRefusedError(`Failed to revoke the invite code for group ${groupId} — admin rights required`);
+    }
     this.host.logger.log(`Revoked invite code for group ${groupId}, new code generated`);
-    return String(newCode);
+    return newCode;
   }
 
   /**

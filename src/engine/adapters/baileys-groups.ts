@@ -11,6 +11,7 @@ import { mapBaileysGroup, mapBaileysGroupInfo } from './baileys-group-mapper';
 import { GroupNotFoundError } from '../../common/errors/group-not-found.error';
 import { resolveMediaBuffer } from './baileys-messaging';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { type createLogger } from '../../common/services/logger.service';
 
@@ -190,14 +191,30 @@ export class BaileysGroups {
     );
   }
 
+  /**
+   * Fetching an invite code is admin-only, but every group the account belongs to is listed by
+   * getGroups regardless of role — so the refusal lands on ids the caller has just been handed.
+   * Both failure shapes are surfaced rather than flattened into a code: a refusal rejects with a
+   * Boom carrying the WA code (403, like every other admin-gated group operation), while an
+   * unanswered query resolves undefined, which coalescing to '' turned into the meaningless link
+   * "https://chat.whatsapp.com/" behind a 200.
+   */
   async getGroupInviteCode(groupId: string): Promise<string> {
     this.host.ensureReady();
-    return (await this.sock().groupInviteCode(groupId)) ?? '';
+    const code = await mapServerRefusal('Fetching the group invite code', () => this.sock().groupInviteCode(groupId));
+    if (!code) {
+      throw new EngineTransportError('WhatsApp did not answer the group invite-code query');
+    }
+    return code;
   }
 
   async revokeGroupInviteCode(groupId: string): Promise<string> {
     this.host.ensureReady();
-    return (await this.sock().groupRevokeInvite(groupId)) ?? '';
+    const code = await mapServerRefusal('Revoking the group invite code', () => this.sock().groupRevokeInvite(groupId));
+    if (!code) {
+      throw new EngineTransportError('WhatsApp did not answer the group invite-code revocation');
+    }
+    return code;
   }
 
   /**

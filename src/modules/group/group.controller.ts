@@ -13,6 +13,11 @@ import {
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 
+// Reading an invite code is admin-only, but the groups list returns every group the account
+// belongs to whatever its role — so these two statuses apply to ids the caller was just given.
+const INVITE_CODE_403 = 'The engine refused the request — admin rights required for this group';
+const INVITE_CODE_503 = 'WhatsApp did not answer the invite-code query — retry shortly';
+
 // NOTE: the session→groups LIST lives on the SessionController at GET /sessions/:id/groups (it
 // registered first and owns the canonical narrow projection). A bare @Get() here would collide on
 // the same path pattern (/sessions/{x}/groups) and be shadowed, so this controller owns only the
@@ -282,6 +287,8 @@ export class GroupController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'groupId', description: 'Group ID' })
   @ApiResponse({ status: 200, description: 'Group invite code' })
+  @ApiResponse({ status: 403, description: INVITE_CODE_403 })
+  @ApiResponse({ status: 503, description: INVITE_CODE_503 })
   async getInviteCode(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
     const inviteCode = await this.groupService.getGroupInviteCode(sessionId, groupId);
     return {
@@ -297,6 +304,8 @@ export class GroupController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'groupId', description: 'Group ID' })
   @ApiResponse({ status: 200, description: 'New invite code generated' })
+  @ApiResponse({ status: 403, description: INVITE_CODE_403 })
+  @ApiResponse({ status: 503, description: INVITE_CODE_503 })
   async revokeInviteCode(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
     const newCode = await this.groupService.revokeGroupInviteCode(sessionId, groupId);
     return {

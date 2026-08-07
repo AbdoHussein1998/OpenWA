@@ -142,6 +142,7 @@ import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { GroupNotFoundError } from '../../common/errors/group-not-found.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
 
 const fakeStore = {
@@ -3031,6 +3032,18 @@ describe('BaileysAdapter group management', () => {
     expect(await adapter.revokeGroupInviteCode('123-456@g.us')).toBe('NEW456');
   });
 
+  // groupInviteCode resolves undefined only when the query went unanswered — a refusal rejects
+  // with a Boom instead. Coalescing that to '' handed the controller an empty code, which it
+  // rendered as the link "https://chat.whatsapp.com/" and returned with a 200.
+  it.each([
+    ['getGroupInviteCode', (a: BaileysAdapter) => a.getGroupInviteCode('123-456@g.us'), 'groupInviteCode'],
+    ['revokeGroupInviteCode', (a: BaileysAdapter) => a.revokeGroupInviteCode('123-456@g.us'), 'groupRevokeInvite'],
+  ])('%s reports an unanswered query instead of fabricating an empty code', async (_name, call, sockMethod) => {
+    (fakeSock as unknown as Record<string, jest.Mock>)[sockMethod].mockResolvedValueOnce(undefined);
+    const adapter = await ready();
+    await expect(call(adapter)).rejects.toBeInstanceOf(EngineTransportError);
+  });
+
   it('joinGroupViaInviteCode returns the joined group id (neutral dialect)', async () => {
     fakeSock.groupAcceptInvite.mockResolvedValue('120363000@g.us');
     const adapter = await ready();
@@ -3123,7 +3136,11 @@ describe('BaileysAdapter group management', () => {
       (a: BaileysAdapter) => a.setGroupMemberAddMode('123-456@g.us', 'admins'),
       'groupMemberAddMode',
     ],
-  ])('%s maps an admin-refused write to EngineRefusedError (403)', async (_name, call, sockMethod) => {
+    // Reads, but refused by the same admin check: WhatsApp answers an invite-code query from a
+    // non-admin with an error node, which reached the caller as a bare 500.
+    ['getGroupInviteCode', (a: BaileysAdapter) => a.getGroupInviteCode('123-456@g.us'), 'groupInviteCode'],
+    ['revokeGroupInviteCode', (a: BaileysAdapter) => a.revokeGroupInviteCode('123-456@g.us'), 'groupRevokeInvite'],
+  ])('%s maps an admin-refused operation to EngineRefusedError (403)', async (_name, call, sockMethod) => {
     (fakeSock as unknown as Record<string, jest.Mock>)[sockMethod].mockRejectedValueOnce(
       Object.assign(new Error('not-authorized'), { data: 401 }),
     );

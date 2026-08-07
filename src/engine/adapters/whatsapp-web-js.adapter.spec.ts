@@ -860,6 +860,28 @@ describe('WhatsAppWebJsAdapter channel-JID guard (#554 — wwebjs Channel lacks 
     });
   });
 
+  describe('group invite code', () => {
+    const groupChat = (over: Record<string, unknown> = {}) => ({
+      getChatById: jest.fn().mockResolvedValue({ isGroup: true, ...over }),
+    });
+
+    it('returns the code when WA Web supplies one', async () => {
+      const getInviteCode = jest.fn().mockResolvedValue('ABC123');
+      await expect(readyAdapter(groupChat({ getInviteCode })).getGroupInviteCode('g@g.us')).resolves.toBe('ABC123');
+    });
+
+    // WA Web yields no code when the account is not an admin of the group. String(undefined)
+    // turned that into the literal 'undefined', which the controller rendered as the link
+    // "https://chat.whatsapp.com/undefined" and returned with a 200.
+    it.each([
+      ['getGroupInviteCode', 'getInviteCode', (a: WhatsAppWebJsAdapter) => a.getGroupInviteCode('g@g.us')],
+      ['revokeGroupInviteCode', 'revokeInvite', (a: WhatsAppWebJsAdapter) => a.revokeGroupInviteCode('g@g.us')],
+    ])('%s treats a missing code as a refusal, not the string "undefined"', async (_name, method, call) => {
+      const stub = jest.fn().mockResolvedValue(undefined);
+      await expect(call(readyAdapter(groupChat({ [method]: stub })))).rejects.toBeInstanceOf(EngineRefusedError);
+    });
+  });
+
   describe('setGroupMemberAddMode', () => {
     const groupChat = (over: Record<string, unknown> = {}) => ({
       getChatById: jest.fn().mockResolvedValue({ isGroup: true, ...over }),

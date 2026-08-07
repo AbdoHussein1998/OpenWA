@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A group invite code now says why it could not be read** — fetching one is admin-only, but the groups list returns every group the account belongs to whatever its role, so the request lands on ids the caller was just handed: Baileys let WhatsApp's refusal escape as a bare `500` (13 of 16 groups on the test account) while whatsapp-web.js stringified its missing result into `{"inviteCode":"undefined"}` and the link `https://chat.whatsapp.com/undefined` behind a `200` (53 of 101). Both engines now answer `403`, the same status the group writes have answered since they were fixed, and an unanswered query answers `503` instead of the codeless link `https://chat.whatsapp.com/`.
 - **A benign whatsapp-web.js rejection no longer reads like a crash** — the same un-awaited `framenavigated` re-injection that already logs at `WARN` when the page goes away was logged at `ERROR` in its other shape, where the navigation lands before WhatsApp Web has defined its module registry; it appears at the first boot after the pinned WhatsApp Web build moves under a warm profile, and the session reaches ready unaided.
 
 ### Fixed
