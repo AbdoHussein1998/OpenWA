@@ -1071,6 +1071,9 @@ export const infraApi = {
       dataDbType: string;
       tables: Record<string, unknown[]>;
       counts: Record<string, number>;
+      // Optional tables absent from an older schema. Always present in the response; a non-empty
+      // list means the backup is partial, not that those tables were empty.
+      skippedTables: string[];
     }>('/infra/export-data'),
   // 200 contract includes the orphan-engine reconciliation result (restartRequired / notices /
   // stopped+failed ids). 409 has several causes and the error's `code` distinguishes them:
