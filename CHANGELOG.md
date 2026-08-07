@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.4] - 2026-08-07
+
 ### Fixed
 
 - **The Infrastructure page's "saved, but not applied yet" notice no longer disappears for the rest of the session** — it was suppressed by a latch that is set when a save succeeds and cleared only by a restart's page reload, so from the first successful save none of the four cards could report a setting that was still waiting on a restart, which is the one state the notice exists for.
