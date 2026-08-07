@@ -55,6 +55,7 @@ OpenWA v0.2+ implements a **dual-database architecture** that separates boot con
 │                             │ • integration_delivery_failures   │
 │                             │ • baileys_stored_messages (engine)│
 │                             │ • lid_mappings (engine)           │
+│                             │ • automation_rules                │
 └─────────────────────────────┴───────────────────────────────────┘
 ```
 
@@ -757,10 +758,10 @@ flowchart LR
 
 OpenWA runs **two separate TypeORM connections**, each with its own migrations directory and CLI DataSource:
 
-| Connection | DataSource            | Migrations dir                  | Owns                                                                                                                                                                                                                                                                                 |
-| ---------- | --------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **main**   | `data-source-main.ts` | `src/database/migrations-main/` | `api_keys`, `audit_logs` — always SQLite (`./data/main.sqlite` by default)                                                                                                                                                                                                           |
-| **data**   | `data-source.ts`      | `src/database/migrations/`      | `sessions`, `webhooks`, `messages`, `message_batches`, `templates`, `status_updates`, `webhook_delivery_failures`, the integration tables (`plugin_instances`, `ingress_events`, `conversation_mappings`, `integration_delivery_failures`), engine tables — SQLite **or** PostgreSQL |
+| Connection | DataSource            | Migrations dir                  | Owns                                                                                                                                                                                                                                                                                                     |
+| ---------- | --------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **main**   | `data-source-main.ts` | `src/database/migrations-main/` | `api_keys`, `audit_logs` — always SQLite (`./data/main.sqlite` by default)                                                                                                                                                                                                                               |
+| **data**   | `data-source.ts`      | `src/database/migrations/`      | `sessions`, `webhooks`, `messages`, `message_batches`, `templates`, `status_updates`, `automation_rules`, `webhook_delivery_failures`, the integration tables (`plugin_instances`, `ingress_events`, `conversation_mappings`, `integration_delivery_failures`), engine tables — SQLite **or** PostgreSQL |
 
 Migrations are hand-authored and idempotent (`IF NOT EXISTS`) so they are safe to adopt on a database originally created by `synchronize`. The two connections differ in how schema is managed:
 
@@ -797,7 +798,11 @@ src/database/migrations/           # data connection (pluggable)
 ├── 1784908800000-AddMessageAuthor.ts
 ├── 1785112230000-AddIngressEventDispatchState.ts
 ├── 1785123853000-AddMessagesCreatedAtIndex.ts
-└── 1785600000000-SlimIngressEventPayload.ts
+├── 1785600000000-SlimIngressEventPayload.ts
+├── 1785700000000-AddMessageMediaArchive.ts
+├── 1785800000000-AddSessionOwnership.ts
+├── 1785900000000-AddAutomationRules.ts            # 14th migration table; FKs sessions ON DELETE CASCADE
+└── 1786000000000-AddSessionNodeUrl.ts
 ```
 
 > [!NOTE]
