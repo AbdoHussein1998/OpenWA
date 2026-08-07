@@ -12,6 +12,8 @@ import {
   resolveAuthTimeoutMs,
   wwebjsAckToDeliveryStatus,
   extractWwebjsCall,
+  READY_RECONCILE_TIMEOUT_MS,
+  READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS,
 } from './whatsapp-web-js.adapter';
 import { getEffectiveWebVersionInfo, resolveWebVersionPin, __resetWebVersionCache } from '../wa-web-version';
 import * as fs from 'fs';
@@ -1498,6 +1500,70 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
+  // whatsapp-web.js sets `eventsAttached = false` in its constructor (Client.js:109) and flips it only
+  // after attachEventListeners() resolves (Client.js:373). Everything in between — LoadUtils, a poll of
+  // up to 30s for window.WWebJS (Client.js:334), ClientInfo, InterfaceController — is a legitimately
+  // slow attach, not a dead bridge. Reloading inside that window navigates the page out from under the
+  // in-flight inject(): the re-inject then dies at getWWebVersion before it re-exposes any of the
+  // bridge, and the one-shot guard blocks a retry, so the session is doomed to the deadline (#1081).
+  it("does not reload a merely slow attach, so a bridge attaching inside upstream's budget still promotes", async () => {
+    jest.useFakeTimers();
+
+    const adapter = newAdapter();
+    // A faithful reload: navigating destroys the in-flight injection, so an attach that was about to
+    // complete never does. Stubbing it inert — as the surrounding tests do — hides the whole defect.
+    const attach = { destroyed: false };
+    const reload = jest.fn().mockImplementation(() => {
+      attach.destroyed = true;
+      return Promise.resolve(undefined);
+    });
+    const { client, onReady } = attachFakeClient(adapter, {
+      eventsAttached: false,
+      pupPage: { evaluate: jest.fn().mockResolvedValue(true), reload },
+    });
+
+    client.emit('authenticated');
+
+    // Upstream is still well inside its own attach budget at this point.
+    await jest.advanceTimersByTimeAsync(20_000);
+    expect(reload).not.toHaveBeenCalled();
+
+    // The attach resolves, comfortably within upstream's 30s WWebJS poll.
+    if (!attach.destroyed) client.eventsAttached = true;
+    await jest.advanceTimersByTimeAsync(2100);
+
+    expect(adapter.getStatus()).toBe(EngineStatus.READY);
+    expect(onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('still reloads a genuinely dead bridge once the grace period has elapsed', async () => {
+    jest.useFakeTimers();
+
+    const adapter = newAdapter();
+    const reload = jest.fn().mockResolvedValue(undefined);
+    const { client } = attachFakeClient(adapter, {
+      eventsAttached: false,
+      pupPage: { evaluate: jest.fn().mockResolvedValue(true), reload },
+    });
+
+    client.emit('authenticated');
+    await jest.advanceTimersByTimeAsync(READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS + 2100);
+
+    expect(reload).toHaveBeenCalledTimes(1);
+
+    // Upstream's window.WWebJS poll alone is 30s (Client.js:334) and is only one stage of the attach.
+    // The grace has to outlast it, or we go back to aborting healthy attaches; and what remains before
+    // the deadline has to outlast it too, or a warranted reload could never finish reinjecting.
+    const UPSTREAM_WWEBJS_POLL_MS = 30_000;
+    expect(READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS).toBeGreaterThan(UPSTREAM_WWEBJS_POLL_MS);
+    expect(READY_RECONCILE_TIMEOUT_MS - READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS).toBeGreaterThan(
+      UPSTREAM_WWEBJS_POLL_MS,
+    );
+
+    client.emit('auth_failure', 'stop test timer');
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
   it('reloads the page once — and only once — to reinject a dead event bridge, then promotes when it heals', async () => {
     jest.useFakeTimers();
 
@@ -1509,7 +1575,8 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     });
 
     client.emit('authenticated');
-    await jest.advanceTimersByTimeAsync(2100 * 3);
+    // Past the grace period: an attach still unfinished this late is dead, not slow.
+    await jest.advanceTimersByTimeAsync(READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS + 2100 * 3);
 
     expect(reload).toHaveBeenCalledTimes(1);
     expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
