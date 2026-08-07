@@ -259,10 +259,45 @@ jobs:
       - name: Run backup/restore smoke test
         run: ./scripts/smoke-test-backup-restore.sh
 
+  # The chart and the workflows had no gate of any kind: nothing rendered charts/openwa, and nothing
+  # parsed the workflow YAML. Tools run as pinned containers rather than actions so there is no new
+  # action to pin by SHA, matching how redis/postgres images are pinned elsewhere in this file.
+  chart:
+    name: Helm chart and workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: helm lint
+        run: docker run --rm -v "$PWD/charts:/charts:ro" alpine/helm:4.2.3 lint /charts/openwa
+
+      # Two value sets: the defaults an operator gets, and every optional resource switched on, so a
+      # template that only breaks under a toggle cannot pass unnoticed.
+      - name: helm template
+        run: |
+          mkdir -p rendered
+          docker run --rm -v "$PWD/charts:/charts:ro" alpine/helm:4.2.3 \
+            template ci /charts/openwa > rendered/default.yaml
+          docker run --rm -v "$PWD/charts:/charts:ro" alpine/helm:4.2.3 \
+            template ci /charts/openwa \
+            --set ingress.enabled=true \
+            --set podDisruptionBudget.enabled=true \
+            --set serviceMonitor.enabled=true > rendered/toggled.yaml
+
+      # -ignore-missing-schemas so the ServiceMonitor CRD is skipped rather than failing the run;
+      # without it the toggled render exits 1 on a resource whose schema is not in the catalogue.
+      - name: Validate rendered manifests
+        run: |
+          docker run --rm -v "$PWD/rendered:/w:ro" ghcr.io/yannh/kubeconform:v0.8.0 \
+            -strict -ignore-missing-schemas -summary /w/default.yaml /w/toggled.yaml
+
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.12 -color
+
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [lint, audit, test, dashboard, scripts-smoke]
+    needs: [lint, audit, test, dashboard, scripts-smoke, chart]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
