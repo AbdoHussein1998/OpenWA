@@ -290,7 +290,9 @@
       "phone": "Número de teléfono",
       "phoneNone": "No conectado",
       "created": "Creado",
-      "lastActive": "Última actividad"
+      "lastActive": "Última actividad",
+      "autoRejectCalls": "Rechazar llamadas automáticamente",
+      "autoRejectCallsHint": "Las llamadas entrantes se rechazan en cuanto suenan. El webhook call.received se envía igualmente antes. Se aplica a la próxima llamada; no hace falta reiniciar."
     },
     "actions": {
       "view": "Ver",

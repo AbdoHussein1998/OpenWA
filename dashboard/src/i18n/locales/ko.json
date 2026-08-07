@@ -290,7 +290,9 @@
       "phone": "전화번호",
       "phoneNone": "연결되지 않음",
       "created": "생성일",
-      "lastActive": "마지막 활동"
+      "lastActive": "마지막 활동",
+      "autoRejectCalls": "통화 자동 거절",
+      "autoRejectCallsHint": "수신 통화가 울리는 즉시 거절됩니다. call.received 웹훅은 그전에 그대로 전송됩니다. 다음 통화부터 적용되며 재시작이 필요하지 않습니다."
     },
     "actions": {
       "view": "보기",
