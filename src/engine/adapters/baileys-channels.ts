@@ -2,6 +2,7 @@ import type { WASocket } from '@whiskeysockets/baileys';
 import { Channel } from '../interfaces/whatsapp-engine.interface';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { mapServerRefusal } from './baileys-groups';
+import { BAILEYS_QUERY_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
 
 /**
  * Channel-domain operations extracted from BaileysAdapter. The adapter keeps the public
@@ -15,7 +16,19 @@ export interface BaileysChannelsHost {
 }
 
 export class BaileysChannels {
-  constructor(private readonly host: BaileysChannelsHost) {}
+  constructor(
+    private readonly host: BaileysChannelsHost,
+    private readonly queryBudgetMs: number = BAILEYS_QUERY_BUDGET_MS,
+  ) {}
+
+  /**
+   * Bound a channel call. executeWMexQuery throws Boom(..., { statusCode: 400, data: result }) when
+   * nothing came back, and with result undefined Boom normalises data to null — so the refusal
+   * classifier cannot place it and the raw Boom escapes as a bare 500.
+   */
+  private bounded<T>(work: Promise<T>, operation: string): Promise<T> {
+    return withQueryDeadline(work, this.queryBudgetMs, `WhatsApp did not answer ${operation} in time`);
+  }
 
   /** Post-ensureReady socket handle. */
   private sock(): WASocket {
@@ -25,20 +38,25 @@ export class BaileysChannels {
   async getChannelById(channelId: string): Promise<Channel | null> {
     this.host.ensureReady();
     // newsletterMetadata resolves ANY channel by jid (richer than the wwjs subscribed-list lookup).
-    const meta = await this.sock().newsletterMetadata('jid', channelId);
+    const meta = await this.bounded(this.sock().newsletterMetadata('jid', channelId), 'the channel lookup');
     return meta ? this.toChannel(meta) : null;
   }
 
   async subscribeToChannel(inviteCode: string): Promise<Channel> {
     this.host.ensureReady();
-    const meta = await this.sock().newsletterMetadata('invite', inviteCode);
+    const meta = await this.bounded(this.sock().newsletterMetadata('invite', inviteCode), 'the invite lookup');
     if (!meta) {
       throw new ChannelNotFoundError(inviteCode);
     }
-    await this.sock().newsletterFollow(meta.id);
+    await this.bounded(this.sock().newsletterFollow(meta.id), 'the channel subscribe');
     return this.toChannel(meta);
   }
 
+  /**
+   * Deliberately NOT bounded, unlike every other call here: creating a channel is non-idempotent,
+   * and 503 is a backpressure status the Go SDK retries three times for POST (sdk/go/retry.go).
+   * A deadline abandons without cancelling, so a slow-but-succeeding create could leave duplicates.
+   */
   async createChannel(name: string, description?: string): Promise<Channel> {
     this.host.ensureReady();
     const meta = await mapServerRefusal('Creating the channel', () => this.sock().newsletterCreate(name, description));
@@ -47,19 +65,24 @@ export class BaileysChannels {
 
   async deleteChannel(channelId: string): Promise<void> {
     this.host.ensureReady();
-    await mapServerRefusal('Deleting the channel', () => this.sock().newsletterDelete(channelId));
+    await mapServerRefusal('Deleting the channel', () =>
+      this.bounded(this.sock().newsletterDelete(channelId), 'the channel delete'),
+    );
   }
 
   async muteChannel(channelId: string, mute: boolean): Promise<void> {
     this.host.ensureReady();
     await mapServerRefusal(mute ? 'Muting the channel' : 'Unmuting the channel', () =>
-      mute ? this.sock().newsletterMute(channelId) : this.sock().newsletterUnmute(channelId),
+      this.bounded(
+        mute ? this.sock().newsletterMute(channelId) : this.sock().newsletterUnmute(channelId),
+        mute ? 'the channel mute' : 'the channel unmute',
+      ),
     );
   }
 
   async unsubscribeFromChannel(channelId: string): Promise<void> {
     this.host.ensureReady();
-    await this.sock().newsletterUnfollow(channelId);
+    await this.bounded(this.sock().newsletterUnfollow(channelId), 'the channel unsubscribe');
   }
 
   /** Map a Baileys NewsletterMetadata to the neutral Channel shape (optionals only when present). */
