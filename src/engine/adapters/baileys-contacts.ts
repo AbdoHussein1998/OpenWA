@@ -3,6 +3,7 @@ import { ChatSummary, Contact, MediaInput } from '../interfaces/whatsapp-engine.
 import { resolveMediaBuffer } from './baileys-messaging';
 import { type createLogger } from '../../common/services/logger.service';
 import { BAILEYS_QUERY_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
 
 /**
  * Contacts/profile/chats-domain operations extracted from BaileysAdapter. The adapter keeps the
@@ -44,8 +45,21 @@ export class BaileysContacts {
   async getProfilePicture(contactId: string): Promise<string | null> {
     this.host.ensureReady();
     try {
-      return (await this.sock().profilePictureUrl(contactId, 'image')) ?? null;
+      // The library also accepts a timeoutMs third argument, but passing it only converts the
+      // stall into a throw — which this catch would swallow into the same null. The deadline has
+      // to be ours, and the catch has to let it past.
+      const url = await withQueryDeadline(
+        this.sock().profilePictureUrl(contactId, 'image'),
+        this.queryBudgetMs,
+        'WhatsApp did not answer the profile picture lookup in time',
+      );
+      return url ?? null;
     } catch (err) {
+      // A no-picture verdict arrives as a thrown error, so this catch must keep swallowing — but a
+      // query that never came back is not a verdict about the picture.
+      if (err instanceof EngineTransportError) {
+        throw err;
+      }
       this.host.logger.debug('profilePictureUrl failed; no picture or hidden', {
         contactId,
         error: err instanceof Error ? err.message : String(err),
