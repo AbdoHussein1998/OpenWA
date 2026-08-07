@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
+import { LabelAckResponseDto, LabelChatDto, LabelDto } from './dto/label-response.dto';
 import { LabelService } from './label.service';
 import { AddLabelDto } from './dto/add-label.dto';
 import { UpsertLabelDto } from './dto/upsert-label.dto';
@@ -14,10 +15,7 @@ export class LabelController {
   @Get()
   @ApiOperation({ summary: 'Get all labels (WhatsApp Business only)' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'List of labels',
-  })
+  @ApiResponse({ status: 200, description: 'List of labels', type: [LabelDto] })
   @ApiResponse({ status: 400, description: 'Session not ready or not a business account' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   async findAll(@Param('sessionId') sessionId: string) {
@@ -28,10 +26,7 @@ export class LabelController {
   @ApiOperation({ summary: 'Get a specific label by ID' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'labelId', description: 'Label ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Label details',
-  })
+  @ApiResponse({ status: 200, description: 'Label details', type: LabelDto })
   @ApiResponse({ status: 404, description: 'Label not found' })
   async findOne(@Param('sessionId') sessionId: string, @Param('labelId') labelId: string) {
     return this.labelService.getLabelById(sessionId, labelId);
@@ -45,7 +40,7 @@ export class LabelController {
   })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'labelId', description: 'Label ID' })
-  @ApiResponse({ status: 200, description: 'Chats carrying the label' })
+  @ApiResponse({ status: 200, description: 'Chats carrying the label', type: [LabelChatDto] })
   @ApiResponse({ status: 400, description: 'Session not started' })
   @ApiResponse({ status: 501, description: 'The active engine cannot list chats by label (Baileys)' })
   async getChatsByLabel(@Param('sessionId') sessionId: string, @Param('labelId') labelId: string) {
@@ -68,7 +63,7 @@ export class LabelController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'labelId', description: 'Label ID — caller-chosen' })
   @ApiBody({ type: UpsertLabelDto })
-  @ApiResponse({ status: 200, description: 'Label created or updated' })
+  @ApiResponse({ status: 200, description: 'Label created or updated', type: LabelAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
   @ApiResponse({ status: 501, description: 'The active engine cannot edit labels (whatsapp-web.js)' })
   async upsertLabel(
@@ -91,7 +86,7 @@ export class LabelController {
   })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'labelId', description: 'Label ID' })
-  @ApiResponse({ status: 200, description: 'Label deleted' })
+  @ApiResponse({ status: 200, description: 'Label deleted', type: LabelAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not started' })
   @ApiResponse({ status: 501, description: 'The active engine cannot edit labels (whatsapp-web.js)' })
   async deleteLabel(
@@ -106,10 +101,7 @@ export class LabelController {
   @ApiOperation({ summary: 'Get labels for a specific chat' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'chatId', description: 'Chat ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'List of labels for the chat',
-  })
+  @ApiResponse({ status: 200, description: 'List of labels for the chat', type: [LabelDto] })
   async getChatLabels(@Param('sessionId') sessionId: string, @Param('chatId') chatId: string) {
     return this.labelService.getChatLabels(sessionId, chatId);
   }
@@ -129,10 +121,7 @@ export class LabelController {
       required: ['labelId'],
     },
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Label added to chat',
-  })
+  @ApiResponse({ status: 200, description: 'Label added to chat', type: LabelAckResponseDto })
   @ApiResponse({
     status: 422,
     description: 'Labels require a WhatsApp Business account, or the chat type has no labels',
@@ -152,10 +141,7 @@ export class LabelController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'chatId', description: 'Chat ID' })
   @ApiParam({ name: 'labelId', description: 'Label ID to remove' })
-  @ApiResponse({
-    status: 200,
-    description: 'Label removed from chat',
-  })
+  @ApiResponse({ status: 200, description: 'Label removed from chat', type: LabelAckResponseDto })
   @ApiResponse({
     status: 422,
     description: 'Labels require a WhatsApp Business account, or the chat type has no labels',

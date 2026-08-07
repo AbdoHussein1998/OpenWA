@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Delete, Param, Body, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiQuery } from '@nestjs/swagger';
+import { ChannelAckResponseDto, ChannelDto, ChannelMessageDto } from './dto/channel-response.dto';
 import { ChannelService } from './channel.service';
 import { SubscribeChannelDto } from './dto/subscribe-channel.dto';
 import { CreateChannelDto } from './dto/create-channel.dto';
@@ -15,10 +16,7 @@ export class ChannelController {
   @Get()
   @ApiOperation({ summary: 'Get all subscribed channels/newsletters' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'List of subscribed channels',
-  })
+  @ApiResponse({ status: 200, description: 'List of subscribed channels', type: [ChannelDto] })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   async findAll(@Param('sessionId') sessionId: string) {
     return this.channelService.getSubscribedChannels(sessionId);
@@ -28,10 +26,7 @@ export class ChannelController {
   @ApiOperation({ summary: 'Get a specific channel by ID' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'channelId', description: 'Channel ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Channel details',
-  })
+  @ApiResponse({ status: 200, description: 'Channel details', type: ChannelDto })
   @ApiResponse({ status: 404, description: 'Channel not found' })
   async findOne(@Param('sessionId') sessionId: string, @Param('channelId') channelId: string) {
     return this.channelService.getChannelById(sessionId, channelId);
@@ -47,10 +42,7 @@ export class ChannelController {
     type: Number,
     description: 'Max messages to return (default 50, max 100)',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'List of channel messages',
-  })
+  @ApiResponse({ status: 200, description: 'List of channel messages', type: [ChannelMessageDto] })
   async getMessages(
     @Param('sessionId') sessionId: string,
     @Param('channelId') channelId: string,
@@ -73,7 +65,7 @@ export class ChannelController {
   })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiBody({ type: CreateChannelDto })
-  @ApiResponse({ status: 201, description: 'The created channel' })
+  @ApiResponse({ status: 201, description: 'The created channel', type: ChannelDto })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
   @ApiResponse({ status: 403, description: 'The engine refused — channel creation may be disabled for this account' })
   async create(@Param('sessionId') sessionId: string, @Body() dto: CreateChannelDto) {
@@ -92,7 +84,7 @@ export class ChannelController {
   })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'channelId', description: 'Channel ID' })
-  @ApiResponse({ status: 200, description: 'Channel deleted' })
+  @ApiResponse({ status: 200, description: 'Channel deleted', type: ChannelAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not started' })
   @ApiResponse({ status: 403, description: 'The engine refused — not found, or this account does not own it' })
   async remove(
@@ -113,7 +105,7 @@ export class ChannelController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'channelId', description: 'Channel ID' })
   @ApiBody({ type: MuteChannelDto })
-  @ApiResponse({ status: 200, description: 'Channel muted or unmuted' })
+  @ApiResponse({ status: 200, description: 'Channel muted or unmuted', type: ChannelAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
   @ApiResponse({ status: 403, description: 'The engine refused' })
   async mute(
@@ -142,10 +134,7 @@ export class ChannelController {
       required: ['inviteCode'],
     },
   })
-  @ApiResponse({
-    status: 201,
-    description: 'Successfully subscribed to channel',
-  })
+  @ApiResponse({ status: 201, description: 'Successfully subscribed to channel', type: ChannelDto })
   async subscribe(@Param('sessionId') sessionId: string, @Body() body: SubscribeChannelDto) {
     return this.channelService.subscribeToChannel(sessionId, body.inviteCode);
   }
@@ -155,10 +144,7 @@ export class ChannelController {
   @ApiOperation({ summary: 'Unsubscribe from a channel' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'channelId', description: 'Channel ID to unsubscribe from' })
-  @ApiResponse({
-    status: 200,
-    description: 'Successfully unsubscribed from channel',
-  })
+  @ApiResponse({ status: 200, description: 'Successfully unsubscribed from channel', type: ChannelAckResponseDto })
   async unsubscribe(@Param('sessionId') sessionId: string, @Param('channelId') channelId: string) {
     await this.channelService.unsubscribeFromChannel(sessionId, channelId);
     return { success: true };
