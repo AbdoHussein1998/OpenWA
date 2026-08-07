@@ -607,6 +607,70 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     });
   });
 
+  it('never strips a URL whose scheme is uppercase — both engines fetch it, so it is a pointer too', async () => {
+    // `@IsUrl()` accepts it and both adapters match the scheme case-insensitively (wwebjs-messaging.ts
+    // `isHttpUrl`, baileys-messaging.ts `resolveMediaBuffer`), so this URL sends successfully and the
+    // row is its only record. Classifying it as bytes destroys that reference for good.
+    const url = 'HTTPS://cdn.example.com/PROMO.png';
+    await seedSession('s1');
+    await ds.getRepository(Message).save(
+      ds.getRepository(Message).create({
+        id: 'm-url-upper',
+        sessionId: 's1',
+        waMessageId: 'WA-URL-UPPER',
+        chatId: 'c1@s.whatsapp.net',
+        from: 'a@s.whatsapp.net',
+        to: 'b@s.whatsapp.net',
+        body: null as never,
+        type: 'image',
+        direction: MessageDirection.OUTGOING,
+        timestamp: 1700000000,
+        metadata: { media: { mimetype: 'image/png', filename: 'promo.png', data: url } },
+        status: MessageStatus.SENT,
+      }),
+    );
+
+    await withBudget(0, async () => {
+      const meta = exportedMeta(await controller.exportData(), 'm-url-upper');
+      expect(meta.media).toEqual({ mimetype: 'image/png', filename: 'promo.png', data: url });
+    });
+  });
+
+  it('spends the export budget on the newest media first', async () => {
+    // `SELECT *` has no ORDER BY, so the rows arrive in rowid order on SQLite — oldest first, the
+    // exact inverse of what a backup wants. Both photos fit alone; only one fits the budget.
+    const olderPhoto = Buffer.from('o'.repeat(600)).toString('base64');
+    const newerPhoto = Buffer.from('n'.repeat(600)).toString('base64');
+    await seedSession('s1');
+    const seedPhoto = async (id: string, timestamp: number, data: string): Promise<void> => {
+      await ds.getRepository(Message).save(
+        ds.getRepository(Message).create({
+          id,
+          sessionId: 's1',
+          waMessageId: `WA-${id}`,
+          chatId: 'c1@s.whatsapp.net',
+          from: 'a@s.whatsapp.net',
+          to: 'b@s.whatsapp.net',
+          body: null as never,
+          type: 'image',
+          direction: MessageDirection.INCOMING,
+          timestamp,
+          metadata: { media: { mimetype: 'image/jpeg', data } },
+          status: MessageStatus.DELIVERED,
+        }),
+      );
+    };
+    // Inserted oldest-first, which is also how SQLite hands them back.
+    await seedPhoto('m-older', 1700000000, olderPhoto);
+    await seedPhoto('m-newer', 1800000000, newerPhoto);
+
+    await withBudget(Buffer.byteLength(newerPhoto, 'utf8'), async () => {
+      const dump = await controller.exportData();
+      expect(exportedMeta(dump, 'm-newer').media).toEqual({ mimetype: 'image/jpeg', data: newerPhoto });
+      expect(exportedMeta(dump, 'm-older').media).toMatchObject({ omitted: true });
+    });
+  });
+
   it('does not 500 the export when a metadata column holds the JSON text `null`', async () => {
     // The import accepts a hand-edited archive verbatim (table-importers.ts), so this row is
     // reachable — and `JSON.parse('null')` returns null, whose `.media` read throws.
