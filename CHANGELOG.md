@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The API description now documents the two statuses middleware returns before routing** — `415` for a compressed request body and `503` with `Retry-After` when too much body data is already in flight, neither of which appeared anywhere in the OpenAPI document despite applying to every operation.
+- **The Helm chart now states the reason `replicaCount` must stay 1 that actually applies today** — the warning described two pods corrupting shared session auth, which a session lease and per-pod volumes already prevent, so an operator acting on it would mitigate the wrong thing.
+
 ## [0.14.4] - 2026-08-07
 
 ### Fixed
