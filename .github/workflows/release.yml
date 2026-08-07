@@ -84,6 +84,12 @@ jobs:
       - name: Check OpenAPI snapshot is up to date
         run: npm run openapi:check
 
+      # The same gate ci.yml runs. Its comment there notes this workflow never ran it, which is the
+      # gap: a tag pushed with `--follow-tags` starts both workflows, and only the branch one could
+      # see an SDK left behind by a contract change. The release path has to stand on its own.
+      - name: Check SDK routes against the contract
+        run: npm run check:sdk-routes
+
   test:
     name: Test
     runs-on: ubuntu-latest
