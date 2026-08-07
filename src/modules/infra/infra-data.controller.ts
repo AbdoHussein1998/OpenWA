@@ -168,12 +168,19 @@ function isMediaPointer(data: string): boolean {
 }
 
 /**
- * Sort key for the media budget: newest first, so a budget that cannot hold everything keeps the
- * most recent media. `Number(null)` is 0, which sorts an undated row last — the least worth keeping.
+ * Order rows so the media budget is spent newest-first, keeping the most recent media when it cannot
+ * hold everything. `SELECT *` carries no ORDER BY: rows arrive in rowid order on SQLite — oldest
+ * first, the exact inverse of what a backup wants — and in physical-tuple order on Postgres, which
+ * routine UPDATEs reshuffle, so two exports of an unchanged DB need not agree. Sorts a COPY, leaving
+ * the exported array's own order untouched. A row with no usable timestamp sorts last, as the least
+ * worth spending the budget on.
  */
-function newestFirstKey(row: MessageRow): number {
-  const timestamp = Number(row.timestamp);
-  return Number.isFinite(timestamp) ? timestamp : 0;
+function newestFirst<T>(rows: readonly T[], at: (row: T) => number): T[] {
+  const key = (row: T): number => {
+    const value = at(row);
+    return Number.isFinite(value) ? value : 0;
+  };
+  return [...rows].sort((a, b) => key(b) - key(a));
 }
 
 /** Spends the shared budget. Returns true when this payload does not fit and must be dropped. */
@@ -364,16 +371,13 @@ export class InfraDataController {
     for (const row of messages) {
       delete row.body_ts;
     }
-    // Spend the budget newest-first. `SELECT *` carries no ORDER BY, so rows arrive in rowid order on
-    // SQLite — oldest first, so an exhausted budget would keep the oldest photos and omit every recent
-    // one — and in physical-tuple order on Postgres, which routine UPDATEs (ack, edits, reactions,
-    // archive pointers) reshuffle, so two exports of an unchanged DB need not agree on which media
-    // they carry. Sorting a COPY leaves the exported array's own order untouched.
-    for (const row of [...messages].sort((a, b) => newestFirstKey(b) - newestFirstKey(a))) {
+    for (const row of newestFirst(messages, row => Number(row.timestamp))) {
       stripInlineMediaPayload(row, exceedsBudget);
     }
     const messageBatches = await queryOptionalTable<MessageBatchRow>('message_batches');
-    for (const row of messageBatches) {
+    // Batches spend what the messages left, and by the same newest-first rule: a run left PROCESSING
+    // keeps its payloads indefinitely, so a stale one must not outbid a current one.
+    for (const row of newestFirst(messageBatches, row => Date.parse(row.created_at))) {
       stripBatchInlineMedia(row, exceedsBudget);
     }
     const templates = await queryOptionalTable<TemplateRow>('templates');

@@ -786,6 +786,53 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     });
   });
 
+  it('spends the export budget on the newest bulk batch first', async () => {
+    // Same defect the `messages` pass was fixed for: `SELECT *` has no ORDER BY, so on SQLite the
+    // batches arrive oldest-first and an exhausted budget keeps the stalest run's payloads.
+    const olderPayload = Buffer.from('o'.repeat(600)).toString('base64');
+    const newerPayload = Buffer.from('n'.repeat(600)).toString('base64');
+    await seedSession('s1');
+    const seedBatch = async (id: string, createdAt: string, base64: string): Promise<void> => {
+      await ds.getRepository(MessageBatch).save(
+        ds.getRepository(MessageBatch).create({
+          id,
+          batchId: `BATCH-${id}`,
+          sessionId: 's1',
+          status: BatchStatus.PROCESSING,
+          messages: [{ chatId: 'c1', type: 'image', content: { image: { base64, mimetype: 'image/png' } } }] as never,
+          options: null as never,
+          progress: null as never,
+          results: null as never,
+          currentIndex: 0,
+          startedAt: null,
+          completedAt: null,
+        }),
+      );
+      // `created_at` is a @CreateDateColumn, so it cannot be seeded through the entity.
+      await ds.query(`UPDATE message_batches SET created_at = ? WHERE id = ?`, [createdAt, id]);
+    };
+    // Inserted oldest-first, which is also how SQLite hands them back.
+    await seedBatch('b-older', '2026-01-01T00:00:00.000Z', olderPayload);
+    await seedBatch('b-newer', '2026-06-01T00:00:00.000Z', newerPayload);
+
+    const batchImage = (
+      dump: Awaited<ReturnType<typeof controller.exportData>>,
+      id: string,
+    ): Record<string, unknown> => {
+      const row = dump.tables.messageBatches.find(r => r.id === id);
+      const msgs = (typeof row?.messages === 'string' ? JSON.parse(row.messages) : row?.messages) as Array<{
+        content: { image: Record<string, unknown> };
+      }>;
+      return msgs[0].content.image;
+    };
+
+    await withBudget(Buffer.byteLength(newerPayload, 'utf8'), async () => {
+      const dump = await controller.exportData();
+      expect(batchImage(dump, 'b-newer')).toEqual({ base64: newerPayload, mimetype: 'image/png' });
+      expect(batchImage(dump, 'b-older')).not.toHaveProperty('base64');
+    });
+  });
+
   it('round-trips plugin instances + integration delivery failures (Integration Fabric + DLQ)', async () => {
     await seedSession('s1');
     await ds.getRepository(PluginInstance).save(
