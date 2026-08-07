@@ -1237,12 +1237,12 @@ Get the processing status and progress of a bulk batch.
 ### Send pacing (opt-in, `429 SEND_PACING_LIMITED`)
 
 Every outbound message send — the `messages/send-*` routes, `messages/edit`, `messages/forward`,
-bulk batches, status posts and `messages/send-product` — passes an optional pacing governor before
+bulk batches, status posts and both catalog sends (`messages/send-product`, `messages/send-catalog`) — passes an optional pacing governor before
 it reaches WhatsApp. Actions on existing messages (react, vote, pin, star) are not sends and are
 not paced. It is **off by default**: unless `SEND_PACING_ENABLED=true`, nothing is refused and no
 extra work is done.
 
-When enabled, two rules can refuse a send:
+When enabled, three rules can refuse a send:
 
 | Rule              | What it means                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -5002,7 +5002,7 @@ Export every row of the 14 migration tables from the Data DB as JSON. Read-only,
 
 > **Inline media is carried up to a budget, then omitted.** `EXPORT_INLINE_MEDIA_BUDGET_BYTES` (8 MiB of encoded base64 by default) bounds how much inline media one export may hold, counted across both `messages` and `messageBatches`. Within each of those tables it is spent newest-first — messages by `timestamp`, batches by `created_at` — so an export that cannot carry everything keeps the most recent media rather than whatever the database happened to return first. Messages are served before batches, so a long history can exhaust the budget before any batch is reached. An over-budget payload on a `messages` row arrives as the omitted marker — `{ mimetype, filename?, omitted: true, sizeBytes }`, the same shape the engine emits when an inbound payload exceeds `MEDIA_DOWNLOAD_MAX_BYTES` — so those messages restore without their pictures. A `messageBatches` entry carries no marker: it simply loses its `base64` and keeps `url`, `mimetype` and `caption`, which is the shape a batch already has once it reaches a terminal state. Without the bound, one 50 MiB attachment becomes 66 MiB of base64 and exceeds the import's own request-body limit (`BODY_SIZE_LIMIT`, 25mb by default), producing a backup this gateway refuses to restore with `413`.
 >
-> A **URL-referenced** payload is never counted or dropped: `metadata.media.data` holds either base64 or the URL a send was given, and a URL is a pointer worth a few dozen bytes. The scheme is matched case-insensitively, as both engine adapters do when they fetch it.
+> An **http/https** payload is never counted or dropped: `metadata.media.data` holds either base64 or the URL a send was given, and such a URL is a pointer worth a few dozen bytes. The scheme is matched case-insensitively, as both engine adapters do when they fetch it; a URL with any other scheme is treated as bytes.
 >
 > This bounds the media, not the export — a large enough text-only history still exceeds the import limit, because every row costs a few hundred bytes of scaffolding whatever was said. For a backup that keeps everything, use `scripts/backup.sh`: it snapshots the database file itself (and `pg_dump`s Postgres), so inline media rides along regardless of this budget.
 
@@ -5160,7 +5160,7 @@ Replace all Data DB rows with the supplied export. **Destructive and transaction
 }
 ```
 
-`warnings` are per-row import failures — they force a **rollback** and `imported:false`. `notices` are non-fatal operator messages (orphan-engine reconciliation detail) and never roll anything back. `restartRequired` is `true` when engines were left pointing at sessions the restore removed (`force`) or when an orphan teardown failed. `orphanedEngines` lists the session ids with a live engine the restored data no longer contains; `stoppedOrphanEngines`/`failedOrphanEngines` report how `stopOrphans` went.
+`warnings` are per-row import failures — they force a **rollback** and `imported:false`. `notices` are non-fatal operator messages (orphan-engine reconciliation detail) and never roll anything back. `restartRequired` is `true` from any of three causes: engines left pointing at sessions the restore removed (`force`), an orphan teardown that failed, or sessions running on another node, which this request has no channel to stop. `orphanedEngines` lists the session ids with a live engine the restored data no longer contains; `stoppedOrphanEngines`/`failedOrphanEngines` report how `stopOrphans` went.
 
 **Orphan-engine pre-flight.** Before the transaction opens, any running engine whose session id is absent from `tables.sessions` is an orphan (the replace would delete its DB row, leaving an unstoppable engine writing into freshly restored tables). Default behaviour is to refuse with `409` listing those ids; `stopOrphans: true` stops them in-request and proceeds; `force: true` proceeds and leaves them running until restart.
 

@@ -1816,7 +1816,7 @@ describe('BaileysAdapter inbound fan-out', () => {
     }
   });
 
-  it('inbound media: skips download and omits media field when MEDIA_DOWNLOAD_ENABLED=false', async () => {
+  it('inbound media: skips download and emits the omitted marker when MEDIA_DOWNLOAD_ENABLED=false', async () => {
     const prev = process.env.MEDIA_DOWNLOAD_ENABLED;
     process.env.MEDIA_DOWNLOAD_ENABLED = 'false';
     try {

@@ -2511,7 +2511,7 @@ describe('WhatsAppWebJsAdapter inbound media (MEDIA_DOWNLOAD_ENABLED=false)', ()
     else process.env[ENV] = orig;
   });
 
-  it('skips media download and omits the media field when disabled', async () => {
+  it('skips the media download and emits the omitted marker when disabled', async () => {
     process.env[ENV] = 'false';
 
     const adapter = new WhatsAppWebJsAdapter({

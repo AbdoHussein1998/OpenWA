@@ -134,7 +134,7 @@ const SHARED_CONNECTION_DIALECTS = new Set(['better-sqlite3', 'sqlite']);
 /**
  * Aggregate budget for the inline base64 media ONE export may carry, counted in the encoded bytes
  * that actually land in the JSON body. Override with EXPORT_INLINE_MEDIA_BUDGET_BYTES; 0 omits every
- * payload, and a garbage value falls back to the default.
+ * payload, and anything that is not a non-negative decimal integer falls back to the default.
  *
  * The export is bounded by nothing while the import rides the global request body limit (25mb by
  * default, `resolveBodyLimit`), so unbounded inline media produces a backup this gateway then refuses
@@ -360,8 +360,8 @@ export class InfraDataController {
       }
     };
 
-    // One budget shared by both tables that can carry inline media, so the total is what is bounded
-    // rather than each table separately.
+    // One budget shared by the two tables that carry a full inline payload — `messages` and
+    // `message_batches` — so the total is what is bounded rather than each table separately.
     const exceedsBudget = createInlineMediaBudget();
 
     const messages = await queryOptionalTable<MessageRow>('messages');
@@ -462,12 +462,23 @@ export class InfraDataController {
         },
         tables: {
           type: 'object',
+          description:
+            'Every one of the 14 migration tables is emptied before the restore runs, so a key omitted here is restored EMPTY rather than left untouched. Post the whole GET /api/infra/export-data payload, not a hand-built subset.',
           properties: {
             sessions: { type: 'array' },
             webhooks: { type: 'array' },
             messages: { type: 'array' },
             messageBatches: { type: 'array' },
+            templates: { type: 'array' },
+            baileysStoredMessages: { type: 'array' },
+            lidMappings: { type: 'array' },
+            pluginInstances: { type: 'array' },
+            conversationMappings: { type: 'array' },
+            ingressEvents: { type: 'array' },
+            webhookDeliveryFailures: { type: 'array' },
+            integrationDeliveryFailures: { type: 'array' },
             statusUpdates: { type: 'array' },
+            automationRules: { type: 'array' },
           },
         },
       },
@@ -502,7 +513,11 @@ export class InfraDataController {
      * warnings: notices never cause a rollback, while warnings make the replace-rollback gate fire.
      */
     notices: string[];
-    /** True when live engines were left pointing at sessions this restore removed — restart to stop them. */
+    /**
+     * True when an engine may still be writing into the restored tables, from any of three causes:
+     * orphans deliberately left running (`force`), a `stopOrphans` teardown that failed, or sessions
+     * held by another node, which this request has no channel to stop. Restart to reconcile.
+     */
     restartRequired: boolean;
     /** Session ids with a running engine that the restored data no longer contains. */
     orphanedEngines: string[];
@@ -849,8 +864,9 @@ export class InfraDataController {
         // only the per-table counts.
         await this.auditService?.logInfo(AuditAction.INFRA_DATA_IMPORTED, { metadata: { counts } });
 
-        // restartRequired was computed in the pre-flight: true only when orphans were left running
-        // (force=true legacy path) or when stopOrphans teardown failed for at least one engine.
+        // restartRequired was computed in the pre-flight, from three independent causes: orphans left
+        // running (force=true legacy path), a stopOrphans teardown that failed for at least one
+        // engine, and sessions held by another node, which this request cannot reach to stop.
         return {
           imported: true,
           counts,

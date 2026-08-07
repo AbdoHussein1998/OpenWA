@@ -239,7 +239,8 @@ connections**:
 - **`data`** — the pluggable user-data connection: `sqlite` (default) or `postgres`, selected by
   `DATABASE_TYPE`. Owns the session/webhook/message/template/engine entities, plus the
   integration-fabric (`plugin_instances`, `ingress_events`, `conversation_mappings`,
-  `integration_delivery_failures`) and status-store (`status_updates`) entities.
+  `integration_delivery_failures`), status-store (`status_updates`) and automation
+  (`automation_rules`) entities.
 
 The engine is provided by `EngineModule` as the `EngineFactory` **class** (a normal injectable, not a
 string token). Storage and cache are provided as the `StorageService` and `CacheService` classes by
@@ -384,7 +385,7 @@ flowchart TB
 
 ### NestJS Module Organization
 
-Trimmed to the load-bearing directories — `src/modules/` holds 27 feature modules. Only `*.module.ts`
+Trimmed to the load-bearing directories — `src/modules/` holds 31 feature modules. Only `*.module.ts`
 is common to all of them; the rest of the shape varies. Most pair a `*.controller.ts` with a
 `*.service.ts`, but `events/` is a WebSocket gateway, `mcp/` an MCP server and `queue/` pure BullMQ
 wiring (none of the three has either); `docker/` and `status-store/` are service-only; `health/`,
@@ -428,6 +429,9 @@ src/
 │   ├── auth/                   # API-key auth: auth.service.ts, guards/, decorators/, entities/
 │   ├── queue/                  # BullMQ wiring + processors/
 │   ├── integration/            # Integration fabric (plugin instances, ingress, mappings)
+│   ├── automation/            # Autoreply rules (automation_rules, the 14th migration table)
+│   ├── media/  chat-media/    # Inbound media handling + the optional chat-media archive
+│   ├── takeover/
 │   └── plugins/  mcp/  events/  infra/  docker/  settings/  metrics/  audit/  health/
 │
 └── database/                   # data-source.ts / data-source-main.ts
