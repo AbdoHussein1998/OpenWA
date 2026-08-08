@@ -47,9 +47,14 @@ export class GroupsResource {
     });
   }
 
-  /** Create a new group. */
-  create(sessionId: string, body: CreateGroupRequest): Promise<GroupInfo> {
-    return this.client.request<GroupInfo>({
+  /**
+   * Create a new group.
+   *
+   * Answers the group SUMMARY, not the detail shape `get()` returns — there is no participant list,
+   * description, owner or creation time on a create response.
+   */
+  create(sessionId: string, body: CreateGroupRequest): Promise<GroupSummary> {
+    return this.client.request<GroupSummary>({
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/groups`,
       body,

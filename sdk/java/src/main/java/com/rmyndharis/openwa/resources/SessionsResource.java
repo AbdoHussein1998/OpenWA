@@ -5,6 +5,7 @@ import static com.rmyndharis.openwa.http.Http.encodeSegment;
 import com.rmyndharis.openwa.OpenWAClient;
 import com.rmyndharis.openwa.http.HttpMethod;
 import com.rmyndharis.openwa.model.CreateSessionRequest;
+import com.rmyndharis.openwa.model.ListSessionsQuery;
 import com.rmyndharis.openwa.model.PairingCodeResponse;
 import com.rmyndharis.openwa.model.QrCodeResponse;
 import com.rmyndharis.openwa.model.RequestPairingCodeRequest;
@@ -22,7 +23,12 @@ public final class SessionsResource {
 
     /** List all sessions (scoped to the API key's allowed sessions). */
     public List<SessionResponse> list() {
-        return client.requestList(HttpMethod.GET, "/api/sessions", null, null, SessionResponse.class);
+        return list(null);
+    }
+
+    /** List sessions, applying the given pagination query. */
+    public List<SessionResponse> list(ListSessionsQuery query) {
+        return client.requestList(HttpMethod.GET, "/api/sessions", query, null, SessionResponse.class);
     }
 
     /** Get a single session by id. */

@@ -5,7 +5,7 @@ Backed by ``src/modules/session/session.controller.ts``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from .._http import quote_segment
 from ..types import (
@@ -21,13 +21,20 @@ if TYPE_CHECKING:
     from .._http import HttpExecutor
 
 
+class ListSessionsQuery(TypedDict, total=False):
+    """Pagination for :meth:`SessionsResource.list`. The server applies its own default when omitted."""
+
+    limit: int
+    offset: int
+
+
 class SessionsResource:
     def __init__(self, http: "HttpExecutor") -> None:
         self._http = http
 
-    def list(self) -> list[SessionResponse]:
+    def list(self, query: ListSessionsQuery | None = None) -> list[SessionResponse]:
         """List sessions."""
-        return self._http.request("GET", "/api/sessions")
+        return self._http.request("GET", "/api/sessions", query=query)
 
     def get(self, session_id: str) -> SessionResponse:
         """Return a single session."""

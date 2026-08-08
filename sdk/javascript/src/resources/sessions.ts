@@ -16,12 +16,18 @@ import type {
   SessionStatsOverview,
 } from '../types.js';
 
+/** Pagination for {@link SessionsResource.list}. The server applies its own default when omitted. */
+export interface ListSessionsQuery {
+  limit?: number;
+  offset?: number;
+}
+
 export class SessionsResource {
   constructor(private readonly client: OpenWAClient) {}
 
   /** List all sessions (scoped to the API key's `allowedSessions`). */
-  list(): Promise<SessionResponse[]> {
-    return this.client.request<SessionResponse[]>({ method: 'GET', path: '/api/sessions' });
+  list(query?: ListSessionsQuery): Promise<SessionResponse[]> {
+    return this.client.request<SessionResponse[]>({ method: 'GET', path: '/api/sessions', query });
   }
 
   /** Get a single session by id. */
