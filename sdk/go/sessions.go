@@ -14,6 +14,27 @@ func (s *SessionsService) List(ctx context.Context, query *ListSessionsQuery) ([
 }
 
 // Get returns a single session.
+// GetConfig reads a session's effective configuration.
+func (s *SessionsService) GetConfig(ctx context.Context, sessionID string) (*SessionConfig, error) {
+	var out SessionConfig
+	err := s.client.do(ctx, "GET", "/api/sessions/"+pathEscape(sessionID)+"/config", nil, nil, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateConfig changes a RUNNING session's configuration. It takes effect without re-linking the
+// account — all three fields were fixed at creation before this route existed.
+func (s *SessionsService) UpdateConfig(ctx context.Context, sessionID string, body UpdateSessionConfigRequest) (*SessionConfig, error) {
+	var out SessionConfig
+	err := s.client.do(ctx, "PATCH", "/api/sessions/"+pathEscape(sessionID)+"/config", nil, body, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (s *SessionsService) Get(ctx context.Context, sessionID string) (*SessionResponse, error) {
 	var out SessionResponse
 	err := s.client.do(ctx, "GET", "/api/sessions/"+pathEscape(sessionID), nil, nil, &out)

@@ -161,6 +161,27 @@ export interface GroupJoinInfo {
   participantCount?: number;
 }
 
+/**
+ * A session's effective runtime configuration. `null` on the two reconnect fields means "unlimited" /
+ * "engine default" respectively — not "unset".
+ */
+export interface SessionConfig {
+  autoRejectCalls: boolean;
+  maxReconnectAttempts: number | null;
+  reconnectBaseDelay: number;
+}
+
+/**
+ * Partial update of a session's config. Applies to a session that is already running — no re-link and
+ * no QR scan. Send `null` for `maxReconnectAttempts` to restore unlimited retries, which no in-range
+ * number can express.
+ */
+export interface UpdateSessionConfigRequest {
+  autoRejectCalls?: boolean | null;
+  maxReconnectAttempts?: number | null;
+  reconnectBaseDelay?: number | null;
+}
+
 export interface CreateSessionRequest {
   /** Alphanumeric + hyphens, 3–50 chars. */
   name: string;

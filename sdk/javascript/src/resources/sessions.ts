@@ -12,7 +12,9 @@ import type {
   PairingCodeResponse,
   QrCodeResponse,
   RequestPairingCodeRequest,
+  SessionConfig,
   SessionResponse,
+  UpdateSessionConfigRequest,
   SessionStatsOverview,
 } from '../types.js';
 
@@ -28,6 +30,26 @@ export class SessionsResource {
   /** List all sessions (scoped to the API key's `allowedSessions`). */
   list(query?: ListSessionsQuery): Promise<SessionResponse[]> {
     return this.client.request<SessionResponse[]>({ method: 'GET', path: '/api/sessions', query });
+  }
+
+  /** Read a session's effective configuration. */
+  getConfig(id: string): Promise<SessionConfig> {
+    return this.client.request<SessionConfig>({
+      method: 'GET',
+      path: `/api/sessions/${encodeSegment(id)}/config`,
+    });
+  }
+
+  /**
+   * Update a running session's configuration. Takes effect without re-linking the account — all three
+   * fields were fixed at creation before this route existed.
+   */
+  updateConfig(id: string, body: UpdateSessionConfigRequest): Promise<SessionConfig> {
+    return this.client.request<SessionConfig>({
+      method: 'PATCH',
+      path: `/api/sessions/${encodeSegment(id)}/config`,
+      body,
+    });
   }
 
   /** Get a single session by id. */

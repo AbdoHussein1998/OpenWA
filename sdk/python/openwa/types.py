@@ -174,6 +174,29 @@ class SessionResponse(TypedDict, total=False):
     engineLoaded: bool
 
 
+class SessionConfig(TypedDict):
+    """A session's effective runtime configuration.
+
+    ``None`` on ``maxReconnectAttempts`` means unlimited -- not unset.
+    """
+
+    autoRejectCalls: bool
+    maxReconnectAttempts: int | None
+    reconnectBaseDelay: int
+
+
+class UpdateSessionConfigRequest(TypedDict, total=False):
+    """Partial update of a running session's config -- no re-link, no QR scan.
+
+    Send ``None`` for ``maxReconnectAttempts`` to restore unlimited retries, which no in-range number
+    can express.
+    """
+
+    autoRejectCalls: bool | None
+    maxReconnectAttempts: int | None
+    reconnectBaseDelay: int | None
+
+
 class CreateSessionRequest(TypedDict, total=False):
     name: str
     config: dict[str, Any]

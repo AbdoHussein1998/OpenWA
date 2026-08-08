@@ -9,8 +9,10 @@ import com.rmyndharis.openwa.model.ListSessionsQuery;
 import com.rmyndharis.openwa.model.PairingCodeResponse;
 import com.rmyndharis.openwa.model.QrCodeResponse;
 import com.rmyndharis.openwa.model.RequestPairingCodeRequest;
+import com.rmyndharis.openwa.model.SessionConfig;
 import com.rmyndharis.openwa.model.SessionResponse;
 import com.rmyndharis.openwa.model.SessionStatsOverview;
+import com.rmyndharis.openwa.model.UpdateSessionConfigRequest;
 import java.util.List;
 
 /** Sessions resource — lifecycle management for WhatsApp sessions. */
@@ -29,6 +31,21 @@ public final class SessionsResource {
     /** List sessions, applying the given pagination query. */
     public List<SessionResponse> list(ListSessionsQuery query) {
         return client.requestList(HttpMethod.GET, "/api/sessions", query, null, SessionResponse.class);
+    }
+
+    /** Read a session's effective configuration. */
+    public SessionConfig getConfig(String id) {
+        return client.request(
+                HttpMethod.GET, "/api/sessions/" + encodeSegment(id) + "/config", null, null, SessionConfig.class);
+    }
+
+    /**
+     * Update a RUNNING session's configuration. Takes effect without re-linking the account — all
+     * three fields were fixed at creation before this route existed.
+     */
+    public SessionConfig updateConfig(String id, UpdateSessionConfigRequest body) {
+        return client.request(
+                HttpMethod.PATCH, "/api/sessions/" + encodeSegment(id) + "/config", null, body, SessionConfig.class);
     }
 
     /** Get a single session by id. */

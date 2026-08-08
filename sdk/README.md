@@ -42,9 +42,15 @@ All five SDKs expose the same fluent resource surface:
 | `health`    | check, live, ready                                                                                                                                                                                                                               |
 
 > ⚠️ Endpoints requiring an `OPERATOR`-level API key are noted in the inline
-> docs. Operator-only modules (`docker`, `metrics`, `infra`, `plugins`, `mcp`,
-> `automation`) are intentionally **not** exposed in the SDK; all user-facing
-> resources are.
+> docs. Deliberately **not** exposed: the operator-only modules (`docker`,
+> `metrics`, `infra`, `plugins`, `mcp`, `automation`, `integration`) and the
+> admin surfaces `docs/18-sdk-design.md` excludes (`auth`/api-keys, `audit`,
+> `settings`, `statistics`). Those two lists have to agree — this one was
+> shorter than the design doc's, and the gap read as an accidental omission.
+>
+> Everything else the gateway publishes is exposed. That sentence used to be an
+> unqualified "all user-facing resources are", which was false for the session
+> config routes and the two cross-session webhook reads until they were added.
 
 ## JavaScript / TypeScript
 

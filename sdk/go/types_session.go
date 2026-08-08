@@ -159,3 +159,39 @@ type SessionStatsOverview struct {
 	ByStatus     map[string]int `json:"byStatus,omitempty"`
 	MemoryUsage  MemoryUsage    `json:"memoryUsage"`
 }
+
+// SessionConfig is a session's effective runtime configuration. A nil MaxReconnectAttempts means
+// unlimited — not unset.
+type SessionConfig struct {
+	AutoRejectCalls      bool `json:"autoRejectCalls"`
+	MaxReconnectAttempts *int `json:"maxReconnectAttempts"`
+	ReconnectBaseDelay   int  `json:"reconnectBaseDelay"`
+}
+
+// UpdateSessionConfigRequest is a partial update of a RUNNING session's config — no re-link, no QR
+// scan. Send a nil MaxReconnectAttempts through Ptr to restore unlimited retries, which no in-range
+// number can express.
+type UpdateSessionConfigRequest struct {
+	AutoRejectCalls      *bool `json:"autoRejectCalls,omitempty"`
+	MaxReconnectAttempts *int  `json:"maxReconnectAttempts,omitempty"`
+	ReconnectBaseDelay   *int  `json:"reconnectBaseDelay,omitempty"`
+}
+
+// DeliveryFailureQuery filters the cross-session webhook list and the delivery-failure log. Nil
+// fields are omitted from the query string. SessionID is ignored by the plain webhook list.
+type DeliveryFailureQuery struct {
+	SessionID *string
+	Limit     *int
+	Offset    *int
+}
+
+func (q *DeliveryFailureQuery) values() url.Values {
+	v := url.Values{}
+	if q == nil {
+		return v
+	}
+	setStr(v, "sessionId", q.SessionID)
+	setInt(v, "limit", q.Limit)
+	setInt(v, "offset", q.Offset)
+	return v
+}

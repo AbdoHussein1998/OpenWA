@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, TypedDict
 from .._http import quote_segment
 from ..types import (
     CreateSessionRequest,
+    SessionConfig,
+    UpdateSessionConfigRequest,
     PairingCodeResponse,
     QrCodeResponse,
     RequestPairingCodeRequest,
@@ -35,6 +37,19 @@ class SessionsResource:
     def list(self, query: ListSessionsQuery | None = None) -> list[SessionResponse]:
         """List sessions."""
         return self._http.request("GET", "/api/sessions", query=query)
+
+    def get_config(self, session_id: str) -> SessionConfig:
+        """Read a session's effective configuration."""
+        return self._http.request("GET", f"/api/sessions/{quote_segment(session_id)}/config")
+
+    def update_config(self, session_id: str, body: UpdateSessionConfigRequest) -> SessionConfig:
+        """Update a RUNNING session's configuration -- no re-link and no QR scan.
+
+        All three fields were fixed at creation before this route existed.
+        """
+        return self._http.request(
+            "PATCH", f"/api/sessions/{quote_segment(session_id)}/config", body=body
+        )
 
     def get(self, session_id: str) -> SessionResponse:
         """Return a single session."""
