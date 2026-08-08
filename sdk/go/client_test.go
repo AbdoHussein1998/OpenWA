@@ -861,6 +861,25 @@ func TestUpdateGroupSettingsOmitsUnsetFields(t *testing.T) {
 	}
 }
 
+// A 503 is the gateway's answer when the engine never confirmed an operation — a transport failure,
+// and the one sentinel here worth retrying. It used to have none, while the permanent 501 did.
+func TestServiceUnavailableIsRetryableSentinel(t *testing.T) {
+	rt := &recordTransport{
+		status: 503,
+		body:   `{"statusCode":503,"message":"WhatsApp did not answer in time","error":"Service Unavailable"}`,
+	}
+	c := newTestClient(t, rt)
+
+	_, err := c.Groups.Get(context.Background(), "s1", "g1")
+	if !errors.Is(err, ErrServiceUnavailable) {
+		t.Fatalf("errors.Is ErrServiceUnavailable = false for %v", err)
+	}
+	// It must not also satisfy a sentinel that would mislead a caller into NOT retrying.
+	if errors.Is(err, ErrNotImplemented) {
+		t.Fatal("a 503 must not match ErrNotImplemented")
+	}
+}
+
 // Setting ephemeralSeconds on the whatsapp-web.js engine surfaces as 501.
 func TestUpdateGroupSettingsNotImplemented(t *testing.T) {
 	rt := &recordTransport{

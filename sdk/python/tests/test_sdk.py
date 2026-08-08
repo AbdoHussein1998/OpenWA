@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from openwa import OpenWAClient, OpenWAApiError, OpenWANotFoundError
+from openwa.errors import OpenWAServiceUnavailableError
 
 from conftest import MockBackend, make_client
 
@@ -108,6 +109,17 @@ class TestClientCore:
         })
         with pytest.raises(OpenWANotFoundError):
             make_client(backend).sessions.get("missing")
+
+    def test_maps_503_to_service_unavailable(self):
+        # The gateway answers 503 when the engine never confirmed an operation -- the one typed error
+        # here worth retrying. It used to fall through to the base class while the permanent 501 had a
+        # subclass of its own.
+        backend = MockBackend()
+        backend.on("GET", "/api/sessions/s1", 503, {
+            "statusCode": 503, "message": "WhatsApp did not answer", "error": "Service Unavailable"
+        })
+        with pytest.raises(OpenWAServiceUnavailableError):
+            make_client(backend).sessions.get("s1")
 
     def test_exposes_all_resources(self):
         client = make_client(MockBackend())

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Two statements in the codebase that were not true** — a load-bearing comment justified skipping a lookup on the grounds that PostgreSQL would raise a 500 against a uuid column, when `sessions.id` is `varchar` on both dialects and a malformed id simply matches nothing; and the webhook event table stated all 22 events are actively dispatched by the engines without saying that four of them fire on Baileys only, which the same document states 2 200 lines later.
+- **All five SDKs now give the retryable status a type of its own** — every one classified `401`, `403`, `404`, `409`, `429` and `501` into a dedicated error and let `503` fall through to the base class, which inverted the mapping against usefulness: `501 Not Implemented` is permanent and never worth retrying, while `503` is the transport failure a caller should retry — and 0.14.5 made it the standard answer for "WhatsApp never confirmed" across 47 of the 189 operations.
 
 ### Fixed
 
