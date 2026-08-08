@@ -381,7 +381,11 @@ export class MessageController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'chatId', description: 'Chat ID containing the message' })
   @ApiParam({ name: 'messageId', description: 'WhatsApp message ID whose media to download' })
-  @ApiResponse({ status: 200, description: 'The archived media bytes, served as an attachment.' })
+  @ApiResponse({
+    status: 200,
+    description: 'The archived media bytes, served as an attachment.',
+    content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } },
+  })
   @ApiResponse({
     status: 404,
     description:

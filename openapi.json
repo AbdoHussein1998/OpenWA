@@ -1674,7 +1674,17 @@
         ],
         "responses": {
           "200": {
-            "description": "Rules in evaluation order: creation time, id as the same-second tiebreak."
+            "description": "Rules in evaluation order: creation time, id as the same-second tiebreak.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AutomationRuleResponseDto"
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "List the session’s autoreply rules",
@@ -2647,7 +2657,15 @@
         ],
         "responses": {
           "200": {
-            "description": "The archived media bytes, served as an attachment."
+            "description": "The archived media bytes, served as an attachment.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "404": {
             "description": "Nothing archived for this message — archiving was off when it arrived, the message carries no media, the media was above the archive cap, retention has since cleared it, or the message was sent BY this account (only inbound media is archived)."
@@ -6132,7 +6150,23 @@
     "/api/stats/messages": {
       "get": {
         "operationId": "StatsController_getMessageStats",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "period",
+            "required": false,
+            "in": "query",
+            "description": "Time window for the returned series.",
+            "schema": {
+              "default": "24h",
+              "type": "string",
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ]
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Message statistics with a time series for the requested period.",
@@ -6555,7 +6589,15 @@
     "/api/sessions/{sessionId}/media/convert": {
       "get": {
         "operationId": "MediaController_conversionStatus",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID the API key must be authorized for",
+            "schema": {}
+          }
+        ],
         "responses": {
           "200": {
             "description": "Reports whether conversion is switched on AND the ffmpeg binary can be run, so a client can decide between converting here and converting before it sends.",
@@ -6577,7 +6619,15 @@
     "/api/sessions/{sessionId}/media/convert/voice": {
       "post": {
         "operationId": "MediaController_convertVoice",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID the API key must be authorized for",
+            "schema": {}
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -6618,7 +6668,15 @@
     "/api/sessions/{sessionId}/media/convert/video": {
       "post": {
         "operationId": "MediaController_convertVideo",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID the API key must be authorized for",
+            "schema": {}
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -6890,7 +6948,17 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "List of all plugins"
+            "description": "List of all plugins",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PluginDto"
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "List all plugins",
@@ -6903,9 +6971,36 @@
       "post": {
         "operationId": "PluginsController_install",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The plugin .zip package"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
-            "description": "Plugin installed"
+            "description": "Plugin installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid package"
@@ -6936,7 +7031,14 @@
         },
         "responses": {
           "201": {
-            "description": "Plugin installed"
+            "description": "Plugin installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid URL, download failed, or invalid package"
@@ -6984,7 +7086,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Plugin details"
+            "description": "Plugin details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginDto"
+                }
+              }
+            }
           },
           "404": {
             "description": "Plugin not found"
@@ -7121,7 +7230,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Config UI HTML"
+            "description": "Config UI HTML",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "description": "Plugin not found or has no config UI"
@@ -7256,7 +7372,14 @@
         },
         "responses": {
           "201": {
-            "description": "Plugin updated"
+            "description": "Plugin updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid URL/package, id mismatch, or built-in"
@@ -7314,6 +7437,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "path",
+            "required": true,
+            "in": "path",
+            "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
+            "schema": {
+              "example": "events/message"
+            }
           }
         ],
         "responses": {
@@ -7361,6 +7493,15 @@
             "in": "path",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "required": true,
+            "in": "path",
+            "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
+            "schema": {
+              "example": "events/message"
             }
           }
         ],
@@ -7410,6 +7551,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "path",
+            "required": true,
+            "in": "path",
+            "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
+            "schema": {
+              "example": "events/message"
+            }
           }
         ],
         "responses": {
@@ -7457,6 +7607,15 @@
             "in": "path",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "required": true,
+            "in": "path",
+            "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
+            "schema": {
+              "example": "events/message"
             }
           }
         ],
@@ -7506,6 +7665,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "path",
+            "required": true,
+            "in": "path",
+            "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
+            "schema": {
+              "example": "events/message"
+            }
           }
         ],
         "responses": {
@@ -7554,6 +7722,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "path",
+            "required": true,
+            "in": "path",
+            "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
+            "schema": {
+              "example": "events/message"
+            }
           }
         ],
         "responses": {
@@ -7601,6 +7778,15 @@
             "in": "path",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "required": true,
+            "in": "path",
+            "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
+            "schema": {
+              "example": "events/message"
             }
           }
         ],
@@ -8639,7 +8825,7 @@
             "example": false
           },
           "maxReconnectAttempts": {
-            "type": "object",
+            "type": "number",
             "description": "Reconnect attempt cap; `null` means unlimited",
             "example": 5,
             "nullable": true
@@ -8660,13 +8846,13 @@
         "type": "object",
         "properties": {
           "autoRejectCalls": {
-            "type": "object",
+            "type": "boolean",
             "description": "Auto-reject every incoming call as soon as it rings. The call.received event is still emitted first, so a webhook consumer sees the call regardless. Takes effect on the next incoming call — the session is not restarted.",
             "example": true,
             "nullable": true
           },
           "maxReconnectAttempts": {
-            "type": "object",
+            "type": "number",
             "description": "Cap on consecutive reconnect attempts (`0` disables reconnect entirely). Send `null` for unlimited, which is the default. Applies on the next session start, not to a reconnect sequence already in flight.",
             "minimum": 0,
             "maximum": 20,
@@ -8674,7 +8860,7 @@
             "nullable": true
           },
           "reconnectBaseDelay": {
-            "type": "object",
+            "type": "number",
             "description": "Base delay of the reconnect backoff in milliseconds. Applies on the next session start, not to a reconnect sequence already in flight.",
             "minimum": 1000,
             "maximum": 300000,
@@ -9168,7 +9354,10 @@
           },
           "retryCount": {
             "type": "number",
-            "description": "Retry count"
+            "description": "Delivery attempts before the webhook is parked. Same range the create route enforces.",
+            "example": 3,
+            "minimum": 0,
+            "maximum": 5
           }
         }
       },
@@ -9890,8 +10079,10 @@
         "properties": {
           "delayBetweenMessages": {
             "type": "number",
-            "description": "Delay between messages in ms (min: 1000, default: 3000)",
-            "default": 3000
+            "description": "Delay between messages in ms.",
+            "default": 3000,
+            "minimum": 1000,
+            "maximum": 60000
           },
           "randomizeDelay": {
             "type": "boolean",
@@ -13282,48 +13473,6 @@
           "chatId"
         ]
       },
-      "InstallFromUrlDto": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "description": "HTTPS URL of the plugin .zip to download and install. Plain http:// is rejected: the package is executable code, so it must be integrity-protected in transit (hosts on private networks remain subject to the SSRF guard). Optional content pinning: append `#sha256=<64 hex>` (fragment — never sent to the server; query params are ignored) to require the downloaded archive to match that digest; a mismatch fails the install."
-          }
-        },
-        "required": [
-          "url"
-        ]
-      },
-      "PluginConfigDto": {
-        "type": "object",
-        "properties": {
-          "config": {
-            "type": "object",
-            "description": "Plugin configuration object"
-          }
-        },
-        "required": [
-          "config"
-        ]
-      },
-      "PluginSessionsDto": {
-        "type": "object",
-        "properties": {
-          "sessions": {
-            "description": "Sessions to activate the plugin for; ['*'] = all numbers, [] = none",
-            "example": [
-              "*"
-            ],
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "sessions"
-        ]
-      },
       "PluginDto": {
         "type": "object",
         "properties": {
@@ -13441,6 +13590,48 @@
           "activeSessions"
         ]
       },
+      "InstallFromUrlDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "HTTPS URL of the plugin .zip to download and install. Plain http:// is rejected: the package is executable code, so it must be integrity-protected in transit (hosts on private networks remain subject to the SSRF guard). Optional content pinning: append `#sha256=<64 hex>` (fragment — never sent to the server; query params are ignored) to require the downloaded archive to match that digest; a mismatch fails the install."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "PluginConfigDto": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "type": "object",
+            "description": "Plugin configuration object"
+          }
+        },
+        "required": [
+          "config"
+        ]
+      },
+      "PluginSessionsDto": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "description": "Sessions to activate the plugin for; ['*'] = all numbers, [] = none",
+            "example": [
+              "*"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "sessions"
+        ]
+      },
       "CreateInstanceDto": {
         "type": "object",
         "properties": {
@@ -13511,7 +13702,7 @@
             "description": "Operator-chosen instance id (unique within the plugin)."
           },
           "sessionScope": {
-            "type": "object",
+            "type": "string",
             "description": "Session id the instance is scoped to, or null for all sessions.",
             "nullable": true
           },
@@ -13520,7 +13711,7 @@
             "description": "Ingress HMAC secret. Masked ('***') on every read; plaintext returned only once on create/regenerate-secret."
           },
           "verifyToken": {
-            "type": "object",
+            "type": "string",
             "description": "Provider verify-token. Masked ('***') on reads when set; plaintext on create/regenerate-secret.",
             "nullable": true
           },
