@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A post-connect group-name hydration WhatsApp never answered no longer finishes without a word** — the read shared the ambiguity `GET /sessions/{id}/groups` was bounded against in 0.14.5, where an unanswered query and an account with no groups both yield an empty result, but only the REST caller got a clock: the hydration step logged neither its success line nor its failure line, so group chats stayed unnamed with nothing to explain it.
+
 ## [0.14.5] - 2026-08-08
 
 ### Added
