@@ -7631,54 +7631,6 @@
           "integration"
         ],
         "security": []
-      },
-      "search": {
-        "operationId": "IngressController_receive_search",
-        "parameters": [
-          {
-            "name": "pluginId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "instanceId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "GET verification challenge echo, or a duplicate delivery already persisted (idempotent re-delivery). Not the primary success path — see 202."
-          },
-          "202": {
-            "description": "Webhook accepted and queued for async plugin processing (the primary success path)."
-          },
-          "401": {
-            "description": "Signature verification failed (missing, stale, or wrong secret)."
-          },
-          "403": {
-            "description": "GET verification challenge failed (verifyToken mismatch)."
-          },
-          "404": {
-            "description": "Unknown pluginId/instanceId, or no route claimed by the plugin."
-          },
-          "413": {
-            "description": "Request body exceeds the route maxBodyBytes limit."
-          },
-          "429": {
-            "description": "Per-instance rate limit exceeded (INGRESS_INSTANCE_LIMIT)."
-          }
-        },
-        "tags": [
-          "integration"
-        ],
-        "security": []
       }
     },
     "/api/integration/instances/{pluginId}/{instanceId}/redrive": {
