@@ -19,6 +19,12 @@ export class ProfileController {
   @ApiResponse({ status: 200, description: 'Profile name updated', type: ProfileAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session is not started' })
   @ApiResponse({ status: 403, description: 'The engine refused the name change' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async setName(@Param('sessionId') sessionId: string, @Body() dto: SetProfileNameDto) {
     await this.profileService.setProfileName(sessionId, dto.name);
     return { success: true, message: 'Profile name updated' };
@@ -31,6 +37,12 @@ export class ProfileController {
   @ApiBody({ type: SetProfileStatusDto })
   @ApiResponse({ status: 200, description: 'Profile status updated', type: ProfileAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session is not started' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async setStatus(@Param('sessionId') sessionId: string, @Body() dto: SetProfileStatusDto) {
     await this.profileService.setProfileStatus(sessionId, dto.status);
     return { success: true, message: 'Profile status updated' };
@@ -48,6 +60,12 @@ export class ProfileController {
   })
   @ApiResponse({ status: 403, description: 'The engine refused the picture change' })
   @ApiResponse({ status: 413, description: 'Decoded base64 image exceeds the configured media cap' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async setPicture(@Param('sessionId') sessionId: string, @Body() dto: SetProfilePictureDto) {
     await this.profileService.setProfilePicture(sessionId, dto);
     return { success: true, message: 'Profile picture updated' };

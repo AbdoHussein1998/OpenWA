@@ -422,6 +422,12 @@ export class MessageController {
     status: 400,
     description: 'Session not active or message not found',
   })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async deleteMessage(
     @Param('sessionId') sessionId: string,
     @Body() dto: DeleteMessageDto,
@@ -490,6 +496,12 @@ export class MessageController {
   })
   @ApiResponse({ status: 400, description: 'Session not active' })
   @ApiResponse({ status: 404, description: 'Message not found in the chat' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async starMessage(@Param('sessionId') sessionId: string, @Body() dto: StarMessageDto): Promise<{ success: boolean }> {
     return this.messageService.starMessage(sessionId, dto);
   }

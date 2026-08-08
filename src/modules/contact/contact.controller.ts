@@ -46,7 +46,7 @@ export class ContactController {
     summary: 'Batch-resolve profile picture URLs for up to 50 contacts',
     description:
       'One request for a whole chat sidebar — avoids the burst of parallel single fetches that ' +
-      'would exhaust the per-IP throttle. Engine lookups run 3 at a time; per-id failures return null.',
+      'would exhaust the per-IP throttle. Engine lookups run 5 at a time; per-id failures return null.',
   })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiQuery({ name: 'ids', required: true, description: 'Comma-separated contact ids (max 50 used)' })
@@ -153,6 +153,12 @@ export class ContactController {
   @ApiParam({ name: 'contactId', description: 'Contact ID (e.g., 628xxx@c.us)' })
   @ApiResponse({ status: 200, description: 'Contact saved', type: ContactAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not active or invalid request' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async upsertContact(
     @Param('sessionId') sessionId: string,
     @Param('contactId') contactId: string,
@@ -171,6 +177,12 @@ export class ContactController {
   @ApiParam({ name: 'contactId', description: 'Contact ID (e.g., 628xxx@c.us)' })
   @ApiResponse({ status: 200, description: 'Contact deleted', type: ContactAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not active' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async deleteContact(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
     await this.contactService.deleteContact(sessionId, contactId);
     return { success: true, message: 'Contact deleted' };
@@ -187,6 +199,12 @@ export class ContactController {
     description: 'Contact blocked',
     type: ContactAckResponseDto,
   })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async blockContact(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
     await this.contactService.blockContact(sessionId, contactId);
     return { success: true, message: 'Contact blocked' };
@@ -201,6 +219,12 @@ export class ContactController {
     status: 200,
     description: 'Contact unblocked',
     type: ContactAckResponseDto,
+  })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
   })
   async unblockContact(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
     await this.contactService.unblockContact(sessionId, contactId);

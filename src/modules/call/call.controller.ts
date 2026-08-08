@@ -19,6 +19,12 @@ export class CallController {
   @ApiResponse({ status: 200, description: 'Call rejected', type: CallAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session is not started' })
   @ApiResponse({ status: 404, description: 'Call not found or no longer ringing' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async reject(@Param('sessionId') sessionId: string, @Param('callId') callId: string) {
     await this.callService.rejectCall(sessionId, callId);
     return { success: true };

@@ -90,6 +90,12 @@ export class GroupController {
   @ApiBody({ type: JoinGroupDto })
   @ApiResponse({ status: 200, description: 'Joined the group', type: GroupJoinedResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid or expired invite code, or session is not started' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async join(@Param('sessionId') sessionId: string, @Body() dto: JoinGroupDto) {
     const groupId = await this.groupService.joinGroupViaInviteCode(sessionId, dto.inviteCode);
     return { success: true, groupId };
@@ -101,6 +107,10 @@ export class GroupController {
   @ApiParam({ name: 'groupId', description: 'Group ID' })
   @ApiResponse({ status: 200, description: 'Group settings', type: GroupSettingsResponseDto })
   @ApiResponse({ status: 404, description: 'Group not found' })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp did not answer within the request budget — nothing could be read.',
+  })
   async getSettings(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
     return this.groupService.getGroupSettings(sessionId, groupId);
   }
@@ -116,6 +126,12 @@ export class GroupController {
   @ApiResponse({ status: 403, description: 'The engine refused the change (the account is not a group admin)' })
   @ApiResponse({ status: 404, description: 'Group not found' })
   @ApiResponse({ status: 501, description: 'The active engine does not support a requested setting' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async updateSettings(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,
@@ -230,6 +246,12 @@ export class GroupController {
   @ApiBody({ type: GroupSubjectDto })
   @ApiResponse({ status: 200, description: 'Subject updated', type: GroupAckResponseDto })
   @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights are required' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async setSubject(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,
@@ -247,6 +269,12 @@ export class GroupController {
   @ApiBody({ type: GroupDescriptionDto })
   @ApiResponse({ status: 200, description: 'Description updated', type: GroupAckResponseDto })
   @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights are required' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async setDescription(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,
@@ -263,6 +291,12 @@ export class GroupController {
   @ApiParam({ name: 'groupId', description: 'Group ID' })
   @ApiResponse({ status: 200, description: 'Left the group', type: GroupAckResponseDto })
   @HttpCode(HttpStatus.OK)
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async leave(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
     await this.groupService.leaveGroup(sessionId, groupId);
     return { success: true, message: 'Left the group' };
@@ -279,6 +313,10 @@ export class GroupController {
     description: 'Picture URL, or null when the group has none',
     type: GroupPictureResponseDto,
   })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp did not answer within the request budget — nothing could be read.',
+  })
   async getPicture(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
     return { url: await this.groupService.getGroupPicture(sessionId, groupId) };
   }
@@ -292,6 +330,12 @@ export class GroupController {
   @ApiResponse({ status: 200, description: 'Group picture updated', type: GroupAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not active, or neither url nor base64 supplied' })
   @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights required' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async setPicture(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,
@@ -309,6 +353,12 @@ export class GroupController {
   @ApiParam({ name: 'groupId', description: 'Group ID' })
   @ApiResponse({ status: 200, description: 'Group picture removed', type: GroupAckResponseDto })
   @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights required' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async deletePicture(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
     await this.groupService.deleteGroupPicture(sessionId, groupId);
     return { success: true, message: 'Group picture removed' };
