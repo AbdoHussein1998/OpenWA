@@ -164,7 +164,12 @@ export class UpdateWebhookDto {
   @IsBoolean()
   active?: boolean;
 
-  @ApiPropertyOptional({ description: 'Retry count' })
+  @ApiPropertyOptional({
+    description: 'Delivery attempts before the webhook is parked. Same range the create route enforces.',
+    example: 3,
+    minimum: 0,
+    maximum: 5,
+  })
   @ToStrictNumber()
   @IsOptional()
   @IsInt()
