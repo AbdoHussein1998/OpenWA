@@ -86,27 +86,27 @@ func (s *GroupsService) UpdateGroupSettings(ctx context.Context, sessionID, grou
 }
 
 // AddParticipants adds members to a group.
-func (s *GroupsService) AddParticipants(ctx context.Context, sessionID, groupID string, participants []string) (*SuccessResult, error) {
+func (s *GroupsService) AddParticipants(ctx context.Context, sessionID, groupID string, participants []string) (*ParticipantsResult, error) {
 	return s.participants(ctx, "POST", sessionID, groupID, "/participants", participants)
 }
 
 // RemoveParticipants removes members from a group.
-func (s *GroupsService) RemoveParticipants(ctx context.Context, sessionID, groupID string, participants []string) (*SuccessResult, error) {
+func (s *GroupsService) RemoveParticipants(ctx context.Context, sessionID, groupID string, participants []string) (*ParticipantsResult, error) {
 	return s.participants(ctx, "DELETE", sessionID, groupID, "/participants", participants)
 }
 
 // PromoteParticipants promotes members to admin.
-func (s *GroupsService) PromoteParticipants(ctx context.Context, sessionID, groupID string, participants []string) (*SuccessResult, error) {
+func (s *GroupsService) PromoteParticipants(ctx context.Context, sessionID, groupID string, participants []string) (*ParticipantsResult, error) {
 	return s.participants(ctx, "POST", sessionID, groupID, "/participants/promote", participants)
 }
 
 // DemoteParticipants demotes admins to member.
-func (s *GroupsService) DemoteParticipants(ctx context.Context, sessionID, groupID string, participants []string) (*SuccessResult, error) {
+func (s *GroupsService) DemoteParticipants(ctx context.Context, sessionID, groupID string, participants []string) (*ParticipantsResult, error) {
 	return s.participants(ctx, "POST", sessionID, groupID, "/participants/demote", participants)
 }
 
-func (s *GroupsService) participants(ctx context.Context, method, sessionID, groupID, suffix string, participants []string) (*SuccessResult, error) {
-	var out SuccessResult
+func (s *GroupsService) participants(ctx context.Context, method, sessionID, groupID, suffix string, participants []string) (*ParticipantsResult, error) {
+	var out ParticipantsResult
 	body := map[string][]string{"participants": participants}
 	err := s.client.do(ctx, method, s.base(sessionID)+"/"+pathEscape(groupID)+suffix, nil, body, &out)
 	if err != nil {
