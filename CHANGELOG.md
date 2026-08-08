@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The SDKs can now read and change a running session's config, and read the webhook diagnostics** — `GET`/`PATCH /sessions/{id}/config` (0.14.5's headline feature), the cross-session `GET /webhooks`, and `GET /webhooks/delivery-failures` were absent from all five SDKs while `sdk/README.md` claimed every user-facing resource was exposed; that claim is now scoped to the exclusion list the SDK design doc actually states.
+
 ### Fixed
 
 - **Two statements in the codebase that were not true** — a load-bearing comment justified skipping a lookup on the grounds that PostgreSQL would raise a 500 against a uuid column, when `sessions.id` is `varchar` on both dialects and a malformed id simply matches nothing; and the webhook event table stated all 22 events are actively dispatched by the engines without saying that four of them fire on Baileys only, which the same document states 2 200 lines later.
