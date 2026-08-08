@@ -66,6 +66,12 @@ export class LabelController {
   @ApiResponse({ status: 200, description: 'Label created or updated', type: LabelAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
   @ApiResponse({ status: 501, description: 'The active engine cannot edit labels (whatsapp-web.js)' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async upsertLabel(
     @Param('sessionId') sessionId: string,
     @Param('labelId') labelId: string,
@@ -89,6 +95,12 @@ export class LabelController {
   @ApiResponse({ status: 200, description: 'Label deleted', type: LabelAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session not started' })
   @ApiResponse({ status: 501, description: 'The active engine cannot edit labels (whatsapp-web.js)' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async deleteLabel(
     @Param('sessionId') sessionId: string,
     @Param('labelId') labelId: string,
@@ -126,6 +138,12 @@ export class LabelController {
     status: 422,
     description: 'Labels require a WhatsApp Business account, or the chat type has no labels',
   })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
   async addLabelToChat(
     @Param('sessionId') sessionId: string,
     @Param('chatId') chatId: string,
@@ -145,6 +163,12 @@ export class LabelController {
   @ApiResponse({
     status: 422,
     description: 'Labels require a WhatsApp Business account, or the chat type has no labels',
+  })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
   })
   async removeLabelFromChat(
     @Param('sessionId') sessionId: string,

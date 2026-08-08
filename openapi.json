@@ -956,6 +956,9 @@
           },
           "404": {
             "description": "Session not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Mark a chat as read/seen",
@@ -1087,6 +1090,9 @@
           },
           "404": {
             "description": "Session not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Mark a chat as unread",
@@ -1127,6 +1133,9 @@
           },
           "404": {
             "description": "Session not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Delete every message in a chat, keeping the chat itself",
@@ -1168,6 +1177,9 @@
           },
           "404": {
             "description": "Session not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Archive or unarchive a chat",
@@ -1209,6 +1221,9 @@
           },
           "404": {
             "description": "Session not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Delete a chat from the chat list (e.g. a group you have left)",
@@ -2674,6 +2689,9 @@
           },
           "400": {
             "description": "Session not active or message not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Delete a message",
@@ -2847,6 +2865,9 @@
           },
           "404": {
             "description": "Message not found in the chat"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Star or unstar a message",
@@ -3772,7 +3793,7 @@
     },
     "/api/sessions/{sessionId}/contacts/profile-pictures": {
       "get": {
-        "description": "One request for a whole chat sidebar — avoids the burst of parallel single fetches that would exhaust the per-IP throttle. Engine lookups run 3 at a time; per-id failures return null.",
+        "description": "One request for a whole chat sidebar — avoids the burst of parallel single fetches that would exhaust the per-IP throttle. Engine lookups run 5 at a time; per-id failures return null.",
         "operationId": "ContactController_getProfilePictures",
         "parameters": [
           {
@@ -3900,6 +3921,9 @@
           },
           "400": {
             "description": "Session not active or invalid request"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Save a contact to the account's addressbook, or edit an existing entry",
@@ -3942,6 +3966,9 @@
           },
           "400": {
             "description": "Session not active"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Remove a contact from the account's addressbook",
@@ -4113,6 +4140,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Block a contact",
@@ -4152,6 +4182,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Unblock a contact",
@@ -4295,6 +4328,9 @@
           },
           "400": {
             "description": "Invalid or expired invite code, or session is not started"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Join a group via invite code",
@@ -4339,6 +4375,9 @@
           },
           "404": {
             "description": "Group not found"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — nothing could be read."
           }
         },
         "summary": "Get group settings (announce / locked / ephemeral timer)",
@@ -4400,6 +4439,9 @@
           },
           "501": {
             "description": "The active engine does not support a requested setting"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Update group settings (announce / locked / ephemeral timer)",
@@ -4698,6 +4740,9 @@
           },
           "403": {
             "description": "The engine refused the change — admin rights are required"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Change group name/subject",
@@ -4752,6 +4797,9 @@
           },
           "403": {
             "description": "The engine refused the change — admin rights are required"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Change group description",
@@ -4793,6 +4841,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Leave a group",
@@ -4834,6 +4885,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — nothing could be read."
           }
         },
         "summary": "Get the group's picture URL",
@@ -4889,6 +4943,9 @@
           },
           "403": {
             "description": "The engine refused the change — admin rights required"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Set the group's picture",
@@ -4931,6 +4988,9 @@
           },
           "403": {
             "description": "The engine refused the change — admin rights required"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Remove the group's picture",
@@ -5073,6 +5133,9 @@
           },
           "403": {
             "description": "The engine refused the name change"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Set the account display name",
@@ -5118,6 +5181,9 @@
           },
           "400": {
             "description": "Session is not started"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Set the account about/status text",
@@ -5169,6 +5235,9 @@
           },
           "413": {
             "description": "Decoded base64 image exceeds the configured media cap"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Set the account profile picture (URL or base64 image)",
@@ -5216,6 +5285,9 @@
           },
           "404": {
             "description": "Call not found or no longer ringing"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Reject a ringing incoming call",
@@ -5357,6 +5429,9 @@
           },
           "501": {
             "description": "The active engine cannot edit labels (whatsapp-web.js)"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Create or update a label",
@@ -5403,6 +5478,9 @@
           },
           "501": {
             "description": "The active engine cannot edit labels (whatsapp-web.js)"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Delete a label",
@@ -5559,6 +5637,9 @@
           },
           "422": {
             "description": "Labels require a WhatsApp Business account, or the chat type has no labels"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Add a label to a chat",
@@ -5612,6 +5693,9 @@
           },
           "422": {
             "description": "Labels require a WhatsApp Business account, or the chat type has no labels"
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
           }
         },
         "summary": "Remove a label from a chat",
@@ -5650,6 +5734,9 @@
           },
           "400": {
             "description": "Session not ready"
+          },
+          "501": {
+            "description": "Not supported by the active engine: the Baileys adapter cannot list subscribed channels."
           }
         },
         "summary": "Get all subscribed channels/newsletters",
@@ -5839,6 +5926,9 @@
                 }
               }
             }
+          },
+          "501": {
+            "description": "Not supported by the active engine: the Baileys adapter cannot read channel messages."
           }
         },
         "summary": "Get messages from a channel",
@@ -6003,6 +6093,9 @@
                 }
               }
             }
+          },
+          "501": {
+            "description": "Not supported by the active engine: whatsapp-web.js cannot subscribe by invite code."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."

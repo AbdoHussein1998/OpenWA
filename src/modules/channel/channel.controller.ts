@@ -18,6 +18,10 @@ export class ChannelController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({ status: 200, description: 'List of subscribed channels', type: [ChannelDto] })
   @ApiResponse({ status: 400, description: 'Session not ready' })
+  @ApiResponse({
+    status: 501,
+    description: 'Not supported by the active engine: the Baileys adapter cannot list subscribed channels.',
+  })
   async findAll(@Param('sessionId') sessionId: string) {
     return this.channelService.getSubscribedChannels(sessionId);
   }
@@ -47,6 +51,10 @@ export class ChannelController {
     description: 'Max messages to return (default 50, max 100)',
   })
   @ApiResponse({ status: 200, description: 'List of channel messages', type: [ChannelMessageDto] })
+  @ApiResponse({
+    status: 501,
+    description: 'Not supported by the active engine: the Baileys adapter cannot read channel messages.',
+  })
   async getMessages(
     @Param('sessionId') sessionId: string,
     @Param('channelId') channelId: string,
@@ -150,6 +158,10 @@ export class ChannelController {
   @ApiResponse({
     status: 503,
     description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
+  })
+  @ApiResponse({
+    status: 501,
+    description: 'Not supported by the active engine: whatsapp-web.js cannot subscribe by invite code.',
   })
   async subscribe(@Param('sessionId') sessionId: string, @Body() body: SubscribeChannelDto) {
     return this.channelService.subscribeToChannel(sessionId, body.inviteCode);
