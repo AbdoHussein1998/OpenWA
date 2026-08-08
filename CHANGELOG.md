@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two statements in the codebase that were not true** — a load-bearing comment justified skipping a lookup on the grounds that PostgreSQL would raise a 500 against a uuid column, when `sessions.id` is `varchar` on both dialects and a malformed id simply matches nothing; and the webhook event table stated all 22 events are actively dispatched by the engines without saying that four of them fire on Baileys only, which the same document states 2 200 lines later.
+
+### Fixed
+
 - **A post-connect group-name hydration WhatsApp never answered no longer finishes without a word** — the read shared the ambiguity `GET /sessions/{id}/groups` was bounded against in 0.14.5, where an unanswered query and an account with no groups both yield an empty result, but only the REST caller got a clock: the hydration step logged neither its success line nor its failure line, so group chats stayed unnamed with nothing to explain it.
 - **The published OpenAPI document is schema-valid again** — `@nestjs/swagger` expands an `@All()` route over its own method list, which includes `search`, and the 3.0 Path Item Object has no field for it, so the ingress route contributed a key that made strict validators reject the whole 150-path document rather than just that route; the export now drops operations the specification cannot express, and nothing in the repository validated the document to catch it.
 - ⚠️ **Breaking (SDK types only, no gateway change). Three response shapes the SDKs decoded into the wrong type** — the four group membership writes answer with a per-participant `results` array that a partial refusal is reported in, and all four typed SDKs declared only `{success, message}`, so a rejected member was indistinguishable from a fully applied batch; `ContactRecord` declared `pushname` where both engines emit `pushName` (which left Java's case-sensitive binder returning null for every contact), carried an `isBusiness` the API never sends, and omitted `isBlocked` and `profilePicUrl`; and `send-product` answers with `id` while the SDKs decoded `messageId`.
