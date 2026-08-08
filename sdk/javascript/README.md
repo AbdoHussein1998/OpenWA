@@ -71,7 +71,7 @@ rejects the publish, so configure it first.
 Cutting a release:
 
 1. Bump `version` in `package.json` and land it on `main`.
-2. Tag that commit `js-sdk-v<version>` (e.g. `js-sdk-v0.2.0`) and push the tag.
+2. Tag that commit `js-sdk-v<version>` (e.g. `js-sdk-v0.3.0`) and push the tag.
    The SDK has its own version line — the monorepo's `v*` tags are the app
    version and never trigger an SDK publish.
 3. The workflow re-runs the SDK's tests, typecheck, build and dual CJS/ESM

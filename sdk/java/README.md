@@ -16,14 +16,14 @@ Java 17+, one runtime dependency ([Gson](https://github.com/google/gson)).
 <dependency>
   <groupId>com.rmyndharis</groupId>
   <artifactId>openwa</artifactId>
-  <version>0.1.1</version>
+  <version>0.3.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.rmyndharis:openwa:0.1.1'
+implementation 'com.rmyndharis:openwa:0.3.0'
 ```
 
 ## Quickstart
@@ -155,7 +155,7 @@ before tagging rather than tagging to see what happens.
 Cutting a release:
 
 1. Bump `<version>` in `pom.xml` and land it on `main`.
-2. Tag that commit `java-sdk-v<version>` (e.g. `java-sdk-v0.1.1`) and push the
+2. Tag that commit `java-sdk-v<version>` (e.g. `java-sdk-v0.3.0`) and push the
    tag. The SDK has its own version line — the monorepo's `v*` tags are the app
    version and never trigger an SDK publish.
 3. The workflow builds, signs, and publishes; Central syncs within a few hours.
