@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.6] - 2026-08-08
+
 ### Added
 
 - **The SDKs can now read and change a running session's config, and read the webhook diagnostics** — `GET`/`PATCH /sessions/{id}/config` (0.14.5's headline feature), the cross-session `GET /webhooks`, and `GET /webhooks/delivery-failures` were absent from all five SDKs while `sdk/README.md` claimed every user-facing resource was exposed; that claim is now scoped to the exclusion list the SDK design doc actually states.
