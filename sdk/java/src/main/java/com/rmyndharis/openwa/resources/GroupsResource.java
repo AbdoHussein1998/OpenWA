@@ -51,7 +51,6 @@ public final class GroupsResource {
             GroupInfo.class);
     }
 
-    /** Create a new group. */
     /**
      * Create a group. Answers the group SUMMARY, not the detail shape {@code get} returns — there is
      * no participant list, description, owner or creation time on a create response.

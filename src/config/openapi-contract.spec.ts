@@ -49,6 +49,30 @@ describe('openapi.json structural invariants', () => {
     expect(undeclared).toEqual([]);
   });
 
+  // OpenAPI 3.0 requires a parameter to carry a schema; without one a generator has no type for the
+  // argument. Every path parameter in the document had one except the four added alongside this spec,
+  // which is exactly the blind spot a structural check exists to close.
+  it('every path parameter declares a schema type', () => {
+    const doc = snapshot();
+    const untyped: string[] = [];
+
+    for (const [route, item] of Object.entries(doc.paths)) {
+      const declared = [...((item.parameters ?? []) as { in?: string; name?: string; schema?: { type?: string } }[])];
+      for (const [method, operation] of Object.entries(item)) {
+        if (!OPERATION_KEYS.has(method)) continue;
+        declared.push(
+          ...((operation as { parameters?: { in?: string; name?: string; schema?: { type?: string } }[] }).parameters ??
+            []),
+        );
+      }
+      for (const p of declared) {
+        if (p.in === 'path' && !p.schema?.type) untyped.push(`${route} -> ${p.name}`);
+      }
+    }
+
+    expect(untyped).toEqual([]);
+  });
+
   it('every operation declares at least one response', () => {
     const doc = snapshot();
     const silent = Object.entries(doc.paths).flatMap(([route, item]) =>
@@ -59,5 +83,34 @@ describe('openapi.json structural invariants', () => {
     );
 
     expect(silent).toEqual([]);
+  });
+});
+
+// The document is produced in TWO places: scripts/export-openapi.ts for the committed snapshot, and
+// src/main.ts for the live /api/docs. The schema-validity pass was added to the export only, so a
+// running gateway kept serving a document that fails validation while the artifact was clean. A
+// structural check, because neither producer is reachable from a unit test.
+describe('both OpenAPI producers apply the same passes', () => {
+  const PASSES = ['dropUnexpressibleOperations', 'exemptPublicOperations'];
+  const producers = ['src/main.ts', 'scripts/export-openapi.ts'];
+
+  it.each(PASSES)('%s runs in every producer', pass => {
+    const missing = producers.filter(
+      file => !fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8').includes(`${pass}(`),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('applies them in the same order in both', () => {
+    for (const file of producers) {
+      const text = fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
+      const order = PASSES.map(p =>
+        text.indexOf(`${p}(document`) >= 0 ? text.indexOf(`${p}(document`) : text.indexOf(`${p}(doc`),
+      );
+      // drop must precede exempt: exempting an operation about to be deleted is wasted work, and the
+      // reverse order would leave a security exemption attached to nothing.
+      expect(order[0]).toBeGreaterThan(-1);
+      expect(order[1]).toBeGreaterThan(order[0]);
+    }
   });
 });

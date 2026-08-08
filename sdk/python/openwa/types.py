@@ -53,6 +53,7 @@ class ParticipantResult(TypedDict, total=False):
     id: str
     success: bool
     status: int
+    message: str
 
 
 class ParticipantsResult(SuccessResult):
@@ -1040,8 +1041,6 @@ class PaginatedProducts(TypedDict):
     pagination: ProductPagination
 
 
-# chatId + productId required; body optional. Modeled total=False for 3.9 compat
-# (callers pass plain dicts); the backend validates the required fields.
 class ProductMessageResponse(TypedDict):
     """Response of ``send-product``.
 
@@ -1050,8 +1049,11 @@ class ProductMessageResponse(TypedDict):
     """
 
     id: str
+    timestamp: int
 
 
+# chatId + productId required; body optional. Modeled total=False for 3.9 compat
+# (callers pass plain dicts); the backend validates the required fields.
 class SendProductRequest(TypedDict, total=False):
     chatId: Jid
     productId: str

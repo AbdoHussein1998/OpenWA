@@ -18,7 +18,7 @@ import { ApiKeyRole } from '../auth/entities/api-key.entity';
 // Declared on the class because no handler binds the parameter — conversion needs no session id, only
 // the guard does (see above). Without this the published paths carry a `{sessionId}` template with no
 // parameter to fill it, which OpenAPI 3.0 does not allow and a generated client cannot satisfy.
-@ApiParam({ name: 'sessionId', description: 'Session ID the API key must be authorized for' })
+@ApiParam({ name: 'sessionId', type: String, description: 'Session ID the API key must be authorized for' })
 @Controller('sessions/:sessionId/media')
 export class MediaController {
   constructor(private readonly mediaConversion: MediaConversionService) {}

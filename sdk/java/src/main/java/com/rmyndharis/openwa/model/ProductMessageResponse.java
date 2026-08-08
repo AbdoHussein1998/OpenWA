@@ -8,4 +8,4 @@ package com.rmyndharis.openwa.model;
  *
  * @param id id of the sent product message
  */
-public record ProductMessageResponse(String id) {}
+public record ProductMessageResponse(String id, long timestamp) {}

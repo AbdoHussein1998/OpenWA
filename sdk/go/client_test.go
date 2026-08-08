@@ -1353,3 +1353,28 @@ func TestConvertVideo(t *testing.T) {
 		t.Fatalf("body = %s, want the url only", got)
 	}
 }
+
+// The config route needs three states per field: absent leaves it unchanged, explicit null clears it
+// to the default, a value sets it. A *int with omitempty could only ever express two — a nil pointer
+// was OMITTED, so restoring unlimited reconnect attempts was unreachable through this SDK.
+func TestUpdateSessionConfigEmitsThreeStates(t *testing.T) {
+	cases := []struct {
+		name string
+		req  UpdateSessionConfigRequest
+		want string
+	}{
+		{"absent leaves everything unchanged", UpdateSessionConfigRequest{}, `{}`},
+		{"a value sets it", UpdateSessionConfigRequest{MaxReconnectAttempts: Ptr(5)}, `{"maxReconnectAttempts":5}`},
+		{"clear sends explicit null", UpdateSessionConfigRequest{ClearMaxReconnectAttempts: true}, `{"maxReconnectAttempts":null}`},
+		{"clear wins over a value", UpdateSessionConfigRequest{MaxReconnectAttempts: Ptr(5), ClearMaxReconnectAttempts: true}, `{"maxReconnectAttempts":null}`},
+	}
+	for _, c := range cases {
+		b, err := json.Marshal(c.req)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if string(b) != c.want {
+			t.Fatalf("%s: got %s, want %s", c.name, b, c.want)
+		}
+	}
+}

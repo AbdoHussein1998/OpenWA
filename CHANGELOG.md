@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Go and Java SDKs can now send the explicit `null` the session-config route needs** — that route takes three states per field (an absent key leaves the value unchanged, `null` clears it to the default, a value sets it), and neither SDK could emit the middle one: Go's `omitempty` omits a nil pointer and Gson drops nulls by default, so restoring `maxReconnectAttempts` to unlimited — the one thing no in-range number can express — was unreachable. Both now carry explicit `clear*` flags.
+- **Three SDK response types dropped fields the API sends** — the per-participant group result omitted `message`, the product-send response omitted `timestamp`, and Python's new 503 error class was not exported from the package root, so the documented import failed for exactly the class that was added.
+- **A running gateway now serves the same schema-valid OpenAPI document as the committed snapshot** — the validity pass was added to the export script only, so `/api/docs` kept serving a document that fails validation while `openapi.json` was clean; a test now holds both producers to the same passes in the same order.
+
 ### Added
 
 - **The SDKs can now read and change a running session's config, and read the webhook diagnostics** — `GET`/`PATCH /sessions/{id}/config` (0.14.5's headline feature), the cross-session `GET /webhooks`, and `GET /webhooks/delivery-failures` were absent from all five SDKs while `sdk/README.md` claimed every user-facing resource was exposed; that claim is now scoped to the exclusion list the SDK design doc actually states.

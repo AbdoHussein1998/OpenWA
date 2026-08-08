@@ -33,6 +33,7 @@ export class IngressController {
   // `{path}` placeholder nothing declares. Awkward to express, not impossible.
   @ApiParam({
     name: 'path',
+    type: String,
     description: 'Provider-defined trailing path the plugin claims (may contain slashes).',
     example: 'events/message',
   })

@@ -44,7 +44,7 @@ All five SDKs expose the same fluent surface:
 | `calls`     | rejectCall                                                                                                                                                                                                                                       |
 | `health`    | check, live, ready                                                                                                                                                                                                                               |
 
-> The SDKs cover the user-facing resources above and stop there. The administrative and operational surfaces are deliberately left out — `auth/api-keys`, `audit`, `settings`, `stats`, `infra`, `plugins` and the `integration` management routes are predominantly `ADMIN`-gated; `metrics` is a `@Public()` Prometheus scrape gated by `METRICS_TOKEN` rather than by role; `mcp` is a Streamable-HTTP transport mounted straight onto the Express adapter; and `ingress` is the `@Public()` receiver that integration providers post into. `docker` has no HTTP surface at all — it is an internal service module. Methods that require an `OPERATOR`-level key are annotated **OPERATOR** in the per-language tables below.
+> The SDKs cover the user-facing resources above and stop there. The administrative and operational surfaces are deliberately left out — `auth/api-keys`, `audit`, `settings`, `stats`, `automation`, `infra`, `plugins` and the `integration` management routes are predominantly `ADMIN`-gated; `metrics` is a `@Public()` Prometheus scrape gated by `METRICS_TOKEN` rather than by role; `mcp` is a Streamable-HTTP transport mounted straight onto the Express adapter; and `ingress` is the `@Public()` receiver that integration providers post into. `docker` has no HTTP surface at all — it is an internal service module. Methods that require an `OPERATOR`-level key are annotated **OPERATOR** in the per-language tables below.
 
 ## 18.2 TypeScript / JavaScript SDK
 
@@ -305,16 +305,17 @@ Media bodies share the `SendMediaRequest` shape: `{ chatId, url? | base64?, mime
 
 On a non-2xx response the SDK throws a typed `OpenWAApiError` subclass carrying `.status` (HTTP status), `.body` (parsed JSON error envelope, or raw text), and `.errorKind` (the NestJS `error` field). All error classes extend `OpenWAError` and are exported, so they are `instanceof`-checkable. A timeout throws `OpenWATimeoutError`, which extends `OpenWAError` directly (not `OpenWAApiError`).
 
-| Error class                 | HTTP status | Meaning                                                                                       |
-| --------------------------- | ----------- | --------------------------------------------------------------------------------------------- |
-| `OpenWAAuthError`           | 401         | Missing or invalid API key.                                                                   |
-| `OpenWAForbiddenError`      | 403         | The key's role is insufficient (e.g. an OPERATOR-only route).                                 |
-| `OpenWANotFoundError`       | 404         | Resource not found.                                                                           |
-| `OpenWAConflictError`       | 409         | Conflict — typically the engine is not ready.                                                 |
-| `OpenWARateLimitError`      | 429         | Rate limited.                                                                                 |
-| `OpenWANotImplementedError` | 501         | The active engine does not support this operation.                                            |
-| `OpenWAApiError`            | any other   | Generic non-2xx (the base API error, e.g. `400`; also surfaced for unfollowed 3xx redirects). |
-| `OpenWATimeoutError`        | —           | The request exceeded the configured timeout.                                                  |
+| Error class                     | HTTP status | Meaning                                                                                       |
+| ------------------------------- | ----------- | --------------------------------------------------------------------------------------------- |
+| `OpenWAAuthError`               | 401         | Missing or invalid API key.                                                                   |
+| `OpenWAForbiddenError`          | 403         | The key's role is insufficient (e.g. an OPERATOR-only route).                                 |
+| `OpenWANotFoundError`           | 404         | Resource not found.                                                                           |
+| `OpenWAConflictError`           | 409         | Conflict — typically the engine is not ready.                                                 |
+| `OpenWARateLimitError`          | 429         | Rate limited.                                                                                 |
+| `OpenWANotImplementedError`     | 501         | The active engine does not support this operation.                                            |
+| `OpenWAServiceUnavailableError` | 503         | The engine did not confirm in time. The only retryable error here — 501 is permanent.         |
+| `OpenWAApiError`                | any other   | Generic non-2xx (the base API error, e.g. `400`; also surfaced for unfollowed 3xx redirects). |
+| `OpenWATimeoutError`            | —           | The request exceeded the configured timeout.                                                  |
 
 ```typescript
 import {
@@ -627,16 +628,17 @@ Resources are accessed as properties on the client (e.g. `client.messages`). All
 
 Every error inherits from `OpenWAError`. A non-2xx response raises an `OpenWAApiError` (or a more specific subclass picked by status); a timeout raises `OpenWATimeoutError`. The API-error classes carry `.status` (HTTP code), `.body` (parsed JSON or raw text), and `.error_kind` (the NestJS `error` field).
 
-| Exception                   | Trigger                                                  |
-| --------------------------- | -------------------------------------------------------- |
-| `OpenWAAuthError`           | HTTP `401` — missing or invalid API key                  |
-| `OpenWAForbiddenError`      | HTTP `403` — insufficient role                           |
-| `OpenWANotFoundError`       | HTTP `404` — resource not found                          |
-| `OpenWAConflictError`       | HTTP `409` — typically engine-not-ready                  |
-| `OpenWARateLimitError`      | HTTP `429` — too many requests                           |
-| `OpenWANotImplementedError` | HTTP `501` — active engine doesn't support the operation |
-| `OpenWAApiError`            | any other non-2xx status (incl. unfollowed `3xx`)        |
-| `OpenWATimeoutError`        | request exceeded `timeout` (has a `.timeout` attribute)  |
+| Exception                       | Trigger                                                  |
+| ------------------------------- | -------------------------------------------------------- |
+| `OpenWAAuthError`               | HTTP `401` — missing or invalid API key                  |
+| `OpenWAForbiddenError`          | HTTP `403` — insufficient role                           |
+| `OpenWANotFoundError`           | HTTP `404` — resource not found                          |
+| `OpenWAConflictError`           | HTTP `409` — typically engine-not-ready                  |
+| `OpenWARateLimitError`          | HTTP `429` — too many requests                           |
+| `OpenWANotImplementedError`     | HTTP `501` — active engine doesn't support the operation |
+| `OpenWAServiceUnavailableError` | HTTP `503` — engine did not confirm in time; retryable   |
+| `OpenWAApiError`                | any other non-2xx status (incl. unfollowed `3xx`)        |
+| `OpenWATimeoutError`            | request exceeded `timeout` (has a `.timeout` attribute)  |
 
 ```python
 from openwa import (
@@ -924,17 +926,18 @@ All payloads are associative arrays; all listed methods are synchronous and retu
 
 All exceptions live in `OpenWA\Exceptions` and descend from `OpenWAException` (which extends PHP's `\Exception`). Any non-2xx response is raised as an `OpenWAApiException`; the static `classify()` factory picks the most specific subclass by status code. An `OpenWAApiException` carries the HTTP status (`getStatus(): int`), the parsed error body (`getBody(): mixed`), and the NestJS `error` kind when present (`getErrorKind(): ?string`).
 
-| Exception                       | Extends              | Trigger                                                                                      |
-| ------------------------------- | -------------------- | -------------------------------------------------------------------------------------------- |
-| `OpenWAException`               | `\Exception`         | Base for all SDK errors (also thrown for missing `baseUrl`/`apiKey`).                        |
-| `OpenWAApiException`            | `OpenWAException`    | Any non-2xx (including unfollowed 3xx and other 4xx/5xx).                                    |
-| `OpenWAAuthException`           | `OpenWAApiException` | `401` — missing/invalid API key.                                                             |
-| `OpenWAForbiddenException`      | `OpenWAApiException` | `403` — insufficient role (e.g. operator-only endpoint).                                     |
-| `OpenWANotFoundException`       | `OpenWAApiException` | `404` — resource not found.                                                                  |
-| `OpenWAConflictException`       | `OpenWAApiException` | `409` — conflict (e.g. engine not ready).                                                    |
-| `OpenWARateLimitException`      | `OpenWAApiException` | `429` — rate limited.                                                                        |
-| `OpenWANotImplementedException` | `OpenWAApiException` | `501` — active engine does not support the operation.                                        |
-| `OpenWATimeoutException`        | `OpenWAException`    | Request exceeded the timeout (`getTimeout(): float`). Not an API error — has no status/body. |
+| Exception                           | Extends              | Trigger                                                                                      |
+| ----------------------------------- | -------------------- | -------------------------------------------------------------------------------------------- |
+| `OpenWAException`                   | `\Exception`         | Base for all SDK errors (also thrown for missing `baseUrl`/`apiKey`).                        |
+| `OpenWAApiException`                | `OpenWAException`    | Any non-2xx (including unfollowed 3xx and other 4xx/5xx).                                    |
+| `OpenWAAuthException`               | `OpenWAApiException` | `401` — missing/invalid API key.                                                             |
+| `OpenWAForbiddenException`          | `OpenWAApiException` | `403` — insufficient role (e.g. operator-only endpoint).                                     |
+| `OpenWANotFoundException`           | `OpenWAApiException` | `404` — resource not found.                                                                  |
+| `OpenWAConflictException`           | `OpenWAApiException` | `409` — conflict (e.g. engine not ready).                                                    |
+| `OpenWARateLimitException`          | `OpenWAApiException` | `429` — rate limited.                                                                        |
+| `OpenWANotImplementedException`     | `OpenWAApiException` | `501` — active engine does not support the operation.                                        |
+| `OpenWAServiceUnavailableException` | `OpenWAApiException` | `503` — engine did not confirm in time; the only retryable one.                              |
+| `OpenWATimeoutException`            | `OpenWAException`    | Request exceeded the timeout (`getTimeout(): float`). Not an API error — has no status/body. |
 
 ```php
 <?php
