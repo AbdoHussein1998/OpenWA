@@ -30,6 +30,8 @@ type ParticipantResult struct {
 	ID      string `json:"id"`
 	Success bool   `json:"success"`
 	Status  int    `json:"status,omitempty"`
+	// Message is the engine-reported reason, when it gave one.
+	Message string `json:"message,omitempty"`
 }
 
 // ParticipantsResult is the response of the group membership writes.
@@ -48,4 +50,6 @@ type ParticipantsResult struct {
 // routes use.
 type ProductMessageResponse struct {
 	ID string `json:"id"`
+	// Timestamp is unix SECONDS the engine stamped on the outgoing message.
+	Timestamp int64 `json:"timestamp"`
 }

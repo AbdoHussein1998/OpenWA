@@ -6595,7 +6595,9 @@
             "required": true,
             "in": "path",
             "description": "Session ID the API key must be authorized for",
-            "schema": {}
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6625,7 +6627,9 @@
             "required": true,
             "in": "path",
             "description": "Session ID the API key must be authorized for",
-            "schema": {}
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -6674,7 +6678,9 @@
             "required": true,
             "in": "path",
             "description": "Session ID the API key must be authorized for",
-            "schema": {}
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -7444,7 +7450,8 @@
             "in": "path",
             "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
             "schema": {
-              "example": "events/message"
+              "example": "events/message",
+              "type": "string"
             }
           }
         ],
@@ -7501,7 +7508,8 @@
             "in": "path",
             "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
             "schema": {
-              "example": "events/message"
+              "example": "events/message",
+              "type": "string"
             }
           }
         ],
@@ -7558,7 +7566,8 @@
             "in": "path",
             "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
             "schema": {
-              "example": "events/message"
+              "example": "events/message",
+              "type": "string"
             }
           }
         ],
@@ -7615,7 +7624,8 @@
             "in": "path",
             "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
             "schema": {
-              "example": "events/message"
+              "example": "events/message",
+              "type": "string"
             }
           }
         ],
@@ -7672,7 +7682,8 @@
             "in": "path",
             "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
             "schema": {
-              "example": "events/message"
+              "example": "events/message",
+              "type": "string"
             }
           }
         ],
@@ -7729,7 +7740,8 @@
             "in": "path",
             "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
             "schema": {
-              "example": "events/message"
+              "example": "events/message",
+              "type": "string"
             }
           }
         ],
@@ -7786,7 +7798,8 @@
             "in": "path",
             "description": "Provider-defined trailing path the plugin claims (may contain slashes).",
             "schema": {
-              "example": "events/message"
+              "example": "events/message",
+              "type": "string"
             }
           }
         ],

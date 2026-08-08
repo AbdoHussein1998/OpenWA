@@ -13,7 +13,6 @@ func (s *SessionsService) List(ctx context.Context, query *ListSessionsQuery) ([
 	return out, err
 }
 
-// Get returns a single session.
 // GetConfig reads a session's effective configuration.
 func (s *SessionsService) GetConfig(ctx context.Context, sessionID string) (*SessionConfig, error) {
 	var out SessionConfig
@@ -35,6 +34,7 @@ func (s *SessionsService) UpdateConfig(ctx context.Context, sessionID string, bo
 	return &out, nil
 }
 
+// Get returns a single session.
 func (s *SessionsService) Get(ctx context.Context, sessionID string) (*SessionResponse, error) {
 	var out SessionResponse
 	err := s.client.do(ctx, "GET", "/api/sessions/"+pathEscape(sessionID), nil, nil, &out)

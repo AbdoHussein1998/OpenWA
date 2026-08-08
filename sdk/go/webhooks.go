@@ -10,7 +10,6 @@ func (s *WebhooksService) base(sessionID string) string {
 	return "/api/sessions/" + pathEscape(sessionID) + "/webhooks"
 }
 
-// List returns webhooks for a session.
 // ListAll returns webhooks across EVERY session the key can see, not one session's. Requires an
 // OPERATOR-level key.
 func (s *WebhooksService) ListAll(ctx context.Context, query *DeliveryFailureQuery) ([]WebhookResponse, error) {
@@ -30,6 +29,7 @@ func (s *WebhooksService) DeliveryFailures(ctx context.Context, query *DeliveryF
 	return out, err
 }
 
+// List returns webhooks for a session.
 func (s *WebhooksService) List(ctx context.Context, sessionID string) ([]WebhookResponse, error) {
 	var out []WebhookResponse
 	err := s.client.do(ctx, "GET", s.base(sessionID), nil, nil, &out)

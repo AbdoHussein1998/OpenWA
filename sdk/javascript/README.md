@@ -41,7 +41,8 @@ CommonJS consumers use `require('@rmyndharis/openwa')` identically.
 
 Non-2xx responses throw a typed `OpenWAApiError` subclass
 (`OpenWAAuthError`, `OpenWAForbiddenError`, `OpenWANotFoundError`,
-`OpenWAConflictError`, `OpenWARateLimitError`, `OpenWANotImplementedError`),
+`OpenWAConflictError`, `OpenWARateLimitError`, `OpenWANotImplementedError`,
+`OpenWAServiceUnavailableError` — 503, the only retryable one),
 each carrying `.status` and the parsed `.body`. Timeouts throw
 `OpenWATimeoutError`. The SDK does **not** retry — wrap calls with your own
 backoff if needed.

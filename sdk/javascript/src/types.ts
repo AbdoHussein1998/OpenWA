@@ -21,14 +21,7 @@ export type ChatKind = 'individual' | 'group' | 'channel' | 'status' | 'broadcas
 
 /** Session lifecycle status. */
 export type SessionStatus =
-  | 'created'
-  | 'initializing'
-  | 'qr_ready'
-  | 'authenticating'
-  | 'ready'
-  | 'disconnected'
-  | 'action_required'
-  | 'failed';
+  'created' | 'initializing' | 'qr_ready' | 'authenticating' | 'ready' | 'disconnected' | 'action_required' | 'failed';
 
 /** Minimal success envelope returned by some state-changing endpoints. */
 export interface SuccessResult {
@@ -48,6 +41,8 @@ export interface ParticipantResult {
   success: boolean;
   /** The engine's own status code, when it gave one. */
   status?: number;
+  /** Engine-reported reason, when it gave one. */
+  message?: string;
 }
 
 /**
@@ -162,8 +157,10 @@ export interface GroupJoinInfo {
 }
 
 /**
- * A session's effective runtime configuration. `null` on the two reconnect fields means "unlimited" /
- * "engine default" respectively — not "unset".
+ * A session's effective runtime configuration.
+ *
+ * Only `maxReconnectAttempts` is nullable, and `null` there means UNLIMITED — not "unset". The
+ * server always reports a concrete `reconnectBaseDelay` and `autoRejectCalls`.
  */
 export interface SessionConfig {
   autoRejectCalls: boolean;
@@ -1046,6 +1043,8 @@ export interface PaginatedProducts {
  */
 export interface ProductMessageResponse {
   id: string;
+  /** Unix SECONDS the engine stamped on the outgoing message. */
+  timestamp: number;
 }
 
 export interface SendProductRequest {

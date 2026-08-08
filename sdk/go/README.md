@@ -94,7 +94,8 @@ case err != nil:
 ```
 
 Sentinels: `ErrUnauthorized` (401), `ErrForbidden` (403), `ErrNotFound` (404),
-`ErrConflict` (409), `ErrRateLimited` (429), `ErrNotImplemented` (501). A timeout
+`ErrConflict` (409), `ErrRateLimited` (429), `ErrNotImplemented` (501),
+`ErrServiceUnavailable` (503 — the only retryable one). A timeout
 surfaces as `*openwa.TimeoutError`.
 
 ## Retries

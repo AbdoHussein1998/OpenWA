@@ -11,4 +11,4 @@ package com.rmyndharis.openwa.model;
  * @param success whether the engine confirmed the change for this participant
  * @param status the engine's own status code, when it gave one
  */
-public record ParticipantResult(String id, boolean success, Integer status) {}
+public record ParticipantResult(String id, boolean success, Integer status, String message) {}

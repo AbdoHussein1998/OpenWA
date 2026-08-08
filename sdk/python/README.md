@@ -67,7 +67,8 @@ for hit in res["hits"]:
 
 A non-2xx response raises a typed `OpenWAApiError` subclass — `OpenWAAuthError` (401),
 `OpenWAForbiddenError` (403), `OpenWANotFoundError` (404), `OpenWAConflictError` (409),
-`OpenWARateLimitError` (429), `OpenWANotImplementedError` (501) — each carrying `.status`
+`OpenWARateLimitError` (429), `OpenWANotImplementedError` (501),
+`OpenWAServiceUnavailableError` (503 — the only retryable one) — each carrying `.status`
 and the parsed `.body`. A timeout raises `OpenWATimeoutError`.
 
 ```python

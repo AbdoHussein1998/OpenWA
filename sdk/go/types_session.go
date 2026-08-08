@@ -1,6 +1,9 @@
 package openwa
 
-import "net/url"
+import (
+	"encoding/json"
+	"net/url"
+)
 
 // ListSessionsQuery paginates GET /sessions. Both fields optional.
 type ListSessionsQuery struct {
@@ -169,12 +172,49 @@ type SessionConfig struct {
 }
 
 // UpdateSessionConfigRequest is a partial update of a RUNNING session's config — no re-link, no QR
-// scan. Send a nil MaxReconnectAttempts through Ptr to restore unlimited retries, which no in-range
-// number can express.
+// scan.
+//
+// The route needs THREE states per field, not two: a key that is absent leaves the value unchanged, a
+// key sent as explicit null clears it back to the default, and a value sets it. A `*int` with
+// `omitempty` can only express the first and the third — a nil pointer is OMITTED, never emitted as
+// null — so the one operation this route exists for, restoring `maxReconnectAttempts` to unlimited
+// (which no in-range number can express), was unreachable. The Clear* flags carry the null case, and
+// MarshalJSON below is what actually emits it.
 type UpdateSessionConfigRequest struct {
-	AutoRejectCalls      *bool `json:"autoRejectCalls,omitempty"`
-	MaxReconnectAttempts *int  `json:"maxReconnectAttempts,omitempty"`
-	ReconnectBaseDelay   *int  `json:"reconnectBaseDelay,omitempty"`
+	AutoRejectCalls      *bool `json:"-"`
+	MaxReconnectAttempts *int  `json:"-"`
+	ReconnectBaseDelay   *int  `json:"-"`
+
+	// ClearMaxReconnectAttempts sends an explicit null, restoring unlimited reconnect attempts. It
+	// wins over MaxReconnectAttempts if both are set.
+	ClearMaxReconnectAttempts bool `json:"-"`
+	// ClearAutoRejectCalls sends an explicit null, restoring the server default.
+	ClearAutoRejectCalls bool `json:"-"`
+	// ClearReconnectBaseDelay sends an explicit null, restoring the server default.
+	ClearReconnectBaseDelay bool `json:"-"`
+}
+
+// MarshalJSON emits only the fields the caller actually addressed: a Clear* flag becomes an explicit
+// null, a non-nil pointer becomes its value, and a field that is neither is left out entirely so the
+// server leaves it unchanged.
+func (r UpdateSessionConfigRequest) MarshalJSON() ([]byte, error) {
+	out := map[string]any{}
+	if r.ClearAutoRejectCalls {
+		out["autoRejectCalls"] = nil
+	} else if r.AutoRejectCalls != nil {
+		out["autoRejectCalls"] = *r.AutoRejectCalls
+	}
+	if r.ClearMaxReconnectAttempts {
+		out["maxReconnectAttempts"] = nil
+	} else if r.MaxReconnectAttempts != nil {
+		out["maxReconnectAttempts"] = *r.MaxReconnectAttempts
+	}
+	if r.ClearReconnectBaseDelay {
+		out["reconnectBaseDelay"] = nil
+	} else if r.ReconnectBaseDelay != nil {
+		out["reconnectBaseDelay"] = *r.ReconnectBaseDelay
+	}
+	return json.Marshal(out)
 }
 
 // DeliveryFailureQuery filters the cross-session webhook list and the delivery-failure log. Nil
