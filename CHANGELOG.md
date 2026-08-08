@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Five routes now document a `503` they have been answering for releases** — the four group participant writes have spent the shared request budget since 0.14.5 and listing chats by label has answered `503` on a dead whatsapp-web.js page since 0.14.0, but all five published only their success statuses, so a client generated from the contract had no branch for a failure the gateway was already returning; the participant `503` in particular is the one status that separates "WhatsApp never answered" from the per-participant refusals a `200` reports inside `results`.
+
 ## [0.14.6] - 2026-08-08
 
 ### Added

@@ -43,6 +43,13 @@ export class LabelController {
   @ApiResponse({ status: 200, description: 'Chats carrying the label', type: [LabelChatDto] })
   @ApiResponse({ status: 400, description: 'Session not started' })
   @ApiResponse({ status: 501, description: 'The active engine cannot list chats by label (Baileys)' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'The whatsapp-web.js page connection died mid-read, so nothing could be read. Deliberately not ' +
+      'reported as a missing label — a page that went away says nothing about whether the label exists. ' +
+      'The other engine never answers this: Baileys has no label query at all and answers 501 above.',
+  })
   async getChatsByLabel(@Param('sessionId') sessionId: string, @Param('labelId') labelId: string) {
     return this.labelService.getChatsByLabel(sessionId, labelId);
   }
