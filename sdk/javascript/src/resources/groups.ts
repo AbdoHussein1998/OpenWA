@@ -17,6 +17,7 @@ import type {
   SetGroupPictureRequest,
   JoinGroupRequest,
   JoinGroupResponse,
+  ParticipantsResult,
   SuccessResult,
   UpdateGroupSettingsRequest,
 } from '../types.js';
@@ -80,8 +81,8 @@ export class GroupsResource {
   }
 
   /** Add participants to a group. */
-  addParticipants(sessionId: string, groupId: string, participants: string[]): Promise<SuccessResult> {
-    return this.client.request<SuccessResult>({
+  addParticipants(sessionId: string, groupId: string, participants: string[]): Promise<ParticipantsResult> {
+    return this.client.request<ParticipantsResult>({
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/participants`,
       body: { participants },
@@ -89,8 +90,8 @@ export class GroupsResource {
   }
 
   /** Remove participants from a group. */
-  removeParticipants(sessionId: string, groupId: string, participants: string[]): Promise<SuccessResult> {
-    return this.client.request<SuccessResult>({
+  removeParticipants(sessionId: string, groupId: string, participants: string[]): Promise<ParticipantsResult> {
+    return this.client.request<ParticipantsResult>({
       method: 'DELETE',
       path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/participants`,
       body: { participants },
@@ -98,8 +99,8 @@ export class GroupsResource {
   }
 
   /** Promote participants to group admin. */
-  promoteParticipants(sessionId: string, groupId: string, participants: string[]): Promise<SuccessResult> {
-    return this.client.request<SuccessResult>({
+  promoteParticipants(sessionId: string, groupId: string, participants: string[]): Promise<ParticipantsResult> {
+    return this.client.request<ParticipantsResult>({
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/participants/promote`,
       body: { participants },
@@ -107,8 +108,8 @@ export class GroupsResource {
   }
 
   /** Demote participants from group admin. */
-  demoteParticipants(sessionId: string, groupId: string, participants: string[]): Promise<SuccessResult> {
-    return this.client.request<SuccessResult>({
+  demoteParticipants(sessionId: string, groupId: string, participants: string[]): Promise<ParticipantsResult> {
+    return this.client.request<ParticipantsResult>({
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/participants/demote`,
       body: { participants },

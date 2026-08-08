@@ -36,6 +36,28 @@ export interface SuccessResult {
   message?: string;
 }
 
+/** One entry per requested participant, in the order they were requested. */
+export interface ParticipantResult {
+  /** Neutral participant id the outcome belongs to. */
+  id: string;
+  /**
+   * True only when the engine confirmed the change for this participant. Engines that confirm the
+   * batch rather than each member report one success entry per requested id, so `true` does not
+   * always mean the engine spoke about that participant individually.
+   */
+  success: boolean;
+  /** The engine's own status code, when it gave one. */
+  status?: number;
+}
+
+/**
+ * The group membership writes. A partial refusal does NOT fail the batch — the request answers 200
+ * and reports the per-participant outcome here, so `success` alone hides a member that was rejected.
+ */
+export interface ParticipantsResult extends SuccessResult {
+  results: ParticipantResult[];
+}
+
 // ── Session ───────────────────────────────────────────────────────
 
 export interface SessionResponse {
@@ -521,9 +543,15 @@ export interface ContactRecord {
   id: Jid;
   name?: string | null;
   number?: string | null;
-  pushname?: string | null;
-  isBusiness?: boolean;
+  /** The name the contact set on their own account. Both engines emit this as `pushName`. */
+  pushName?: string | null;
   isMyContact?: boolean;
+  /**
+   * Whether the account has blocked this contact. Reported best-effort: the Baileys adapter does not
+   * track blocklist state and always reports `false`.
+   */
+  isBlocked?: boolean;
+  profilePicUrl?: string | null;
 }
 
 export interface CheckNumberResponse {
@@ -989,6 +1017,14 @@ export interface CatalogProduct {
 export interface PaginatedProducts {
   products: CatalogProduct[];
   pagination: { page: number; limit: number; total: number; totalPages: number };
+}
+
+/**
+ * Response of `send-product`. The route answers with the sent message's id under `id`, not the
+ * `messageId` the other send routes use.
+ */
+export interface ProductMessageResponse {
+  id: string;
 }
 
 export interface SendProductRequest {

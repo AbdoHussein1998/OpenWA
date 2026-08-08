@@ -18,6 +18,7 @@ import com.rmyndharis.openwa.model.JoinGroupRequest;
 import com.rmyndharis.openwa.model.JoinGroupResponse;
 import com.rmyndharis.openwa.model.ListGroupsQuery;
 import com.rmyndharis.openwa.model.ParticipantsRequest;
+import com.rmyndharis.openwa.model.ParticipantsResult;
 import com.rmyndharis.openwa.model.SuccessResult;
 import java.util.List;
 
@@ -57,43 +58,43 @@ public final class GroupsResource {
     }
 
     /** Add participants to a group. */
-    public SuccessResult addParticipants(String sessionId, String groupId, List<String> participants) {
+    public ParticipantsResult addParticipants(String sessionId, String groupId, List<String> participants) {
         return client.request(
             HttpMethod.POST,
             "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId) + "/participants",
             null,
             new ParticipantsRequest(participants),
-            SuccessResult.class);
+            ParticipantsResult.class);
     }
 
     /** Remove participants from a group. */
-    public SuccessResult removeParticipants(String sessionId, String groupId, List<String> participants) {
+    public ParticipantsResult removeParticipants(String sessionId, String groupId, List<String> participants) {
         return client.request(
             HttpMethod.DELETE,
             "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId) + "/participants",
             null,
             new ParticipantsRequest(participants),
-            SuccessResult.class);
+            ParticipantsResult.class);
     }
 
     /** Promote participants to group admin. */
-    public SuccessResult promoteParticipants(String sessionId, String groupId, List<String> participants) {
+    public ParticipantsResult promoteParticipants(String sessionId, String groupId, List<String> participants) {
         return client.request(
             HttpMethod.POST,
             "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId) + "/participants/promote",
             null,
             new ParticipantsRequest(participants),
-            SuccessResult.class);
+            ParticipantsResult.class);
     }
 
     /** Demote participants from group admin. */
-    public SuccessResult demoteParticipants(String sessionId, String groupId, List<String> participants) {
+    public ParticipantsResult demoteParticipants(String sessionId, String groupId, List<String> participants) {
         return client.request(
             HttpMethod.POST,
             "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId) + "/participants/demote",
             null,
             new ParticipantsRequest(participants),
-            SuccessResult.class);
+            ParticipantsResult.class);
     }
 
     /** Update the group subject (name). */

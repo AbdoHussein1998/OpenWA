@@ -18,6 +18,7 @@ from ..types import (
     InviteCodeResponse,
     JoinGroupRequest,
     JoinGroupResponse,
+    ParticipantsResult,
     SuccessResult,
 )
 
@@ -43,25 +44,25 @@ class GroupsResource:
     def create(self, session_id: str, body: CreateGroupRequest) -> GroupInfo:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/groups", body=body)
 
-    def add_participants(self, session_id: str, group_id: str, participants: list[str]) -> SuccessResult:
+    def add_participants(self, session_id: str, group_id: str, participants: list[str]) -> ParticipantsResult:
         return self._http.request(
             "POST", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/participants",
             body={"participants": participants},
         )
 
-    def remove_participants(self, session_id: str, group_id: str, participants: list[str]) -> SuccessResult:
+    def remove_participants(self, session_id: str, group_id: str, participants: list[str]) -> ParticipantsResult:
         return self._http.request(
             "DELETE", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/participants",
             body={"participants": participants},
         )
 
-    def promote_participants(self, session_id: str, group_id: str, participants: list[str]) -> SuccessResult:
+    def promote_participants(self, session_id: str, group_id: str, participants: list[str]) -> ParticipantsResult:
         return self._http.request(
             "POST", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/participants/promote",
             body={"participants": participants},
         )
 
-    def demote_participants(self, session_id: str, group_id: str, participants: list[str]) -> SuccessResult:
+    def demote_participants(self, session_id: str, group_id: str, participants: list[str]) -> ParticipantsResult:
         return self._http.request(
             "POST", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/participants/demote",
             body={"participants": participants},

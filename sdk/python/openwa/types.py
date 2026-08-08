@@ -42,6 +42,29 @@ class SuccessResult(TypedDict, total=False):
     message: str
 
 
+class ParticipantResult(TypedDict, total=False):
+    """One entry per requested participant, in the order they were requested.
+
+    ``success`` is true only when the engine confirmed the change for this participant. Engines that
+    confirm the batch rather than each member report one success entry per requested id, so a true
+    here does not always mean the engine spoke about that participant individually.
+    """
+
+    id: str
+    success: bool
+    status: int
+
+
+class ParticipantsResult(SuccessResult):
+    """The group membership writes.
+
+    A partial refusal does NOT fail the batch — the request answers 200 and reports the
+    per-participant outcome in ``results``, so ``success`` alone hides a member that was rejected.
+    """
+
+    results: list[ParticipantResult]
+
+
 class ParticipantPresence(TypedDict, total=False):
     """One participant's presence within a chat."""
 
@@ -489,12 +512,19 @@ class BatchStatusResponse(TypedDict, total=False):
 
 
 class ContactRecord(TypedDict, total=False):
+    """A contact as the gateway returns it.
+
+    ``isBlocked`` is best-effort: the Baileys adapter does not track blocklist state and always
+    reports ``False``.
+    """
+
     id: Jid
     name: str | None
     number: str | None
-    pushname: str | None
-    isBusiness: bool
+    pushName: str | None
     isMyContact: bool
+    isBlocked: bool
+    profilePicUrl: str | None
 
 
 class CheckNumberResponse(TypedDict):
@@ -989,6 +1019,16 @@ class PaginatedProducts(TypedDict):
 
 # chatId + productId required; body optional. Modeled total=False for 3.9 compat
 # (callers pass plain dicts); the backend validates the required fields.
+class ProductMessageResponse(TypedDict):
+    """Response of ``send-product``.
+
+    The route answers with the sent message's id under ``id``, not the ``messageId`` the other send
+    routes use.
+    """
+
+    id: str
+
+
 class SendProductRequest(TypedDict, total=False):
     chatId: Jid
     productId: str
