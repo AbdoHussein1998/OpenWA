@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.5] - 2026-08-08
+
 ### Added
 
 - **Auto-reject calls can be turned on from the dashboard** — the session detail panel now carries a toggle wired to the config endpoint, so the setting no longer requires an API call to reach, and it states that `call.received` still fires and that no restart is needed.
