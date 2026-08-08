@@ -4744,13 +4744,22 @@ describe('BaileysAdapter channel administration', () => {
   });
 
   // The raw Boom from executeWMexQuery used to escape as a 500 on every refused channel write.
+  //
+  // The fixture is the shape executeWMexQuery ACTUALLY builds — Boom(msg, { statusCode, data: the
+  // GraphQL error OBJECT }) — not the numeric `data` an IQ refusal carries. These cases previously
+  // used the numeric one, which this path can never produce: they passed through the IQ branch of
+  // the classifier and stayed green straight through a release in which channel refusals regressed
+  // from 403 to a bare 500.
   it.each([
     ['createChannel', (a: BaileysAdapter) => a.createChannel('X'), 'newsletterCreate'],
     ['deleteChannel', (a: BaileysAdapter) => a.deleteChannel(CHANNEL), 'newsletterDelete'],
     ['muteChannel', (a: BaileysAdapter) => a.muteChannel(CHANNEL, true), 'newsletterMute'],
   ])('%s maps a server refusal to EngineRefusedError (403)', async (_name, call, sockMethod) => {
     (fakeSock as unknown as Record<string, jest.Mock>)[sockMethod].mockRejectedValueOnce(
-      Object.assign(new Error('not-authorized'), { data: 401 }),
+      new Boom('GraphQL server error: not authorized', {
+        statusCode: 403,
+        data: { message: 'not authorized', extensions: { error_code: 403 } },
+      }),
     );
     const adapter = await readyAdapter();
     await expect(call(adapter)).rejects.toBeInstanceOf(EngineRefusedError);
