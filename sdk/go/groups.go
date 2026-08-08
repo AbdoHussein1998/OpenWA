@@ -42,8 +42,10 @@ func (s *GroupsService) JoinInfo(ctx context.Context, sessionID, code string) (*
 }
 
 // Create creates a group.
-func (s *GroupsService) Create(ctx context.Context, sessionID string, body CreateGroupRequest) (*GroupInfo, error) {
-	var out GroupInfo
+// Create makes a new group. It answers the group SUMMARY, not the detail shape Get returns — there is
+// no participant list, description, owner or creation time on a create response.
+func (s *GroupsService) Create(ctx context.Context, sessionID string, body CreateGroupRequest) (*GroupSummary, error) {
+	var out GroupSummary
 	err := s.client.do(ctx, "POST", s.base(sessionID), nil, body, &out)
 	if err != nil {
 		return nil, err

@@ -41,7 +41,12 @@ class GroupsResource:
     def get(self, session_id: str, group_id: str) -> GroupInfo:
         return self._http.request("GET", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}")
 
-    def create(self, session_id: str, body: CreateGroupRequest) -> GroupInfo:
+    def create(self, session_id: str, body: CreateGroupRequest) -> GroupSummary:
+        """Create a group.
+
+        Answers the group SUMMARY, not the detail shape ``get()`` returns -- no participant list,
+        description, owner or creation time.
+        """
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/groups", body=body)
 
     def add_participants(self, session_id: str, group_id: str, participants: list[str]) -> ParticipantsResult:

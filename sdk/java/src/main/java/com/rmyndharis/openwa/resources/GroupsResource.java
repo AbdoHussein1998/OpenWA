@@ -52,9 +52,13 @@ public final class GroupsResource {
     }
 
     /** Create a new group. */
-    public GroupInfo create(String sessionId, CreateGroupRequest body) {
+    /**
+     * Create a group. Answers the group SUMMARY, not the detail shape {@code get} returns — there is
+     * no participant list, description, owner or creation time on a create response.
+     */
+    public GroupSummary create(String sessionId, CreateGroupRequest body) {
         return client.request(
-            HttpMethod.POST, "/api/sessions/" + encodeSegment(sessionId) + "/groups", null, body, GroupInfo.class);
+            HttpMethod.POST, "/api/sessions/" + encodeSegment(sessionId) + "/groups", null, body, GroupSummary.class);
     }
 
     /** Add participants to a group. */
