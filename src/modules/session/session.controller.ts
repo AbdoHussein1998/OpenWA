@@ -271,8 +271,10 @@ export class SessionController {
           name: 'my-bot',
           status: 'disconnected',
           phone: null,
-          pushName: null,
-          connectedAt: null,
+          // logout clears `phone` only, so a session that had connected keeps the name and the
+          // connection timestamp it was last linked with.
+          pushName: 'John Doe',
+          connectedAt: '2026-06-24T08:15:00.000Z',
           lastActive: '2026-06-25T09:01:55.000Z',
           createdAt: '2026-06-20T11:30:00.000Z',
           updatedAt: '2026-06-25T09:11:00.000Z',

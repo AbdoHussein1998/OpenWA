@@ -594,11 +594,13 @@ export class MessageController {
     description: 'Batch created and processing started',
     type: BulkMessageResponseDto,
   })
+  // No 409 here, unlike the single sends: the batch is queued and drained after this handler has
+  // already answered 202, so an engine that is not ready surfaces in the per-message results on
+  // GET /messages/batch/{batchId}, never as a status on this route. An absent engine is the 400 above.
   @ApiResponse({
     status: 400,
     description: 'Session not active or invalid request',
   })
-  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendBulk(
     @Param('sessionId') sessionId: string,
     @Body() dto: SendBulkMessageDto,

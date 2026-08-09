@@ -8,15 +8,27 @@
 
 /**
  * `EngineNotReadyError` (409) — thrown by every adapter's `ensureReady()` guard, which each engine
- * method calls before touching the socket or the page. Distinct from the 409 the session, auth and
- * plugin routes already declare: those report a semantic conflict (a name already taken, a plugin
- * already installed, a session already running), whereas this one says the session exists but has
- * no live engine behind it yet.
+ * method calls before touching the socket or the page. The guard fires when an engine EXISTS but is
+ * not `READY`; a session with no engine at all never reaches it, because the service resolves the
+ * engine first and throws `400 Session is not started`. Distinct too from the 409 the session, auth
+ * and plugin routes declare, which reports a semantic conflict — a name already taken, a plugin
+ * already installed, a session already running.
  */
 export const ENGINE_NOT_READY_409 =
-  'The session is not connected — it exists, but no engine is running for it, so the request never ' +
-  'reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle ' +
-  'routes answer, which reports a conflicting state rather than a missing engine.';
+  'The session is not connected — an engine exists for it but is not `ready`: disconnected, ' +
+  'reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and ' +
+  'retry. A session that was never started answers `400` instead, and the session lifecycle routes ' +
+  'answer `409` for a conflicting state rather than this.';
+
+/**
+ * The catalog and status services pass a `NotFoundException` factory to `EngineRegistry.require()`
+ * instead of taking its `BadRequestException` default, so on those routes an unstarted session is a
+ * 404 rather than the 400 every other engine module answers. Documented rather than changed: the
+ * status code is the contract those routes already have.
+ */
+export const SESSION_NOT_STARTED_404 =
+  'No session is running under that id — it was never started, was stopped, or does not exist. These ' +
+  'routes report an unstarted session as `404`, where the message and group routes report it as `400`.';
 
 /**
  * `RecipientUnreachableError` (400) — whatsapp-web.js could not resolve the recipient to an

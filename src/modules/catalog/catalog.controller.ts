@@ -5,7 +5,7 @@ import { SendProductDto, SendCatalogDto, ProductQueryDto } from './dto/send-prod
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import { CatalogDto, PaginatedProductsDto, ProductDto, ProductMessageResponseDto } from './dto/catalog-response.dto';
-import { ENGINE_NOT_READY_409 } from '../../common/openapi/engine-status-responses';
+import { ENGINE_NOT_READY_409, SESSION_NOT_STARTED_404 } from '../../common/openapi/engine-status-responses';
 
 /**
  * Every catalog read walks WhatsApp's business-catalog IQ, which the server simply leaves
@@ -32,6 +32,7 @@ export class CatalogController {
   })
   @ApiResponse({ status: 503, description: CATALOG_TIMEOUT_503 })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 404, description: SESSION_NOT_STARTED_404 })
   async getCatalog(@Param('sessionId') sessionId: string) {
     return this.catalogService.getCatalog(sessionId);
   }
@@ -45,6 +46,7 @@ export class CatalogController {
   })
   @ApiResponse({ status: 503, description: CATALOG_TIMEOUT_503 })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 404, description: SESSION_NOT_STARTED_404 })
   async getProducts(@Param('sessionId') sessionId: string, @Query() query: ProductQueryDto) {
     return this.catalogService.getProducts(sessionId, query.page, query.limit);
   }
@@ -62,6 +64,7 @@ export class CatalogController {
   })
   @ApiResponse({ status: 503, description: CATALOG_TIMEOUT_503 })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 404, description: SESSION_NOT_STARTED_404 })
   async getProduct(@Param('sessionId') sessionId: string, @Param('productId') productId: string) {
     return this.catalogService.getProduct(sessionId, productId);
   }
@@ -87,6 +90,7 @@ export class CatalogController {
   @ApiOperation({ summary: 'Send catalog link (not supported by any engine)' })
   @ApiResponse({ status: 501, description: 'Not supported by the active engine: no engine can send catalog links.' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 404, description: SESSION_NOT_STARTED_404 })
   async sendCatalog(@Param('sessionId') sessionId: string, @Body() dto: SendCatalogDto) {
     return this.catalogService.sendCatalog(sessionId, dto.chatId, dto.body);
   }
