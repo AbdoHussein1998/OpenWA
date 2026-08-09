@@ -93,6 +93,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
       "wwjs Client.archiveChat(chatId)/unarchiveChat(chatId) → Promise<boolean> (index.d.ts:46,328) — the CLIENT methods, not Chat.archive(), which resolves void; baileys chatModify({archive,lastMessages}, jid) (Types/Chat.d.ts:63-66) needs the chat's last message, so a chat with no known history resolves false rather than throwing",
   },
   blockContact: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  getBlockedContacts: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'wwjs Client.getBlockedContacts() → Contact[] models (index.d.ts:97) — mapped to neutral ids via readWid; baileys fetchBlocklist() → bare jid strings (Socket/chats.d.ts:41; chats.js:263-274) — an unanswered query would resolve [] (query() swallows its timeout), so the adapter bounds it with its own deadline',
+  },
   checkNumberExists: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   clearChatMessages: {
     wwjs: { status: 'supported' },

@@ -2002,6 +2002,23 @@ List all contacts for a session, returned as an in-memory paginated window.
 
 **Errors:** `400` session is not started · `401` missing/invalid API key, or key not scoped to this session
 
+#### GET /api/sessions/:sessionId/contacts/blocked
+
+The contacts this account has blocked — the read half of the block/unblock endpoints. A bare array
+of neutral contact ids, and ids only: whatsapp-web.js resolves full contact models, but Baileys'
+blocklist query answers bare jids, and inventing the other fields on one engine would make the two
+engines claim different things about the same account.
+
+**Auth:** API key
+
+**Response** `200`
+
+```json
+["628123456789@c.us", "628987654321@c.us"]
+```
+
+**Errors:** `400` session not started · `401` missing/invalid `X-API-Key` · `409` engine not ready · `503` WhatsApp did not answer the blocklist query (on Baileys the gateway bounds the query with its own clock — an unanswered query is a `503`, never an empty list)
+
 #### GET /api/sessions/:sessionId/contacts/check/:number
 
 Check whether a phone number exists on WhatsApp and return its canonical WhatsApp id when it does.

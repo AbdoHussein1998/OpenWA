@@ -2,7 +2,7 @@ import { type Client } from 'whatsapp-web.js';
 import { Contact } from '../interfaces/whatsapp-engine.interface';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { userPart } from '../identity/wa-id';
-import { readWid } from '../types/whatsapp-web-js.types';
+import { readWid, type SerializedWid } from '../types/whatsapp-web-js.types';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
 /**
@@ -111,6 +111,22 @@ export class WwebjsContacts {
     const contact = await this.client().getContactById(contactId);
     await contact.block();
     this.host.logger.log(`Blocked contact ${contactId}`);
+  }
+
+  /**
+   * The read half of block/unblockContact. Ids only — the neutral common subset with Baileys,
+   * whose blocklist query answers bare jids. An entry whose wid is unreadable (#747 rename
+   * hazard) is dropped rather than reported as the literal "undefined".
+   */
+  async getBlockedContacts(): Promise<string[]> {
+    this.host.ensureReady();
+    try {
+      const contacts = await this.client().getBlockedContacts();
+      return contacts.map(c => readWid(c.id as unknown as SerializedWid)).filter((id): id is string => Boolean(id));
+    } catch (error) {
+      this.host.reportIfPageTransportError(error, 'getBlockedContacts');
+      throw error;
+    }
   }
 
   async unblockContact(contactId: string): Promise<void> {

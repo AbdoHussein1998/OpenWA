@@ -176,6 +176,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       listChats: () => this.sessionStore.listChats(),
       lastMessage: chatId => this.sessionStore.lastMessage(chatId),
       toEngineJid: jid => this.sessionStore.toEngineJid(jid),
+      toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
     });
     this.statusOps = new BaileysStatus({
       ensureReady: () => this.ensureReady(),
@@ -494,6 +495,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   async unblockContact(contactId: string): Promise<void> {
     return this.contacts.unblockContact(contactId);
+  }
+
+  async getBlockedContacts(): Promise<string[]> {
+    return this.contacts.getBlockedContacts();
   }
 
   // ----- Profile (own account) -----

@@ -4057,6 +4057,48 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/contacts/blocked": {
+      "get": {
+        "description": "The read half of the block/unblock endpoints. A bare array of neutral contact ids — ids only, because that is the honest common subset: whatsapp-web.js resolves full contact models but Baileys' blocklist query answers bare jids, and inventing the other fields on one engine would make the two engines claim different things about the same account.",
+        "operationId": "ContactController_getBlockedContacts",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Blocked contact ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
+          },
+          "503": {
+            "description": "WhatsApp did not answer the blocklist query — retry shortly"
+          }
+        },
+        "summary": "List the contacts this account has blocked",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/contacts/{contactId}": {
       "get": {
         "operationId": "ContactController_findOne",
