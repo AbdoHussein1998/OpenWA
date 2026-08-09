@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- ⚠️ **Breaking (behavior). Engine operations during a WhatsApp Web page reload answer `409` instead of a raw `500`** — WhatsApp Web reloads its own page (measured ~5 minutes after a fresh pairing, among others) and whatsapp-web.js re-injects into it; for that bounded window every engine route now answers the documented retryable `409` naming the reload, where it previously surfaced raw `TypeError` 500s — and the six chat write routes (`read`/`unread`/`archive`/`unarchive`/`typing`/clear) answered `200 {success:false}`. Retry after the session re-emits `ready`. Typed 4xx also no longer count toward the send breaker, so a reload can no longer latch its 15-minute cooldown.
+
+- **`GET /sessions/{id}/chats` now documents and answers the `503` a dead page deserves** — the one read route that still surfaced a page-transport death as a raw `500`, now split exactly like its siblings.
+
 - **125 routes now document a status they could already answer** — 91 gained the `409` an unconnected session answers, plus `400` on six sends, `403` on six group and channel writes, `404` on eleven, and `501` on eleven more. A generated client had no branch for any of them.
 
 - **Five routes now document a `503` they have been answering for releases** — the four group participant writes since 0.14.5, and listing chats by label since 0.14.0. There the `503` is what separates "WhatsApp never answered" from the per-participant refusals a `200` reports inside `results`.
@@ -28,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A bulk media send lost its attachment when the engine echo won the persist race** — the batch write collided on `UNIQUE(sessionId, waMessageId)` and was swallowed into a warning, leaving only the echo's row, which on a Baileys API send carries a media-less marker; it now merges onto that row like the single-send path already did.
+
+- **A WhatsApp Web page reload no longer kills a starting session** — a navigation landing during the first injection rejects `Client.initialize()` before whatsapp-web.js has installed its own re-inject handler, and the adapter's error channel is terminal, so one reload parked the session `FAILED` with nobody retrying (on start and on reconnect alike); the engine now retries that launch once, within the init deadline, before declaring failure.
+
+- **The liveness watchdog no longer tears down a session that is healing itself** — a post-`ready` page navigation makes `getState()` reject until WhatsApp Web reboots, which read as two failed probes and a teardown of a page whatsapp-web.js was about to re-inject; the probe now grants a bounded post-navigation grace (never for a logout navigation, and capped per episode so a reload loop cannot mask a genuinely dead page).
 
 - **Three shared status descriptions said the wrong thing on the routes that borrowed them** — `send-text`'s `501` is specifically a caller-supplied `customLinkPreview`, which only Baileys accepts, not a wholesale gap in the engine; `POST /channels/subscribe` takes an invite code and no channel id, so its `404` is an unresolvable invite; and the `400` on six send routes named the unreachable recipient as though it were the only cause, while omitting body validation and an inactive session, and cited a `404` meaning that four of those six routes do not declare.
 

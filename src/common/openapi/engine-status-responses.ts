@@ -18,7 +18,9 @@ export const ENGINE_NOT_READY_409 =
   'The session is not connected — an engine exists for it but is not `ready`: disconnected, ' +
   'reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and ' +
   'retry. A session that was never started answers `400` instead, and the session lifecycle routes ' +
-  'answer `409` for a conflicting state rather than this.';
+  'answer `409` for a conflicting state rather than this. One window answers this while the session ' +
+  'still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects ' +
+  'into it — for those few seconds the answer is a `409` naming the reload; retry shortly.';
 
 /**
  * The catalog and status services pass a `NotFoundException` factory to `EngineRegistry.require()`
