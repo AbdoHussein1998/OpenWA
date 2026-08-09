@@ -80,6 +80,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       "wwjs GroupChat.addParticipants → per-participant {code,message} object, or a reason STRING on batch refusal (index.d.ts:2184; GroupChat.js:78-264) — both mapped at the adapter; baileys groupParticipantsUpdate(jid,pids,'add') → per-jid [{status:'200'|error}] (Socket/groups.js:140-156); per-participant results surface on the HTTP `results` field, a total refusal throws",
   },
+  approveGroupMembershipRequests: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      "wwjs Client.approveGroupMembershipRequests(groupId, {requesterIds, sleep}) → per-requester [{requesterId, error?, message}] (index.d.ts:360; Client.js:3024-3038), requesterIds null = every pending request; baileys groupRequestParticipantsUpdate(jid, pids, 'approve') → per-jid [{status:'200'|error, jid}] (Socket/groups.d.ts:13; groups.js:116-139) — no act-on-all form, so an omitted list enumerates groupRequestParticipantsList first",
+  },
   archiveChat: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
@@ -136,6 +142,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   deleteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   muteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getGroupJoinInfo: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  getGroupMembershipRequests: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'wwjs Client.getGroupMembershipRequests(groupId) → raw page-context store objects {id, addedBy, parentGroupId, requestMethod, t} (index.d.ts:355; Client.js:2990-3000) — wids read via readWid for the #747 $1 rename; baileys groupRequestParticipantsList(jid) → bare wire attrs [{jid, request_method, request_time}] (Socket/groups.d.ts:10; groups.js:105-115)',
+  },
   getChannelById: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getChannelMessages: {
     wwjs: { status: 'supported' },
@@ -247,6 +259,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     baileys: { status: 'supported' },
     evidence:
       "wwjs GroupChat.removeParticipants → batch {status:200} only (index.d.ts:2189; GroupChat.js:267-298) — a non-200 now throws at the adapter instead of being discarded; baileys groupParticipantsUpdate(jid,pids,'remove') → per-jid [{status}] (Socket/groups.js:140-156)",
+  },
+  rejectGroupMembershipRequests: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      "same shapes as approveGroupMembershipRequests with the 'Reject' page action (wwjs Client.js:3050-3064) / the 'reject' update action (baileys groups.js:116-139)",
   },
   rejectCall: {
     wwjs: { status: 'supported' },

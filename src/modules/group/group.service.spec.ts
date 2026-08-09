@@ -247,3 +247,60 @@ describe('GroupService join-info preview', () => {
     );
   });
 });
+
+describe('GroupService membership requests', () => {
+  const makeService = (engine: Partial<IWhatsAppEngine>, pacing: SendPacingService = inertPacing()) => {
+    const engines = new EngineRegistry();
+    engines.set('s1', engine as IWhatsAppEngine);
+    return { svc: new GroupService(engines, pacing), pacing };
+  };
+
+  it('delegates the pending-request list to the engine', async () => {
+    const requests = [{ participantId: '628111@c.us', method: 'invite_link', requestedAt: 1754700000 }];
+    const getGroupMembershipRequests = jest.fn().mockResolvedValue(requests);
+
+    const { svc } = makeService({ getGroupMembershipRequests });
+
+    await expect(svc.getGroupMembershipRequests('s1', 'g1')).resolves.toEqual(requests);
+    expect(getGroupMembershipRequests).toHaveBeenCalledWith('g1');
+  });
+
+  it.each([['approveGroupMembershipRequests' as const], ['rejectGroupMembershipRequests' as const]])(
+    '%s forwards the named participants and the results verbatim',
+    async method => {
+      const results = [{ id: '628111@c.us', success: true, status: 200 }];
+      const engineFn = jest.fn().mockResolvedValue(results);
+
+      const { svc } = makeService({ [method]: engineFn });
+
+      await expect(svc[method]('s1', 'g1', ['628111@c.us'])).resolves.toEqual(results);
+      expect(engineFn).toHaveBeenCalledWith('g1', ['628111@c.us']);
+    },
+  );
+
+  it('passes an omitted participant list through as undefined (approve/reject ALL pending)', async () => {
+    const approveGroupMembershipRequests = jest.fn().mockResolvedValue([]);
+
+    const { svc } = makeService({ approveGroupMembershipRequests });
+
+    await expect(svc.approveGroupMembershipRequests('s1', 'g1')).resolves.toEqual([]);
+    expect(approveGroupMembershipRequests).toHaveBeenCalledWith('g1', undefined);
+  });
+
+  it('does NOT draw on the cold-reachout budget — the requesters asked for the contact', async () => {
+    const approveGroupMembershipRequests = jest.fn().mockResolvedValue([]);
+    const assertReachoutAllowed = jest.fn().mockResolvedValue(undefined);
+
+    const { svc } = makeService({ approveGroupMembershipRequests }, {
+      assertReachoutAllowed,
+    } as unknown as SendPacingService);
+    await svc.approveGroupMembershipRequests('s1', 'g1', ['628111@c.us']);
+
+    expect(assertReachoutAllowed).not.toHaveBeenCalled();
+  });
+
+  it('throws 400 when the session is not started', () => {
+    const svc = new GroupService(new EngineRegistry(), inertPacing());
+    expect(() => svc.getGroupMembershipRequests('s1', 'g1')).toThrow(BadRequestException);
+  });
+});

@@ -4,6 +4,8 @@ import {
   GroupInfo,
   GroupJoinInfo,
   GroupMemberAddMode,
+  GroupMembershipRequest,
+  GroupMembershipRequestMethod,
   MediaInput,
   ParticipantOperationResult,
 } from '../interfaces/whatsapp-engine.interface';
@@ -91,6 +93,13 @@ export async function mapServerRefusal<T>(
 export function toEngineParticipants(participants: string[], toEngineJid: (jid: string) => string): string[] {
   return participants.map(toEngineJid);
 }
+
+/** The neutral method tokens — Baileys' wire tokens are already this vocabulary. */
+const MEMBERSHIP_REQUEST_METHODS: readonly GroupMembershipRequestMethod[] = [
+  'invite_link',
+  'non_admin_add',
+  'linked_group_join',
+];
 
 export class BaileysGroups {
   constructor(
@@ -393,5 +402,101 @@ export class BaileysGroups {
     await mapServerRefusal('Setting the disappearing-message timer', () =>
       this.confirmed(this.sock().groupToggleEphemeral(groupId, durationSec), 'the disappearing-message timer change'),
     );
+  }
+
+  async getGroupMembershipRequests(groupId: string): Promise<GroupMembershipRequest[]> {
+    this.host.ensureReady();
+    const raw = await mapServerRefusal('Listing the membership requests', () =>
+      withQueryDeadline(
+        this.sock().groupRequestParticipantsList(groupId),
+        this.queryBudgetMs,
+        'WhatsApp did not answer the membership-request list query in time',
+      ),
+    );
+    // Bare wire attrs: engine-dialect `jid`, snake_case `request_method`, stringly `request_time`.
+    // Fields that do not parse are omitted rather than defaulted; an entry without a jid carries
+    // nothing addressable and is dropped.
+    return (raw ?? []).flatMap(attrs => {
+      if (!attrs.jid) {
+        return [];
+      }
+      const method = MEMBERSHIP_REQUEST_METHODS.includes(attrs.request_method as GroupMembershipRequestMethod)
+        ? (attrs.request_method as GroupMembershipRequestMethod)
+        : undefined;
+      const requestedAt = Number(attrs.request_time);
+      return [
+        {
+          participantId: this.host.toNeutralJid(attrs.jid),
+          ...(method ? { method } : {}),
+          ...(Number.isFinite(requestedAt) && requestedAt > 0 ? { requestedAt: Math.floor(requestedAt) } : {}),
+        },
+      ];
+    });
+  }
+
+  approveGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]> {
+    return this.runMembershipRequestsUpdate(groupId, participants, 'approve');
+  }
+
+  rejectGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]> {
+    return this.runMembershipRequestsUpdate(groupId, participants, 'reject');
+  }
+
+  /**
+   * `groupRequestParticipantsUpdate` resolves the same per-jid `[{status, jid}]` shape as the
+   * participant writes (status is the server's error attr or '200', Socket/groups.js:116-139), and
+   * the same guards apply — but only when the caller NAMED requesters. Baileys has no act-on-all
+   * form, so an omitted list enumerates the pending queue first; an empty queue is a legitimate
+   * no-op that resolves [], not a refusal.
+   */
+  private async runMembershipRequestsUpdate(
+    groupId: string,
+    participants: string[] | undefined,
+    action: 'approve' | 'reject',
+  ): Promise<ParticipantOperationResult[]> {
+    this.host.ensureReady();
+    let targets: string[];
+    if (participants) {
+      targets = this.toEngineParticipants(participants);
+    } else {
+      const pending = await mapServerRefusal(`Listing the membership requests to ${action}`, () =>
+        withQueryDeadline(
+          this.sock().groupRequestParticipantsList(groupId),
+          this.queryBudgetMs,
+          'WhatsApp did not answer the membership-request list query in time',
+        ),
+      );
+      targets = (pending ?? []).map(attrs => attrs.jid).filter((jid): jid is string => Boolean(jid));
+      if (targets.length === 0) {
+        return [];
+      }
+    }
+    const raw = await mapServerRefusal(`Membership-request ${action}`, () =>
+      withQueryDeadline(
+        this.sock().groupRequestParticipantsUpdate(groupId, targets, action),
+        this.queryBudgetMs,
+        `WhatsApp did not answer the membership-request ${action} in time`,
+      ),
+    );
+    const results: ParticipantOperationResult[] = (raw ?? []).map(entry => ({
+      id: entry.jid ? this.host.toNeutralJid(entry.jid) : '',
+      success: entry.status === '200',
+      status: Number.isFinite(Number(entry.status)) ? Number(entry.status) : undefined,
+    }));
+    if (!participants) {
+      return results;
+    }
+    if (results.length === 0) {
+      throw new EngineRefusedError(
+        `groupRequestParticipantsUpdate(${action}) returned no per-participant outcome for group ${groupId}`,
+      );
+    }
+    if (results.every(r => !r.success)) {
+      const detail = results.map(r => `${r.id || '?'} (${r.status ?? '?'})`).join(', ');
+      throw new EngineRefusedError(
+        `Membership-request ${action} failed for all ${results.length} participant(s) in group ${groupId}: ${detail}`,
+      );
+    }
+    return results;
   }
 }

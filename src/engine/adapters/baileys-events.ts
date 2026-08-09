@@ -358,6 +358,45 @@ export class BaileysEvents {
   }
 
   /**
+   * Baileys `group.join-request`: someone asked to join a group the account admins (join-approval
+   * on). Only action 'created' maps to the neutral join_request kind — the wwebjs event has no
+   * revoke/reject counterpart, so only the shared signal is surfaced. Upstream scope caveat: rc13
+   * emits this event only from the NON_ADMIN_ADD stub (172); the direct self-request stub (144) is
+   * unhandled with an upstream TODO (Utils/process-message.js:569), so an invite-link self-request
+   * may produce no event on this engine — the REST list endpoint still sees it. The pn twins are
+   * preferred over lids for the same reason as everywhere else. The event carries no timestamp, so
+   * it is stamped at receipt.
+   */
+  handleGroupJoinRequest(event: {
+    id?: string;
+    author?: string;
+    authorPn?: string;
+    participant?: string;
+    participantPn?: string;
+    action?: string;
+    method?: string;
+  }): void {
+    if (event.action !== 'created' || !event.id) {
+      return;
+    }
+    const participant = event.participantPn ?? event.participant;
+    if (!participant) {
+      return; // nothing addressable to report
+    }
+    const payload: GroupEvent = {
+      kind: 'join_request',
+      groupId: this.host.toNeutralJid(event.id),
+      participantIds: [this.host.toNeutralJid(participant)],
+      timestamp: Math.floor(Date.now() / 1000),
+    };
+    const actor = event.authorPn ?? event.author;
+    if (actor) {
+      payload.actorId = this.host.toNeutralJid(actor);
+    }
+    this.host.getOnGroupEvent()?.(payload);
+  }
+
+  /**
    * Baileys `groups.update`: partial group metadata. Each entry becomes one neutral 'update'
    * GroupEvent with `changes` filled from whichever of subject/desc/announce/restrict it carries
    * (desc → description, restrict → locked). Entries about fields the neutral shape does not model

@@ -259,6 +259,27 @@ export interface GroupJoinInfo {
   participantCount?: number;
 }
 
+/** How a join request was made. Neutral vocabulary; both engines' tokens map onto it. */
+export type GroupMembershipRequestMethod = 'invite_link' | 'non_admin_add' | 'linked_group_join';
+
+/**
+ * One pending request to join a group that has join-approval turned on. Mapped at the adapter
+ * boundary from engine shapes that disagree on everything: whatsapp-web.js resolves raw
+ * page-context store objects (wid objects, PascalCase method tokens), Baileys bare wire attrs
+ * (engine-dialect jids, snake_case tokens, stringly timestamps). Fields the engine did not report
+ * are omitted rather than defaulted.
+ */
+export interface GroupMembershipRequest {
+  /** Neutral id of the user asking to join. */
+  participantId: string;
+  /** Who created the request when the engine reports it (differs from the requester on a non-admin add). */
+  addedById?: string;
+  /** How the request was made, when the engine reports a token this shape models. */
+  method?: GroupMembershipRequestMethod;
+  /** Unix seconds the request was created, when the engine reports it. */
+  requestedAt?: number;
+}
+
 /**
  * A caller-supplied link preview, used instead of fetching one.
  *
@@ -520,19 +541,24 @@ export interface ReactionEvent {
 /**
  * A group membership or metadata change, mapped at the adapter boundary to this neutral
  * shape so consumers never see engine-specific payloads:
- *  - whatsapp-web.js: `group_join` / `group_leave` / `group_update` (GroupNotification).
+ *  - whatsapp-web.js: `group_join` / `group_leave` / `group_update` /
+ *    `group_membership_request` (GroupNotification).
  *  - Baileys: `group-participants.update` (add/remove only — promote/demote are not
- *    surfaced) and `groups.update` (subject/desc/announce/restrict).
+ *    surfaced), `groups.update` (subject/desc/announce/restrict) and `group.join-request`
+ *    (action 'created' only — the wwebjs event has no revoke/reject counterpart, so only
+ *    the shared signal is surfaced; rc13 itself emits the event only for non-admin-add
+ *    requests — the direct self-request stub 144 is unhandled upstream, marked TODO at
+ *    Utils/process-message.js:569 — so an invite-link self-request may not fire on Baileys).
  * All ids are in the neutral dialect (`@g.us` / `@c.us`; a lid stays `<id>@lid` when the
  * lid->phone mapping is unknown).
  */
 export interface GroupEvent {
-  kind: 'join' | 'leave' | 'update';
+  kind: 'join' | 'leave' | 'update' | 'join_request';
   /** Neutral group id (`@g.us`). */
   groupId: string;
   /** Who performed the action, neutral user id when the engine reports one. */
   actorId?: string;
-  /** Affected users (join/leave), neutral ids. Empty for metadata updates. */
+  /** Affected users (join/leave), or the users asking to join (join_request), neutral ids. Empty for metadata updates. */
   participantIds: string[];
   /** Metadata delta for kind 'update'; absent or partially populated for join/leave. */
   changes?: { subject?: string; description?: string; announce?: boolean; locked?: boolean };
@@ -667,9 +693,9 @@ export interface EngineEventCallbacks {
   onMessageReaction?: (event: ReactionEvent) => void;
   onMessageEdited?: (message: EditedMessage) => void;
   /**
-   * Fired on group membership changes (join/leave) and group metadata updates
-   * (subject/description/announce/locked). The `kind` selects the consumer event name
-   * (`group.join` / `group.leave` / `group.update`).
+   * Fired on group membership changes (join/leave), group metadata updates
+   * (subject/description/announce/locked), and pending join requests. The `kind` selects the
+   * consumer event name (`group.join` / `group.leave` / `group.update` / `group.join_request`).
    */
   onGroupEvent?: (event: GroupEvent) => void;
   /**
@@ -891,6 +917,20 @@ export interface IWhatsAppEngine {
    * Known values: 86400 (24h), 604800 (7d), 7776000 (90d).
    */
   setGroupEphemeral(groupId: string, durationSec: number): Promise<void>;
+  /**
+   * Pending join requests for a group with join-approval turned on. Admin-only on both engines;
+   * a non-admin's read is refused by the engine and surfaced as-is.
+   */
+  getGroupMembershipRequests(groupId: string): Promise<GroupMembershipRequest[]>;
+  /**
+   * Approve pending join requests — the named participants, or EVERY pending request when
+   * `participants` is omitted. Per-participant outcomes follow the membership-write contract
+   * (see addParticipants); the all-failed/no-outcome guards apply only when participants were
+   * NAMED — approving an empty queue is a no-op that resolves [].
+   */
+  approveGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]>;
+  /** Reject pending join requests; same contract as approveGroupMembershipRequests. */
+  rejectGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]>;
 
   // Message Operations
   deleteMessage(chatId: string, messageId: string, forEveryone?: boolean): Promise<void>;

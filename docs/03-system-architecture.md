@@ -910,7 +910,7 @@ export interface EngineEventCallbacks {
   onMessageRevoked?: (message: RevokedMessage) => void;
   onMessageReaction?: (event: ReactionEvent) => void;
   onMessageEdited?: (message: EditedMessage) => void;
-  onGroupEvent?: (event: GroupEvent) => void; // kind selects group.join / group.leave / group.update
+  onGroupEvent?: (event: GroupEvent) => void; // kind selects group.join / group.leave / group.update / group.join_request
   onCall?: (event: IncomingCallEvent) => void; // incoming call ringing; rejectCall() while it rings
   onHistoryMessages?: (messages: IncomingMessage[]) => void; // bulk initial sync; persist, don't dispatch
   onDisconnected?: (reason: string) => void; // recoverable -> reconnect

@@ -179,6 +179,7 @@ describe('SessionService', () => {
       emitMessageReaction: jest.fn(),
       emitMessageEdited: jest.fn(),
       emitGroupJoin: jest.fn(),
+      emitGroupJoinRequest: jest.fn(),
       emitGroupLeave: jest.fn(),
       emitGroupUpdate: jest.fn(),
       emitCallReceived: jest.fn(),
@@ -5382,6 +5383,23 @@ describe('SessionService', () => {
       expect(eventsGateway.emitGroupJoin).toHaveBeenCalledWith('sess-uuid-1', payload);
       expect(eventsGateway.emitGroupLeave).not.toHaveBeenCalled();
       expect(eventsGateway.emitGroupUpdate).not.toHaveBeenCalled();
+    });
+
+    it('dispatches a join request as group.join_request — the join-approval queue grew', async () => {
+      const onGroupEvent = await startAndCaptureGroupCallback();
+
+      onGroupEvent(groupEvent({ kind: 'join_request' }));
+
+      const payload = {
+        groupId: '120363@g.us',
+        participantIds: ['628111@c.us'],
+        timestamp: 1700000900,
+        actorId: '628444@c.us',
+      };
+      expect(webhookService.dispatch).toHaveBeenCalledWith('sess-uuid-1', 'group.join_request', payload);
+      expect(eventsGateway.emitGroupJoinRequest).toHaveBeenCalledWith('sess-uuid-1', payload);
+      // A request to join is NOT a join: the two names must never cross.
+      expect(eventsGateway.emitGroupJoin).not.toHaveBeenCalled();
     });
 
     it('dispatches a leave as group.leave', async () => {

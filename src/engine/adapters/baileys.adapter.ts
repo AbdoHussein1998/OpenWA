@@ -22,6 +22,7 @@ import {
   Group,
   GroupInfo,
   GroupMemberAddMode,
+  GroupMembershipRequest,
   IncomingMessage,
   IWhatsAppEngine,
   Label,
@@ -221,6 +222,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       logContactEvent: (event, records) => this.events.logContactEvent(event, records),
       handleGroupParticipantsUpdate: event => this.events.handleGroupParticipantsUpdate(event),
       handleGroupsUpdate: updates => this.events.handleGroupsUpdate(updates),
+      handleGroupJoinRequest: event => this.events.handleGroupJoinRequest(event),
       handleCallEvents: calls => this.events.handleCallEvents(calls),
       handlePresenceUpdate: update => this.events.handlePresenceUpdate(update),
       captureHistoryMessages: messages => this.history.captureHistoryMessages(messages),
@@ -453,6 +455,21 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   async setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
     return this.groups.setGroupEphemeral(groupId, durationSec);
+  }
+
+  async getGroupMembershipRequests(groupId: string): Promise<GroupMembershipRequest[]> {
+    return this.groups.getGroupMembershipRequests(groupId);
+  }
+
+  async approveGroupMembershipRequests(
+    groupId: string,
+    participants?: string[],
+  ): Promise<ParticipantOperationResult[]> {
+    return this.groups.approveGroupMembershipRequests(groupId, participants);
+  }
+
+  async rejectGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]> {
+    return this.groups.rejectGroupMembershipRequests(groupId, participants);
   }
 
   async getProfilePicture(contactId: string): Promise<string | null> {
