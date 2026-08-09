@@ -1485,9 +1485,9 @@ describe('MessageService', () => {
   describe('persistSentState vs the own-send echo (dedup race)', () => {
     it('merges state onto the echo row, then drops the redundant PENDING row', async () => {
       // The engine's message_create echo (onMessageCreate) won the insert race, so the SENT-state save
-      // collides on UNIQUE(sessionId, waMessageId). The echo row carries only a media-less marker —
-      // the merge must land status/timestamp/metadata on it BEFORE the placeholder is deleted, or the
-      // payload is lost. The send still succeeds.
+      // collides on UNIQUE(sessionId, waMessageId). The echo row carries only what the engine reported
+      // — for a Baileys API send, a media-less marker — so the merge must land status/timestamp/metadata
+      // on it BEFORE the placeholder is deleted, or the payload is lost. The send still succeeds.
       (repository.save as jest.Mock)
         .mockImplementationOnce(msg => Promise.resolve(msg)) // saveOutgoingMessage (PENDING)
         .mockRejectedValueOnce(new Error('UNIQUE constraint failed: messages.sessionId, messages.waMessageId'));

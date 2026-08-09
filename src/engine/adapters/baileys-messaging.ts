@@ -441,7 +441,8 @@ export class BaileysMessaging {
       // wwjs fires `message_create` for its own API sends, which SessionService turns into `message.sent`.
       // Baileys' own socket-sends echo back only as a `type:'append'` upsert (skipped as history sync), so
       // that event never fired for API sends. Emit the outbound "created" callback here for parity —
-      // best-effort and off the response path, with no media re-download (matching the wwjs payload).
+      // best-effort and off the response path. No media re-download: the API caller already holds the
+      // payload and the REST send path persists it (wwjs, by contrast, does download it on its echo).
       void this.emitOwnSendEcho(sent);
     }
     return { id: sent?.key?.id ?? '', timestamp: this.host.toUnixSeconds(sent?.messageTimestamp) };
