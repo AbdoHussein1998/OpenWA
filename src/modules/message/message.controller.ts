@@ -417,21 +417,23 @@ export class MessageController {
   // Three path segments, so it never collides with `:chatId/history` (two) regardless of
   // declaration order — Nest/Express match on segment count first.
   @Get(':chatId/:messageId/media')
-  @ApiOperation({ summary: 'Download a message’s archived media' })
+  @ApiOperation({ summary: 'Download a message’s stored media' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'chatId', description: 'Chat ID containing the message' })
   @ApiParam({ name: 'messageId', description: 'WhatsApp message ID whose media to download' })
   @ApiResponse({
     status: 200,
-    description: 'The archived media bytes, served as an attachment.',
+    description:
+      'The media bytes — the archived file when one exists, else the inline copy stored on the ' +
+      'message row (which is how media sent by this account is served) — as an attachment.',
     content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } },
   })
   @ApiResponse({
     status: 404,
     description:
-      'Nothing archived for this message — archiving was off when it arrived, the message carries no ' +
-      'media, the media was above the archive cap, retention has since cleared it, or the message ' +
-      'was sent BY this account (only inbound media is archived).',
+      'No stored media for this message — it carries no media, media download was disabled or the ' +
+      'payload was over the cap when it was stored (size-only marker), it was a URL-based API send ' +
+      '(those bytes are never stored), or the message is not in this gateway’s history.',
   })
   async getChatMedia(
     @Param('sessionId') sessionId: string,

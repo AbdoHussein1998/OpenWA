@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The media download route now serves media sent by the account** — `GET /messages/:chatId/:messageId/media` falls back to the inline copy stored on the message row when no archived file exists, which covers outbound messages (never archived) and inbound messages whose archived file retention has purged.
+
 ### Changed
 
 - **125 routes now document a status they could already answer** — 91 gained the `409` an unconnected session answers, plus `400` on six sends, `403` on six group and channel writes, `404` on eleven, and `501` on eleven more. A generated client had no branch for any of them.

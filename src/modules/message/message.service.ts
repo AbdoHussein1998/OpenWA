@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm';
 import { SessionService } from '../session/session.service';
 import { EngineRegistry } from '../../engine/engine-registry.service';
@@ -84,8 +84,8 @@ export class MessageService {
     private readonly pacing: SendPacingService,
     @Optional()
     private readonly configService?: ConfigService,
-    // Optional so the existing standalone constructions keep working; absent means the archive
-    // read endpoint reports "nothing archived", which is also what a disabled archive reports.
+    // Optional so the existing standalone constructions keep working; absent (like a disabled
+    // archive) means the media read endpoint serves only the inline row copy, never archived files.
     @Optional()
     private readonly chatMediaArchive?: ChatMediaArchiveService,
     @Optional()
@@ -761,7 +761,13 @@ export class MessageService {
   }
 
   /**
-   * Read a message's archived media back out of the file store.
+   * Read a message's media: the archived file when one exists, else the inline copy persisted on
+   * the message row. The fallback is what makes media sent BY the account retrievable here — the
+   * archive is written only on the inbound path, but outbound rows carry the payload inline: the
+   * REST send persists it, wwjs downloads it for the own-send echo, and Baileys downloads it for
+   * phone-composed fromMe messages (the Baileys API-send echo alone carries only a marker, which
+   * the REST-persisted copy covers) — #1165. It also serves an inbound message whose archived file
+   * was purged by retention while the inline copy lives on.
    *
    * Unlike status media (only ever an image or video), chat media includes documents a sender chose
    * the type of — so the declared mimetype is echoed back only when it is inert, and the caller
@@ -774,20 +780,40 @@ export class MessageService {
     messageId: string,
   ): Promise<{ buffer: Buffer; mimetype: string }> {
     const media = await this.chatMediaArchive?.getMedia(sessionId, chatId, messageId);
-    if (!media || !this.storageService) {
-      throw new NotFoundException('No archived media for this message');
-    }
-    try {
-      const buffer = await this.storageService.getFile(media.path);
-      return { buffer, mimetype: inertMimetype(media.mimetype) };
-    } catch (error) {
-      // The row outlived its file: the retention purge (or a concurrent delete) removed it between
-      // the DB read and this read. That's "gone", not a server fault — surface a 404.
-      if (isMissingObjectError(error)) {
-        throw new NotFoundException('No archived media for this message');
+    if (media && this.storageService) {
+      try {
+        return { buffer: await this.storageService.getFile(media.path), mimetype: inertMimetype(media.mimetype) };
+      } catch (error) {
+        // The row outlived its file: the retention purge (or a concurrent delete) removed it
+        // between the DB read and this read. Not a server fault — try the inline copy instead.
+        if (!isMissingObjectError(error)) {
+          throw error;
+        }
       }
-      throw error;
     }
+
+    // Match across dialects like getMessages does: an outbound row stores the caller's literal
+    // chatId (REST persist) or the engine-neutral form (own-send echo) depending on which writer
+    // won the persist race, so a literal match would 404 on half the rows this fallback exists for.
+    const row = await this.messageRepository.findOne({
+      where: { sessionId, chatId: In(this.resolveJidCandidates(chatId)), waMessageId: messageId },
+    });
+    const inline = (row?.metadata as { media?: { data?: unknown; mimetype?: unknown; omitted?: unknown } })?.media;
+    if (
+      !inline ||
+      inline.omitted ||
+      typeof inline.data !== 'string' ||
+      !inline.data ||
+      typeof inline.mimetype !== 'string' ||
+      !inline.mimetype ||
+      // A URL-based send persists the URL STRING as `data` (buildMediaInput: `data: base64 ||
+      // dto.url!`) — the bytes were fetched at send time and never stored. Decoding the URL as
+      // base64 would serve garbage, so report it as absent. Same discriminator as the send path.
+      /^https?:\/\//i.test(inline.data)
+    ) {
+      throw new NotFoundException('No media stored for this message');
+    }
+    return { buffer: Buffer.from(inline.data, 'base64'), mimetype: inertMimetype(inline.mimetype) };
   }
 
   /** Maximum messages a single getChatHistory call may request from the engine. */

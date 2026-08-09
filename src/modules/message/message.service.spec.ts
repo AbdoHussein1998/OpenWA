@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { BadRequestException, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { MessageService } from './message.service';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
@@ -1632,6 +1632,100 @@ describe('MessageService', () => {
     it('does not swallow a genuine storage fault as a 404', async () => {
       const svc = build(archived('image/png'), { getFile: jest.fn().mockRejectedValue(new Error('S3 500')) });
       await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).rejects.toThrow('S3 500');
+    });
+
+    // ── inline fallback (sent-message media, #1165) ──────────────────
+
+    const inlineRow = (media: Record<string, unknown>) => ({ id: 'msg-uuid-1', metadata: { media } });
+    const noArchive = () => ({ getMedia: jest.fn().mockResolvedValue(null) });
+
+    it('serves the inline row copy when nothing is archived', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        inlineRow({ mimetype: 'image/jpeg', data: Buffer.from('INLINE').toString('base64') }),
+      );
+      const svc = build(noArchive(), storage());
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).resolves.toEqual({
+        buffer: Buffer.from('INLINE'),
+        mimetype: 'image/jpeg',
+      });
+      expect(repository.findOne).toHaveBeenCalledWith({
+        where: { sessionId: 'sess-1', chatId: In(['c@c.us', 'c@s.whatsapp.net']), waMessageId: 'wa-1' },
+      });
+    });
+
+    it('looks the row up across chatId dialects — outbound rows store the literal or the neutral form by race', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        inlineRow({ mimetype: 'image/jpeg', data: Buffer.from('SENT').toString('base64') }),
+      );
+      const svc = build(noArchive(), storage());
+      await expect(svc.getChatMedia('sess-1', '628123456789@s.whatsapp.net', 'wa-1')).resolves.toEqual({
+        buffer: Buffer.from('SENT'),
+        mimetype: 'image/jpeg',
+      });
+      expect(repository.findOne).toHaveBeenCalledWith({
+        where: {
+          sessionId: 'sess-1',
+          chatId: In(['628123456789@s.whatsapp.net', '628123456789@c.us']),
+          waMessageId: 'wa-1',
+        },
+      });
+    });
+
+    it('prefers the archived file over the inline copy when both exist', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        inlineRow({ mimetype: 'image/png', data: Buffer.from('INLINE').toString('base64') }),
+      );
+      const svc = build(archived('image/png'), storage(Buffer.from('ARCHIVE-BYTES')));
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).resolves.toEqual({
+        buffer: Buffer.from('ARCHIVE-BYTES'),
+        mimetype: 'image/png',
+      });
+    });
+
+    it('downgrades an active inline mimetype to octet-stream, matching the archive path', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        inlineRow({ mimetype: 'text/html', data: Buffer.from('<img>').toString('base64') }),
+      );
+      const svc = build(noArchive(), storage());
+      const { mimetype: served } = await svc.getChatMedia('sess-1', 'c@c.us', 'wa-1');
+      expect(served).toBe('application/octet-stream');
+    });
+
+    it.each([
+      // A URL-based send persists the URL STRING in metadata.media.data (buildMediaInput:
+      // `data: base64 || dto.url!`) — decoding it as base64 would serve garbage bytes.
+      ['a URL string from a url-based send', { mimetype: 'image/png', data: 'https://example.com/cat.png' }],
+      ['the omitted marker', { mimetype: 'image/png', omitted: true, sizeBytes: 99 }],
+      ['a payload with no mimetype', { data: Buffer.from('X').toString('base64') }],
+      ['a media object with no data', { mimetype: 'image/png' }],
+    ])('404s when the inline copy is %s', async (_label, media) => {
+      (repository.findOne as jest.Mock).mockResolvedValue(inlineRow(media));
+      const svc = build(noArchive(), storage());
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('falls back to the inline copy when the archived file was purged by retention', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        inlineRow({ mimetype: 'image/jpeg', data: Buffer.from('STILL-HERE').toString('base64') }),
+      );
+      const svc = build(archived('image/jpeg'), {
+        getFile: jest.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+      });
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).resolves.toEqual({
+        buffer: Buffer.from('STILL-HERE'),
+        mimetype: 'image/jpeg',
+      });
+    });
+
+    it('serves the inline copy when no storage backend is configured', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        inlineRow({ mimetype: 'image/jpeg', data: Buffer.from('INLINE').toString('base64') }),
+      );
+      const svc = build(archived('image/jpeg'), undefined);
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).resolves.toEqual({
+        buffer: Buffer.from('INLINE'),
+        mimetype: 'image/jpeg',
+      });
     });
   });
 });
