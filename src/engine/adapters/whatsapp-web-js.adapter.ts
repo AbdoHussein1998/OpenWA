@@ -1693,6 +1693,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.contacts.unblockContact(contactId);
   }
 
+  getBlockedContacts(): Promise<string[]> {
+    return this.contacts.getBlockedContacts();
+  }
+
   // ========== Profile (own account) ==========
 
   setProfileName(name: string): Promise<void> {

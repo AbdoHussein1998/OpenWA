@@ -24,6 +24,8 @@ export interface BaileysContactsHost {
   lastMessage(chatId: string): { key: WAMessageKey; timestamp: number } | null;
   /** Fold a neutral @c.us id to the engine @s.whatsapp.net form used as the app-state index key. */
   toEngineJid(jid: string): string;
+  /** Fold an engine jid back to the neutral dialect before it crosses the engine boundary. */
+  toNeutralJid(jid: string): string;
 }
 
 export class BaileysContacts {
@@ -102,6 +104,22 @@ export class BaileysContacts {
   async unblockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
     await this.confirmed(this.sock().updateBlockStatus(contactId, 'unblock'), 'the unblock');
+  }
+
+  /**
+   * The read half of block/unblockContact. Bounded by our own clock: Baileys' `query()` swallows
+   * its timeout, and an unanswered blocklist query would otherwise surface as an EMPTY blocklist —
+   * a claim about the account sold in place of a transport failure. Wire items without a jid attr
+   * are dropped rather than reported as "undefined".
+   */
+  async getBlockedContacts(): Promise<string[]> {
+    this.host.ensureReady();
+    const jids = await withQueryDeadline(
+      this.sock().fetchBlocklist(),
+      this.queryBudgetMs,
+      'WhatsApp did not answer the blocklist query in time',
+    );
+    return (jids ?? []).filter((jid): jid is string => Boolean(jid)).map(jid => this.host.toNeutralJid(jid));
   }
 
   async setProfileName(name: string): Promise<void> {

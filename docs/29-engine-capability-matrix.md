@@ -22,7 +22,7 @@ The `rootCause`/`evidence` fields are hand-curated from source traces of the ins
 
 ## Unwired-capability inventory
 
-21 of the 104 interface methods are `not-available` on at least one adapter (22 not-available adapter-cells total). Grouped by cluster below. Each entry shows: status today → rootCause → evidence → wiring note.
+21 of the 105 interface methods are `not-available` on at least one adapter (22 not-available adapter-cells total). Grouped by cluster below. Each entry shows: status today → rootCause → evidence → wiring note.
 
 ### Channels / Newsletter
 
@@ -174,8 +174,8 @@ These are hand-maintained and had drifted from the source before this pass; they
 from `engine-capability-matrix.ts` rather than adjusted by hand. Re-derive them the same way when
 adding a method, instead of incrementing the previous figure.
 
-- **104** interface methods, **208** adapter-cells (104 × 2 engines).
-- **186** supported cells; **22** not-available cells across **21** methods.
+- **105** interface methods, **210** adapter-cells (105 × 2 engines).
+- **188** supported cells; **22** not-available cells across **21** methods.
 - Of the 22 not-available cells: **2 adapter-gaps** (fixable) + **20 library-limitations** + **0 uncertain**.
 - **0 phantom-support rows** — every `not-available` row throws at the adapter boundary.
 

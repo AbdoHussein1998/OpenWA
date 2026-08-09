@@ -64,6 +64,24 @@ export class ContactController {
     return { pictures };
   }
 
+  @Get('blocked')
+  @ApiOperation({
+    summary: 'List the contacts this account has blocked',
+    description:
+      'The read half of the block/unblock endpoints. A bare array of neutral contact ids — ids ' +
+      'only, because that is the honest common subset: whatsapp-web.js resolves full contact ' +
+      "models but Baileys' blocklist query answers bare jids, and inventing the other fields on " +
+      'one engine would make the two engines claim different things about the same account.',
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Blocked contact ids', type: [String] })
+  @ApiResponse({ status: 503, description: 'WhatsApp did not answer the blocklist query — retry shortly' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  // NOTE: declared BEFORE @Get(':contactId') so the literal segment wins over the param route.
+  async getBlockedContacts(@Param('sessionId') sessionId: string) {
+    return this.contactService.getBlockedContacts(sessionId);
+  }
+
   @Get(':contactId')
   @ApiOperation({ summary: 'Get a specific contact by ID' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })

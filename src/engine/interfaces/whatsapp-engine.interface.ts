@@ -993,6 +993,13 @@ export interface IWhatsAppEngine {
   getProfilePicture(contactId: string): Promise<string | null>;
   blockContact(contactId: string): Promise<void>;
   unblockContact(contactId: string): Promise<void>;
+  /**
+   * Neutral ids of the contacts this account has blocked — the read half of block/unblockContact.
+   * Ids only: whatsapp-web.js resolves full Contact models, but Baileys' blocklist query answers
+   * bare jids, and inventing the other fields on one engine would make the two engines claim
+   * different things about the same account.
+   */
+  getBlockedContacts(): Promise<string[]>;
 
   /**
    * Save a contact to the account's addressbook, or edit an existing entry. `contactId` is a
