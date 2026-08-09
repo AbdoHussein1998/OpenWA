@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`CHAT_MEDIA_ARCHIVE_OUTBOUND` archives media this account sent** — a sub-flag of `CHAT_MEDIA_ARCHIVE_ENABLED` (off by default), so a sent attachment gets the same durable file copy, S3 portability and TTL retention inbound media already had. Refs #1165.
+
 - **Group membership requests: list, approve, reject, and a `group.join_request` event** — the join-approval queue wwebjs/Baileys both expose is now surfaced: `GET/POST .../groups/:groupId/membership-requests[/approve|/reject]` on both engines, plus a webhook/socket event when someone asks to join an administered group. Refs #1164 (discussion).
 
 - **Own global presence: `PUT /sessions/:id/presence`** — appear online or offline on both engines; an always-online headless bot suppresses the phone's own notifications, and `available: false` hands them back. Connection-scoped (re-issue after a reconnect). Refs #871.
@@ -30,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Five routes now document a `503` they have been answering for releases** — the four group participant writes since 0.14.5, and listing chats by label since 0.14.0. There the `503` is what separates "WhatsApp never answered" from the per-participant refusals a `200` reports inside `results`.
 
 ### Fixed
+
+- **A URL-based send no longer discards bytes the gateway already downloaded** — merging its metadata onto the engine's own-send echo replaced that echo's real payload with the URL string, so a whatsapp-web.js URL send rendered as a bare marker after a reload.
 
 - **A bulk media send lost its attachment when the engine echo won the persist race** — the batch write collided on `UNIQUE(sessionId, waMessageId)` and was swallowed into a warning, leaving only the echo's row, which on a Baileys API send carries a media-less marker; it now merges onto that row like the single-send path already did.
 

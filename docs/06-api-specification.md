@@ -1200,12 +1200,19 @@ Download a message's **stored** media bytes.
 The route serves the chat-media **archive** first, and falls back to the **inline base64 copy** on
 the message row when no archived file is servable. Archiving is **opt-in and off by default**
 (`CHAT_MEDIA_ARCHIVE_ENABLED`); when enabled, each inbound message's media is written to whatever
-backs `StorageService` (local disk or S3) in addition to the inline copy. The inline fallback is
-what makes media **sent by this account** downloadable here — outbound messages are never archived,
-but their payload is stored inline (base64 API sends persist it on the send path; media composed on
-a linked phone is downloaded by the engine for the own-send echo). It also keeps an inbound
-message's media downloadable after `CHAT_MEDIA_ARCHIVE_TTL_DAYS` retention purges the archived
-file, since retention leaves the inline copy in place.
+backs `StorageService` (local disk or S3) in addition to the inline copy. Media **sent by this
+account** is archived too when `CHAT_MEDIA_ARCHIVE_OUTBOUND=true` is set alongside it — off by
+default, since it doubles storage again for the outbound half.
+
+Media sent by this account is downloadable here regardless of that flag, because its payload is
+stored inline: base64 API sends persist it on the send path, and media composed on a linked phone is
+downloaded by the engine for the own-send echo. The flag buys a durable copy with its own lifecycle
+(S3 portability, TTL retention), not retrievability. A **URL-based send is the exception**: the
+gateway fetches those bytes at send time and stores none, so there is nothing to serve or archive.
+
+The inline fallback also keeps an inbound message's media downloadable after
+`CHAT_MEDIA_ARCHIVE_TTL_DAYS` retention purges the archived file, since retention leaves the inline
+copy in place.
 
 **Auth:** API key
 
