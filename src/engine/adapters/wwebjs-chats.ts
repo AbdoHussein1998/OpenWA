@@ -1,5 +1,6 @@
 import { MessageTypes, type Client } from 'whatsapp-web.js';
 import { ChatSummary, ChatState } from '../interfaces/whatsapp-engine.interface';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { chatKind, isChannelJid } from '../identity/wa-id';
 import { WwebjsMessaging } from './wwebjs-messaging';
 import { type WwebjsEngineHost } from './wwebjs-host';
@@ -23,7 +24,18 @@ export class WwebjsChats {
 
   async getChats(): Promise<ChatSummary[]> {
     this.host.ensureReady();
-    const chats = await this.client().getChats();
+    let chats: Awaited<ReturnType<Client['getChats']>>;
+    try {
+      chats = await this.client().getChats();
+    } catch (error) {
+      // Same split every sibling read makes (see getChatsByLabel): a dead page is a 503 and an
+      // early death signal, not an opaque 500 under a status that still says READY (#1081).
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'getChats');
+        throw new EngineTransportError('Transport died while listing chats');
+      }
+      throw error;
+    }
     const summaries: ChatSummary[] = [];
     let skipped = 0;
 

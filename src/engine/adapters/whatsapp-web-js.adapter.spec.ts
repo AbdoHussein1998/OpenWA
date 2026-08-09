@@ -14,6 +14,8 @@ import {
   extractWwebjsCall,
   READY_RECONCILE_TIMEOUT_MS,
   READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS,
+  NAVIGATION_REINJECT_GRACE_MS,
+  NAVIGATION_EPISODE_CAP_MS,
 } from './whatsapp-web-js.adapter';
 import { getEffectiveWebVersionInfo, resolveWebVersionPin, __resetWebVersionCache } from '../wa-web-version';
 import * as fs from 'fs';
@@ -186,6 +188,208 @@ describe('WhatsAppWebJsAdapter initialize() failure reason (#1081)', () => {
     const raw = 'Failed to launch the browser process:  Code: null';
 
     expect(await reasonFor(raw)).toBe(raw);
+  });
+});
+
+// A WhatsApp Web page navigation during the FIRST inject rejects Client.initialize() before the
+// library's own framenavigated re-inject handler exists (Client.js:502 vs :504), so nothing upstream
+// retries it — and the adapter's onError channel is terminal. One in-adapter retry converts that
+// one-navigation death into a normal slow start (#1081).
+describe('WhatsAppWebJsAdapter initialize() retry on a navigation-killed first inject (#1081)', () => {
+  const newAdapter = (): WhatsAppWebJsAdapter =>
+    new WhatsAppWebJsAdapter({ sessionId: 'sess-nav-retry', sessionDataPath: './data/sessions', puppeteer: {} });
+
+  const EXEC_CTX = 'Protocol error (Runtime.callFunctionOn): Execution context was destroyed.';
+
+  let rmSpy: jest.SpyInstance;
+  let clientInitSpy: jest.SpyInstance;
+  let clientDestroySpy: jest.SpyInstance;
+  let savedWebVersion: string | undefined;
+  let savedAuthTimeout: string | undefined;
+
+  beforeEach(() => {
+    savedWebVersion = process.env.WWEBJS_WEB_VERSION;
+    process.env.WWEBJS_WEB_VERSION = 'off';
+    // The budget tests assume the 60s outer-deadline floor; an ambient WWEBJS_AUTH_TIMEOUT_MS
+    // (a documented operator knob, #353) would widen it and flip their expectations.
+    savedAuthTimeout = process.env.WWEBJS_AUTH_TIMEOUT_MS;
+    delete process.env.WWEBJS_AUTH_TIMEOUT_MS;
+    rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    clientInitSpy = jest.spyOn(Client.prototype as unknown as { initialize: () => Promise<void> }, 'initialize');
+    // The inter-attempt cleanup destroys the failed client; the real destroy() would throw on a
+    // browserless Client, which is best-effort-tolerated but noisy — keep it deterministic.
+    clientDestroySpy = jest
+      .spyOn(Client.prototype as unknown as { destroy: () => Promise<void> }, 'destroy')
+      .mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    rmSpy.mockRestore();
+    clientInitSpy.mockRestore();
+    clientDestroySpy.mockRestore();
+    jest.useRealTimers();
+    if (savedWebVersion === undefined) {
+      delete process.env.WWEBJS_WEB_VERSION;
+    } else {
+      process.env.WWEBJS_WEB_VERSION = savedWebVersion;
+    }
+    if (savedAuthTimeout !== undefined) {
+      process.env.WWEBJS_AUTH_TIMEOUT_MS = savedAuthTimeout;
+    }
+  });
+
+  it('retries once when the first inject dies to a navigation, without surfacing an error', async () => {
+    clientInitSpy.mockRejectedValueOnce(new Error(EXEC_CTX)).mockResolvedValueOnce(undefined);
+    const onError = jest.fn();
+
+    await expect(newAdapter().initialize({ onError })).resolves.toBeUndefined();
+
+    expect(clientInitSpy).toHaveBeenCalledTimes(2);
+    expect(onError).not.toHaveBeenCalled();
+    // The inter-attempt reset destroys attempt 1's client, and BOTH attempts run the pre-launch
+    // Singleton sweep (3 rm's each) — the docblocks present both as load-bearing.
+    expect(clientDestroySpy).toHaveBeenCalledTimes(1);
+    expect(rmSpy).toHaveBeenCalledTimes(6);
+  });
+
+  it('still retries with exactly the minimum outer budget remaining', async () => {
+    jest.useFakeTimers();
+    clientInitSpy
+      .mockImplementationOnce(() => {
+        jest.setSystemTime(Date.now() + 40_000); // 60s floor − 40s = exactly the 20s floor
+        throw new Error(EXEC_CTX);
+      })
+      .mockResolvedValueOnce(undefined);
+    const onError = jest.fn();
+
+    await expect(newAdapter().initialize({ onError })).resolves.toBeUndefined();
+
+    expect(clientInitSpy).toHaveBeenCalledTimes(2);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("abandons the retry when attempt 1's browser will not die — never two Chromiums on one profile", async () => {
+    // Real timers: the destroy bound is 5s of wall clock. Fake timers cannot drive this path —
+    // the pre-launch sweep's real IO and the race's timer interleave in ways an advance loop
+    // starves — so this one test simply waits the bound out.
+    clientInitSpy.mockRejectedValueOnce(new Error(EXEC_CTX)).mockResolvedValueOnce(undefined);
+    clientDestroySpy.mockImplementation(() => new Promise<never>(() => {}));
+    const onError = jest.fn();
+
+    await expect(newAdapter().initialize({ onError })).rejects.toThrow(EXEC_CTX);
+
+    expect(clientInitSpy).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+  }, 10_000);
+
+  it("silences attempt 1's client: a late event from its persisted bindings cannot corrupt the retry", async () => {
+    jest.useFakeTimers();
+    clientInitSpy.mockRejectedValueOnce(new Error(EXEC_CTX)).mockResolvedValueOnce(undefined);
+    const adapter = newAdapter();
+
+    await expect(adapter.initialize({ onError: jest.fn() })).resolves.toBeUndefined();
+    // 'authenticated' has no source-client identity fence: without the removeAllListeners in
+    // resetForInitRetry, this late emit would flip the retry to AUTHENTICATING and arm a
+    // reconcile deadline that belongs to no live attempt. mock.contexts[0] is attempt 1's client.
+    (clientInitSpy.mock.contexts[0] as Client).emit('authenticated');
+
+    expect(adapter.getStatus()).toBe(EngineStatus.INITIALIZING);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("retries the 'window.require is not a function' navigation variant too", async () => {
+    clientInitSpy
+      .mockRejectedValueOnce(new Error('Evaluation failed: TypeError: window.require is not a function'))
+      .mockResolvedValueOnce(undefined);
+    const onError = jest.fn();
+
+    await expect(newAdapter().initialize({ onError })).resolves.toBeUndefined();
+
+    expect(clientInitSpy).toHaveBeenCalledTimes(2);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('fails terminally after the single retry: onError exactly once, raw error rethrown', async () => {
+    clientInitSpy.mockRejectedValue(new Error(EXEC_CTX));
+    const onError = jest.fn();
+
+    await expect(newAdapter().initialize({ onError })).rejects.toThrow(EXEC_CTX);
+
+    expect(clientInitSpy).toHaveBeenCalledTimes(2);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'Failed to launch the browser process:  Code: null',
+    'Protocol error (Runtime.callFunctionOn): Target closed',
+  ])('does not retry a non-navigation failure: %s', async raw => {
+    clientInitSpy.mockRejectedValue(new Error(raw));
+    const onError = jest.fn();
+
+    await expect(newAdapter().initialize({ onError })).rejects.toThrow(raw);
+
+    expect(clientInitSpy).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry upstream's bare 'auth timeout' string (its 504 mapping matches by exact message)", async () => {
+    clientInitSpy.mockRejectedValue('auth timeout');
+    const onError = jest.fn();
+
+    await expect(newAdapter().initialize({ onError })).rejects.toEqual('auth timeout');
+
+    expect(clientInitSpy).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the retry when the outer init budget is nearly spent (the lifecycle race must win instead)', async () => {
+    jest.useFakeTimers();
+    clientInitSpy.mockImplementationOnce(() => {
+      jest.setSystemTime(Date.now() + 55_000);
+      throw new Error(EXEC_CTX);
+    });
+    const onError = jest.fn();
+
+    await expect(newAdapter().initialize({ onError })).rejects.toThrow(EXEC_CTX);
+
+    expect(clientInitSpy).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry once a teardown has begun', async () => {
+    const adapter = newAdapter();
+    clientInitSpy.mockImplementationOnce(async () => {
+      // A destroy() lands while attempt 1 is in flight: tearingDown latches before the catch runs.
+      await adapter.destroy();
+      throw new Error(EXEC_CTX);
+    });
+    const onError = jest.fn();
+
+    await expect(adapter.initialize({ onError })).rejects.toThrow(EXEC_CTX);
+
+    expect(clientInitSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the abandoned reconcile deadline from a first attempt that authenticated before dying', async () => {
+    jest.useFakeTimers();
+    clientInitSpy
+      .mockImplementationOnce(function (this: Client) {
+        // The patched hasSynced level-check can fire AUTHENTICATED before the killed evaluate
+        // rejects initialize() — attempt 1 then leaves a live 90s reconcile deadline behind, whose
+        // non-bridge branch DELETES credentials (recoverFromStuckAuth). The retry must clear it.
+        this.emit('authenticated');
+        throw new Error(EXEC_CTX);
+      })
+      .mockResolvedValueOnce(undefined);
+    const onError = jest.fn();
+    const adapter = newAdapter();
+
+    await expect(adapter.initialize({ onError })).resolves.toBeUndefined();
+
+    expect(jest.getTimerCount()).toBe(0);
+    expect(onError).not.toHaveBeenCalled();
+    // Attempt 2 starts from a clean INITIALIZING, not attempt 1's leftover AUTHENTICATING.
+    expect(adapter.getStatus()).toBe(EngineStatus.INITIALIZING);
   });
 });
 
@@ -4683,6 +4887,215 @@ describe('WhatsAppWebJsAdapter.probeLiveness (session watchdog probe)', () => {
   });
 });
 
+// A post-READY WhatsApp Web page navigation is a designed-survivable event: whatsapp-web.js
+// re-injects on framenavigated. But getState() rejects until WA Web reboots, so without a grace the
+// watchdog (2 failed probes) tears down a session that was about to heal, and every delegate call
+// answers a raw 500 while the status still says READY (#1081).
+describe('WhatsAppWebJsAdapter navigation re-inject grace (#1081)', () => {
+  type NavFakeClient = EventEmitter & {
+    getState: jest.Mock;
+    getChats?: jest.Mock;
+    lastLoggedOut?: boolean;
+    pupBrowser: EventEmitter;
+    pupPage: EventEmitter & { mainFrame?: () => unknown };
+  };
+
+  const wireAdapter = (
+    clientOverrides: Partial<NavFakeClient> = {},
+  ): { adapter: WhatsAppWebJsAdapter; client: NavFakeClient } => {
+    const adapter = new WhatsAppWebJsAdapter({
+      sessionId: 'sess-nav',
+      sessionDataPath: './data/sessions',
+      puppeteer: {},
+    });
+    const client = Object.assign(new EventEmitter(), {
+      getState: jest
+        .fn()
+        .mockRejectedValue(new Error('Execution context was destroyed, most likely because of a navigation.')),
+      pupBrowser: new EventEmitter(),
+      pupPage: new EventEmitter(),
+      ...clientOverrides,
+    }) as NavFakeClient;
+    (adapter as unknown as { client: unknown }).client = client;
+    (adapter as unknown as { callbacks: unknown }).callbacks = {};
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    // Mirror the real init order: event handlers first, puppeteer listeners after initialize().
+    (adapter as unknown as { setupEventHandlers: () => void }).setupEventHandlers();
+    (adapter as unknown as { attachPuppeteerLifecycleListeners: () => void }).attachPuppeteerLifecycleListeners();
+    return { adapter, client };
+  };
+
+  const navFrame = (url = 'https://web.whatsapp.com/'): { url: () => string } => ({ url: () => url });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('keeps answering the liveness probe while a fresh main-frame navigation is re-injecting', async () => {
+    const { adapter, client } = wireAdapter();
+
+    client.pupPage.emit('framenavigated', navFrame());
+
+    await expect(adapter.probeLiveness()).resolves.toBe(true);
+  });
+
+  it('stops gracing once the per-navigation window has expired', async () => {
+    jest.useFakeTimers();
+    const { adapter, client } = wireAdapter();
+
+    client.pupPage.emit('framenavigated', navFrame());
+    jest.setSystemTime(Date.now() + NAVIGATION_REINJECT_GRACE_MS);
+
+    await expect(adapter.probeLiveness()).resolves.toBe(false);
+  });
+
+  it('a navigation loop cannot suppress the watchdog forever: the episode cap denies further grace', async () => {
+    jest.useFakeTimers();
+    const { adapter, client } = wireAdapter();
+
+    // Re-navigate every 30s: each nav lands inside the previous grace, so the rolling window alone
+    // would never expire — only the episode cap ends it.
+    client.pupPage.emit('framenavigated', navFrame());
+    for (let elapsed = 0; elapsed < NAVIGATION_EPISODE_CAP_MS; elapsed += 30_000) {
+      jest.setSystemTime(Date.now() + 30_000);
+      client.pupPage.emit('framenavigated', navFrame());
+    }
+
+    await expect(adapter.probeLiveness()).resolves.toBe(false);
+  });
+
+  it("a completed re-inject (the library's re-emitted 'ready') closes the window", async () => {
+    const { adapter, client } = wireAdapter();
+
+    client.pupPage.emit('framenavigated', navFrame());
+    client.emit('ready');
+
+    await expect(adapter.probeLiveness()).resolves.toBe(false);
+  });
+
+  it('does not stamp a post_logout navigation — the credential teardown path must win', async () => {
+    const { adapter, client } = wireAdapter();
+
+    client.pupPage.emit('framenavigated', navFrame('https://web.whatsapp.com/?post_logout=1&logout_reason=0'));
+
+    await expect(adapter.probeLiveness()).resolves.toBe(false);
+  });
+
+  it('does not stamp when upstream has latched a logout (lastLoggedOut)', async () => {
+    const { adapter, client } = wireAdapter({ lastLoggedOut: true });
+
+    client.pupPage.emit('framenavigated', navFrame());
+
+    await expect(adapter.probeLiveness()).resolves.toBe(false);
+  });
+
+  it('does not stamp a subframe navigation', async () => {
+    const { adapter, client } = wireAdapter();
+    const mainFrame = navFrame();
+    client.pupPage.mainFrame = () => mainFrame;
+
+    client.pupPage.emit('framenavigated', navFrame());
+
+    await expect(adapter.probeLiveness()).resolves.toBe(false);
+  });
+
+  it('never graces past the status gate: a non-READY adapter stays dead to the probe', async () => {
+    const { adapter, client } = wireAdapter();
+
+    client.pupPage.emit('framenavigated', navFrame());
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.ACTION_REQUIRED;
+
+    await expect(adapter.probeLiveness()).resolves.toBe(false);
+    expect(client.getState).not.toHaveBeenCalled();
+  });
+
+  it('also graces a probe that RESOLVES non-CONNECTED during the window (WA Web mid-boot)', async () => {
+    const { adapter, client } = wireAdapter();
+    client.getState.mockResolvedValue(WAState.OPENING);
+
+    client.pupPage.emit('framenavigated', navFrame());
+
+    await expect(adapter.probeLiveness()).resolves.toBe(true);
+  });
+
+  it('stamps a REAL main frame — the page shape production always has', async () => {
+    const { adapter, client } = wireAdapter();
+    const mainFrame = navFrame();
+    client.pupPage.mainFrame = () => mainFrame;
+
+    client.pupPage.emit('framenavigated', mainFrame);
+
+    await expect(adapter.probeLiveness()).resolves.toBe(true);
+  });
+
+  it('a CONNECTED probe closes the episode, so a much later navigation gets a fresh grace', async () => {
+    jest.useFakeTimers();
+    const { adapter, client } = wireAdapter();
+    client.getState.mockResolvedValueOnce(WAState.CONNECTED);
+
+    // Episode 1: the re-inject dies silently (no 'ready'), but WA Web's socket comes back —
+    // the watchdog's CONNECTED probe is the observed recovery that must close the episode.
+    client.pupPage.emit('framenavigated', navFrame());
+    await expect(adapter.probeLiveness()).resolves.toBe(true);
+
+    // Hours later, the next routine reload must still be graced — a stale episode anchor would
+    // trip the episode cap and hand the healing page straight back to the watchdog.
+    jest.setSystemTime(Date.now() + 4 * 60 * 60 * 1000);
+    client.pupPage.emit('framenavigated', navFrame());
+    await expect(adapter.probeLiveness()).resolves.toBe(true);
+  });
+
+  it('does not report a transport-matching error as death inside the window (in-flight race)', () => {
+    const { adapter, client } = wireAdapter();
+    const report = (adapter as unknown as { reportIfPageTransportError: (e: unknown, c: string) => void })
+      .reportIfPageTransportError;
+
+    client.pupPage.emit('framenavigated', navFrame());
+    report.call(
+      adapter,
+      new Error('Protocol error (Runtime.callFunctionOn): Execution context was destroyed.'),
+      'getChats',
+    );
+
+    expect(adapter.getStatus()).toBe(EngineStatus.READY);
+  });
+
+  it('reports a transport-matching error as death again once the window expired', () => {
+    jest.useFakeTimers();
+    const { adapter, client } = wireAdapter();
+    const report = (adapter as unknown as { reportIfPageTransportError: (e: unknown, c: string) => void })
+      .reportIfPageTransportError;
+
+    client.pupPage.emit('framenavigated', navFrame());
+    jest.setSystemTime(Date.now() + NAVIGATION_REINJECT_GRACE_MS);
+    report.call(adapter, new Error('Protocol error: Target closed'), 'getChats');
+
+    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+  });
+
+  it('answers engine operations with a retryable 409 while the page is re-injecting', async () => {
+    const getChats = jest.fn();
+    const { adapter, client } = wireAdapter({ getChats });
+
+    client.pupPage.emit('framenavigated', navFrame());
+
+    await expect(adapter.getChats()).rejects.toBeInstanceOf(EngineNotReadyError);
+    await expect(adapter.getChats()).rejects.toThrow(/reload/i);
+    expect(getChats).not.toHaveBeenCalled();
+  });
+
+  it('lets engine operations through again once the window has expired', async () => {
+    jest.useFakeTimers();
+    const getChats = jest.fn().mockResolvedValue([]);
+    const { adapter, client } = wireAdapter({ getChats });
+
+    client.pupPage.emit('framenavigated', navFrame());
+    jest.setSystemTime(Date.now() + NAVIGATION_REINJECT_GRACE_MS);
+
+    await expect(adapter.getChats()).resolves.toEqual([]);
+  });
+});
+
 describe('WhatsAppWebJsAdapter stale Singleton cleanup (pre-launch)', () => {
   const SESSION_ID = 'sess-singleton';
   const newAdapter = (): WhatsAppWebJsAdapter =>
@@ -6372,6 +6785,24 @@ describe('WhatsAppWebJsAdapter transport death is not a not-found', () => {
       getChatsByLabelId: jest.fn().mockRejectedValue(new TypeError('Cannot read properties of undefined')),
     });
     await expect(unknown.getChatsByLabel('7')).rejects.toBeInstanceOf(LabelNotFoundError);
+  });
+
+  // getChats was the one read delegate without this split: a dead page propagated raw as a 500
+  // while the status still said READY, and the early-death signal never fired (#1081).
+  it('getChats answers 503 for a dead page and feeds the death signal', async () => {
+    const adapter = readyAdapter({
+      getChats: jest.fn().mockRejectedValue(new Error('Protocol error (Runtime.callFunctionOn): Target closed')),
+    });
+
+    await expect(adapter.getChats()).rejects.toBeInstanceOf(EngineTransportError);
+    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+  });
+
+  it('getChats rethrows a non-transport failure untouched', async () => {
+    const boom = new TypeError("Cannot read properties of undefined (reading 'getChats')");
+    const adapter = readyAdapter({ getChats: jest.fn().mockRejectedValue(boom) });
+
+    await expect(adapter.getChats()).rejects.toBe(boom);
   });
 });
 
