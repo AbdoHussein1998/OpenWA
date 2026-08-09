@@ -662,8 +662,8 @@
                   "name": "my-bot",
                   "status": "disconnected",
                   "phone": null,
-                  "pushName": null,
-                  "connectedAt": null,
+                  "pushName": "John Doe",
+                  "connectedAt": "2026-06-24T08:15:00.000Z",
                   "lastActive": "2026-06-25T09:01:55.000Z",
                   "createdAt": "2026-06-20T11:30:00.000Z",
                   "updatedAt": "2026-06-25T09:11:00.000Z",
@@ -760,7 +760,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Get QR code for session authentication",
@@ -811,7 +811,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Request an 8-char pairing code to link via phone number (alternative to QR)",
@@ -863,7 +863,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer the group-list query. Deliberately not reported as an empty list — the engine returns the same empty value for \"you are in no groups\", and a caller cannot tell those apart from the body."
@@ -928,7 +928,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Get active chats for a session",
@@ -972,7 +972,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -1020,7 +1020,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot observe presence (whatsapp-web.js)"
@@ -1112,7 +1112,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -1158,7 +1158,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -1205,7 +1205,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -1252,7 +1252,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -1296,7 +1296,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Send a typing/recording presence indicator to a chat (or clear it with 'paused')",
@@ -1981,7 +1981,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot serve this operation. It is part of the engine contract, but the engine currently running has no implementation for it."
@@ -2035,7 +2035,7 @@
             "description": "Session or template not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Render a stored text template and send it as a text message",
@@ -2093,7 +2093,7 @@
             "description": "Session not active or invalid request"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Sending media to a channel (`<id>@newsletter`) is not supported by the whatsapp-web.js engine — the page method it needs was removed by a WhatsApp Web update. Text to a channel still works."
@@ -2153,7 +2153,7 @@
             "description": "Session not active or invalid request"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Sending media to a channel (`<id>@newsletter`) is not supported by the whatsapp-web.js engine — the page method it needs was removed by a WhatsApp Web update. Text to a channel still works."
@@ -2214,7 +2214,7 @@
             "description": "Session not active or invalid request"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Sending media to a channel (`<id>@newsletter`) is not supported by the whatsapp-web.js engine — the page method it needs was removed by a WhatsApp Web update. Text to a channel still works."
@@ -2275,7 +2275,7 @@
             "description": "Session not active or invalid request"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Sending media to a channel (`<id>@newsletter`) is not supported by the whatsapp-web.js engine — the page method it needs was removed by a WhatsApp Web update. Text to a channel still works."
@@ -2326,7 +2326,7 @@
             "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Send a location message",
@@ -2374,7 +2374,7 @@
             "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Send a contact card message",
@@ -2431,7 +2431,7 @@
             "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Sending media to a channel (`<id>@newsletter`) is not supported by the whatsapp-web.js engine — the page method it needs was removed by a WhatsApp Web update. Text to a channel still works."
@@ -2482,7 +2482,7 @@
             "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Send a native WhatsApp poll",
@@ -2533,7 +2533,7 @@
             "description": "No such message — the id is outside the engine's lookup window (roughly the last hundred messages of the chat, or absent from the Baileys store) or the message was revoked."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Reply to a message",
@@ -2584,7 +2584,7 @@
             "description": "No such message — the id is outside the engine's lookup window (roughly the last hundred messages of the chat, or absent from the Baileys store) or the message was revoked."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Forward a message to another chat",
@@ -2628,7 +2628,7 @@
             "description": "No such message — the id is outside the engine's lookup window (roughly the last hundred messages of the chat, or absent from the Baileys store) or the message was revoked."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Add or remove a reaction to a message",
@@ -2693,7 +2693,7 @@
             "description": "Chat history (most recent messages)"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot serve this operation. It is part of the engine contract, but the engine currently running has no implementation for it."
@@ -2745,7 +2745,7 @@
             "description": "No such message — the id is outside the engine's lookup window (roughly the last hundred messages of the chat, or absent from the Baileys store) or the message was revoked."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot serve this operation. It is part of the engine contract, but the engine currently running has no implementation for it."
@@ -2846,7 +2846,7 @@
             "description": "No such message — the id is outside the engine's lookup window (roughly the last hundred messages of the chat, or absent from the Baileys store) or the message was revoked."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -2893,7 +2893,7 @@
             "description": "Poll not found in the chat’s recent history"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Not supported on the Baileys engine"
@@ -2943,7 +2943,7 @@
             "description": "Message not found in the chat"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Pin a message in its chat",
@@ -2990,7 +2990,7 @@
             "description": "Message not found in the chat"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Remove a message’s pin",
@@ -3034,7 +3034,7 @@
             "description": "Message not found in the chat"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -3091,7 +3091,7 @@
             "description": "Message not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Edit the text of a message sent by this account",
@@ -3137,9 +3137,6 @@
           },
           "400": {
             "description": "Session not active or invalid request"
-          },
-          "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
           }
         },
         "summary": "Send messages to multiple recipients (async batch processing)",
@@ -3961,7 +3958,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Get all contacts for a session",
@@ -4006,7 +4003,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Batch-resolve profile picture URLs for up to 50 contacts",
@@ -4053,7 +4050,7 @@
             "description": "Contact not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Get a specific contact by ID",
@@ -4108,7 +4105,7 @@
             "description": "Session not active or invalid request"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -4156,7 +4153,7 @@
             "description": "Session not active"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -4204,7 +4201,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer the lookup. Deliberately not reported as `exists: false` — that would be a claim about the number rather than about the query, and this route exists to be trusted before a send."
@@ -4251,7 +4248,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer the lookup. Deliberately not reported as `url: null` — that is the same answer a contact with no picture gives, and a caller cannot tell them apart."
@@ -4298,7 +4295,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Resolve a contact id (e.g. an @lid) to a phone number — best-effort",
@@ -4342,7 +4339,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -4387,7 +4384,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -4441,7 +4438,7 @@
             "description": "No such invite — invalid, expired or revoked"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. Deliberately not folded into the 404 above — a query that never came back is not the same claim as a group that does not exist."
@@ -4491,7 +4488,7 @@
             "description": "Group not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. Deliberately not folded into the 404 above — a query that never came back is not the same claim as a group that does not exist."
@@ -4542,7 +4539,7 @@
             "description": "Invalid or expired invite code, or session is not started"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -4592,7 +4589,7 @@
             "description": "Group not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget — nothing could be read."
@@ -4656,7 +4653,7 @@
             "description": "Group not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine does not support a requested setting"
@@ -4710,7 +4707,7 @@
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Create a new group",
@@ -4767,7 +4764,7 @@
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
@@ -4825,7 +4822,7 @@
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
@@ -4885,7 +4882,7 @@
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
@@ -4945,7 +4942,7 @@
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
@@ -5005,7 +5002,7 @@
             "description": "The engine refused the change — admin rights are required"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -5065,7 +5062,7 @@
             "description": "The engine refused the change — admin rights are required"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -5112,7 +5109,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -5159,7 +5156,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget — nothing could be read."
@@ -5223,7 +5220,7 @@
             "description": "No such group — the id is unknown, or it addresses a 1:1 chat rather than a group."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -5274,7 +5271,7 @@
             "description": "No such group — the id is unknown, or it addresses a 1:1 chat rather than a group."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -5324,7 +5321,7 @@
             "description": "The engine refused the request — admin rights required for this group"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer the invite-code query — retry shortly"
@@ -5374,7 +5371,7 @@
             "description": "The engine refused the request — admin rights required for this group"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer the invite-code query — retry shortly"
@@ -5428,7 +5425,7 @@
             "description": "The engine refused the name change"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -5479,7 +5476,7 @@
             "description": "Session is not started"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -5533,7 +5530,7 @@
             "description": "The engine refused the picture change"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "413": {
             "description": "Decoded base64 image exceeds the configured media cap"
@@ -5589,7 +5586,7 @@
             "description": "Call not found or no longer ringing"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
@@ -5636,7 +5633,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot serve this operation. It is part of the engine contract, but the engine currently running has no implementation for it."
@@ -5686,7 +5683,7 @@
             "description": "Label not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot serve this operation. It is part of the engine contract, but the engine currently running has no implementation for it."
@@ -5745,7 +5742,7 @@
             "description": "Session not started, or validation failed"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot edit labels (whatsapp-web.js)"
@@ -5797,7 +5794,7 @@
             "description": "Session not started"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot edit labels (whatsapp-web.js)"
@@ -5857,7 +5854,7 @@
             "description": "No such label — it was never created, or the account is not a WhatsApp Business one and holds no labels at all. Both are the same answer to the caller."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot list chats by label (Baileys)"
@@ -5910,7 +5907,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "The active engine cannot serve this operation. It is part of the engine contract, but the engine currently running has no implementation for it."
@@ -5974,7 +5971,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "422": {
             "description": "Labels require a WhatsApp Business account, or the chat type has no labels"
@@ -6033,7 +6030,7 @@
             }
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "422": {
             "description": "Labels require a WhatsApp Business account, or the chat type has no labels"
@@ -6080,7 +6077,7 @@
             "description": "Session not ready"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Not supported by the active engine: the Baileys adapter cannot list subscribed channels."
@@ -6133,7 +6130,7 @@
             "description": "The engine refused — channel creation may be disabled for this account"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Create a channel",
@@ -6180,7 +6177,7 @@
             "description": "Channel not found"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
@@ -6228,7 +6225,7 @@
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
@@ -6290,7 +6287,7 @@
             "description": "No such channel — the id is not among the session's subscribed channels, either because it is wrong or because the channel has not synced into the local collection yet."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Not supported by the active engine: the Baileys adapter cannot read channel messages."
@@ -6344,7 +6341,7 @@
             "description": "The engine refused — not found, or this account does not own it"
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
@@ -6411,7 +6408,7 @@
             "description": "No such channel — the id is not among the session's subscribed channels, either because it is wrong or because the channel has not synced into the local collection yet."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "503": {
             "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
@@ -6472,7 +6469,7 @@
             "description": "No such channel — the id is not among the session's subscribed channels, either because it is wrong or because the channel has not synced into the local collection yet."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js cannot subscribe by invite code."
@@ -6761,8 +6758,11 @@
           "400": {
             "description": "Invalid request, or the post was blocked by a plugin."
           },
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Post a text status",
@@ -6808,8 +6808,11 @@
           "400": {
             "description": "Neither url nor base64 provided, or the post was blocked by a plugin."
           },
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "413": {
             "description": "Base64 media exceeds MEDIA_DOWNLOAD_MAX_BYTES."
@@ -6858,8 +6861,11 @@
           "400": {
             "description": "Neither url nor base64 provided, or the post was blocked by a plugin."
           },
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "413": {
             "description": "Base64 media exceeds MEDIA_DOWNLOAD_MAX_BYTES."
@@ -6908,8 +6914,11 @@
           "400": {
             "description": "Neither url nor base64 provided, or the post was blocked by a plugin."
           },
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "413": {
             "description": "Base64 media exceeds MEDIA_DOWNLOAD_MAX_BYTES."
@@ -6953,8 +6962,11 @@
               }
             }
           },
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           }
         },
         "summary": "Delete own status",
@@ -7121,8 +7133,11 @@
               }
             }
           },
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js has no catalog API."
@@ -7183,8 +7198,11 @@
               }
             }
           },
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js has no catalog API."
@@ -7231,8 +7249,11 @@
               }
             }
           },
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js has no catalog API."
@@ -7288,7 +7309,7 @@
             "description": "Product id not found in the session catalog."
           },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Not supported by the active engine: whatsapp-web.js cannot send product messages."
@@ -7327,8 +7348,11 @@
           }
         },
         "responses": {
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
           "409": {
-            "description": "The session is not connected — it exists, but no engine is running for it, so the request never reached WhatsApp. Start the session and retry. Distinct from the `409` the session lifecycle routes answer, which reports a conflicting state rather than a missing engine."
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
             "description": "Not supported by the active engine: no engine can send catalog links."
