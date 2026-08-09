@@ -1984,7 +1984,7 @@
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
           },
           "501": {
-            "description": "The active engine cannot serve this operation. It is part of the engine contract, but the engine currently running has no implementation for it."
+            "description": "A caller-supplied `customLinkPreview` is not supported by the whatsapp-web.js engine — only Baileys can attach one. The send itself is supported on both; omit the field, or use `linkPreview`."
           }
         },
         "summary": "Send a text message",
@@ -2323,7 +2323,7 @@
             }
           },
           "400": {
-            "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
+            "description": "The request was rejected before anything was sent. Among the causes: the recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not on WhatsApp — as well as body validation and a session that is not active."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
@@ -2371,7 +2371,7 @@
             }
           },
           "400": {
-            "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
+            "description": "The request was rejected before anything was sent. Among the causes: the recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not on WhatsApp — as well as body validation and a session that is not active."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
@@ -2428,7 +2428,7 @@
             }
           },
           "400": {
-            "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
+            "description": "The request was rejected before anything was sent. Among the causes: the recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not on WhatsApp — as well as body validation and a session that is not active."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
@@ -2479,7 +2479,7 @@
             }
           },
           "400": {
-            "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
+            "description": "The request was rejected before anything was sent. Among the causes: the recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not on WhatsApp — as well as body validation and a session that is not active."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
@@ -2527,7 +2527,7 @@
             }
           },
           "400": {
-            "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
+            "description": "The request was rejected before anything was sent. Among the causes: the recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not on WhatsApp — as well as body validation and a session that is not active."
           },
           "404": {
             "description": "No such message — the id is outside the engine's lookup window (roughly the last hundred messages of the chat, or absent from the Baileys store) or the message was revoked."
@@ -2578,7 +2578,7 @@
             }
           },
           "400": {
-            "description": "The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a `404` on these routes already means the session was not found."
+            "description": "The request was rejected before anything was sent. Among the causes: the recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number is not on WhatsApp — as well as body validation and a session that is not active."
           },
           "404": {
             "description": "No such message — the id is outside the engine's lookup window (roughly the last hundred messages of the chat, or absent from the Baileys store) or the message was revoked."
@@ -6466,7 +6466,7 @@
             }
           },
           "404": {
-            "description": "No such channel — the id is not among the session's subscribed channels, either because it is wrong or because the channel has not synced into the local collection yet."
+            "description": "The invite code does not resolve to a channel — it is wrong, expired, or revoked. This route takes an invite code rather than a channel id."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
