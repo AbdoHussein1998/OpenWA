@@ -151,6 +151,7 @@ describe('SessionService', () => {
       markUnread: jest.fn().mockResolvedValue(true),
       deleteChat: jest.fn().mockResolvedValue(true),
       sendChatState: jest.fn().mockResolvedValue(undefined),
+      setOnlinePresence: jest.fn().mockResolvedValue(undefined),
       resolveContactPhone: jest.fn().mockResolvedValue('628111222333'),
       rejectCall: jest.fn().mockResolvedValue(undefined),
       getContactStatuses: jest.fn().mockResolvedValue([]),
@@ -5093,6 +5094,29 @@ describe('SessionService', () => {
       (repository.findOne as jest.Mock).mockResolvedValue(session);
 
       await expect(service.sendChatState('sess-uuid-1', '123@c.us', 'typing')).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ── setOnlinePresence (own global presence) ───────────────────────
+
+  describe('setOnlinePresence', () => {
+    it('delegates the availability flag to the engine', async () => {
+      const session = createMockSession();
+      (repository.findOne as jest.Mock).mockResolvedValue(session);
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+
+      await service.start('sess-uuid-1');
+
+      await service.setOnlinePresence('sess-uuid-1', false);
+
+      expect(mockEngine.setOnlinePresence).toHaveBeenCalledWith(false);
+    });
+
+    it('throws BadRequestException when the session is not started', async () => {
+      const session = createMockSession();
+      (repository.findOne as jest.Mock).mockResolvedValue(session);
+
+      await expect(service.setOnlinePresence('sess-uuid-1', true)).rejects.toThrow(BadRequestException);
     });
   });
 

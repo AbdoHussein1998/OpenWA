@@ -187,6 +187,17 @@ export class BaileysMessaging {
   }
 
   /**
+   * Publish the account's own GLOBAL presence — the no-jid form of sendPresenceUpdate, which
+   * addresses the whole account rather than a chat. Not best-effort, unlike sendChatState: the
+   * caller asked for a specific visibility, so a failure surfaces instead of leaving the account
+   * silently online (#871). Resets on reconnect per the socket's markOnlineOnConnect option.
+   */
+  async setOnlinePresence(available: boolean): Promise<void> {
+    this.host.ensureReady();
+    await this.sock().sendPresenceUpdate(available ? 'available' : 'unavailable');
+  }
+
+  /**
    * Subscribe to a chat's presence. Unlike sendChatState this is NOT best-effort: the caller asked
    * for a subscription, and silently swallowing a failure would leave them waiting for updates that
    * can never arrive. A failure surfaces so the caller can retry or stop expecting them.

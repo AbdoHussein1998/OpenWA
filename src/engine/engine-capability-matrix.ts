@@ -353,6 +353,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'wwjs GroupChat.setSubject(newSubject) → boolean (index.d.ts:1982; false → adapter throws EngineRefusedError); baileys groupUpdateSubject(jid, subject) (Socket/groups.d.ts:20)',
   },
+  setOnlinePresence: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      "wwjs Client.sendPresenceAvailable()/sendPresenceUnavailable() (index.d.ts:230/233); baileys sendPresenceUpdate('available'|'unavailable') with no jid — the global whole-account form (Socket/chats.d.ts:38). Connection-scoped on both: resets on reconnect (Baileys re-announces per markOnlineOnConnect)",
+  },
   setProfileName: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },

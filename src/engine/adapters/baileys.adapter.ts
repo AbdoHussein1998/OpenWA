@@ -311,6 +311,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.messaging.sendChatState(chatId, state);
   }
 
+  async setOnlinePresence(available: boolean): Promise<void> {
+    return this.messaging.setOnlinePresence(available);
+  }
+
   async sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
     return this.messaging.sendImageMessage(chatId, media);
   }

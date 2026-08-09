@@ -1849,6 +1849,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.chats.sendChatState(chatId, state);
   }
 
+  setOnlinePresence(available: boolean): Promise<void> {
+    return this.chats.setOnlinePresence(available);
+  }
+
   private ensureReady(): void {
     if (this.status !== EngineStatus.READY || !this.client) {
       // Typed so the global filter returns 409 Conflict ("session not connected")

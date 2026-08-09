@@ -1087,6 +1087,16 @@ export interface IWhatsAppEngine {
    */
   sendChatState(chatId: string, state: ChatState): Promise<void>;
   /**
+   * Publish the ACCOUNT's own global presence: `true` = appear online, `false` = appear offline.
+   * A linked device that announces itself online routes notifications away from the phone, so a
+   * headless bot that never goes offline suppresses the phone's own alerts — which is why this is
+   * NOT best-effort, unlike sendChatState: the caller asked for a specific visibility, and a
+   * swallowed failure would leave the account silently online. The setting belongs to the
+   * connection and resets on reconnect (Baileys re-announces per its `markOnlineOnConnect`
+   * socket option), so callers re-issue it after a reconnect.
+   */
+  setOnlinePresence(available: boolean): Promise<void>;
+  /**
    * Ask WhatsApp to start reporting a chat's presence, delivered through `onPresenceUpdate`.
    *
    * Deliberately per chat rather than a blanket subscribe-all: WhatsApp emits a presence update on
