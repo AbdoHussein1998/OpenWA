@@ -13,10 +13,8 @@ import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, Not, IsNull, DataSource, FindManyOptions } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Session, SessionStatus } from './entities/session.entity';
-import { Message } from '../message/entities/message.entity';
 import { CreateSessionDto, SessionConfigResponseDto, UpdateSessionConfigDto } from './dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
-import { SessionLidResolver } from './session-lid-resolver.service';
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
@@ -66,12 +64,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   constructor(
     @InjectRepository(Session, 'data')
     private readonly sessionRepository: Repository<Session>,
-    @InjectRepository(Message, 'data')
-    private readonly messageRepository: Repository<Message>,
     @InjectDataSource('data')
     private readonly dataSource: DataSource,
     private readonly engineRegistry: EngineRegistry,
-    private readonly lidResolver: SessionLidResolver,
     private readonly watchdog: SessionLivenessWatchdog,
     private readonly sessionErrors: SessionErrorStore,
     private readonly sessionRestrictions: SessionRestrictionStore,
@@ -657,13 +652,6 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         rss: Math.round(memory.rss / 1024 / 1024),
       },
     };
-  }
-
-  /**
-   * Get count of currently active (running) sessions
-   */
-  getActiveCount(): number {
-    return this.engines.size;
   }
 
   /**

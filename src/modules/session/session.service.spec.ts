@@ -5545,23 +5545,7 @@ describe('SessionService', () => {
     });
   });
 
-  // ── getActiveCount / isActive ─────────────────────────────────────
-
-  describe('getActiveCount', () => {
-    it('should return 0 when no engines are running', () => {
-      expect(service.getActiveCount()).toBe(0);
-    });
-
-    it('should return correct count after starting sessions', async () => {
-      const session = createMockSession();
-      (repository.findOne as jest.Mock).mockResolvedValue(session);
-      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
-
-      await service.start('sess-uuid-1');
-
-      expect(service.getActiveCount()).toBe(1);
-    });
-  });
+  // ── isActive ──────────────────────────────────────────────────────
 
   describe('isActive', () => {
     it('should return false for inactive session', () => {
@@ -5621,7 +5605,7 @@ describe('SessionService', () => {
       await service.onModuleDestroy();
 
       expect(mockEngine.destroy).toHaveBeenCalled();
-      expect(service.getActiveCount()).toBe(0);
+      expect(service.isActive('sess-uuid-1')).toBe(false);
     });
   });
 
