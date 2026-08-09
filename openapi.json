@@ -1032,6 +1032,51 @@
         ]
       }
     },
+    "/api/sessions/{id}/presence": {
+      "put": {
+        "description": "Publishes whether this account appears online. WhatsApp routes notifications away from the phone while a linked device announces itself online, so a headless bot that never goes offline suppresses the phone's own alerts — set `available: false` to hand them back.\n\nThe setting belongs to the connection: it does not survive a restart or reconnect and must be re-issued after `session.status` reports one (on Baileys the socket re-announces itself per its connect-time behaviour). Supported on both engines.",
+        "operationId": "SessionController_setOnlinePresence",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetOwnPresenceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Presence published"
+          },
+          "400": {
+            "description": "Session not started, or validation failed"
+          },
+          "404": {
+            "description": "Session not found"
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
+          }
+        },
+        "summary": "Set the account's own global presence (appear online or offline)",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/sessions/{id}/presence/{chatId}": {
       "get": {
         "description": "Serves the most recent report received since the chat was subscribed. Returns `null` when nothing has been reported — either the chat was never subscribed, or nothing has changed since. That is a normal state, not a missing resource, so it is `200` with a null body rather than a `404`.\n\nHeld in memory and never persisted: presence is short-lived, and answering \"typing\" from before a restart would be worse than answering nothing.",
@@ -9610,6 +9655,19 @@
         },
         "required": [
           "chatId"
+        ]
+      },
+      "SetOwnPresenceDto": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "true = appear online; false = appear offline (hands notifications back to the phone — an always-online linked device suppresses the phone's own alerts)",
+            "example": false
+          }
+        },
+        "required": [
+          "available"
         ]
       },
       "ParticipantPresenceDto": {

@@ -729,6 +729,37 @@ restart would be worse than answering nothing.
 
 **Errors:** `401` · `403` · `404` session not found
 
+#### PUT /api/sessions/:id/presence
+
+Set the account's OWN global presence: appear online or offline. WhatsApp routes notifications away
+from the phone while a linked device announces itself online, so a headless bot that never goes
+offline suppresses the phone's own alerts — `available: false` hands them back. Supported on both
+engines.
+
+The setting belongs to the connection: it does not survive a restart or reconnect and must be
+re-issued after `session.status` reports one. Not best-effort — a failure surfaces instead of
+leaving the account silently online.
+
+**Auth:** API key (OPERATOR) · **Scope:** session-scoped
+
+**Request body** — `SetOwnPresenceDto`
+
+| Field     | Type    | Required | Description                                      |
+| --------- | ------- | -------- | ------------------------------------------------ |
+| available | boolean | Yes      | `true` = appear online, `false` = appear offline |
+
+```json
+{ "available": false }
+```
+
+**Response** `200`
+
+```json
+{ "success": true }
+```
+
+**Errors:** `400` session not started / validation · `401` · `403` key lacks OPERATOR role · `404` session not found · `409` engine not ready
+
 #### POST /api/sessions/:id/chats/read
 
 Mark a chat as read/seen.

@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Param,
   Query,
@@ -21,6 +22,7 @@ import {
   QRCodeResponseDto,
   MarkChatReadDto,
   SubscribePresenceDto,
+  SetOwnPresenceDto,
   ChatPresenceResponseDto,
   ArchiveChatDto,
   DeleteChatDto,
@@ -466,6 +468,31 @@ export class SessionController {
     @Body() dto: SubscribePresenceDto,
   ): Promise<{ success: boolean }> {
     await this.sessionService.subscribeToPresence(id, dto.chatId);
+    return { success: true };
+  }
+
+  @Put(':id/presence')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({
+    summary: "Set the account's own global presence (appear online or offline)",
+    description:
+      'Publishes whether this account appears online. WhatsApp routes notifications away from the ' +
+      'phone while a linked device announces itself online, so a headless bot that never goes ' +
+      "offline suppresses the phone's own alerts — set `available: false` to hand them back.\n\n" +
+      'The setting belongs to the connection: it does not survive a restart or reconnect and must ' +
+      'be re-issued after `session.status` reports one (on Baileys the socket re-announces itself ' +
+      'per its connect-time behaviour). Supported on both engines.',
+  })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Presence published' })
+  @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  async setOnlinePresence(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetOwnPresenceDto,
+  ): Promise<{ success: boolean }> {
+    await this.sessionService.setOnlinePresence(id, dto.available);
     return { success: true };
   }
 

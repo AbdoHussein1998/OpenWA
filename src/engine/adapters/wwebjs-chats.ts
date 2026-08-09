@@ -141,6 +141,21 @@ export class WwebjsChats {
     }
   }
 
+  /**
+   * Publish the account's own GLOBAL presence. Not best-effort, unlike sendChatState: the caller
+   * asked for a specific visibility, and swallowing a failure would leave the account silently
+   * online after the API reported otherwise (#871 — an always-online bot suppresses the phone's
+   * own notifications).
+   */
+  async setOnlinePresence(available: boolean): Promise<void> {
+    this.host.ensureReady();
+    if (available) {
+      await this.client().sendPresenceAvailable();
+    } else {
+      await this.client().sendPresenceUnavailable();
+    }
+  }
+
   async sendChatState(chatId: string, state: ChatState): Promise<void> {
     this.host.ensureReady();
     if (isChannelJid(chatId)) {

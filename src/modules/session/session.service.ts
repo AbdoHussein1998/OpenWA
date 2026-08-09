@@ -518,6 +518,21 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   /**
+   * Publish the account's own global presence (appear online/offline). Connection-scoped: the
+   * setting resets on reconnect, so callers re-issue it after `session.status` reports one.
+   */
+  async setOnlinePresence(id: string, available: boolean): Promise<void> {
+    await this.findOne(id);
+    const engine = this.engines.get(id);
+
+    if (!engine) {
+      throw new BadRequestException('Session is not started');
+    }
+
+    return engine.setOnlinePresence(available);
+  }
+
+  /**
    * The last presence WhatsApp reported for a chat, or null when none has been — either because the
    * chat was never subscribed, or because nothing has changed since the subscription was made.
    * Deliberately not an error: "nothing reported yet" is a normal state, not a missing resource.
