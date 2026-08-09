@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The engine capability matrix now covers every library method, event and install-time patch** — `docs/29` grew from the 105-method contract view into a three-way comparison of the Baileys library, the whatsapp-web.js library and what OpenWA actually exposes: all 152 Baileys socket methods and 81 whatsapp-web.js Client methods mapped to the interface method that uses them (or marked unexposed, which is the implementation backlog), all 34 + 31 library events marked consumed or dropped, all five install-time patches with the rows that depend on them, and the capabilities both libraries already have that only OpenWA lacks. Every exposure mark was traced back to adapter code, so the inventory reflects what the adapters call rather than what they mention.
 - **An onboarding modal the detector does not recognise now shows up in the logs instead of failing silently** — when the "What's new" probe finds nothing to click, the watcher reports the visible dialog's heading and confirm-button labels once per distinct dialog (`action: onboarding_dialog_unrecognized`), so a renamed or localised modal can be covered via `WWEBJS_ONBOARDING_CONTINUE_LABELS` before WhatsApp unlinks the companion. The watcher also logs when it arms and a summary when it stops at its lifetime cap (both debug). Refs #1072.
 
 ## [0.15.0] - 2026-08-09
