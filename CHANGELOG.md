@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Blocklist read: `GET /sessions/:sessionId/contacts/blocked`** — the missing read half of the block/unblock endpoints, as a bare array of neutral contact ids on both engines; on Baileys an unanswered query is a `503`, never an empty list.
 
+- **Upstream capability-surface drift guard** — `scripts/check-upstream-surface.mjs` (in `test:scripts`) diffs the installed engines' Client/socket methods and event maps against a reviewed snapshot, so an engine bump that ships new capabilities fails CI until the delta is reviewed instead of sitting unnoticed.
+
 - **The media download route now serves media sent by the account** — `GET /messages/:chatId/:messageId/media` falls back to the inline copy stored on the message row when no archived file exists, which covers outbound messages (never archived) and inbound messages whose archived file retention has purged.
 
 ### Changed

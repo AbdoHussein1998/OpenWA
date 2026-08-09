@@ -18,6 +18,8 @@ The `rootCause`/`evidence` fields are hand-curated from source traces of the ins
 
 > **Phantom support.** The drift gate's throw-heuristic cannot see adapter methods that silently stub (return `null`/`[]` + a warn log) without throwing. The wwjs catalog reads — `getCatalog`, `getProducts`, `getProduct` — used to be the live example (marked `not-available` here while their adapter bodies did not throw); the stubs have since been replaced with explicit `EngineNotSupportedError` 501s, so the throw-scan now covers them like every other unavailable row. Any future `not-available` row that must stay non-throwing cannot be verified by the gate — keep it hand-tracked in the matrix (or make the adapter throw).
 
+**Upstream surface drift** is guarded from the other direction by `scripts/check-upstream-surface.mjs` (wired into `npm run test:scripts`): it extracts the installed engines' public capability surface — whatsapp-web.js `Client` methods + `Events` values, Baileys socket methods + `BaileysEventMap` events — and compares it against the committed, reviewed snapshot (`scripts/upstream-surface.snapshot.json`). An engine bump that introduces new symbols fails the check until each one is reviewed (expose / defer / record the exclusion) and the snapshot is refreshed with `node scripts/check-upstream-surface.mjs --update`. This closes the blindspot where a capability both engines already supported sat unreviewed until a user asked for it.
+
 ---
 
 ## Unwired-capability inventory
