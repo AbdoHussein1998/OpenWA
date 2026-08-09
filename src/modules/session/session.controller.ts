@@ -276,6 +276,9 @@ export class SessionController {
           createdAt: '2026-06-20T11:30:00.000Z',
           updatedAt: '2026-06-25T09:11:00.000Z',
           lastError: null,
+          restriction: null,
+          // The engine is torn out of the map before the status write, so a logout always reports false.
+          engineLoaded: false,
         },
       },
     },

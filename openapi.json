@@ -667,7 +667,9 @@
                   "lastActive": "2026-06-25T09:01:55.000Z",
                   "createdAt": "2026-06-20T11:30:00.000Z",
                   "updatedAt": "2026-06-25T09:11:00.000Z",
-                  "lastError": null
+                  "lastError": null,
+                  "restriction": null,
+                  "engineLoaded": false
                 }
               }
             }
@@ -8363,7 +8365,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "example": "4f1c9b2a-..."
+            "example": "4f1c9b2a-8d3e-4c5b-9a17-2e6f0b4d8c31"
           },
           "action": {
             "type": "string",
@@ -8761,7 +8763,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "example": "sess_123e4567-e89b-12d3-a456-426614174000"
+            "example": "0a941dac-a965-45e7-b318-74ae8be134f0"
           },
           "name": {
             "type": "string",
@@ -10326,7 +10328,10 @@
             "type": "object",
             "description": "Per-dependency outcome, keyed by dependency name. Present on both the 200 and the 503.",
             "example": {
-              "database": {
+              "mainDatabase": {
+                "status": "up"
+              },
+              "dataDatabase": {
                 "status": "up"
               }
             },
@@ -10704,7 +10709,9 @@
           "features": {
             "description": "Capabilities the engine declares.",
             "example": [
-              "send-text"
+              "text-messages",
+              "media-messages",
+              "group-management"
             ],
             "type": "array",
             "items": {
@@ -13469,8 +13476,8 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "The message id, assigned when the gateway accepts the message for sending. Note the field name: the send routes served by MessageService answer `messageId` for the same value. A 2xx here means the message was handed to the WhatsApp client, not that it was delivered.",
-            "example": "true_628123456789@c.us_3EB0123456789"
+            "description": "The message id, assigned when the gateway accepts the message for sending. Note the field name: the send routes served by MessageService answer `messageId` for the same value. A 2xx here means the message was handed to the WhatsApp client, not that it was delivered.\n\nThis route is Baileys-only, so the id is the bare key id Baileys assigns — not the `true_<jid>_<id>` serialized form the whatsapp-web.js send routes report.",
+            "example": "3EB0C767D26B8A3F6E"
           },
           "timestamp": {
             "type": "number",
@@ -13805,7 +13812,7 @@
           "messageId": {
             "type": "string",
             "description": "Gateway message row id.",
-            "example": "4f1c9b2a-..."
+            "example": "7c2e5a91-3b8d-4f6a-a05c-9d1e4b7f2306"
           },
           "waMessageId": {
             "type": "string",
