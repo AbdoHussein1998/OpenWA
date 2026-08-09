@@ -8,6 +8,7 @@ import { MuteChannelDto } from './dto/mute-channel.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import {
+  CHANNEL_INVITE_NOT_FOUND_404,
   CHANNEL_NOT_FOUND_404,
   ENGINE_NOT_READY_409,
   ENGINE_REFUSED_403,
@@ -177,7 +178,7 @@ export class ChannelController {
     description: 'Not supported by the active engine: whatsapp-web.js cannot subscribe by invite code.',
   })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
-  @ApiResponse({ status: 404, description: CHANNEL_NOT_FOUND_404 })
+  @ApiResponse({ status: 404, description: CHANNEL_INVITE_NOT_FOUND_404 })
   async subscribe(@Param('sessionId') sessionId: string, @Body() body: SubscribeChannelDto) {
     return this.channelService.subscribeToChannel(sessionId, body.inviteCode);
   }

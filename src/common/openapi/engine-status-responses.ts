@@ -32,12 +32,14 @@ export const SESSION_NOT_STARTED_404 =
 
 /**
  * `RecipientUnreachableError` (400) — whatsapp-web.js could not resolve the recipient to an
- * addressable id, so the send never left the gateway.
+ * addressable id, so the send never left the gateway. The wording stays non-exclusive: 400 is also
+ * what body validation and an inactive session answer on these routes, and the earlier text claimed
+ * a 404 meaning that four of the six routes carrying this constant do not even declare.
  */
 export const RECIPIENT_UNREACHABLE_400 =
-  'The recipient could not be addressed — WhatsApp reports no deliverable id for that `chatId`, ' +
-  'which is how it says the number is not reachable on WhatsApp. `400` rather than `404`, because a ' +
-  '`404` on these routes already means the session was not found.';
+  'The request was rejected before anything was sent. Among the causes: the recipient could not be ' +
+  'addressed — WhatsApp reports no deliverable id for that `chatId`, which is how it says the number ' +
+  'is not on WhatsApp — as well as body validation and a session that is not active.';
 
 /** `EngineRefusedError` (403) — the request was well formed; WhatsApp itself refused it. */
 export const ENGINE_REFUSED_403 =
@@ -49,10 +51,26 @@ export const MESSAGE_NOT_FOUND_404 =
   "No such message — the id is outside the engine's lookup window (roughly the last hundred messages " +
   'of the chat, or absent from the Baileys store) or the message was revoked.';
 
-/** `ChannelNotFoundError` (404). */
+/** `ChannelNotFoundError` (404), on routes addressed by channel id. */
 export const CHANNEL_NOT_FOUND_404 =
   "No such channel — the id is not among the session's subscribed channels, either because it is " +
   'wrong or because the channel has not synced into the local collection yet.';
+
+/**
+ * `ChannelNotFoundError` (404) on `POST /channels/subscribe`, which takes an invite code and no
+ * channel id at all — so the id-based wording above would describe the wrong thing.
+ */
+export const CHANNEL_INVITE_NOT_FOUND_404 =
+  'The invite code does not resolve to a channel — it is wrong, expired, or revoked. This route takes ' +
+  'an invite code rather than a channel id.';
+
+/**
+ * `EngineNotSupportedError` (501) on `POST /messages/send-text`, which is supported by both engines;
+ * only the caller-supplied link preview is not. The generic engine-wide wording would overstate it.
+ */
+export const CUSTOM_LINK_PREVIEW_501 =
+  'A caller-supplied `customLinkPreview` is not supported by the whatsapp-web.js engine — only ' +
+  'Baileys can attach one. The send itself is supported on both; omit the field, or use `linkPreview`.';
 
 /** `GroupNotFoundError` (404) — unknown id, or an id that addresses a 1:1 chat. */
 export const GROUP_NOT_FOUND_404 = 'No such group — the id is unknown, or it addresses a 1:1 chat rather than a group.';

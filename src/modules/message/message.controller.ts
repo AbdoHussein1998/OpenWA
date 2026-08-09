@@ -35,6 +35,7 @@ import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import {
   CHANNEL_MEDIA_501,
+  CUSTOM_LINK_PREVIEW_501,
   ENGINE_NOT_READY_409,
   ENGINE_NOT_SUPPORTED_501,
   MESSAGE_NOT_FOUND_404,
@@ -98,7 +99,7 @@ export class MessageController {
   })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
-  @ApiResponse({ status: 501, description: ENGINE_NOT_SUPPORTED_501 })
+  @ApiResponse({ status: 501, description: CUSTOM_LINK_PREVIEW_501 })
   async sendText(@Param('sessionId') sessionId: string, @Body() dto: SendTextMessageDto): Promise<MessageResponseDto> {
     return this.messageService.sendText(sessionId, dto);
   }
