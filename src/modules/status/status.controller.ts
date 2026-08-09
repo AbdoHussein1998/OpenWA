@@ -7,6 +7,7 @@ import { SendTextStatusDto } from './dto/send-text-status.dto';
 import { SendImageStatusDto, SendVideoStatusDto, SendVoiceStatusDto } from './dto/send-media-status.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
+import { ENGINE_NOT_READY_409 } from '../../common/openapi/engine-status-responses';
 
 @ApiTags('status')
 @Controller('sessions/:sessionId/status')
@@ -62,6 +63,7 @@ export class StatusController {
     type: StatusResultDto,
   })
   @ApiResponse({ status: 400, description: 'Invalid request, or the post was blocked by a plugin.' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendTextStatus(@Param('sessionId') sessionId: string, @Body() dto: SendTextStatusDto) {
     return this.statusService.postTextStatus(sessionId, dto.text, {
       recipients: dto.recipients,
@@ -85,6 +87,7 @@ export class StatusController {
     description: 'Neither url nor base64 provided, or the post was blocked by a plugin.',
   })
   @ApiResponse({ status: 413, description: 'Base64 media exceeds MEDIA_DOWNLOAD_MAX_BYTES.' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendImageStatus(@Param('sessionId') sessionId: string, @Body() dto: SendImageStatusDto) {
     return this.statusService.postImageStatus(sessionId, dto.image, {
       recipients: dto.recipients,
@@ -107,6 +110,7 @@ export class StatusController {
     description: 'Neither url nor base64 provided, or the post was blocked by a plugin.',
   })
   @ApiResponse({ status: 413, description: 'Base64 media exceeds MEDIA_DOWNLOAD_MAX_BYTES.' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendVideoStatus(@Param('sessionId') sessionId: string, @Body() dto: SendVideoStatusDto) {
     return this.statusService.postVideoStatus(sessionId, dto.video, {
       recipients: dto.recipients,
@@ -130,6 +134,7 @@ export class StatusController {
     description: 'Neither url nor base64 provided, or the post was blocked by a plugin.',
   })
   @ApiResponse({ status: 413, description: 'Base64 media exceeds MEDIA_DOWNLOAD_MAX_BYTES.' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendVoiceStatus(@Param('sessionId') sessionId: string, @Body() dto: SendVoiceStatusDto) {
     return this.statusService.postVoiceStatus(sessionId, dto.audio, {
       recipients: dto.recipients,
@@ -141,6 +146,7 @@ export class StatusController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Delete own status' })
   @ApiResponse({ status: 200, description: 'Status deleted.', type: StatusDeletedResponseDto })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async deleteStatus(@Param('sessionId') sessionId: string, @Param('statusId') statusId: string) {
     await this.statusService.deleteStatus(sessionId, statusId);
     return { message: 'Status deleted successfully' };

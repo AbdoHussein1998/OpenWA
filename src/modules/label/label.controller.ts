@@ -6,6 +6,11 @@ import { AddLabelDto } from './dto/add-label.dto';
 import { UpsertLabelDto } from './dto/upsert-label.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
+import {
+  ENGINE_NOT_READY_409,
+  ENGINE_NOT_SUPPORTED_501,
+  LABEL_NOT_FOUND_404,
+} from '../../common/openapi/engine-status-responses';
 
 @ApiTags('labels')
 @Controller('sessions/:sessionId/labels')
@@ -18,6 +23,8 @@ export class LabelController {
   @ApiResponse({ status: 200, description: 'List of labels', type: [LabelDto] })
   @ApiResponse({ status: 400, description: 'Session not ready or not a business account' })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 501, description: ENGINE_NOT_SUPPORTED_501 })
   async findAll(@Param('sessionId') sessionId: string) {
     return this.labelService.getLabels(sessionId);
   }
@@ -28,6 +35,8 @@ export class LabelController {
   @ApiParam({ name: 'labelId', description: 'Label ID' })
   @ApiResponse({ status: 200, description: 'Label details', type: LabelDto })
   @ApiResponse({ status: 404, description: 'Label not found' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 501, description: ENGINE_NOT_SUPPORTED_501 })
   async findOne(@Param('sessionId') sessionId: string, @Param('labelId') labelId: string) {
     return this.labelService.getLabelById(sessionId, labelId);
   }
@@ -50,6 +59,8 @@ export class LabelController {
       'reported as a missing label — a page that went away says nothing about whether the label exists. ' +
       'The other engine never answers this: Baileys has no label query at all and answers 501 above.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 404, description: LABEL_NOT_FOUND_404 })
   async getChatsByLabel(@Param('sessionId') sessionId: string, @Param('labelId') labelId: string) {
     return this.labelService.getChatsByLabel(sessionId, labelId);
   }
@@ -79,6 +90,7 @@ export class LabelController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async upsertLabel(
     @Param('sessionId') sessionId: string,
     @Param('labelId') labelId: string,
@@ -108,6 +120,7 @@ export class LabelController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async deleteLabel(
     @Param('sessionId') sessionId: string,
     @Param('labelId') labelId: string,
@@ -121,6 +134,8 @@ export class LabelController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'chatId', description: 'Chat ID' })
   @ApiResponse({ status: 200, description: 'List of labels for the chat', type: [LabelDto] })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 501, description: ENGINE_NOT_SUPPORTED_501 })
   async getChatLabels(@Param('sessionId') sessionId: string, @Param('chatId') chatId: string) {
     return this.labelService.getChatLabels(sessionId, chatId);
   }
@@ -151,6 +166,7 @@ export class LabelController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async addLabelToChat(
     @Param('sessionId') sessionId: string,
     @Param('chatId') chatId: string,
@@ -177,6 +193,7 @@ export class LabelController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async removeLabelFromChat(
     @Param('sessionId') sessionId: string,
     @Param('chatId') chatId: string,

@@ -4,6 +4,7 @@ import { CallAckResponseDto } from './dto/call-response.dto';
 import { CallService } from './call.service';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
+import { ENGINE_NOT_READY_409 } from '../../common/openapi/engine-status-responses';
 
 @ApiTags('calls')
 @Controller('sessions/:sessionId/calls')
@@ -25,6 +26,7 @@ export class CallController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async reject(@Param('sessionId') sessionId: string, @Param('callId') callId: string) {
     await this.callService.rejectCall(sessionId, callId);
     return { success: true };

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A hundred and twenty-five routes now document a status they could already answer** — the contract described the happy path and the timeout but almost nothing in between: ninety-one routes reach an engine whose `ensureReady()` guard answers `409` when the session has no live engine, and not one of them said so; six sends could answer `400` for a recipient WhatsApp cannot address; six group and channel writes could answer `403` on a WhatsApp-side refusal; eleven routes could answer `404` for a message, group, channel or label that does not resolve; and eleven could answer `501` on the engine that cannot serve them. A client generated from the contract had no branch for any of it, and on the four participant writes the undeclared `403` was the one status separating a refused batch from an applied one.
+
 - **Five routes now document a `503` they have been answering for releases** — the four group participant writes have spent the shared request budget since 0.14.5 and listing chats by label has answered `503` on a dead whatsapp-web.js page since 0.14.0, but all five published only their success statuses, so a client generated from the contract had no branch for a failure the gateway was already returning; the participant `503` in particular is the one status that separates "WhatsApp never answered" from the per-participant refusals a `200` reports inside `results`.
 
 ### Fixed
