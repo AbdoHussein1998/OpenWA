@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Five routes now document a `503` they have been answering for releases** — the four group participant writes have spent the shared request budget since 0.14.5 and listing chats by label has answered `503` on a dead whatsapp-web.js page since 0.14.0, but all five published only their success statuses, so a client generated from the contract had no branch for a failure the gateway was already returning; the participant `503` in particular is the one status that separates "WhatsApp never answered" from the per-participant refusals a `200` reports inside `results`.
 
+### Fixed
+
+- **Seven published examples showed values the API cannot produce** — the session id carried a `sess_` prefix that every session route's `ParseUUIDPipe` rejects before the handler runs, two row ids were UUIDs truncated to `4f1c9b2a-...`, the logout response example omitted `engineLoaded` although its own schema marks it required, the readiness probe keyed its details on `database` where the code writes `mainDatabase` and `dataDatabase`, the engine list advertised a `send-text` capability neither engine declares, and the Baileys-only product send documented the whatsapp-web.js `true_<jid>_<id>` id form that route never returns.
+
 ## [0.14.6] - 2026-08-08
 
 ### Added
