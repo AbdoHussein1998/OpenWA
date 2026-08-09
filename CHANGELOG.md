@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-09
+
 ### Added
 
 - **`CHAT_MEDIA_ARCHIVE_OUTBOUND` archives media this account sent** — a sub-flag of `CHAT_MEDIA_ARCHIVE_ENABLED` (off by default), so a sent attachment gets the same durable file copy, S3 portability and TTL retention inbound media already had. Refs #1165.
