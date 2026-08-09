@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Group membership requests: list, approve, reject, and a `group.join_request` event** — the join-approval queue wwebjs/Baileys both expose is now surfaced: `GET/POST .../groups/:groupId/membership-requests[/approve|/reject]` on both engines, plus a webhook/socket event when someone asks to join an administered group. Refs #1164 (discussion).
+
 - **The media download route now serves media sent by the account** — `GET /messages/:chatId/:messageId/media` falls back to the inline copy stored on the message row when no archived file exists, which covers outbound messages (never archived) and inbound messages whose archived file retention has purged.
 
 ### Changed

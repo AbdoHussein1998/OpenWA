@@ -4,6 +4,8 @@ import {
   GroupInfo,
   GroupJoinInfo,
   GroupMemberAddMode,
+  GroupMembershipRequest,
+  GroupMembershipRequestMethod,
   MediaInput,
   GroupParticipant,
   ParticipantOperationResult,
@@ -54,6 +56,17 @@ export function normalizeWwebjsMemberAddMode(raw: string | boolean | undefined):
   // The documented (but not observed) boolean form: true = only admins may add.
   if (raw === true) return 'admins';
   if (raw === false) return 'all';
+  return undefined;
+}
+
+/**
+ * Normalise whatsapp-web.js's PascalCase request-method token to the neutral vocabulary.
+ * Unrecognised tokens (a future WA Web build) are reported as unknown rather than guessed.
+ */
+export function normalizeWwebjsRequestMethod(raw: string | undefined): GroupMembershipRequestMethod | undefined {
+  if (raw === 'InviteLink') return 'invite_link';
+  if (raw === 'NonAdminAdd') return 'non_admin_add';
+  if (raw === 'LinkedGroupJoin') return 'linked_group_join';
   return undefined;
 }
 
@@ -499,5 +512,84 @@ export class WwebjsGroups {
   async setGroupEphemeral(_groupId: string, _durationSec: number): Promise<void> {
     this.host.ensureReady();
     throw new EngineNotSupportedError('setGroupEphemeral');
+  }
+
+  async getGroupMembershipRequests(groupId: string): Promise<GroupMembershipRequest[]> {
+    this.host.ensureReady();
+    try {
+      const raw = await this.client().getGroupMembershipRequests(groupId);
+      // Raw page-context store objects: wids can arrive as {_serialized} OR {$1} (the #747
+      // minifier rename), so every id goes through readWid; a requester whose wid is unreadable
+      // is dropped rather than reported as the literal "undefined".
+      return (raw ?? []).flatMap(entry => {
+        const e = entry as unknown as {
+          id?: SerializedWid | string;
+          addedBy?: SerializedWid | string;
+          requestMethod?: string;
+          t?: number;
+        };
+        const participantId = readWid(e.id);
+        if (!participantId) {
+          return [];
+        }
+        const addedById = readWid(e.addedBy);
+        const method = normalizeWwebjsRequestMethod(e.requestMethod);
+        return [
+          {
+            participantId,
+            ...(addedById ? { addedById } : {}),
+            ...(method ? { method } : {}),
+            ...(typeof e.t === 'number' ? { requestedAt: e.t } : {}),
+          },
+        ];
+      });
+    } catch (error) {
+      this.host.reportIfPageTransportError(error, 'getGroupMembershipRequests');
+      throw error;
+    }
+  }
+
+  approveGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]> {
+    return this.runMembershipRequestAction('approveGroupMembershipRequests', groupId, participants);
+  }
+
+  rejectGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]> {
+    return this.runMembershipRequestAction('rejectGroupMembershipRequests', groupId, participants);
+  }
+
+  /**
+   * Shared body of the approve/reject writes. The upstream default sleep (a human-ish 250-500ms
+   * pause between requesters) is restated explicitly so a wwebjs default change cannot silently
+   * alter this gateway's pacing. The membership-write guards (assertParticipantResults) apply only
+   * when the caller NAMED requesters: acting on "all pending" of an empty queue is a legitimate
+   * no-op that resolves [], not a refusal.
+   */
+  private async runMembershipRequestAction(
+    op: 'approveGroupMembershipRequests' | 'rejectGroupMembershipRequests',
+    groupId: string,
+    participants?: string[],
+  ): Promise<ParticipantOperationResult[]> {
+    this.host.ensureReady();
+    const raw = await this.client()[op](groupId, {
+      requesterIds: participants ?? null,
+      sleep: [250, 500],
+    });
+    // {requesterId, error?, message} per requester; requesterId is a page-context value that can
+    // arrive as a string or a wid object (both #747 spellings), so it goes through readWid too.
+    // "No error field" is NOT sufficient for success: the page util's non-success RPC branch pushes
+    // {requesterId, message: 'ServerStatusCodeError'} with no code at all (Injected/Utils.js:1637-1648).
+    const results: ParticipantOperationResult[] = (raw ?? []).map(entry => {
+      const e = entry as unknown as { requesterId?: SerializedWid | string | null; error?: number; message?: string };
+      return {
+        id: readWid(e.requesterId ?? undefined) ?? '',
+        success: e.error === undefined && e.message !== 'ServerStatusCodeError',
+        ...(e.error !== undefined ? { status: e.error } : {}),
+        ...(e.message ? { message: e.message } : {}),
+      };
+    });
+    if (!participants) {
+      return results;
+    }
+    return this.assertParticipantResults(op, groupId, results);
   }
 }

@@ -70,6 +70,23 @@ export class GroupService {
     return this.getEngine(sessionId).demoteParticipants(groupId, participants);
   }
 
+  getGroupMembershipRequests(sessionId: string, groupId: string) {
+    return this.getEngine(sessionId).getGroupMembershipRequests(groupId);
+  }
+
+  /**
+   * Deliberately NOT paced, unlike addParticipants: the people here asked for the contact
+   * themselves, so approving (or rejecting) them draws nothing from the cold-reachout budget.
+   * `participants` omitted means every pending request.
+   */
+  approveGroupMembershipRequests(sessionId: string, groupId: string, participants?: string[]) {
+    return this.getEngine(sessionId).approveGroupMembershipRequests(groupId, participants);
+  }
+
+  rejectGroupMembershipRequests(sessionId: string, groupId: string, participants?: string[]) {
+    return this.getEngine(sessionId).rejectGroupMembershipRequests(groupId, participants);
+  }
+
   setGroupSubject(sessionId: string, groupId: string, subject: string) {
     return this.getEngine(sessionId).setGroupSubject(groupId, subject);
   }

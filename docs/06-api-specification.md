@@ -2789,6 +2789,98 @@ Update group settings. Each present field maps to one engine call; absent fields
 
 **Errors:** `400` session is not started / empty patch / unknown body field · `401` missing/invalid `X-API-Key` · `403` key lacks OPERATOR role, or the account is not a group admin (`memberAddMode` on whatsapp-web.js) · `501` `ephemeralSeconds` on the whatsapp-web.js engine (library limitation)
 
+#### GET /api/sessions/:sessionId/groups/:groupId/membership-requests
+
+List the pending join requests of a group with join-approval mode turned on — the queue the
+`group.join_request` webhook/socket event announces. Admin-only on both engines: a non-admin read
+is refused by WhatsApp, not silently emptied.
+
+**Auth:** API key
+
+**Path parameters**
+
+| Name      | Type   | Description |
+| --------- | ------ | ----------- |
+| sessionId | string | Session ID  |
+| groupId   | string | Group ID    |
+
+**Response** `200` — a bare array; fields the engine does not report are omitted rather than defaulted.
+
+```json
+[
+  {
+    "participantId": "628123456789@c.us",
+    "addedById": "628987654321@c.us",
+    "method": "invite_link",
+    "requestedAt": 1754700000
+  }
+]
+```
+
+Each entry is a `GroupMembershipRequest`: `participantId` (the user asking to join), optional
+`addedById` (who created the request — differs from the requester on a non-admin add), optional
+`method` (`invite_link` | `non_admin_add` | `linked_group_join`), optional `requestedAt` (unix
+seconds).
+
+**Errors:** `400` session is not started · `401` missing/invalid `X-API-Key` · `403` the engine refused the read — admin rights required · `409` engine not ready · `503` WhatsApp did not answer within the request budget
+
+#### POST /api/sessions/:sessionId/groups/:groupId/membership-requests/approve
+
+Approve pending join requests — the named requesters, or **every** pending request when the body
+names none. Approving an empty queue is a no-op that returns an empty `results` list. Deliberately
+not paced by the cold-reachout governor: unlike `POST .../participants`, the people here asked for
+the contact themselves. On whatsapp-web.js the engine pauses 250–500ms between requesters
+(upstream anti-abuse pacing), so acting on a large queue is a proportionally long request.
+
+**Auth:** API key (OPERATOR)
+
+**Path parameters**
+
+| Name      | Type   | Description |
+| --------- | ------ | ----------- |
+| sessionId | string | Session ID  |
+| groupId   | string | Group ID    |
+
+**Request body** — `MembershipRequestActionDto`
+
+| Field        | Type     | Required | Constraints                                                           | Description                                                   |
+| ------------ | -------- | -------- | --------------------------------------------------------------------- | ------------------------------------------------------------- |
+| participants | string[] | No       | `@IsOptional`, `@IsArray`, `@ArrayNotEmpty`, `@IsString({each:true})` | Requester WhatsApp IDs. Omit to act on every pending request. |
+
+```json
+{ "participants": ["628123456789@c.us"] }
+```
+
+**Response** `200`
+
+Status is forced to `200` via `@HttpCode(HttpStatus.OK)` (overriding the POST default). `results`
+carries the engine's per-participant outcome — the same `ParticipantOperationResult` contract as
+the participant writes: a partial refusal does **not** fail the batch, while a batch that failed
+for every **named** requester is a `403`.
+
+```json
+{
+  "success": true,
+  "message": "Membership requests approved",
+  "results": [{ "id": "628123456789@c.us", "success": true, "status": 200 }]
+}
+```
+
+**Errors:** `400` validation / session not started · `401` missing/invalid `X-API-Key` · `403` key lacks OPERATOR role, or the engine refused (admin rights / every named requester failed) · `409` engine not ready · `503` WhatsApp did not answer within the request budget
+
+#### POST /api/sessions/:sessionId/groups/:groupId/membership-requests/reject
+
+Reject pending join requests. Same body, response shape, batch-guard contract and error map as
+`.../membership-requests/approve`; rejecting an empty queue is likewise a no-op.
+
+```json
+{
+  "success": true,
+  "message": "Membership requests rejected",
+  "results": [{ "id": "628123456789@c.us", "success": true, "status": 200 }]
+}
+```
+
 ### 6.4.5 Message Templates
 
 Reusable message templates scoped to a session, with `{{variable}}` placeholders rendered at send time. All routes are nested under `/api/sessions/:sessionId/templates` and require an **OPERATOR** key. The `sessionId` is stored on the template but is **not** validated against an existing session in these handlers.
@@ -3901,7 +3993,7 @@ Webhooks are configured per session and managed under `/api/sessions/:sessionId/
 
 Two fields — `secret` and `headers` — are **write-only**: they are accepted on create/update but are **never** returned in any response (the response DTO has no `@Expose` for them, so `fromEntity` drops them). The `secret` is used to compute the `X-OpenWA-Signature: sha256=<hex>` HMAC-SHA256 header on deliveries.
 
-The `events` array accepts these members plus the `*` wildcard: `message.received`, `message.sent`, `message.ack`, `message.failed`, `message.revoked`, `message.reaction`, `message.edited`, `session.status`, `session.qr`, `session.authenticated`, `session.disconnected`, `session.reconnect_loop`, `session.restriction`, `presence.update`, `call.accepted`, `call.rejected`, `call.missed`, `group.join`, `group.leave`, `group.update`, `call.received`, `status.received`. All of them are actively dispatched by at least one engine — none is a reserved placeholder. Four are **Baileys only**, because whatsapp-web.js produces no callback behind them: `presence.update` (its prerequisite `POST .../presence/subscribe` answers `501` there, so this one announces itself) and `call.accepted` / `call.rejected` / `call.missed` (whatsapp-web.js sees a call ring but never its outcome, so these three are accepted on subscribe and then simply never fire). See the per-event catalog below for engine scope.
+The `events` array accepts these members plus the `*` wildcard: `message.received`, `message.sent`, `message.ack`, `message.failed`, `message.revoked`, `message.reaction`, `message.edited`, `session.status`, `session.qr`, `session.authenticated`, `session.disconnected`, `session.reconnect_loop`, `session.restriction`, `presence.update`, `call.accepted`, `call.rejected`, `call.missed`, `group.join`, `group.leave`, `group.update`, `group.join_request`, `call.received`, `status.received`. All of them are actively dispatched by at least one engine — none is a reserved placeholder. Four are **Baileys only**, because whatsapp-web.js produces no callback behind them: `presence.update` (its prerequisite `POST .../presence/subscribe` answers `501` there, so this one announces itself) and `call.accepted` / `call.rejected` / `call.missed` (whatsapp-web.js sees a call ring but never its outcome, so these three are accepted on subscribe and then simply never fire). See the per-event catalog below for engine scope.
 
 #### GET /api/sessions/:sessionId/webhooks
 
@@ -6047,6 +6139,7 @@ presence.update
 group.join
 group.leave
 group.update
+group.join_request
 call.received
 call.accepted
 call.rejected
@@ -6131,6 +6224,7 @@ These are the events OpenWA actually emits. A webhook is registered with an `eve
 | `group.join`                                      | Participant(s) are added to or join a group this session is in                                                                                                                                                                        | `{ groupId, actorId?, participantIds, timestamp }` — `actorId` is the admin/inviter when known                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `group.leave`                                     | Participant(s) leave or are removed from a group                                                                                                                                                                                      | `{ groupId, actorId?, participantIds, timestamp }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `group.update`                                    | Group metadata changes (subject, description, announce/locked settings)                                                                                                                                                               | `{ groupId, actorId?, participantIds, changes?, timestamp }` — `changes` carries only the fields that changed: `subject?`, `description?`, `announce?`, `locked?`                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `group.join_request`                              | Someone asked to join a group this session administers (join-approval mode on)                                                                                                                                                        | `{ groupId, actorId?, participantIds, timestamp }` — `participantIds` are the users asking to join; `actorId` is who created the request when the engine reports one (differs from the requester on a non-admin add). Act on it via `GET/POST .../groups/:groupId/membership-requests[...]` **Baileys caveat**: the library (7.0.0-rc13) emits this only for non-admin-add requests — an invite-link self-request may produce no event there (upstream TODO); the membership-requests list endpoint still reports it.                                                                    |
 | `call.received`                                   | An incoming voice/video call starts ringing                                                                                                                                                                                           | `{ callId, from, isVideo, isGroup, timestamp }` — `callId` is the id to pass to `POST /sessions/:sessionId/calls/:callId/reject`                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `call.accepted` / `call.rejected` / `call.missed` | A ringing call ended — answered, declined, or never picked up. **Baileys only**: whatsapp-web.js hooks the call collection's insert and sees no status at all, so it can report the ring but never its outcome                        | `{ sessionId, callId, from, outcome, isVideo, isGroup, timestamp }` — `callId` matches the `call.received` that preceded it, so the pair can be correlated. The engines report _what_ happened, never _who_ did it: an accept can come from any linked device. An outcome is only sent for a call this session saw ring, and offline-replayed signalling for calls that ended while disconnected is dropped. WhatsApp's `terminate` is deliberately unmapped — it covers both a caller hanging up before answer and either side ending an answered call, with nothing to tell them apart |
 | `status.received`                                 | A contact posts a status/story (opt-in — see below)                                                                                                                                                                                   | `{ sessionId, statusId, contact: { id, name?, pushName? }, type, caption?, hasMedia, mediaOmitted, omitReason?, postedAt, expiresAt }` — `statusId` is the store's `id` (usable with the status endpoints below); `postedAt`/`expiresAt` are epoch **milliseconds** (unlike the epoch-seconds convention for message timestamps), matching the `GET /status` store's own `Date`-backed fields                                                                                                                                                                                            |
@@ -6201,6 +6295,7 @@ Every delivery includes:
 - `session.disconnected`: `disc_{sessionId}_{hash(reason)}_{occurredAt}`
 - `group.join` / `group.leave`: `grp_{groupId}_{hash(participantIds)}_{join|leave}_{occurredAt}`
 - `group.update`: `grp_{groupId}_update_{hash(changes)}_{occurredAt}`
+- `group.join_request`: `grp_{groupId}_{hash(participantIds)}_join_request_{occurredAt}` (salted like `group.join` — a rejected user can legitimately ask again)
 - `call.received`: `call_{sessionId}_{callId}` (a call id is unique per call, so no `occurredAt` salt)
 
 Recurring lifecycle events (and `message.reaction` / `message.edited`) carry the same content across occurrences — the same phone on every reconnect, a constant disconnect reason, a re-applied emoji, or editing the same message multiple times — so they are salted with an `occurredAt` timestamp captured **once per dispatch and reused across that dispatch's retries**. This gives distinct occurrences distinct keys while keeping retries of one occurrence stable. Message keys are scoped by `sessionId` because WhatsApp message ids are unique per account, not globally.

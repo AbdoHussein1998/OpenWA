@@ -3425,6 +3425,46 @@ describe('BaileysAdapter group events (group-participants.update / groups.update
     expect(firstEvent(onGroupEvent).actorId).toBeUndefined();
   });
 
+  it('maps a created group.join-request to a neutral join_request GroupEvent', async () => {
+    const { onGroupEvent } = await readyWithGroupEvents();
+
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1782000000_000);
+    try {
+      fakeSock.fire('group.join-request', {
+        id: '123-456@g.us',
+        author: '628444@s.whatsapp.net',
+        participant: '628111@s.whatsapp.net',
+        action: 'created',
+        method: 'invite_link',
+      });
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(onGroupEvent).toHaveBeenCalledTimes(1);
+    expect(firstEvent(onGroupEvent)).toEqual({
+      kind: 'join_request',
+      groupId: '123-456@g.us',
+      actorId: '628444@c.us',
+      participantIds: ['628111@c.us'],
+      timestamp: 1782000000, // the Baileys event is undated: stamped at receipt
+    });
+  });
+
+  it('drops a revoked group.join-request — only the request being MADE is surfaced', async () => {
+    const { onGroupEvent } = await readyWithGroupEvents();
+
+    fakeSock.fire('group.join-request', {
+      id: '123-456@g.us',
+      author: '628444@s.whatsapp.net',
+      participant: '628111@s.whatsapp.net',
+      action: 'revoked',
+      method: 'invite_link',
+    });
+
+    expect(onGroupEvent).not.toHaveBeenCalled();
+  });
+
   it('maps groups.update entries to update GroupEvents with the neutral changes delta', async () => {
     const { onGroupEvent } = await readyWithGroupEvents();
 

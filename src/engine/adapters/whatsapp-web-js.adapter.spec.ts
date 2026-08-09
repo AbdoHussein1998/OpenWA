@@ -3058,6 +3058,68 @@ describe('WhatsAppWebJsAdapter group notifications (group_join / group_leave / g
     });
   });
 
+  it('maps group_membership_request to a join_request GroupEvent, with the author as the requester', () => {
+    const { onGroupEvent, client } = wireGroupHandler();
+
+    // Upstream documents chatId/author/timestamp for this event (Client.js:633-641); a
+    // self-request carries no recipients, so the author IS the user asking to join.
+    client.emit('group_membership_request', {
+      id: { _serialized: 'NOTIF_REQ' },
+      chatId: '120363@g.us',
+      author: '628111@c.us',
+      recipientIds: [],
+      body: '',
+      timestamp: 1700000300,
+      type: 'membership_approval_request',
+    });
+
+    expect(onGroupEvent).toHaveBeenCalledTimes(1);
+    expect(groupArg(onGroupEvent)).toEqual({
+      kind: 'join_request',
+      groupId: '120363@g.us',
+      actorId: '628111@c.us',
+      participantIds: ['628111@c.us'],
+      timestamp: 1700000300,
+    });
+  });
+
+  it('reports recipientIds as the requested users when present (a non-admin add request)', () => {
+    const { onGroupEvent, client } = wireGroupHandler();
+
+    client.emit('group_membership_request', {
+      id: { _serialized: 'NOTIF_REQ2' },
+      chatId: '120363@g.us',
+      author: '628111@c.us',
+      recipientIds: ['628222@c.us'],
+      body: '',
+      timestamp: 1700000400,
+      type: 'membership_approval_request',
+    });
+
+    expect(groupArg(onGroupEvent)).toEqual({
+      kind: 'join_request',
+      groupId: '120363@g.us',
+      actorId: '628111@c.us',
+      participantIds: ['628222@c.us'],
+      timestamp: 1700000400,
+    });
+  });
+
+  it('drops a membership request that names no requester at all — nothing addressable to report', () => {
+    const { onGroupEvent, client } = wireGroupHandler();
+
+    client.emit('group_membership_request', {
+      id: { _serialized: 'NOTIF_REQ3' },
+      chatId: '120363@g.us',
+      recipientIds: [],
+      body: '',
+      timestamp: 1700000500,
+      type: 'membership_approval_request',
+    });
+
+    expect(onGroupEvent).not.toHaveBeenCalled();
+  });
+
   it('omits actorId when the notification has no author', () => {
     const { onGroupEvent, client } = wireGroupHandler();
 

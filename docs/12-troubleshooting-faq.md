@@ -1179,6 +1179,7 @@ available_events:
   - group.join # Participant(s) added/joined
   - group.leave # Participant(s) left/removed
   - group.update # Group subject/description/announce/locked changed
+  - group.join_request # Someone asked to join a group this session administers
 
   # Calls
   - call.received # Incoming call ringing (payload: callId, from, isVideo, isGroup, timestamp)

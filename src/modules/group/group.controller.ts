@@ -8,6 +8,7 @@ import {
   GroupDescriptionDto,
   JoinGroupDto,
   GroupSettingsDto,
+  MembershipRequestActionDto,
   SetGroupPictureDto,
 } from './dto/group.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
@@ -19,6 +20,7 @@ import {
   GroupInviteCodeRevokedResponseDto,
   GroupJoinInfoDto,
   GroupJoinedResponseDto,
+  GroupMembershipRequestDto,
   GroupPictureResponseDto,
   GroupSettingsResponseDto,
   GroupSummaryDto,
@@ -267,6 +269,88 @@ export class GroupController {
   ) {
     const results = await this.groupService.demoteParticipants(sessionId, groupId, dto.participants);
     return { success: true, message: 'Participants demoted from admin', results };
+  }
+
+  @Get(':groupId/membership-requests')
+  @ApiOperation({
+    summary: 'List pending join requests for a group',
+    description:
+      'The join-approval queue of a group the account administers (join-approval mode on). ' +
+      'Admin-only on both engines — a non-admin read is refused. Fields the engine does not ' +
+      'report are omitted rather than defaulted.',
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'groupId', description: 'Group ID' })
+  @ApiResponse({ status: 200, description: 'Pending membership requests', type: [GroupMembershipRequestDto] })
+  @ApiResponse({ status: 503, description: 'WhatsApp did not answer within the request budget — retry shortly' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
+  async getMembershipRequests(@Param('sessionId') sessionId: string, @Param('groupId') groupId: string) {
+    return this.groupService.getGroupMembershipRequests(sessionId, groupId);
+  }
+
+  @Post(':groupId/membership-requests/approve')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve pending join requests',
+    description:
+      'Approves the named requesters, or EVERY pending request when the body names none. ' +
+      'Approving an empty queue is a no-op that returns an empty results list. On whatsapp-web.js ' +
+      'the engine pauses 250-500ms between requesters (upstream anti-abuse pacing), so acting on a ' +
+      'large queue is a proportionally long request.',
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'groupId', description: 'Group ID' })
+  @ApiBody({ type: MembershipRequestActionDto })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Requests processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal of NAMED requesters is an error)',
+    type: ParticipantsOperationResponseDto,
+  })
+  @ApiResponse({ status: 503, description: PARTICIPANTS_503 })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
+  async approveMembershipRequests(
+    @Param('sessionId') sessionId: string,
+    @Param('groupId') groupId: string,
+    @Body() dto: MembershipRequestActionDto,
+  ) {
+    const results = await this.groupService.approveGroupMembershipRequests(sessionId, groupId, dto.participants);
+    return { success: true, message: 'Membership requests approved', results };
+  }
+
+  @Post(':groupId/membership-requests/reject')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject pending join requests',
+    description:
+      'Rejects the named requesters, or EVERY pending request when the body names none. ' +
+      'Rejecting an empty queue is a no-op that returns an empty results list. On whatsapp-web.js ' +
+      'the engine pauses 250-500ms between requesters (upstream anti-abuse pacing), so acting on a ' +
+      'large queue is a proportionally long request.',
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'groupId', description: 'Group ID' })
+  @ApiBody({ type: MembershipRequestActionDto })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Requests processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal of NAMED requesters is an error)',
+    type: ParticipantsOperationResponseDto,
+  })
+  @ApiResponse({ status: 503, description: PARTICIPANTS_503 })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
+  async rejectMembershipRequests(
+    @Param('sessionId') sessionId: string,
+    @Param('groupId') groupId: string,
+    @Body() dto: MembershipRequestActionDto,
+  ) {
+    const results = await this.groupService.rejectGroupMembershipRequests(sessionId, groupId, dto.participants);
+    return { success: true, message: 'Membership requests rejected', results };
   }
 
   @Put(':groupId/subject')

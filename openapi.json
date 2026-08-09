@@ -4954,6 +4954,182 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/groups/{groupId}/membership-requests": {
+      "get": {
+        "description": "The join-approval queue of a group the account administers (join-approval mode on). Admin-only on both engines — a non-admin read is refused. Fields the engine does not report are omitted rather than defaulted.",
+        "operationId": "GroupController_getMembershipRequests",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "description": "Group ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending membership requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupMembershipRequestDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — retry shortly"
+          }
+        },
+        "summary": "List pending join requests for a group",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/groups/{groupId}/membership-requests/approve": {
+      "post": {
+        "description": "Approves the named requesters, or EVERY pending request when the body names none. Approving an empty queue is a no-op that returns an empty results list. On whatsapp-web.js the engine pauses 250-500ms between requesters (upstream anti-abuse pacing), so acting on a large queue is a proportionally long request.",
+        "operationId": "GroupController_approveMembershipRequests",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "description": "Group ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MembershipRequestActionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Requests processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal of NAMED requesters is an error)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParticipantsOperationResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
+          }
+        },
+        "summary": "Approve pending join requests",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/groups/{groupId}/membership-requests/reject": {
+      "post": {
+        "description": "Rejects the named requesters, or EVERY pending request when the body names none. Rejecting an empty queue is a no-op that returns an empty results list. On whatsapp-web.js the engine pauses 250-500ms between requesters (upstream anti-abuse pacing), so acting on a large queue is a proportionally long request.",
+        "operationId": "GroupController_rejectMembershipRequests",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "description": "Group ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MembershipRequestActionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Requests processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal of NAMED requesters is an error)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParticipantsOperationResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this."
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
+          }
+        },
+        "summary": "Reject pending join requests",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/groups/{groupId}/subject": {
       "put": {
         "operationId": "GroupController_setSubject",
@@ -9590,6 +9766,7 @@
                 "group.join",
                 "group.leave",
                 "group.update",
+                "group.join_request",
                 "call.received",
                 "call.accepted",
                 "call.rejected",
@@ -9741,6 +9918,7 @@
                 "group.join",
                 "group.leave",
                 "group.update",
+                "group.join_request",
                 "call.received",
                 "call.accepted",
                 "call.rejected",
@@ -12586,6 +12764,52 @@
           "message",
           "results"
         ]
+      },
+      "GroupMembershipRequestDto": {
+        "type": "object",
+        "properties": {
+          "participantId": {
+            "type": "string",
+            "description": "Neutral id of the user asking to join.",
+            "example": "628123456789@c.us"
+          },
+          "addedById": {
+            "type": "string",
+            "description": "Who created the request, when the engine reports it (differs from the requester on a non-admin add).",
+            "example": "628987654321@c.us"
+          },
+          "method": {
+            "type": "string",
+            "description": "How the request was made, when the engine reports it.",
+            "enum": [
+              "invite_link",
+              "non_admin_add",
+              "linked_group_join"
+            ],
+            "example": "invite_link"
+          },
+          "requestedAt": {
+            "type": "number",
+            "description": "Unix seconds the request was created, when the engine reports it.",
+            "example": 1754700000
+          }
+        },
+        "required": [
+          "participantId"
+        ]
+      },
+      "MembershipRequestActionDto": {
+        "type": "object",
+        "properties": {
+          "participants": {
+            "description": "Requester WhatsApp IDs (e.g. 628123456789@c.us). Omit to act on every pending request.",
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "GroupSubjectDto": {
         "type": "object",

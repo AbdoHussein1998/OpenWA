@@ -22,6 +22,7 @@ import {
   Group,
   GroupInfo,
   GroupMemberAddMode,
+  GroupMembershipRequest,
   ParticipantOperationResult,
   LocationInput,
   PollInput,
@@ -613,6 +614,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.client.on('group_join', notification => this.handleGroupNotification('join', notification));
     this.client.on('group_leave', notification => this.handleGroupNotification('leave', notification));
     this.client.on('group_update', notification => this.handleGroupNotification('update', notification));
+    this.client.on('group_membership_request', notification =>
+      this.handleGroupNotification('join_request', notification),
+    );
 
     this.client.on('call', call => this.handleIncomingCall(call));
 
@@ -754,6 +758,15 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
             ? Math.floor(notification.timestamp)
             : Math.floor(Date.now() / 1000),
       };
+      if (kind === 'join_request' && payload.participantIds.length === 0) {
+        // A self-request carries no recipients: the author IS the user asking to join
+        // (Client.js:633-641 documents chatId/author/timestamp for this event). A request naming
+        // nobody at all is unactionable and dropped.
+        if (!payload.actorId) {
+          return;
+        }
+        payload.participantIds = [payload.actorId];
+      }
       if (kind === 'update') {
         // Join/leave carry no metadata delta. An update whose subtype/body cannot be interpreted
         // still emits with empty changes rather than being dropped silently.
@@ -1737,6 +1750,18 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   setGroupEphemeral(groupId: string, durationSec: number): Promise<void> {
     return this.groups.setGroupEphemeral(groupId, durationSec);
+  }
+
+  getGroupMembershipRequests(groupId: string): Promise<GroupMembershipRequest[]> {
+    return this.groups.getGroupMembershipRequests(groupId);
+  }
+
+  approveGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]> {
+    return this.groups.approveGroupMembershipRequests(groupId, participants);
+  }
+
+  rejectGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]> {
+    return this.groups.rejectGroupMembershipRequests(groupId, participants);
   }
 
   // ========== Status/Stories (Phase 3) ==========
