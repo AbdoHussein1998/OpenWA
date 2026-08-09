@@ -509,7 +509,11 @@ once, so the session stops instead of being silently unlinked by WhatsApp about 
 > a container stops Chromium launching at all). If your deployment does get a
 > localised modal, it is **not** auto-dismissed and the session never reaches `action_required` —
 > instead it links normally, then drops to `disconnected` with reason `LOGOUT` a few minutes later and
-> the device disappears from the phone's Linked devices list. Because that path wipes the stored
+> the device disappears from the phone's Linked devices list. That miss is no longer silent: when the
+> watcher finds a visible dialog it cannot match, it logs a warning (`action:
+onboarding_dialog_unrecognized`) carrying the dialog's heading and button labels — the label to add
+> via `WWEBJS_ONBOARDING_CONTINUE_LABELS`, and the heading worth reporting — minutes before the unlink
+> would happen. Because that path wipes the stored
 > credentials, the automatic reconnect comes back with a fresh QR on its own, so the session is
 > usually already sitting at `qr_ready` rather than needing a manual start. Acknowledge the modal once
 > in a browser signed in as that account, then scan the QR. It does not recur — the modal is shown

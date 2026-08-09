@@ -71,6 +71,7 @@ import { WwebjsCatalog } from './wwebjs-catalog';
 import { isSupportedProxyUrl, buildProxyLaunchConfig } from './wwebjs-proxy';
 import {
   probeOnboardingModal,
+  collectDialogDiagnostics,
   resolveOnboardingContinueLabels,
   ONBOARDING_DEFAULT_CONTINUE_LABEL,
 } from './wwebjs-onboarding';
@@ -223,7 +224,7 @@ export { isSupportedProxyUrl, buildProxyLaunchConfig } from './wwebjs-proxy';
 
 // The onboarding-modal probe moved to ./wwebjs-onboarding with its label resolution; re-exported
 // because existing callers (the adapter spec) still import it from here.
-export { probeOnboardingModal } from './wwebjs-onboarding';
+export { probeOnboardingModal, collectDialogDiagnostics } from './wwebjs-onboarding';
 
 export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngine {
   private client: Client | null = null;
@@ -252,6 +253,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   // How many times we have clicked the modal's Continue button. Not reset by clearOnboardingWatcher:
   // it counts for the engine's lifetime, which is what makes "the click is not landing" detectable.
   private onboardingDismissClicks = 0;
+  // Dialog signatures the watcher already warned about (#1072 follow-up). A signature is the
+  // serialized diagnostics of what is on screen, so the warn fires once per DISTINCT unrecognised
+  // dialog instead of once per 5s tick. Dies with the engine, exactly like the watcher itself.
+  private onboardingDialogSignatures = new Set<string>();
+  // Probe ticks run, for the lifetime-cap summary line.
+  private onboardingProbes = 0;
   /** How long a received call's handle stays rejectable. Calls ring for roughly a minute, so
    *  two minutes covers the ringing window with margin without pinning dead calls for long. */
   private static readonly LIVE_CALL_TTL_MS = 2 * 60_000;
@@ -1246,6 +1253,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     if (this.onboardingWatcherStarted) return; // idempotent: ready event + reconcile path share one funnel
     this.onboardingWatcherStarted = true;
     this.onboardingWatcherStartedAt = Date.now();
+    this.logger.debug('Onboarding modal watcher armed', {
+      sessionId: this.config.sessionId,
+      action: 'onboarding_watcher_started',
+    });
 
     const tick = (): void => {
       if (!this.client || this.status !== EngineStatus.READY || this.tearingDown || this.disconnectReported) {
@@ -1254,6 +1265,16 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       }
       // The modal is one-shot per account: stop after the lifetime cap rather than polling forever.
       if (Date.now() - this.onboardingWatcherStartedAt >= ONBOARDING_MODAL_MAX_LIFETIME_MS) {
+        // Natural end of the episode: one summary, so a log read can tell the watcher ran and what
+        // it saw without per-tick noise. Teardown/disconnect stops log nothing — that is shutdown,
+        // not signal.
+        this.logger.debug('Onboarding modal watcher stopped at its lifetime cap', {
+          sessionId: this.config.sessionId,
+          probes: this.onboardingProbes,
+          clicks: this.onboardingDismissClicks,
+          dialogsSeen: this.onboardingDialogSignatures.size,
+          action: 'onboarding_watcher_stopped',
+        });
         this.clearOnboardingWatcher();
         return;
       }
@@ -1283,9 +1304,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
    */
   private async dismissOnboardingModalIfNeeded(): Promise<void> {
     if (!this.client) return;
+    this.onboardingProbes += 1;
     const page = (
       this.client as unknown as {
-        pupPage?: { evaluate: <T, A>(fn: (arg: A) => T, arg: A) => Promise<T> };
+        pupPage?: { evaluate: <T, A>(fn: (arg: A) => T, arg?: A) => Promise<T> };
       }
     ).pupPage;
 
@@ -1306,6 +1328,32 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           timeout.unref?.();
         }),
       ]);
+
+      // The probe found nothing to click: ask the page what dialogs ARE on screen, so a modal whose
+      // title or button label the detector does not recognise is visible in the logs instead of
+      // failing silently until WhatsApp unlinks the companion (#1072 follow-up). The `=== false`
+      // dispatch is deliberate: a probe that clicked (dismissed) needs no diagnostics, and an
+      // absent/garbled result says the page is in no state to answer a second evaluate either.
+      if (result && result.dismissed === false) {
+        const dialogs = await page?.evaluate(collectDialogDiagnostics);
+        if (Array.isArray(dialogs) && dialogs.length > 0) {
+          const signature = JSON.stringify(dialogs);
+          if (!this.onboardingDialogSignatures.has(signature)) {
+            this.onboardingDialogSignatures.add(signature);
+            this.logger.warn(
+              'A visible dialog on WhatsApp Web matches neither the onboarding-modal heading nor a ' +
+                'confirm-button label. If this is the onboarding screen in an unrecognised title or ' +
+                'language, WhatsApp will unlink this companion within minutes: add its confirm-label ' +
+                'via WWEBJS_ONBOARDING_CONTINUE_LABELS, and report the heading so detection can cover it.',
+              {
+                sessionId: this.config.sessionId,
+                dialogs,
+                action: 'onboarding_dialog_unrecognized',
+              },
+            );
+          }
+        }
+      }
 
       if (!result?.dismissed) return;
 
@@ -1344,7 +1392,16 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   private reportActionRequired(reason: string): void {
     this.clearOnboardingWatcher();
-    if (this.status !== EngineStatus.READY) return; // already leaving READY; don't override a teardown/failure
+    if (this.status !== EngineStatus.READY) {
+      // A teardown/failure latched first: its status stands and the callback stays silent — but the
+      // reason must not vanish without a trace, or this path is indistinguishable from "no modal".
+      this.logger.debug('Onboarding modal fallback superseded by a status change; not moving to ACTION_REQUIRED', {
+        sessionId: this.config.sessionId,
+        status: this.status,
+        action: 'onboarding_action_required_suppressed',
+      });
+      return;
+    }
     this.setStatus(EngineStatus.ACTION_REQUIRED);
     this.callbacks.onActionRequired?.(reason);
     this.logger.warn(reason, { sessionId: this.config.sessionId, action: 'onboarding_modal_fallback' });

@@ -9,6 +9,7 @@ import {
   buildProxyLaunchConfig,
   loadRemoteMedia,
   probeOnboardingModal,
+  collectDialogDiagnostics,
   resolveAuthTimeoutMs,
   wwebjsAckToDeliveryStatus,
   extractWwebjsCall,
@@ -6152,6 +6153,147 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
         jest.useRealTimers();
       }
     });
+
+    // ── Dialog diagnostics (#1072 follow-up) ─────────────────────────────────────
+    // When the probe finds nothing to click, the watcher asks the page what dialogs ARE visible,
+    // so a modal whose title or button label the detector does not recognise lands in the logs
+    // instead of failing silently until WhatsApp unlinks the companion.
+
+    it('warns once per unique unrecognised dialog, carrying its heading and button labels', async () => {
+      jest.useFakeTimers();
+      try {
+        const { adapter, client, evaluate, onActionRequired } = promoteToReady();
+
+        (client as EventEmitter).emit('authenticated');
+        await jest.advanceTimersByTimeAsync(2100);
+        expect(adapter.getStatus()).toBe(EngineStatus.READY);
+
+        // Spy AFTER promotion: the reconcile path warns once on its own ('ready event was missed'),
+        // which would otherwise pollute the counts this test asserts.
+        const logger = (adapter as unknown as { logger: { warn: (m: string, meta?: unknown) => void } }).logger;
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+        evaluate.mockImplementation((fn: unknown) =>
+          fn === probeOnboardingModal
+            ? Promise.resolve({ modalPresent: false, dismissed: false })
+            : Promise.resolve([{ heading: 'A fresh look for WhatsApp Web', buttons: ['Get started'] }]),
+        );
+
+        await jest.advanceTimersByTimeAsync(5100); // first tick seeing the dialog
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringMatching(/dialog/i),
+          expect.objectContaining({
+            action: 'onboarding_dialog_unrecognized',
+            dialogs: [{ heading: 'A fresh look for WhatsApp Web', buttons: ['Get started'] }],
+          }),
+        );
+
+        await jest.advanceTimersByTimeAsync(5100); // the same dialog again — no repeat warn
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+
+        // A different dialog (another step of the flow, or another language) is a new signature.
+        evaluate.mockImplementation((fn: unknown) =>
+          fn === probeOnboardingModal
+            ? Promise.resolve({ modalPresent: false, dismissed: false })
+            : Promise.resolve([{ heading: 'Novedades de WhatsApp Web', buttons: ['Continuar'] }]),
+        );
+        await jest.advanceTimersByTimeAsync(5100);
+        expect(warnSpy).toHaveBeenCalledTimes(2);
+
+        // The warning is observational: the session itself must never move on it.
+        expect(adapter.getStatus()).toBe(EngineStatus.READY);
+        expect(onActionRequired).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not run the diagnostics collector on a tick that dismissed the modal', async () => {
+      jest.useFakeTimers();
+      try {
+        const { adapter, client, evaluate } = promoteToReady();
+
+        (client as EventEmitter).emit('authenticated');
+        await jest.advanceTimersByTimeAsync(2100);
+        expect(adapter.getStatus()).toBe(EngineStatus.READY);
+
+        evaluate.mockClear(); // drop the reconcile calls; the default `true` implementation stays
+        evaluate.mockResolvedValueOnce({ modalPresent: true, dismissed: true } satisfies ModalProbe);
+        await jest.advanceTimersByTimeAsync(5100);
+
+        expect(evaluate.mock.calls.filter((call: unknown[]) => call[0] === collectDialogDiagnostics)).toHaveLength(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not run the diagnostics collector when the probe itself fails', async () => {
+      jest.useFakeTimers();
+      try {
+        const { adapter, client, evaluate, onActionRequired } = promoteToReady();
+
+        (client as EventEmitter).emit('authenticated');
+        await jest.advanceTimersByTimeAsync(2100);
+        expect(adapter.getStatus()).toBe(EngineStatus.READY);
+
+        evaluate.mockClear();
+        evaluate.mockRejectedValueOnce(new Error('Execution context was destroyed'));
+        await jest.advanceTimersByTimeAsync(5100);
+
+        expect(evaluate.mock.calls.filter((call: unknown[]) => call[0] === collectDialogDiagnostics)).toHaveLength(0);
+        expect(adapter.getStatus()).toBe(EngineStatus.READY);
+        expect(onActionRequired).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('logs when the watcher arms and when it stops at the lifetime cap', async () => {
+      jest.useFakeTimers();
+      try {
+        const { adapter, client } = promoteToReady();
+        const logger = (adapter as unknown as { logger: { debug: (m: string, meta?: unknown) => void } }).logger;
+        const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
+
+        (client as EventEmitter).emit('authenticated');
+        await jest.advanceTimersByTimeAsync(2100);
+        expect(adapter.getStatus()).toBe(EngineStatus.READY);
+        expect(debugSpy).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({ action: 'onboarding_watcher_started' }),
+        );
+
+        await jest.advanceTimersByTimeAsync(5 * 60_000 + 5100);
+        expect(debugSpy).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({ action: 'onboarding_watcher_stopped', clicks: 0, dialogsSeen: 0 }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('logs and does not call back when the fallback fires after READY was already left', () => {
+      const adapter = newAdapter();
+      const onActionRequired = jest.fn();
+      (adapter as unknown as { callbacks: unknown }).callbacks = { onActionRequired };
+      (adapter as unknown as { status: EngineStatus }).status = EngineStatus.DISCONNECTED;
+      const logger = (adapter as unknown as { logger: { debug: (m: string, meta?: unknown) => void } }).logger;
+      const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
+
+      (adapter as unknown as { reportActionRequired: (reason: string) => void }).reportActionRequired(
+        'modal stuck after five clicks',
+      );
+
+      // The status a concurrent teardown chose stands; the reason survives as a debug line only.
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+      expect(onActionRequired).not.toHaveBeenCalled();
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ action: 'onboarding_action_required_suppressed' }),
+      );
+    });
   });
 });
 
@@ -6356,6 +6498,161 @@ describe('probeOnboardingModal (in-page onboarding modal detection)', () => {
       dismissed: false,
     });
     expect(button.click).not.toHaveBeenCalled();
+  });
+});
+
+// The diagnostics half of the watcher (#1072 follow-up): when the probe finds nothing to click, the
+// adapter asks what dialogs ARE on screen, so a modal the detector does not recognise — a new title,
+// another language — shows up in the logs instead of failing silently. `collectDialogDiagnostics` is
+// a self-contained function for the same reason as the probe: it is stringified into the page, and
+// being plain means the DOM work is unit-testable here directly.
+describe('collectDialogDiagnostics (in-page dialog diagnostics)', () => {
+  type FakeEl = {
+    tagName: string;
+    role: string | null;
+    ariaModal: boolean;
+    ariaLabel: string | null;
+    textContent: string;
+    parentElement: FakeEl | null;
+    offsetParent: unknown;
+    getBoundingClientRect: () => { width: number; height: number };
+    getAttribute: (name: string) => string | null;
+  };
+
+  const el = (
+    textContent: string,
+    opts: { tag?: string; role?: string; ariaModal?: boolean; ariaLabel?: string; hidden?: boolean } = {},
+  ): FakeEl => {
+    const ariaLabel = opts.ariaLabel ?? null;
+    return {
+      tagName: opts.tag ?? 'DIV',
+      role: opts.role ?? null,
+      ariaModal: opts.ariaModal ?? false,
+      ariaLabel,
+      textContent,
+      parentElement: null,
+      offsetParent: opts.hidden ? null : {},
+      getBoundingClientRect: () => (opts.hidden ? { width: 0, height: 0 } : { width: 200, height: 40 }),
+      getAttribute: (name: string) => (name === 'aria-label' ? ariaLabel : null),
+    };
+  };
+
+  /** Wire children to a parent and return the parent, so ancestor walks have something to walk. */
+  const nest = (parent: FakeEl, ...children: FakeEl[]): FakeEl => {
+    for (const child of children) child.parentElement = parent;
+    return parent;
+  };
+
+  const install = (all: FakeEl[]): void => {
+    (globalThis as unknown as { document: unknown }).document = {
+      // Mirror the collector's selectors per comma branch: tag branches match tagName, attribute
+      // branches match the corresponding fake field.
+      querySelectorAll: (selector: string) => {
+        const branches = selector.split(',').map(branch => branch.trim());
+        return all.filter(e =>
+          branches.some(branch =>
+            branch === 'button'
+              ? e.tagName === 'BUTTON'
+              : branch === '[role="button"]'
+                ? e.role === 'button'
+                : branch === '[role="dialog"]'
+                  ? e.role === 'dialog'
+                  : branch === '[aria-modal="true"]'
+                    ? e.ariaModal
+                    : branch === '[role="heading"]'
+                      ? e.role === 'heading'
+                      : /^h[1-6]$/.test(branch)
+                        ? e.tagName === branch.toUpperCase()
+                        : false,
+          ),
+        );
+      },
+    };
+  };
+
+  afterEach(() => {
+    delete (globalThis as unknown as { document?: unknown }).document;
+  });
+
+  it('captures the heading and confirm-button labels of a visible dialog', () => {
+    const heading = el('A fresh look for WhatsApp Web', { role: 'heading' });
+    const button = el('Get started', { tag: 'BUTTON' });
+    const dialog = nest(el('', { role: 'dialog' }), heading, button);
+    install([dialog, heading, button]);
+
+    expect(collectDialogDiagnostics()).toEqual([
+      { heading: 'A fresh look for WhatsApp Web', buttons: ['Get started'] },
+    ]);
+  });
+
+  // Chat rows and stray buttons are not dialogs: nothing they carry may be reported, or the log
+  // would end up capturing ordinary page content.
+  it('returns nothing when nothing on the page is a dialog', () => {
+    install([el('Alice12:34What’s new?'), el('Continue', { tag: 'BUTTON' })]);
+
+    expect(collectDialogDiagnostics()).toEqual([]);
+  });
+
+  it('ignores a dialog that is not visible', () => {
+    const heading = el("What's new on WhatsApp Web", { role: 'heading' });
+    const dialog = nest(el('', { role: 'dialog', hidden: true }), heading);
+    install([dialog, heading]);
+
+    expect(collectDialogDiagnostics()).toEqual([]);
+  });
+
+  it('caps the report at three dialogs', () => {
+    const dialogs = [1, 2, 3, 4].map(i => el(`dialog ${i}`, { role: 'dialog' }));
+    install(dialogs);
+
+    expect(collectDialogDiagnostics()).toHaveLength(3);
+  });
+
+  it('excludes buttons and headings that sit outside the dialog', () => {
+    const dialog = el('', { role: 'dialog' });
+    install([dialog, el('Continue', { tag: 'BUTTON' }), el('Page title', { role: 'heading' })]);
+
+    expect(collectDialogDiagnostics()).toEqual([{ heading: null, buttons: [] }]);
+  });
+
+  it("falls back to the dialog's aria-label when it carries no heading element", () => {
+    const button = el('Continue', { tag: 'BUTTON' });
+    const dialog = nest(el('', { ariaModal: true, ariaLabel: "What's new on WhatsApp Web" }), button);
+    install([dialog, button]);
+
+    expect(collectDialogDiagnostics()).toEqual([{ heading: "What's new on WhatsApp Web", buttons: ['Continue'] }]);
+  });
+
+  // Captured page text goes straight into the logs: a newline in it would forge extra log lines.
+  it('strips control characters so captured text cannot forge log lines', () => {
+    const heading = el("What's new\non WhatsApp Web\r\n", { role: 'heading' });
+    const dialog = nest(el('', { role: 'dialog' }), heading);
+    install([dialog, heading]);
+
+    expect(collectDialogDiagnostics()).toEqual([{ heading: "What's new on WhatsApp Web", buttons: [] }]);
+  });
+
+  it('truncates over-long captured text', () => {
+    const heading = el('x'.repeat(200), { role: 'heading' });
+    const dialog = nest(el('', { role: 'dialog' }), heading);
+    install([dialog, heading]);
+
+    const [report] = collectDialogDiagnostics();
+    expect(report.heading).toHaveLength(80);
+  });
+
+  // Association walks up from the candidate, bounded, so a heading anywhere on the page is not
+  // attributed to a dialog it merely shares a distant ancestor with.
+  it('associates content only within a bounded ancestor walk', () => {
+    const heading = el("What's new on WhatsApp Web", { role: 'heading' });
+    let node = heading;
+    for (let i = 0; i < 13; i++) {
+      node = nest(el('wrapper'), node);
+    }
+    const dialog = nest(el('', { role: 'dialog' }), node);
+    install([dialog, heading]);
+
+    expect(collectDialogDiagnostics()).toEqual([{ heading: null, buttons: [] }]);
   });
 });
 
