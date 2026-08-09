@@ -30,6 +30,13 @@ import {
 const INVITE_CODE_403 = 'The engine refused the request — admin rights required for this group';
 const INVITE_CODE_503 = 'WhatsApp did not answer the invite-code query — retry shortly';
 
+// Shared by the four participant writes, whose 200 reports per-participant refusals inside `results` —
+// so this 503 has to say, on all four, that it is not one of those.
+const PARTICIPANTS_503 =
+  'WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. ' +
+  'Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside ' +
+  '`results` and is an answer; an update that never came back is not.';
+
 // NOTE: the session→groups LIST lives on the SessionController at GET /sessions/:id/groups (it
 // registered first and owns the canonical narrow projection). A bare @Get() here would collide on
 // the same path pattern (/sessions/{x}/groups) and be shadowed, so this controller owns only the
@@ -163,6 +170,7 @@ export class GroupController {
       'Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)',
     type: ParticipantsOperationResponseDto,
   })
+  @ApiResponse({ status: 503, description: PARTICIPANTS_503 })
   @HttpCode(HttpStatus.OK)
   async addParticipants(
     @Param('sessionId') sessionId: string,
@@ -185,6 +193,7 @@ export class GroupController {
       'Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)',
     type: ParticipantsOperationResponseDto,
   })
+  @ApiResponse({ status: 503, description: PARTICIPANTS_503 })
   async removeParticipants(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,
@@ -206,6 +215,7 @@ export class GroupController {
       'Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)',
     type: ParticipantsOperationResponseDto,
   })
+  @ApiResponse({ status: 503, description: PARTICIPANTS_503 })
   @HttpCode(HttpStatus.OK)
   async promoteParticipants(
     @Param('sessionId') sessionId: string,
@@ -228,6 +238,7 @@ export class GroupController {
       'Participants processed — `results` carries the per-participant outcome (a partial refusal does not fail the batch; a total refusal is an error)',
     type: ParticipantsOperationResponseDto,
   })
+  @ApiResponse({ status: 503, description: PARTICIPANTS_503 })
   @HttpCode(HttpStatus.OK)
   async demoteParticipants(
     @Param('sessionId') sessionId: string,

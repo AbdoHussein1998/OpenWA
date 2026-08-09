@@ -73,6 +73,37 @@ describe('openapi.json structural invariants', () => {
     expect(untyped).toEqual([]);
   });
 
+  // Every participant write goes through runParticipantsUpdate, which spends the shared request
+  // budget (baileys-groups.ts), so each can answer 503 — and each ALSO reports per-participant
+  // refusals inside its 200, which is the neighbouring claim it is easiest to mistake the 503 for.
+  // Keyed off the response schema rather than a list of paths: these four were missed when the rest
+  // of the module gained its 503s, and a hand-written list would miss a fifth route the same way.
+  it('every participant write documents the 503 its request budget can produce', () => {
+    const doc = snapshot();
+    const participantWrites: string[] = [];
+    const undocumented: string[] = [];
+
+    for (const [route, item] of Object.entries(doc.paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        if (!OPERATION_KEYS.has(method)) continue;
+        const responses =
+          (operation as { responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }> })
+            .responses ?? {};
+        const ref = responses['200']?.content?.['application/json']?.schema?.$ref;
+        if (!ref?.endsWith('/ParticipantsOperationResponseDto')) continue;
+
+        const id = `${method.toUpperCase()} ${route}`;
+        participantWrites.push(id);
+        if (!responses['503']) undocumented.push(id);
+      }
+    }
+
+    // A renamed DTO would match nothing and leave the assertion below vacuously true — an empty
+    // result from a selector that can no longer match is not evidence of compliance.
+    expect(participantWrites.length).toBeGreaterThan(0);
+    expect(undocumented).toEqual([]);
+  });
+
   it('every operation declares at least one response', () => {
     const doc = snapshot();
     const silent = Object.entries(doc.paths).flatMap(([route, item]) =>

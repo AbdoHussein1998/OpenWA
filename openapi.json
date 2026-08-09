@@ -4553,6 +4553,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
           }
         },
         "summary": "Add participants to a group",
@@ -4602,6 +4605,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
           }
         },
         "summary": "Remove participants from a group",
@@ -4653,6 +4659,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
           }
         },
         "summary": "Promote participants to admin",
@@ -4704,6 +4713,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget, so no per-participant outcome was read at all. Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside `results` and is an answer; an update that never came back is not."
           }
         },
         "summary": "Demote participants from admin",
@@ -5550,6 +5562,9 @@
           },
           "501": {
             "description": "The active engine cannot list chats by label (Baileys)"
+          },
+          "503": {
+            "description": "The whatsapp-web.js page connection died mid-read, so nothing could be read. Deliberately not reported as a missing label — a page that went away says nothing about whether the label exists. The other engine never answers this: Baileys has no label query at all and answers 501 above."
           }
         },
         "summary": "Get every chat carrying a label",
