@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An API key's session allow-list showed ids that can never match** — `allowedSessions` is compared by exact equality against the session id in the request path, but the published example was `['session-uuid-1', 'session-uuid-2']`, so a reader copying its shape would scope a key to nothing and see every request denied; the field now shows real UUIDs and states that names are not accepted, which the MCP tool schema has said all along.
+
 - **Seven published examples showed values the API cannot produce** — the session id carried a `sess_` prefix that every session route's `ParseUUIDPipe` rejects before the handler runs, two row ids were UUIDs truncated to `4f1c9b2a-...`, the logout response example omitted `engineLoaded` although its own schema marks it required, the readiness probe keyed its details on `database` where the code writes `mainDatabase` and `dataDatabase`, the engine list advertised a `send-text` capability neither engine declares, and the Baileys-only product send documented the whatsapp-web.js `true_<jid>_<id>` id form that route never returns.
 
 ## [0.14.6] - 2026-08-08
