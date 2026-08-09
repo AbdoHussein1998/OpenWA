@@ -838,7 +838,7 @@ class UnpinMessageRequest(TypedDict):
 
 
 class MessageMedia(TypedDict):
-    """A message's archived media file: raw bytes plus the served content type."""
+    """A message's stored media: raw bytes plus the served content type."""
 
     data: bytes
     contentType: str | None

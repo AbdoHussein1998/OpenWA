@@ -761,7 +761,12 @@ export class MessageService {
   }
 
   /**
-   * Read a message's archived media back out of the file store.
+   * Read a message's media: the archived file when one exists, else the inline copy persisted on
+   * the message row. The fallback is what makes media sent BY the account retrievable here — the
+   * archive is written only on the inbound path, but outbound rows carry the payload inline
+   * (the REST send persists it, and both engines download it for the own-send echo) — #1165. It
+   * also serves an inbound message whose archived file was purged by retention while the inline
+   * copy lives on.
    *
    * Unlike status media (only ever an image or video), chat media includes documents a sender chose
    * the type of — so the declared mimetype is echoed back only when it is inert, and the caller
@@ -774,20 +779,35 @@ export class MessageService {
     messageId: string,
   ): Promise<{ buffer: Buffer; mimetype: string }> {
     const media = await this.chatMediaArchive?.getMedia(sessionId, chatId, messageId);
-    if (!media || !this.storageService) {
-      throw new NotFoundException('No archived media for this message');
-    }
-    try {
-      const buffer = await this.storageService.getFile(media.path);
-      return { buffer, mimetype: inertMimetype(media.mimetype) };
-    } catch (error) {
-      // The row outlived its file: the retention purge (or a concurrent delete) removed it between
-      // the DB read and this read. That's "gone", not a server fault — surface a 404.
-      if (isMissingObjectError(error)) {
-        throw new NotFoundException('No archived media for this message');
+    if (media && this.storageService) {
+      try {
+        return { buffer: await this.storageService.getFile(media.path), mimetype: inertMimetype(media.mimetype) };
+      } catch (error) {
+        // The row outlived its file: the retention purge (or a concurrent delete) removed it
+        // between the DB read and this read. Not a server fault — try the inline copy instead.
+        if (!isMissingObjectError(error)) {
+          throw error;
+        }
       }
-      throw error;
     }
+
+    const row = await this.messageRepository.findOne({ where: { sessionId, chatId, waMessageId: messageId } });
+    const inline = (row?.metadata as { media?: { data?: unknown; mimetype?: unknown; omitted?: unknown } })?.media;
+    if (
+      !inline ||
+      inline.omitted ||
+      typeof inline.data !== 'string' ||
+      !inline.data ||
+      typeof inline.mimetype !== 'string' ||
+      !inline.mimetype ||
+      // A URL-based send persists the URL STRING as `data` (buildMediaInput: `data: base64 ||
+      // dto.url!`) — the bytes were fetched at send time and never stored. Decoding the URL as
+      // base64 would serve garbage, so report it as absent. Same discriminator as the send path.
+      /^https?:\/\//i.test(inline.data)
+    ) {
+      throw new NotFoundException('No media stored for this message');
+    }
+    return { buffer: Buffer.from(inline.data, 'base64'), mimetype: inertMimetype(inline.mimetype) };
   }
 
   /** Maximum messages a single getChatHistory call may request from the engine. */

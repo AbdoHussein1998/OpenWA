@@ -1164,13 +1164,17 @@ Remove a message's pin. Takes no duration.
 
 #### GET /api/sessions/:sessionId/messages/:chatId/:messageId/media
 
-Download a message's **archived** media bytes.
+Download a message's **stored** media bytes.
 
-This is the read side of chat-media archiving, which is **opt-in and off by default**
-(`CHAT_MEDIA_ARCHIVE_ENABLED`). When enabled, each inbound message's media is written to whatever
-backs `StorageService` (local disk or S3) in addition to the inline base64 copy the message row
-already carries, so it stays retrievable after delivery. With archiving off, this route answers
-`404` for every message.
+The route serves the chat-media **archive** first, and falls back to the **inline base64 copy** on
+the message row when no archived file is servable. Archiving is **opt-in and off by default**
+(`CHAT_MEDIA_ARCHIVE_ENABLED`); when enabled, each inbound message's media is written to whatever
+backs `StorageService` (local disk or S3) in addition to the inline copy. The inline fallback is
+what makes media **sent by this account** downloadable here — outbound messages are never archived,
+but their payload is stored inline (base64 API sends persist it on the send path; media composed on
+a linked phone is downloaded by the engine for the own-send echo). It also keeps an inbound
+message's media downloadable after `CHAT_MEDIA_ARCHIVE_TTL_DAYS` retention purges the archived
+file, since retention leaves the inline copy in place.
 
 **Auth:** API key
 
@@ -1189,9 +1193,10 @@ mimetype when it is in a conservative inert set (common image/video/audio types)
 content on the API origin.
 
 **Errors:** `401` missing/invalid API key, or key not scoped to this session · `404`
-`No archived media for this message` — archiving was off when the message arrived, the message
-carries no media, the media was above `CHAT_MEDIA_ARCHIVE_MAX_BYTES`, or
-`CHAT_MEDIA_ARCHIVE_TTL_DAYS` retention has since cleared the file
+`No media stored for this message` — the message carries no media, `MEDIA_DOWNLOAD_ENABLED=false`
+or the media was above `MEDIA_DOWNLOAD_MAX_BYTES` when it was stored (the row holds a size-only
+marker), it was a URL-based API send (the gateway fetches those bytes at send time and never stores
+them), or the message is not in this gateway's history (e.g. history backfill, which is media-free)
 
 Note: this is a three-path-segment route, so it never collides with the two-segment
 `GET /messages/:chatId/history` regardless of declaration order.
