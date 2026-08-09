@@ -267,14 +267,6 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     return this.sessionRestrictions.attachTo(this.sessionErrors.attachTo(session));
   }
 
-  async findByName(name: string): Promise<Session> {
-    const session = await this.sessionRepository.findOne({ where: { name } });
-    if (!session) {
-      throw new NotFoundException(`Session with name '${name}' not found`);
-    }
-    return session;
-  }
-
   /**
    * Project the opaque `config` column onto the three keys the engine actually reads, resolved
    * through the same clamp the engine uses — so a legacy row holding an out-of-range value reports

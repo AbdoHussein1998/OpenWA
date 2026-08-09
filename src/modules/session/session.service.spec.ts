@@ -687,7 +687,7 @@ describe('SessionService', () => {
     });
   });
 
-  // ── findAll / findOne / findByName ────────────────────────────────
+  // ── findAll / findOne ─────────────────────────────────────────────
 
   describe('findAll', () => {
     it('should return all sessions ordered by createdAt DESC', async () => {
@@ -887,22 +887,6 @@ describe('SessionService', () => {
 
       internals.engines.clear();
       internals.initializingSessions.clear();
-    });
-  });
-
-  describe('findByName', () => {
-    it('should return session by name', async () => {
-      const session = createMockSession();
-      (repository.findOne as jest.Mock).mockResolvedValue(session);
-
-      const result = await service.findByName('test-session');
-      expect(result.name).toBe('test-session');
-    });
-
-    it('should throw NotFoundException if name not found', async () => {
-      (repository.findOne as jest.Mock).mockResolvedValue(null);
-
-      await expect(service.findByName('nonexistent')).rejects.toThrow(NotFoundException);
     });
   });
 
