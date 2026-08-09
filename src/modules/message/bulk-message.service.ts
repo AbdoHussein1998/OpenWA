@@ -702,6 +702,8 @@ export class BulkMessageService implements OnApplicationBootstrap {
           : undefined,
       });
     } catch (error) {
+      // Losing the dedup race to the own-send echo is no longer an error here — saveOutgoingMessage
+      // merges onto the echo's row. Anything reaching this point is a real persistence fault.
       this.logger.warn(`Batch message persisted-after-send failed: ${String(error)}`);
     }
   }

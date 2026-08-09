@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A bulk media send lost its attachment when the engine echo won the persist race** — the batch write collided on `UNIQUE(sessionId, waMessageId)` and was swallowed into a warning, leaving only the echo's row, which on a Baileys API send carries a media-less marker; it now merges onto that row like the single-send path already did.
+
 - **Three shared status descriptions said the wrong thing on the routes that borrowed them** — `send-text`'s `501` is specifically a caller-supplied `customLinkPreview`, which only Baileys accepts, not a wholesale gap in the engine; `POST /channels/subscribe` takes an invite code and no channel id, so its `404` is an unresolvable invite; and the `400` on six send routes named the unreachable recipient as though it were the only cause, while omitting body validation and an inactive session, and cited a `404` meaning that four of those six routes do not declare.
 
 - **Four contract corrections from a review of this cycle's own work** — the `409` description said the session had no engine when the guard actually fires on an engine that exists but is not `ready` (an unstarted session answers `400`); `send-bulk` declared a `409` it cannot produce, since the batch drains after the handler has answered `202`; the nine catalog and status routes declared that `409` but not the `404` their own service throws for an unstarted session; and the logout example showed a null `pushName` and `connectedAt` beside a populated `lastActive`, though logout clears only `phone`.
