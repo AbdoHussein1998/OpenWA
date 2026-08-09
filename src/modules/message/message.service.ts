@@ -704,9 +704,10 @@ export class MessageService {
     } catch (persistError) {
       if (result.id && isUniqueConstraintError(persistError)) {
         // The engine's own-send echo (onMessageCreate) won the race and already persisted a row with
-        // this waMessageId. That row carries only a media-less marker — merge our SENT state AND our
-        // metadata (the actual media payload) onto it BEFORE dropping this redundant PENDING row, or
-        // the payload-bearing row is the one that gets deleted and the media is gone after a reload.
+        // this waMessageId. That row carries only what the engine reported — for a Baileys API send,
+        // a media-less marker — so merge our SENT state AND our metadata (the actual media payload)
+        // onto it BEFORE dropping this redundant PENDING row, or the payload-bearing row is the one
+        // that gets deleted and the media is gone after a reload.
         // Best-effort throughout: the send itself already succeeded.
         this.logger.debug(
           `Send echo already persisted ${result.id}; merging state and dropping the redundant pending row`,

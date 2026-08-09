@@ -3222,9 +3222,10 @@ describe('SessionService', () => {
       delete process.env.STORE_EPHEMERAL_MESSAGES;
     });
 
-    it('synthesizes the omitted media marker for a media echo carrying no media (wwjs shape)', async () => {
-      // wwjs' buildIncomingMessageBase never attaches media to the own-send echo; without the marker
-      // the dashboard renders an empty bubble and the by-type stats filter would skip the row.
+    it('synthesizes the omitted media marker for a media echo carrying no media field', async () => {
+      // A wwjs echo whose media download failed carries no media field at all — the sync
+      // buildIncomingMessageBase attaches none and the enrichment around it is best-effort. Without
+      // the marker the dashboard renders an empty bubble and the by-type stats filter would skip the row.
       const callbacks = await startAndCaptureCallbacks();
       (hookManager.execute as jest.Mock).mockImplementation((_e: string, data: unknown) =>
         Promise.resolve({ continue: true, data }),

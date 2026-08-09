@@ -724,8 +724,10 @@ export class BaileysEvents {
       return undefined;
     }
 
-    // The outbound "sent" echo passes skipMediaDownload: the sender already holds the media, and for
-    // parity with the wwjs message.sent (which carries no media buffer) we emit only the marker here.
+    // The outbound "sent" echo passes skipMediaDownload: the API caller already holds the media and
+    // the REST send path persists it, so re-downloading it here would buy nothing. This is where
+    // Baileys deliberately diverges from wwjs, whose echo does download the payload
+    // (wwebjs-message-events.ts) because a phone-composed send has no other source for it.
     if (skipMediaDownload || !isMediaDownloadEnabled()) {
       // Emit the omitted marker so the media field is present (webhook/n8n/dashboard contract).
       // mimetype is available pre-download from the message content.

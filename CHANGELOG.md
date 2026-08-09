@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Four contract corrections from a review of this cycle's own work** — the `409` description said the session had no engine when the guard actually fires on an engine that exists but is not `ready` (an unstarted session answers `400`); `send-bulk` declared a `409` it cannot produce, since the batch drains after the handler has answered `202`; the nine catalog and status routes declared that `409` but not the `404` their own service throws for an unstarted session; and the logout example showed a null `pushName` and `connectedAt` beside a populated `lastActive`, though logout clears only `phone`.
 
+- **Fifteen statements in the codebase that were not true** — comments, a test name and an architecture sketch still described the own-send echo by its pre-0.10.0 behaviour: that whatsapp-web.js echoes carry no media, that the engines are at parity in carrying none, and that the echo never writes the database.
+
 - **An API key's session allow-list showed ids that can never match** — `allowedSessions` is matched by exact equality against the session id, but the example was `['session-uuid-1', 'session-uuid-2']`, which would scope a key to nothing and deny every request. It now shows real UUIDs.
 
 - **Seven published examples showed values the API cannot produce** — a `sess_`-prefixed session id that `ParseUUIDPipe` rejects, two truncated UUIDs, a logout example missing the required `engineLoaded`, a readiness probe keyed on `database` rather than `mainDatabase`/`dataDatabase`, a `send-text` capability no engine declares, and the whatsapp-web.js id form on a Baileys-only route.

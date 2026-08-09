@@ -1146,7 +1146,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
     this.socket!.ev.on('messages.upsert', ({ messages }) => {
       for (const msg of messages) {
-        if (!msg.key.fromMe) this.callbacks.onMessage?.(this.toIncomingMessage(msg)); // neutral ids
+        const incoming = this.toIncomingMessage(msg); // neutral ids
+        // Own sends are not dropped: they route to onMessageCreate, which drives `message.sent`.
+        if (msg.key.fromMe) this.callbacks.onMessageCreate?.(incoming);
+        else this.callbacks.onMessage?.(incoming);
       }
     });
   }
