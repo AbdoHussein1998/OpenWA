@@ -35,6 +35,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { RequireRole, CurrentApiKey, SessionScoped, RequireUnscopedKey } from '../auth/decorators/auth.decorators';
 import { ApiKey, ApiKeyRole } from '../auth/entities/api-key.entity';
+import { ENGINE_NOT_READY_409 } from '../../common/openapi/engine-status-responses';
 
 @ApiTags('sessions')
 @Controller('sessions')
@@ -340,6 +341,7 @@ export class SessionController {
     description: 'QR code not ready or session already authenticated',
   })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async getQRCode(@Param('id', ParseUUIDPipe) id: string): Promise<QRCodeResponseDto> {
     const qrCode = await this.sessionService.getQRCode(id);
     await this.auditService.logInfo(AuditAction.SESSION_QR_GENERATED, {
@@ -355,6 +357,7 @@ export class SessionController {
   @ApiResponse({ status: 201, description: 'Pairing code generated', type: PairingCodeResponseDto })
   @ApiResponse({ status: 400, description: 'Session not started or already authenticated' })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async requestPairingCode(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RequestPairingCodeDto,
@@ -378,6 +381,7 @@ export class SessionController {
       'the engine returns the same empty value for "you are in no groups", and a caller cannot tell ' +
       'those apart from the body.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiQuery({ name: 'limit', required: false, description: 'Max groups to return (1–1000, default 1000)' })
   @ApiQuery({ name: 'offset', required: false, description: 'Number of groups to skip (for paging)' })
   async getGroups(
@@ -397,6 +401,7 @@ export class SessionController {
   @ApiResponse({ status: 200, description: 'List of active chats (most recent first)', type: [ChatSummaryDto] })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiQuery({ name: 'limit', required: false, description: 'Max chats to return (1–1000, default 1000)' })
   @ApiQuery({ name: 'offset', required: false, description: 'Number of chats to skip (for paging)' })
   async getChats(
@@ -424,6 +429,7 @@ export class SessionController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async markChatRead(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: MarkChatReadDto,
@@ -452,6 +458,7 @@ export class SessionController {
   @ApiResponse({ status: 400, description: 'Session not started' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 501, description: 'The active engine cannot observe presence (whatsapp-web.js)' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async subscribeToPresence(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SubscribePresenceDto,
@@ -498,6 +505,7 @@ export class SessionController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async markChatUnread(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: MarkChatReadDto,
@@ -526,6 +534,7 @@ export class SessionController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async clearChatMessages(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('chatId') chatId: string,
@@ -553,6 +562,7 @@ export class SessionController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async archiveChat(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ArchiveChatDto,
@@ -575,6 +585,7 @@ export class SessionController {
       'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
       'the gateway stopped waiting for a confirmation that never came.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async deleteChat(@Param('id', ParseUUIDPipe) id: string, @Body() dto: DeleteChatDto): Promise<{ success: boolean }> {
     const success = await this.sessionService.deleteChat(id, dto.chatId);
     return { success };
@@ -587,6 +598,7 @@ export class SessionController {
   @ApiParam({ name: 'id', description: 'Session ID' })
   @ApiResponse({ status: 200, description: 'Presence sent' })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendChatState(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SendChatStateDto,

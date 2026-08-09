@@ -7,6 +7,11 @@ import { CreateChannelDto } from './dto/create-channel.dto';
 import { MuteChannelDto } from './dto/mute-channel.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
+import {
+  CHANNEL_NOT_FOUND_404,
+  ENGINE_NOT_READY_409,
+  ENGINE_REFUSED_403,
+} from '../../common/openapi/engine-status-responses';
 
 @ApiTags('channels')
 @Controller('sessions/:sessionId/channels')
@@ -22,6 +27,7 @@ export class ChannelController {
     status: 501,
     description: 'Not supported by the active engine: the Baileys adapter cannot list subscribed channels.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async findAll(@Param('sessionId') sessionId: string) {
     return this.channelService.getSubscribedChannels(sessionId);
   }
@@ -36,6 +42,7 @@ export class ChannelController {
     description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
   })
   @ApiResponse({ status: 404, description: 'Channel not found' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async findOne(@Param('sessionId') sessionId: string, @Param('channelId') channelId: string) {
     return this.channelService.getChannelById(sessionId, channelId);
   }
@@ -55,6 +62,8 @@ export class ChannelController {
     status: 501,
     description: 'Not supported by the active engine: the Baileys adapter cannot read channel messages.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 404, description: CHANNEL_NOT_FOUND_404 })
   async getMessages(
     @Param('sessionId') sessionId: string,
     @Param('channelId') channelId: string,
@@ -80,6 +89,7 @@ export class ChannelController {
   @ApiResponse({ status: 201, description: 'The created channel', type: ChannelDto })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
   @ApiResponse({ status: 403, description: 'The engine refused — channel creation may be disabled for this account' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async create(@Param('sessionId') sessionId: string, @Body() dto: CreateChannelDto) {
     return this.channelService.createChannel(sessionId, dto.name, dto.description);
   }
@@ -103,6 +113,7 @@ export class ChannelController {
   })
   @ApiResponse({ status: 400, description: 'Session not started' })
   @ApiResponse({ status: 403, description: 'The engine refused — not found, or this account does not own it' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async remove(
     @Param('sessionId') sessionId: string,
     @Param('channelId') channelId: string,
@@ -128,6 +139,8 @@ export class ChannelController {
   })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
   @ApiResponse({ status: 403, description: 'The engine refused' })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 404, description: CHANNEL_NOT_FOUND_404 })
   async mute(
     @Param('sessionId') sessionId: string,
     @Param('channelId') channelId: string,
@@ -163,6 +176,8 @@ export class ChannelController {
     status: 501,
     description: 'Not supported by the active engine: whatsapp-web.js cannot subscribe by invite code.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 404, description: CHANNEL_NOT_FOUND_404 })
   async subscribe(@Param('sessionId') sessionId: string, @Body() body: SubscribeChannelDto) {
     return this.channelService.subscribeToChannel(sessionId, body.inviteCode);
   }
@@ -177,6 +192,8 @@ export class ChannelController {
     status: 503,
     description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
   })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
   async unsubscribe(@Param('sessionId') sessionId: string, @Param('channelId') channelId: string) {
     await this.channelService.unsubscribeFromChannel(sessionId, channelId);
     return { success: true };
