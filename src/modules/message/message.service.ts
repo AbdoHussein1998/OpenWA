@@ -615,6 +615,12 @@ export class MessageService {
    * Save outgoing message to database.
    * When called before sending, creates a record with PENDING status; bulk send reuses this after a
    * successful send (status SENT) so batch messages are persisted like single sends.
+   *
+   * A caller that already knows the engine id races the own-send echo on
+   * UNIQUE(sessionId, waMessageId) — only the bulk path does today, since every single send persists
+   * its PENDING row before the id exists. Losing that race merges onto the echo's row rather than
+   * failing, mirroring `persistSentState`: the echo carries only what the engine reported (for a
+   * Baileys API send, a media-less marker), so dropping this write would lose the media payload.
    */
   async saveOutgoingMessage(
     sessionId: string,
@@ -648,7 +654,22 @@ export class MessageService {
       status: data.status ?? MessageStatus.PENDING,
       metadata: data.metadata,
     });
-    const saved = await this.messageRepository.save(message);
+    const saved = await this.messageRepository.save(message).catch(async (err: unknown) => {
+      const waMessageId = message.waMessageId;
+      if (!waMessageId || !isUniqueConstraintError(err)) throw err;
+      const patch: QueryDeepPartialEntity<Message> = {
+        status: message.status,
+        timestamp: message.timestamp,
+      };
+      // Only when this write actually carries metadata: a text item must not blank the echo's.
+      if (message.metadata) {
+        patch.metadata = message.metadata as QueryDeepPartialEntity<Record<string, unknown>>;
+      }
+      await this.messageRepository.update({ sessionId, waMessageId }, patch);
+      const surviving = await this.messageRepository.findOne({ where: { sessionId, waMessageId } });
+      if (!surviving) throw err;
+      return surviving;
+    });
     this.emitPersisted(sessionId, saved);
     return saved;
   }

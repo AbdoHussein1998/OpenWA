@@ -1482,6 +1482,64 @@ describe('MessageService', () => {
     });
   });
 
+  // The bulk path persists AFTER the send with the engine id already known, so it races the own-send
+  // echo on UNIQUE(sessionId, waMessageId). Losing that race used to drop the batch's media payload.
+  describe('saveOutgoingMessage vs the own-send echo (dedup race)', () => {
+    const uniqueViolation = new Error('UNIQUE constraint failed: messages.sessionId, messages.waMessageId');
+    const bulkRow = {
+      waMessageId: 'wa-bulk-1',
+      chatId: '621@c.us',
+      type: 'image',
+      status: MessageStatus.SENT,
+      timestamp: 1706868000,
+      metadata: { media: { mimetype: 'image/png', data: 'QUJD', filename: 'a.png' } },
+    };
+
+    it('merges the media payload onto the echo row instead of losing it', async () => {
+      (repository.save as jest.Mock).mockRejectedValueOnce(uniqueViolation);
+      (repository.findOne as jest.Mock).mockResolvedValueOnce({ id: 'echo-row', ...bulkRow });
+
+      const saved = await service.saveOutgoingMessage('sess-1', bulkRow);
+
+      expect(repository.update).toHaveBeenCalledWith(
+        { sessionId: 'sess-1', waMessageId: 'wa-bulk-1' },
+        expect.objectContaining({
+          status: MessageStatus.SENT,
+          timestamp: 1706868000,
+          metadata: bulkRow.metadata,
+        }),
+      );
+      expect(saved).toEqual(expect.objectContaining({ id: 'echo-row' }));
+    });
+
+    it('leaves the echo row metadata alone when this write carries none', async () => {
+      (repository.save as jest.Mock).mockRejectedValueOnce(uniqueViolation);
+      (repository.findOne as jest.Mock).mockResolvedValueOnce({ id: 'echo-row' });
+
+      await service.saveOutgoingMessage('sess-1', { ...bulkRow, type: 'text', metadata: undefined });
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const patch = (repository.update as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>;
+      expect(patch).not.toHaveProperty('metadata');
+    });
+
+    it('rethrows a transient (non-unique) persist error', async () => {
+      (repository.save as jest.Mock).mockRejectedValueOnce(new Error('SQLITE_BUSY: database is locked'));
+
+      await expect(service.saveOutgoingMessage('sess-1', bulkRow)).rejects.toThrow('SQLITE_BUSY');
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it('rethrows when there is no engine id to merge onto', async () => {
+      (repository.save as jest.Mock).mockRejectedValueOnce(uniqueViolation);
+
+      await expect(service.saveOutgoingMessage('sess-1', { chatId: '621@c.us', type: 'text' })).rejects.toThrow(
+        uniqueViolation,
+      );
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('persistSentState vs the own-send echo (dedup race)', () => {
     it('merges state onto the echo row, then drops the redundant PENDING row', async () => {
       // The engine's message_create echo (onMessageCreate) won the insert race, so the SENT-state save
