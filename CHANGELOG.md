@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An onboarding modal the detector does not recognise now shows up in the logs instead of failing silently** — when the "What's new" probe finds nothing to click, the watcher reports the visible dialog's heading and confirm-button labels once per distinct dialog (`action: onboarding_dialog_unrecognized`), so a renamed or localised modal can be covered via `WWEBJS_ONBOARDING_CONTINUE_LABELS` before WhatsApp unlinks the companion. The watcher also logs when it arms and a summary when it stops at its lifetime cap (both debug). Refs #1072.
+
 ## [0.15.0] - 2026-08-09
 
 ### Added
