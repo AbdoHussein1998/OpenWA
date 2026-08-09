@@ -1512,6 +1512,23 @@ describe('MessageService', () => {
       expect(saved).toEqual(expect.objectContaining({ id: 'echo-row' }));
     });
 
+    it('does not overwrite the echo row’s downloaded bytes with a URL pointer', async () => {
+      // A wwjs echo carries the media it downloaded; a URL-based send carries only the URL string.
+      // Merging ours over theirs would discard bytes the gateway already holds — and leave a row
+      // the archive cannot use.
+      (repository.save as jest.Mock).mockRejectedValueOnce(uniqueViolation);
+      (repository.findOne as jest.Mock).mockResolvedValueOnce({ id: 'echo-row' });
+
+      await service.saveOutgoingMessage('sess-1', {
+        ...bulkRow,
+        metadata: { media: { mimetype: 'image/png', data: 'https://example.com/cat.png' } },
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const patch = (repository.update as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>;
+      expect(patch).not.toHaveProperty('metadata');
+    });
+
     it('leaves the echo row metadata alone when this write carries none', async () => {
       (repository.save as jest.Mock).mockRejectedValueOnce(uniqueViolation);
       (repository.findOne as jest.Mock).mockResolvedValueOnce({ id: 'echo-row' });
@@ -1571,6 +1588,18 @@ describe('MessageService', () => {
       const patch = (repository.update as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown> | undefined;
       expect((patch?.metadata as { media?: { data?: string } } | undefined)?.media?.data).toBe('QUJD');
       expect(repository.delete).toHaveBeenCalledWith({ id: 'msg-uuid-1' });
+    });
+
+    it('keeps the echo row’s downloaded bytes rather than merging a URL pointer over them', async () => {
+      (repository.save as jest.Mock)
+        .mockImplementationOnce(msg => Promise.resolve(msg))
+        .mockRejectedValueOnce(new Error('UNIQUE constraint failed: messages.sessionId, messages.waMessageId'));
+
+      await service.sendImage('sess-1', { chatId: '621@c.us', url: 'https://example.com/cat.png' });
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const patch = (repository.update as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+      expect(patch).not.toHaveProperty('metadata');
     });
 
     it('does NOT delete anything on a transient (non-unique) persist error', async () => {
@@ -1685,6 +1714,71 @@ describe('MessageService', () => {
     ])('404s when the row outlived its file (%s)', async (_label, err) => {
       const svc = build(archived('image/png'), { getFile: jest.fn().mockRejectedValue(err) });
       await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).rejects.toThrow(NotFoundException);
+    });
+
+    // ── outbound archiving (CHAT_MEDIA_ARCHIVE_OUTBOUND) ─────────────
+
+    describe('archiving media this account sent', () => {
+      const withFlag = (archiveOutbound: boolean, archive: { archive: jest.Mock }): MessageService =>
+        new MessageService(
+          repository as Repository<Message>,
+          sessionService as unknown as SessionService,
+          engines,
+          messageProjector as unknown as MessageProjector,
+          hookManager as HookManager,
+          templateService as unknown as TemplateService,
+          lidMappingStore as unknown as LidMappingStoreService,
+          inertPacing(),
+          {
+            get: (key: string, fallback?: unknown) =>
+              key === 'chatMedia.archiveOutbound' ? archiveOutbound : fallback,
+          } as never,
+          archive as never,
+          undefined,
+        );
+
+      it('archives a SENT outbound row when the flag is on', async () => {
+        const archive = { archive: jest.fn().mockResolvedValue('chat-media/k') };
+        const svc = withFlag(true, archive);
+
+        await svc.saveOutgoingMessage('sess-1', {
+          waMessageId: 'wa-1',
+          chatId: '621@c.us',
+          type: 'image',
+          status: MessageStatus.SENT,
+          metadata: { media: { mimetype: 'image/png', data: 'QUJD' } },
+        });
+
+        expect(archive.archive).toHaveBeenCalledWith(expect.objectContaining({ waMessageId: 'wa-1' }));
+      });
+
+      it('archives nothing while the flag is off', async () => {
+        const archive = { archive: jest.fn() };
+        const svc = withFlag(false, archive);
+
+        await svc.saveOutgoingMessage('sess-1', {
+          waMessageId: 'wa-1',
+          chatId: '621@c.us',
+          type: 'image',
+          status: MessageStatus.SENT,
+          metadata: { media: { mimetype: 'image/png', data: 'QUJD' } },
+        });
+
+        expect(archive.archive).not.toHaveBeenCalled();
+      });
+
+      it('never archives a PENDING row — the merge may delete it and the reaper may rewrite it', async () => {
+        const archive = { archive: jest.fn() };
+        const svc = withFlag(true, archive);
+
+        await svc.saveOutgoingMessage('sess-1', {
+          chatId: '621@c.us',
+          type: 'image',
+          metadata: { media: { mimetype: 'image/png', data: 'QUJD' } },
+        });
+
+        expect(archive.archive).not.toHaveBeenCalled();
+      });
     });
 
     it('does not swallow a genuine storage fault as a 404', async () => {

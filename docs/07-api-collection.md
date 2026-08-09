@@ -314,9 +314,9 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/unpin" \
 
 #### GET /api/sessions/:sessionId/messages/:chatId/:messageId/media
 
-Download a message's stored media: the archived file when one exists
-(`CHAT_MEDIA_ARCHIVE_ENABLED=true` when the message arrived), else the inline copy on the message
-row — which covers media sent by this account; `404` when neither holds bytes.
+Download a message's stored media: the archived file when one exists (`CHAT_MEDIA_ARCHIVE_ENABLED`,
+plus `CHAT_MEDIA_ARCHIVE_OUTBOUND` for media this account sent), else the inline copy on the message
+row — which covers media sent by this account either way; `404` when neither holds bytes.
 
 ```bash
 curl "$BASE/api/sessions/$SESSION_ID/messages/628123456789@c.us/true_628123456789@c.us_3EB0ABCD/media" \

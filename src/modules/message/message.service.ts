@@ -52,6 +52,17 @@ function inertMimetype(mimetype: string): string {
 }
 
 /**
+ * True when this write's media is only a remote-URL pointer (a URL-based send, whose bytes the
+ * engine fetches and discards). Merging such metadata onto an echo row would REPLACE bytes the
+ * gateway already downloaded — wwjs enriches its own-send echo with the real payload — leaving a
+ * row that renders as a bare marker and that the archive cannot use.
+ */
+function isUrlPointerMetadata(metadata: Record<string, unknown> | undefined): boolean {
+  const data = (metadata as { media?: { data?: unknown } } | undefined)?.media?.data;
+  return typeof data === 'string' && /^https?:\/\//i.test(data);
+}
+
+/**
  * Outbound sends are executed directly against the WhatsApp engine, not via a BullMQ queue.
  *
  * The engine is single-threaded per session (a Puppeteer page for the whatsapp-web.js adapter, a
@@ -661,8 +672,9 @@ export class MessageService {
         status: message.status,
         timestamp: message.timestamp,
       };
-      // Only when this write actually carries metadata: a text item must not blank the echo's.
-      if (message.metadata) {
+      // Only when this write actually carries metadata worth merging: a text item must not blank
+      // the echo's, and a URL pointer must not replace bytes the engine already downloaded.
+      if (message.metadata && !isUrlPointerMetadata(message.metadata)) {
         patch.metadata = message.metadata as QueryDeepPartialEntity<Record<string, unknown>>;
       }
       await this.messageRepository.update({ sessionId, waMessageId }, patch);
@@ -680,10 +692,23 @@ export class MessageService {
   // transition (SENT / FAILED / merge) — so a provider's copy never stays stuck at PENDING (#906).
   // The payload is a shallow snapshot: the same entity instance is mutated as the send progresses
   // (PENDING → SENT/FAILED), and fire-and-forget execution must still see the state at emission time.
+  //
+  // Outbound archiving rides the same chokepoint rather than a call at each of the four persist
+  // sites: every terminal state of an outbound row passes here. Gated on SENT because a PENDING row
+  // may still be deleted by the dedup merge or rewritten by the pending reaper, and a FAILED one has
+  // had its payload stripped — archiving either would strand a file the row never points at.
   private emitPersisted(sessionId: string, message: Message): void {
     void this.hookManager
       .execute('message:persisted', { sessionId, message: { ...message } }, { sessionId, source: 'MessageService' })
       .catch(() => undefined);
+    if (message.status === MessageStatus.SENT && this.archiveOutboundEnabled) {
+      void this.chatMediaArchive?.archive(message).catch(() => undefined);
+    }
+  }
+
+  /** Whether media this account sent is archived too — a sub-flag of the archive itself. */
+  private get archiveOutboundEnabled(): boolean {
+    return this.configService?.get<boolean>('chatMedia.archiveOutbound', false) === true;
   }
 
   /**
@@ -737,7 +762,7 @@ export class MessageService {
           },
         );
         const patch: QueryDeepPartialEntity<Message> = { status: MessageStatus.SENT, timestamp: result.timestamp };
-        if (message.metadata) {
+        if (message.metadata && !isUrlPointerMetadata(message.metadata)) {
           patch.metadata = message.metadata as QueryDeepPartialEntity<Record<string, unknown>>;
         }
         await this.messageRepository
@@ -801,7 +826,8 @@ export class MessageService {
     chatId: string,
     messageId: string,
   ): Promise<{ buffer: Buffer; mimetype: string }> {
-    const media = await this.chatMediaArchive?.getMedia(sessionId, chatId, messageId);
+    const chatIds = this.resolveJidCandidates(chatId);
+    const media = await this.chatMediaArchive?.getMedia(sessionId, chatIds, messageId);
     if (media && this.storageService) {
       try {
         return { buffer: await this.storageService.getFile(media.path), mimetype: inertMimetype(media.mimetype) };
@@ -818,7 +844,7 @@ export class MessageService {
     // chatId (REST persist) or the engine-neutral form (own-send echo) depending on which writer
     // won the persist race, so a literal match would 404 on half the rows this fallback exists for.
     const row = await this.messageRepository.findOne({
-      where: { sessionId, chatId: In(this.resolveJidCandidates(chatId)), waMessageId: messageId },
+      where: { sessionId, chatId: In(chatIds), waMessageId: messageId },
     });
     const inline = (row?.metadata as { media?: { data?: unknown; mimetype?: unknown; omitted?: unknown } })?.media;
     if (

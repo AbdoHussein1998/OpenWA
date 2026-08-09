@@ -37,6 +37,9 @@ function extFromMimetype(mimetype: string): string {
   return MIME_SUBTYPE_EXT_OVERRIDES[subtype] ?? subtype;
 }
 
+/** `metadata.media.data` holding a remote URL (a URL-based send) rather than base64 bytes. */
+const MEDIA_URL_POINTER = /^https?:\/\//i;
+
 /** The inline media shape carried on a persisted row's `metadata.media`. */
 interface InlineMedia {
   mimetype?: string;
@@ -121,11 +124,20 @@ export class ChatMediaArchiveService implements OnModuleInit, OnModuleDestroy {
    * Never throws: archiving is a side benefit of receiving a message, and a storage hiccup must not
    * surface on the receive path. Returns the storage key when a file was written.
    */
-  async archive(row: Pick<Message, 'id' | 'sessionId' | 'metadata'>): Promise<string | null> {
+  async archive(row: Pick<Message, 'id' | 'sessionId' | 'metadata' | 'mediaPath'>): Promise<string | null> {
     if (!this.enabled) return null;
+    // Outbound rows have two possible writers (the REST/bulk persist and the engine echo), so the
+    // same row can reach here twice. A second write would leave the first file referenced by
+    // nothing but still inside the grace window — work and storage for no gain.
+    if (row.mediaPath) return null;
 
     const media = (row.metadata as { media?: InlineMedia } | null | undefined)?.media;
     if (!media?.data || media.omitted || !media.mimetype) return null;
+    // A URL-based send stores the URL STRING as `data`, not bytes. `Buffer.from(url, 'base64')`
+    // does not throw — it yields ~18 bytes of noise — and the read endpoint consults the archive
+    // BEFORE the inline copy, so archiving one would serve garbage in place of the correct 404.
+    // Same discriminator the send path and the export controller already apply to this value.
+    if (MEDIA_URL_POINTER.test(media.data)) return null;
 
     const maxBytes = this.configService.get<number>('chatMedia.maxBytes', DEFAULT_ARCHIVE_MAX_BYTES);
     const sizeBytes = media.sizeBytes ?? Buffer.byteLength(media.data, 'base64');
@@ -165,10 +177,13 @@ export class ChatMediaArchiveService implements OnModuleInit, OnModuleDestroy {
    */
   async getMedia(
     sessionId: string,
-    chatId: string,
+    chatIds: string[],
     waMessageId: string,
   ): Promise<{ path: string; mimetype: string } | null> {
-    const row = await this.repository.findOne({ where: { sessionId, chatId, waMessageId } });
+    // Candidates rather than one id: an outbound row stores the caller's literal chatId or the
+    // engine-neutral form depending on which writer won the persist race. The caller owns the
+    // dialect resolution (it holds the lid table), so this only has to match any of them.
+    const row = await this.repository.findOne({ where: { sessionId, chatId: In(chatIds), waMessageId } });
     if (!row?.mediaPath || !row.mediaMimetype) return null;
     return { path: row.mediaPath, mimetype: row.mediaMimetype };
   }
