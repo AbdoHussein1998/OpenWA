@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { BadRequestException, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { MessageService } from './message.service';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
@@ -1649,7 +1649,36 @@ describe('MessageService', () => {
         mimetype: 'image/jpeg',
       });
       expect(repository.findOne).toHaveBeenCalledWith({
-        where: { sessionId: 'sess-1', chatId: 'c@c.us', waMessageId: 'wa-1' },
+        where: { sessionId: 'sess-1', chatId: In(['c@c.us', 'c@s.whatsapp.net']), waMessageId: 'wa-1' },
+      });
+    });
+
+    it('looks the row up across chatId dialects — outbound rows store the literal or the neutral form by race', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        inlineRow({ mimetype: 'image/jpeg', data: Buffer.from('SENT').toString('base64') }),
+      );
+      const svc = build(noArchive(), storage());
+      await expect(svc.getChatMedia('sess-1', '628123456789@s.whatsapp.net', 'wa-1')).resolves.toEqual({
+        buffer: Buffer.from('SENT'),
+        mimetype: 'image/jpeg',
+      });
+      expect(repository.findOne).toHaveBeenCalledWith({
+        where: {
+          sessionId: 'sess-1',
+          chatId: In(['628123456789@s.whatsapp.net', '628123456789@c.us']),
+          waMessageId: 'wa-1',
+        },
+      });
+    });
+
+    it('prefers the archived file over the inline copy when both exist', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        inlineRow({ mimetype: 'image/png', data: Buffer.from('INLINE').toString('base64') }),
+      );
+      const svc = build(archived('image/png'), storage(Buffer.from('ARCHIVE-BYTES')));
+      await expect(svc.getChatMedia('sess-1', 'c@c.us', 'wa-1')).resolves.toEqual({
+        buffer: Buffer.from('ARCHIVE-BYTES'),
+        mimetype: 'image/png',
       });
     });
 
