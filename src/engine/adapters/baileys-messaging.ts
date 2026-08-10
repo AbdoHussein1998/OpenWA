@@ -3,6 +3,7 @@ import type * as BaileysLib from '@whiskeysockets/baileys';
 import type { AnyMessageContent, MiscMessageGenerationOptions, WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { generateSafeLinkPreview } from './safe-link-preview';
 import {
+  CallLinkType,
   CustomLinkPreview,
   ChatState,
   ContactCard,
@@ -325,6 +326,28 @@ export class BaileysMessaging {
       caption: media.caption,
       ...this.withMentions(media.mentions),
     });
+  }
+
+  async createCallLink(type: CallLinkType, startTime: number): Promise<string> {
+    this.host.ensureReady();
+    const lib = await this.host.loadLib();
+    // The socket resolves only the bare `token` attribute of the `link_create` node; the finished
+    // link is that token behind one of the library's two exported prefixes. Note the audio prefix
+    // WhatsApp itself uses is `/voice/`, which is also what whatsapp-web.js calls the same thing.
+    //
+    // timeoutMs is passed so the library can retire its own pending query, and the call is ALSO
+    // wrapped: baileys' query() swallows its timeout, so an unanswered request would otherwise
+    // resolve to nothing and be indistinguishable from a refusal.
+    const token = await this.confirmed(
+      this.sock().createCallLink(type, { startTime: Math.floor(startTime / 1000) }, this.queryBudgetMs),
+      'the call link',
+    );
+    if (!token) {
+      // A prefix with nothing after it is a dead link that looks like a real one — the caller would
+      // hand it to a user and only find out then.
+      throw new EngineRefusedError('WhatsApp did not return a call link');
+    }
+    return `${type === 'video' ? lib.CALL_VIDEO_PREFIX : lib.CALL_AUDIO_PREFIX}${token}`;
   }
 
   async sendStickerMessage(chatId: string, media: MediaInput): Promise<MessageResult> {

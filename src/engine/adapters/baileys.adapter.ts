@@ -11,6 +11,7 @@ import { BaileysLifecycle } from './baileys-lifecycle';
 import { BaileysMessaging } from './baileys-messaging';
 import { BaileysStatus } from './baileys-status';
 import {
+  CallLinkType,
   ChatState,
   Channel,
   ChannelMessage,
@@ -749,6 +750,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
   /* eslint-enable @typescript-eslint/no-unused-vars */
 
   // ----- Events -----
+
+  createCallLink(type: CallLinkType, startTime: number): Promise<string> {
+    return this.messaging.createCallLink(type, startTime);
+  }
 
   async rejectCall(callId: string): Promise<void> {
     return this.events.rejectCall(callId);

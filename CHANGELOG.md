@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An onboarding modal the "What's new" probe does not recognise is now logged once with its heading and confirm-button labels (`onboarding_dialog_unrecognized`), so it can be covered via `WWEBJS_ONBOARDING_CONTINUE_LABELS` before WhatsApp unlinks the companion. Refs #1072.
 - `npm run check:sdk-events` compares each typed SDK's webhook event list to the contract, so an event the gateway accepts can no longer be missing from the SDKs.
 - `npm run check:sdk-docs` compares the SDK design doc and the coverage tables to the shipped client surface, so a client method can no longer ship undocumented.
+- `POST /sessions/:sessionId/calls/link` generates a shareable WhatsApp call link on both engines, returning the finished `https://call.whatsapp.com/…` URL; a WhatsApp-side failure answers `403` rather than a success carrying an empty link.
 
 ### Fixed
 

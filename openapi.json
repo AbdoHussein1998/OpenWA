@@ -5903,6 +5903,60 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/calls/link": {
+      "post": {
+        "operationId": "CallController_createLink",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCallLinkDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The generated link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallLinkResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Session is not started, or an invalid type / startTime"
+          },
+          "403": {
+            "description": "WhatsApp generated no link for this request"
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The link may or may not have been created — the gateway stopped waiting for a reply that never came."
+          }
+        },
+        "summary": "Generate a shareable WhatsApp call link",
+        "tags": [
+          "calls"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/calls/{callId}/reject": {
       "post": {
         "operationId": "CallController_reject",
@@ -13212,6 +13266,42 @@
             "example": "image/jpeg"
           }
         }
+      },
+      "CreateCallLinkDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Which kind of call the link opens. WhatsApp's own URL path for `audio` is `/voice/`.",
+            "enum": [
+              "audio",
+              "video"
+            ],
+            "example": "video"
+          },
+          "startTime": {
+            "type": "number",
+            "description": "Absolute epoch-MILLISECONDS timestamp the call is scheduled to start at. Required: whatsapp-web.js generates an event-linked call and has no notion of \"no start time\", so a link for right now is `Date.now()` rather than an omitted field.",
+            "example": 1800000000000
+          }
+        },
+        "required": [
+          "type",
+          "startTime"
+        ]
+      },
+      "CallLinkResponseDto": {
+        "type": "object",
+        "properties": {
+          "link": {
+            "type": "string",
+            "description": "The shareable WhatsApp call link.",
+            "example": "https://call.whatsapp.com/video/XxXxXxXxXxXxXx"
+          }
+        },
+        "required": [
+          "link"
+        ]
       },
       "CallAckResponseDto": {
         "type": "object",

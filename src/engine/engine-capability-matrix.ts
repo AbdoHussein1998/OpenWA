@@ -284,6 +284,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       "same shapes as approveGroupMembershipRequests with the 'Reject' page action (wwjs Client.js:3044) / the 'reject' update action (baileys groups.js:116-139)",
   },
+  createCallLink: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'baileys createCallLink(type, {startTime}, timeoutMs) (Socket/chats.d.ts:17) resolves the bare link_create token (Socket/chats.js:586-603), assembled behind CALL_VIDEO_PREFIX / CALL_AUDIO_PREFIX (Defaults/index.d.ts:5-6); wwjs Client.createCallLink(startTime, callType) (index.d.ts:342) resolves the finished link or an empty string (Client.js:3212-3235)',
+  },
   rejectCall: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },

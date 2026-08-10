@@ -3,7 +3,7 @@
 Three-way comparison of every capability: the **Baileys library** (`@whiskeysockets/baileys`
 7.0.0-rc13), the **whatsapp-web.js library** (1.34.7), and what **OpenWA actually exposes** through
 its adapter layer and REST API — including which "supported" cells only work because OpenWA patches
-the installed library. Coverage is total: all 107 `IWhatsAppEngine` methods (29.4), **all 152
+the installed library. Coverage is total: all 108 `IWhatsAppEngine` methods (29.4), **all 152
 Baileys + 81 whatsapp-web.js library methods** (29.5), all 34 + 31 library events (29.5.4), and all
 5 install-time patches (29.3). If it exists upstream or in OpenWA, it has a row here.
 
@@ -24,7 +24,7 @@ Statuses used in the tables:
 
 Two complementary views:
 
-- **29.4 — the OpenWA contract view.** Rows are the 107 `IWhatsAppEngine` methods; use it to see
+- **29.4 — the OpenWA contract view.** Rows are the 108 `IWhatsAppEngine` methods; use it to see
   what a REST caller gets per engine. Source of truth: `src/engine/engine-capability-matrix.ts`
   (per-cell `evidence` strings cite the exact library `file:symbol` inspected).
 - **29.5 — the full engine inventory.** Rows are **every method the installed libraries expose**,
@@ -36,14 +36,14 @@ Two complementary views:
 ## 29.2 Adapter architecture
 
 OpenWA never calls a WhatsApp library directly from a controller. Every session owns one engine
-instance behind the neutral `IWhatsAppEngine` interface (107 methods +
+instance behind the neutral `IWhatsAppEngine` interface (108 methods +
 `EngineEventCallbacks`), and all modules go through it:
 
 ```mermaid
 flowchart LR
     subgraph OpenWA["OpenWA"]
         API["REST API controllers"] --> SVC["Modules / services"]
-        SVC --> IF["IWhatsAppEngine - 107 methods"]
+        SVC --> IF["IWhatsAppEngine - 108 methods"]
         IF --> WA["WwebjsAdapter"]
         IF --> BA["BaileysAdapter"]
         SVC --> STORE["OpenWA-side stores"]
@@ -156,7 +156,7 @@ Rows that are ✅ on **both** engines where one side is patch-dependent: `initia
 rests on the column-wide 🔧¹ (wwjs) and 🔧⁵ (baileys) — no row runs on stock library code on both
 sides.
 
-## 29.4 Full capability matrix — the OpenWA contract view (107 methods)
+## 29.4 Full capability matrix — the OpenWA contract view (108 methods)
 
 Legend recap: **✅** supported · **✅🔧ⁿ** supported via OpenWA patch `🔧ⁿ` (29.3) ·
 **❌ gap** adapter-gap · **❌ lib** library-limitation. Column headers carry the engine-wide
@@ -335,10 +335,11 @@ answers 501.
 | --------------------- | ------------------- | ------------------ | --------------- |
 | `subscribeToPresence` | ✅                  | ❌ lib             | ⚠️ baileys only |
 | `rejectCall`          | ✅                  | ✅                 | ✅              |
+| `createCallLink`      | ✅                  | ✅                 | ✅              |
 
-**Totals:** 107 methods → 214 adapter cells: **192 ✅, 22 ❌** (2 adapter-gaps, 20
-library-limitations, 0 uncertain) across 21 methods. From the REST caller's side: **88** methods
-work on any engine (86 fully supported + 2 store-backed status reads), **9** are Baileys-only,
+**Totals:** 108 methods → 216 adapter cells: **194 ✅, 22 ❌** (2 adapter-gaps, 20
+library-limitations, 0 uncertain) across 21 methods. From the REST caller's side: **89** methods
+work on any engine (87 fully supported + 2 store-backed status reads), **9** are Baileys-only,
 **9** are wwjs-only (the 2 store-backed rows excluded), **1** (`sendCatalog`) is 501 on both.
 
 ## 29.5 Full engine method inventory — every library method, mapped to OpenWA
@@ -531,7 +532,7 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 | Library method           | OpenWA exposure                           |
 | ------------------------ | ----------------------------------------- |
 | `addOrEditContact`       | ✅ `upsertContact`                        |
-| `createCallLink`         | ❌ **not exposed**                        |
+| `createCallLink`         | ✅ `createCallLink`                       |
 | `presenceSubscribe`      | ✅ `subscribeToPresence`                  |
 | `removeContact`          | ✅ `deleteContact`                        |
 | `removeCoverPhoto`       | ❌ **not exposed**                        |
@@ -703,9 +704,9 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 
 **Misc** (1)
 
-| Library method   | OpenWA exposure    |
-| ---------------- | ------------------ |
-| `createCallLink` | ❌ **not exposed** |
+| Library method   | OpenWA exposure     |
+| ---------------- | ------------------- |
+| `createCallLink` | ✅ `createCallLink` |
 
 ### 29.5.3 Supported by BOTH libraries — missing only in OpenWA
 
@@ -713,12 +714,11 @@ The highest-value backlog: capabilities with first-class symbols on **both** eng
 new `IWhatsAppEngine` method wires both adapters at once. All cross-checked against the installed
 `.d.ts` files.
 
-| Capability                 | Baileys symbol                                           | wwjs symbol                         | Note                                                         |
-| -------------------------- | -------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------ |
-| Create call link           | `createCallLink` (`Socket/chats.d.ts:17`)                | `createCallLink` (`index.d.ts:342`) | identical shape on both                                      |
-| Delete own profile picture | `removeProfilePicture(ownJid)` (`Socket/groups.d.ts:83`) | `deleteProfilePicture`              | the Baileys symbol is already wired for `deleteGroupPicture` |
-| Channel admin demote       | `newsletterDemote` (`Socket/newsletter.d.ts:25`)         | `demoteChannelAdmin`                | pair with the ❌-exposed invite flows below                  |
-| Channel ownership transfer | `newsletterChangeOwner` (`Socket/newsletter.d.ts:24`)    | `transferChannelOwnership`          |                                                              |
+| Capability                 | Baileys symbol                                           | wwjs symbol                | Note                                                         |
+| -------------------------- | -------------------------------------------------------- | -------------------------- | ------------------------------------------------------------ |
+| Delete own profile picture | `removeProfilePicture(ownJid)` (`Socket/groups.d.ts:83`) | `deleteProfilePicture`     | the Baileys symbol is already wired for `deleteGroupPicture` |
+| Channel admin demote       | `newsletterDemote` (`Socket/newsletter.d.ts:25`)         | `demoteChannelAdmin`       | pair with the ❌-exposed invite flows below                  |
+| Channel ownership transfer | `newsletterChangeOwner` (`Socket/newsletter.d.ts:24`)    | `transferChannelOwnership` |                                                              |
 
 Near-misses (both libraries have the area, but the symbol sets only partially overlap — still
 worth an interface method): **channel admin invites** (wwjs
@@ -868,25 +868,25 @@ adapter boundary — none silently stubs.
 Recomputed from `engine-capability-matrix.ts`, `upstream-surface.snapshot.json`, and a scan of the
 adapter sources — re-derive the same way when anything changes:
 
-- **107** interface methods → **214** adapter cells: **192 ✅** / **22 ❌** (2 adapter-gaps, 20
+- **108** interface methods → **216** adapter cells: **194 ✅** / **22 ❌** (2 adapter-gaps, 20
   library-limitations, 0 uncertain), spanning **21** methods.
-- Of the 192 ✅ cells, **6 wwjs cells carry an explicit patch dependency** (4 × 🔧² status send,
+- Of the 194 ✅ cells, **6 wwjs cells carry an explicit patch dependency** (4 × 🔧² status send,
   1 × 🔧³ channel link preview, 1 × 🔧⁴ ready-sync) and the whole wwjs column additionally
   depends on 🔧¹, the whole Baileys column on 🔧⁵ — so every row rests on a patch on each side,
   even though no row carries a row-level mark on both.
-- REST caller's view: **88** engine-neutral (86 + 2 store-backed status reads), **9** Baileys-only,
+- REST caller's view: **89** engine-neutral (87 + 2 store-backed status reads), **9** Baileys-only,
   **9** wwjs-only, **1** unavailable on both (`sendCatalog`).
 - Full engine inventory (29.5), split by the exposure legend rather than lumped: Baileys **152**
-  socket methods — 46 wired into interface methods, 5 internal wiring, 29 plumbing, **72 ❌ not
-  exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 45 wired,
-  2 internal wiring, 1 class plumbing, **33 ❌ not exposed** (25 real capabilities + 8
+  socket methods — 47 wired into interface methods, 5 internal wiring, 29 plumbing, **71 ❌ not
+  exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 46 wired,
+  2 internal wiring, 1 class plumbing, **32 ❌ not exposed** (24 real capabilities + 8
   session/transport settings that are not WhatsApp capabilities). The backlog is the ❌ rows minus
   those 8 settings; 🔩 plumbing is correctly never exposed.
 - Events: Baileys **34** (15 consumed / 19 dropped), wwjs **31** (16 consumed / 15 dropped).
-- **4** capabilities are supported by **both** libraries and missing only in OpenWA (29.5.3) — the
-  cheapest backlog: create-call-link, delete-own-profile-picture, channel admin demote, channel
-  ownership transfer. (Chat mute/unmute and chat pin/unpin were two of the six; both are now wired —
-  see `muteChat` and `pinChat`.)
+- **3** capabilities are supported by **both** libraries and missing only in OpenWA (29.5.3) — the
+  cheapest backlog: delete-own-profile-picture, channel admin demote, channel ownership transfer.
+  (Chat mute/unmute, chat pin/unpin and create-call-link were three of the six; all three are now
+  wired — see `muteChat`, `pinChat` and `createCallLink`.)
 - **5** install-time patches (4 whatsapp-web.js + 1 Baileys), all exact and self-disabling.
 - **0 phantom-support rows** — every `not-available` cell throws at the adapter boundary.
 - Remaining adapter-gaps (fixable in this repo, ranked): **#1** `getChannelMessages` (Baileys —
