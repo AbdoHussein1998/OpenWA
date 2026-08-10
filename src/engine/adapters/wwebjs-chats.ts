@@ -119,6 +119,17 @@ export class WwebjsChats {
     }
   }
 
+  async muteChat(chatId: string, muteUntil: number | null): Promise<void> {
+    this.host.ensureReady();
+    if (muteUntil === null) {
+      await this.client().unmuteChat(chatId);
+      return;
+    }
+    // muteUntil is epoch milliseconds, which is what Date wants; Client.muteChat floors it to the
+    // seconds its page-side call expects. The Baileys side takes the same milliseconds unmodified.
+    await this.client().muteChat(chatId, new Date(muteUntil));
+  }
+
   async markUnread(chatId: string): Promise<boolean> {
     this.host.ensureReady();
     if (isChannelJid(chatId)) {

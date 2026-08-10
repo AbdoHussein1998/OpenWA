@@ -889,6 +889,58 @@ Archive or unarchive a chat.
 
 **Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found
 
+#### POST /api/sessions/:id/chats/mute
+
+Mute a chat's notifications until a given moment, or unmute it.
+
+**Auth:** API key (OPERATOR) · **Scope:** session-scoped
+
+**Path parameters**
+
+| Name | Type   | Description  |
+| ---- | ------ | ------------ |
+| `id` | string | Session UUID |
+
+**Request body** — `MuteChatDto`
+
+| Field       | Type           | Required | Constraints                                                                                 | Description                                                     |
+| ----------- | -------------- | -------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `chatId`    | string         | Yes      | `@IsString`; `@IsNotEmpty`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Engine-native JID, e.g. `1234567890-123@g.us`                   |
+| `muteUntil` | number \| null | Yes      | `@IsInt`; `@Min(1)` when not `null`                                                         | Epoch **milliseconds** the mute expires at, or `null` to unmute |
+
+```json
+{ "chatId": "1234567890-123@g.us", "muteUntil": 1800000000000 }
+```
+
+```json
+{ "chatId": "1234567890-123@g.us", "muteUntil": null }
+```
+
+**Response** `200`
+
+```json
+{ "success": true }
+```
+
+> **`muteUntil` is required, and `null` is not the same as omitting it.** The two plausible readings
+> of a missing field — unmute, or mute forever — are opposites, so the endpoint rejects the omission
+> with a `400` instead of guessing. Send `null` to unmute. To mute indefinitely, send a far-future
+> timestamp: neither engine exposes a portable "forever" value (whatsapp-web.js uses `-1` internally,
+> Baileys has none), so the API keeps one well-defined shape.
+
+> **Milliseconds, not seconds.** This was measured against a live WhatsApp account rather than read
+> off the protocol: the app-state field is the unsuffixed `MuteAction.muteEndTimestamp` while the same
+> proto spells other millisecond fields `…Ms`, which reads as seconds and is wrong. A seconds-scale
+> value is an instant in 1970, so the mute expires the moment it is set — and the request still
+> answers `200`, because nothing in the chain rejects a timestamp in the past.
+
+> **Unlike `chats/archive`, there is no declined outcome.** The mute change is not keyed to the chat's
+> last message on either engine, so a chat with no known history mutes like any other. The response is
+> always `{ "success": true }` or an error.
+
+**Errors:** `400` session not ready, or invalid `chatId`/`muteUntil` · `401` missing/invalid API key ·
+`404` session not found · `503` WhatsApp did not confirm within the request budget
+
 #### POST /api/sessions/:id/chats/delete
 
 Delete a chat from the chat list (e.g. a group you have left).

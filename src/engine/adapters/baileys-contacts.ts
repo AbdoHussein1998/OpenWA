@@ -229,6 +229,13 @@ export class BaileysContacts {
     return true;
   }
 
+  async muteChat(chatId: string, muteUntil: number | null): Promise<void> {
+    this.host.ensureReady();
+    // Deliberately no lastMessage lookup: the `mute` member of ChatModification carries no
+    // `lastMessages`, unlike archive/clear/delete, so a chat with no known history mutes fine.
+    await this.confirmed(this.sock().chatModify({ mute: muteUntil }, this.host.toEngineJid(chatId)), 'the mute change');
+  }
+
   async deleteChat(chatId: string): Promise<boolean> {
     this.host.ensureReady();
     const last = this.host.lastMessage(chatId);

@@ -1083,6 +1083,24 @@ export interface IWhatsAppEngine {
    */
   archiveChat(chatId: string, archive: boolean): Promise<boolean>;
   /**
+   * Mute or unmute a chat's notifications. `muteUntil` is an absolute epoch-MILLISECONDS timestamp
+   * the mute expires at; `null` unmutes now. To mute indefinitely, pass a far-future timestamp —
+   * neither engine exposes a portable "forever" sentinel (whatsapp-web.js uses -1 internally,
+   * Baileys has none), so the contract keeps a single well-defined shape instead.
+   *
+   * Milliseconds is measured, not inferred. WhatsApp's app-state `MuteAction.muteEndTimestamp` is
+   * unsuffixed while the proto spells other millisecond fields `…Ms`, which reads as seconds and is
+   * wrong: sending an epoch-seconds value live left the chat unmuted (the instant had already
+   * passed in 1970), and the same instant sent in milliseconds muted it to the expected minute.
+   * Getting this backwards is silent — the send still answers 200 and the mute simply never applies,
+   * or lands tens of thousands of years out and reads as permanent.
+   *
+   * Unlike archiveChat/clearChatMessages/deleteChat this has no "engine declined" outcome: the
+   * Baileys `mute` app-state modification carries no `lastMessages`, so a chat with no known
+   * history mutes like any other. That is why it resolves void rather than boolean.
+   */
+  muteChat(chatId: string, muteUntil: number | null): Promise<void>;
+  /**
    * Delete every message in a chat while keeping the chat itself in the list. Resolves false when
    * the engine cannot act — an unknown chat on whatsapp-web.js, or (as with archiveChat) a chat
    * with no known history on Baileys, whose clear is keyed to the last message.

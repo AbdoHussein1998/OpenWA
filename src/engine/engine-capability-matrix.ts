@@ -147,6 +147,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   createChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   deleteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   muteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  muteChat: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'baileys chatModify({mute: <epoch milliseconds> | null}) (ChatModification, Types/Chat.d.ts) → MuteAction.muteEndTimestamp (Utils/chat-utils.js:417-425); wwjs Client.muteChat(chatId, unmuteDate)/unmuteChat(chatId) (index.d.ts:182,331), which floors getTime()/1000 before the page write (Client.js:2092)',
+  },
   getGroupJoinInfo: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getGroupMembershipRequests: {
     wwjs: { status: 'supported' },
