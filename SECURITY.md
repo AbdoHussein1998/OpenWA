@@ -50,6 +50,13 @@ the README and `docs/` — in particular `CORS_ORIGINS`, `ALLOW_DEV_API_KEY`,
 Never expose the dashboard/API to the public internet with the development API key
 enabled.
 
+If you created your `.env` by copying `.env.example` before this advisory, check it for
+`ENABLE_SWAGGER=true`. Earlier templates shipped that line uncommented alongside
+`NODE_ENV=production`, so a copied file pinned the opt-in that production otherwise
+withholds, and `/api/docs` is served outside the API-key guard. Comment the line out or
+set it to `false` to restore the production default. Docker Compose and the Helm chart
+are unaffected — neither forwards `ENABLE_SWAGGER` and the container never reads `.env`.
+
 ### Docker socket proxy — scope and residual risk
 
 The application container never mounts `/var/run/docker.sock`; it reaches the daemon
