@@ -96,9 +96,15 @@ flowchart TD
 
 `engine-parity.spec.ts` guarantees every interface method has exactly one matrix row (and vice
 versa) and checks the throw-invariants it can observe. `check-upstream-surface.mjs` extracts the
-installed libraries' public surface (Client/socket methods + events) and fails on any drift from
-the reviewed snapshot, so an engine bump can never smuggle an unreviewed capability in. Neither
-of those two reads this document — status changes land in the matrix first, then here.
+installed libraries' public surface and fails on any drift from the reviewed snapshot, so an
+engine bump cannot smuggle in an unreviewed capability **within the surface it reads** — which is
+four lists and no more: the `export class Client` block of whatsapp-web.js's `index.d.ts`, its
+`Constants.js` event values, Baileys' `lib/Socket/*.d.ts` members and `lib/Types/Events.d.ts`.
+Anything upstream outside those is invisible to it, including symbols this page cites as evidence:
+`Message.vote` (29.6.1) sits on the `Message` interface, and the `chatModify({mute})`/`({pin})`
+shapes in 29.5.3 live in `lib/Types/Chat.d.ts`, which no extractor opens. A version bump whose
+extracted surface is unchanged passes with a note, by design — there is nothing new to review.
+Neither of those two reads this document — status changes land in the matrix first, then here.
 
 `engine-inventory-parity.spec.ts` is the one gate that **does** read this page, because 29.5's two
 right-hand columns are hand-filled and nothing else could see them drift. It asserts that every
