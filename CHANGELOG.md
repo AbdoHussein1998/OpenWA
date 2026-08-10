@@ -24,15 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A bare `@SkipThrottle()` no longer leaves a route throttled: it writes one metadata key the guard never read, so `/api/metrics` and the `/api/health*` probes were rate-limited despite being documented as exempt, and a 429 on readiness reads as unhealthy to every configured probe. Those four routes are also `@Public()`, so the global IP limit was the only one reaching them and they now carry none — rate-limit them at your proxy if they are internet-facing.
 - The chat-media retention purge and orphan sweep now run while `CHAT_MEDIA_ARCHIVE_ENABLED` is off; previously turning archiving off stopped both, leaving files past their TTL and crash-leftover orphans in the store indefinitely. Note the consequence for a deployment that has archiving off: the orphan sweep now deletes any file under the `chat-media/` prefix that no message row references, once it has been unreferenced for the grace window (`CHAT_MEDIA_ORPHAN_GRACE_MS`, default 1h). A file a surviving row points at is never touched.
 - A plugin whose code went missing is recoverable through the API again: reinstalling now writes over its surviving `ctx.storage` directory instead of answering `409`, and uninstalling a known-but-unloaded id no longer answers `404`.
+- A sticker sent through the Baileys engine no longer reaches WhatsApp as non-WebP bytes labelled `image/webp`; the adapter converts `image/*` to a 512×512 WebP before the socket, passes genuine WebP through byte-identical, and refuses anything it cannot convert with a `400` instead of reporting success.
 
 ### Security
 
 - An advisory usage-statistics write no longer persists the whole API-key row. A key deleted while a request that had already loaded it was in flight was re-inserted with its original hash and authenticated again; a revocation or a narrowing of role, allowlist, IP allowlist or expiry was likewise reverted to the values that request loaded. The write is now scoped to the two usage columns and affects nothing if the row is gone.
 - `.env.example` no longer ships `ENABLE_SWAGGER=true` uncommented: the template also declares `NODE_ENV=production`, so copying it pinned the opt-in that production withholds and served the schema and running version at `/api/docs`, which sits outside the API-key guard. Bare-metal operators who already copied it should check their own `.env`; Docker and Helm are unaffected.
-
-### Fixed
-
-- A sticker sent through the Baileys engine no longer reaches WhatsApp as non-WebP bytes labelled `image/webp`; the adapter converts `image/*` to a 512×512 WebP before the socket, passes genuine WebP through byte-identical, and refuses anything it cannot convert with a `400` instead of reporting success.
 
 ## [0.15.0] - 2026-08-09
 
