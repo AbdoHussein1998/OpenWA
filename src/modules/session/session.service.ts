@@ -595,6 +595,22 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     return engine.archiveChat(chatId, archive);
   }
 
+  /**
+   * Mute a chat until `muteUntil` (absolute epoch milliseconds), or unmute it with `null`. Unlike
+   * archiveChat there is no "engine declined" outcome — the Baileys mute patch is not keyed to the
+   * chat's last message — so this resolves void and a failure surfaces as an error.
+   */
+  async muteChat(id: string, chatId: string, muteUntil: number | null): Promise<void> {
+    await this.findOne(id); // Verify session exists
+    const engine = this.engines.get(id);
+
+    if (!engine) {
+      throw new BadRequestException('Session is not started');
+    }
+
+    return engine.muteChat(chatId, muteUntil);
+  }
+
   async deleteChat(id: string, chatId: string): Promise<boolean> {
     await this.findOne(id); // Verify session exists
     const engine = this.engines.get(id);

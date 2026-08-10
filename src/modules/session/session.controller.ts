@@ -25,6 +25,7 @@ import {
   SetOwnPresenceDto,
   ChatPresenceResponseDto,
   ArchiveChatDto,
+  MuteChatDto,
   DeleteChatDto,
   SendChatStateDto,
   RequestPairingCodeDto,
@@ -606,6 +607,32 @@ export class SessionController {
   ): Promise<{ success: boolean }> {
     const success = await this.sessionService.archiveChat(id, dto.chatId, dto.archive);
     return { success };
+  }
+
+  @Post(':id/chats/mute')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mute or unmute a chat' })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Returns `{ success: true }`. Unlike the archive route there is no declined outcome: the mute ' +
+      "change is not keyed to the chat's last message on either engine, so a chat with no known " +
+      'history mutes like any other.',
+  })
+  @ApiResponse({ status: 400, description: 'Session not ready, or an invalid chatId / muteUntil' })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  async muteChat(@Param('id', ParseUUIDPipe) id: string, @Body() dto: MuteChatDto): Promise<{ success: boolean }> {
+    await this.sessionService.muteChat(id, dto.chatId, dto.muteUntil);
+    return { success: true };
   }
 
   @Post(':id/chats/delete')

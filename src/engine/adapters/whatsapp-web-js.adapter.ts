@@ -2123,6 +2123,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.chats.sendSeen(chatId);
   }
 
+  muteChat(chatId: string, muteUntil: number | null): Promise<void> {
+    return this.chats.muteChat(chatId, muteUntil);
+  }
+
   archiveChat(chatId: string, archive: boolean): Promise<boolean> {
     return this.chats.archiveChat(chatId, archive);
   }

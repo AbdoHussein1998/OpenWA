@@ -1311,6 +1311,53 @@
         ]
       }
     },
+    "/api/sessions/{id}/chats/mute": {
+      "post": {
+        "operationId": "SessionController_muteChat",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MuteChatDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns `{ success: true }`. Unlike the archive route there is no declined outcome: the mute change is not keyed to the chat's last message on either engine, so a chat with no known history mutes like any other."
+          },
+          "400": {
+            "description": "Session not ready, or an invalid chatId / muteUntil"
+          },
+          "404": {
+            "description": "Session not found"
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
+          }
+        },
+        "summary": "Mute or unmute a chat",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/sessions/{id}/chats/delete": {
       "post": {
         "operationId": "SessionController_deleteChat",
@@ -9791,6 +9838,26 @@
         "required": [
           "chatId",
           "archive"
+        ]
+      },
+      "MuteChatDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string",
+            "description": "Chat ID in the active engine's native format (e.g. 1234567890-123@g.us on whatsapp-web.js)",
+            "example": "1234567890-123@g.us"
+          },
+          "muteUntil": {
+            "type": "number",
+            "description": "Absolute epoch-MILLISECONDS timestamp at which the mute expires, or `null` to unmute now. Required — omitting it is rejected rather than guessed, because the two plausible readings (unmute vs mute forever) are opposites. To mute indefinitely, send a far-future timestamp. Milliseconds, not seconds: a seconds-scale value is an instant in 1970, so the mute expires immediately while the request still answers 200.",
+            "example": 1800000000000,
+            "nullable": true
+          }
+        },
+        "required": [
+          "chatId",
+          "muteUntil"
         ]
       },
       "DeleteChatDto": {

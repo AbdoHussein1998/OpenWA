@@ -157,3 +157,34 @@ describe('SessionController — logout() audit + error forwarding contract', () 
     expect(auditService.logInfo).not.toHaveBeenCalled();
   });
 });
+
+// Chat mute carries a nullable argument, which is the part worth pinning: `null` is the unmute
+// instruction, so a controller that coalesced it away (`?? undefined`, `|| 0`) would silently turn
+// every unmute into a mute-until-the-epoch. Both directions are asserted.
+describe('SessionController — muteChat', () => {
+  let sessionService: { muteChat: jest.Mock };
+  let auditService: { logInfo: jest.Mock };
+  let controller: SessionController;
+
+  beforeEach(() => {
+    sessionService = { muteChat: jest.fn().mockResolvedValue(undefined) };
+    auditService = { logInfo: jest.fn().mockResolvedValue(undefined) };
+    controller = new SessionControllerClass(
+      sessionService as unknown as SessionService,
+      auditService as unknown as AuditService,
+    );
+  });
+
+  it('forwards the expiry second to the service', async () => {
+    const result = await controller.muteChat('sess-uuid-1', { chatId: '628123@c.us', muteUntil: 1_800_000_000 });
+
+    expect(sessionService.muteChat).toHaveBeenCalledWith('sess-uuid-1', '628123@c.us', 1_800_000_000);
+    expect(result).toEqual({ success: true });
+  });
+
+  it('forwards a null expiry as null — that is the unmute instruction, not a missing value', async () => {
+    await controller.muteChat('sess-uuid-1', { chatId: '628123@c.us', muteUntil: null });
+
+    expect(sessionService.muteChat).toHaveBeenCalledWith('sess-uuid-1', '628123@c.us', null);
+  });
+});
