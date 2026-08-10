@@ -1745,12 +1745,19 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   /**
    * Request an 8-char pairing code so the user can link via "Link with phone number" instead of
-   * scanning the QR. Must be called after the engine has started (the client is initialized and
-   * waiting to link); whatsapp-web.js throws if called before it is ready or after authentication.
+   * scanning the QR.
+   *
+   * Gated on QR_READY, not on the client merely existing. `this.client` is assigned before
+   * `client.initialize()` (see runInitAttempt), so for the whole Chromium launch — seconds on a
+   * modest host — a client is present while its `pupPage` is still null, and whatsapp-web.js's
+   * requestPairingCode reaches `exposeFunctionIfAbsent(this.pupPage, …)` and throws a raw TypeError
+   * that surfaces as a 500. QR_READY is the precise window this can work in anyway: the library
+   * emits 'qr' only once the Store is injected and the in-page socket reports UNPAIRED, which are
+   * the same preconditions the pairing flow needs.
    */
   async requestPairingCode(phoneNumber: string): Promise<string> {
-    if (!this.client) {
-      throw new EngineNotReadyError();
+    if (!this.client || this.status !== EngineStatus.QR_READY) {
+      throw new EngineNotReadyError('Session is not waiting to be linked. Start it and wait for the QR stage.');
     }
     return this.client.requestPairingCode(phoneNumber);
   }
