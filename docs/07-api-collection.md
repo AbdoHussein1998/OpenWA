@@ -222,6 +222,16 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/mute
   -d '{"chatId":"1234567890-123@g.us","muteUntil":1800000000000}'
 ```
 
+#### POST /api/sessions/:id/chats/pin
+
+Pin a chat to the top of the list, or unpin it (OPERATOR). WhatsApp allows at most three pinned chats.
+
+```bash
+curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/pin" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"chatId":"1234567890-123@g.us","pin":true}'
+```
+
 #### POST /api/sessions/:id/chats/delete
 
 Delete a chat from the chat list (OPERATOR).

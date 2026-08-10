@@ -2127,6 +2127,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.chats.muteChat(chatId, muteUntil);
   }
 
+  pinChat(chatId: string, pin: boolean): Promise<boolean> {
+    return this.chats.pinChat(chatId, pin);
+  }
+
   archiveChat(chatId: string, archive: boolean): Promise<boolean> {
     return this.chats.archiveChat(chatId, archive);
   }

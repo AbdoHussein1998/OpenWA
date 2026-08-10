@@ -248,6 +248,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   leaveGroup: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   logout: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   markUnread: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  pinChat: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'baileys chatModify({pin: boolean}) (ChatModification, Types/Chat.d.ts:69) -> pinAction indexed by [pin_v1, jid] (Utils/chat-utils.js:487-499); wwjs Client.pinChat/unpinChat (index.d.ts:49,52), which resolve the NEW pin state and enforce MAX_PIN_COUNT = 3 page-side (Client.js:2046-2084)',
+  },
   pinMessage: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },

@@ -26,6 +26,7 @@ import {
   ChatPresenceResponseDto,
   ArchiveChatDto,
   MuteChatDto,
+  PinChatDto,
   DeleteChatDto,
   SendChatStateDto,
   RequestPairingCodeDto,
@@ -633,6 +634,32 @@ export class SessionController {
   async muteChat(@Param('id', ParseUUIDPipe) id: string, @Body() dto: MuteChatDto): Promise<{ success: boolean }> {
     await this.sessionService.muteChat(id, dto.chatId, dto.muteUntil);
     return { success: true };
+  }
+
+  @Post(':id/chats/pin')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Pin or unpin a chat at the top of the chat list' })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Returns `{ success }`. `false` means the engine declined, and only a pin can: WhatsApp allows ' +
+      'at most three pinned chats and the whatsapp-web.js engine reports the refusal. Unpinning always ' +
+      'succeeds, and the Baileys engine always reports success because it cannot observe the cap.',
+  })
+  @ApiResponse({ status: 400, description: 'Session not ready' })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  async pinChat(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PinChatDto): Promise<{ success: boolean }> {
+    const success = await this.sessionService.pinChat(id, dto.chatId, dto.pin);
+    return { success };
   }
 
   @Post(':id/chats/delete')

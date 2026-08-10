@@ -553,6 +553,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.contacts.muteChat(chatId, muteUntil);
   }
 
+  async pinChat(chatId: string, pin: boolean): Promise<boolean> {
+    return this.contacts.pinChat(chatId, pin);
+  }
+
   async archiveChat(chatId: string, archive: boolean): Promise<boolean> {
     return this.contacts.archiveChat(chatId, archive);
   }

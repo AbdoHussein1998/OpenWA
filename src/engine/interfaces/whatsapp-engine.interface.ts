@@ -1083,6 +1083,17 @@ export interface IWhatsAppEngine {
    */
   archiveChat(chatId: string, archive: boolean): Promise<boolean>;
   /**
+   * Pin or unpin a chat at the top of the chat list. Chat-level — distinct from `pinMessage`, which
+   * pins a message inside a chat.
+   *
+   * Resolves false only when the engine DECLINED, and only one direction can: WhatsApp allows at
+   * most three pinned chats, and whatsapp-web.js reports the refusal rather than silently dropping
+   * it. Unpinning always resolves true, and Baileys always resolves true in both directions — it
+   * writes an app-state patch and WhatsApp reports nothing back, so it cannot see the cap. Unlike
+   * archiveChat the patch carries no `lastMessages`, so a chat with no known history pins fine.
+   */
+  pinChat(chatId: string, pin: boolean): Promise<boolean>;
+  /**
    * Mute or unmute a chat's notifications. `muteUntil` is an absolute epoch-MILLISECONDS timestamp
    * the mute expires at; `null` unmutes now. To mute indefinitely, pass a far-future timestamp —
    * neither engine exposes a portable "forever" sentinel (whatsapp-web.js uses -1 internally,
