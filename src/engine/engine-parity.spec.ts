@@ -5,18 +5,18 @@ import { WhatsAppWebJsAdapter } from './adapters/whatsapp-web-js.adapter';
 import { ENGINE_CAPABILITY_MATRIX } from './engine-capability-matrix';
 
 /**
- * Drift invariants for the engine capability matrix. The matrix's `status` (supported /
- * not-available) is hand-curated and richer than a throw-scan: it also marks "phantom support"
- * methods (adapter stubs that return null/[] without throwing — see docs/29-engine-capability-matrix.md).
- * So the gate asserts the invariants a throw-scan CAN verify, not full equality:
+ * Drift invariants for the engine capability matrix. Status and throw behaviour must agree exactly:
+ * a cell is `not-available` if and only if the adapter method throws
+ * EngineNotSupportedError/ChannelMediaNotSupportedError.
  *
- *   1. A method whose adapter body throws EngineNotSupportedError/ChannelMediaNotSupportedError
- *      MUST be `not-available` in the matrix (throws always mean unavailable).
- *   2. A method the matrix marks `supported` MUST NOT throw.
+ * The reverse direction — `not-available` implies throws — is the one that catches a "phantom
+ * support" stub: an adapter method that returns null/[] for a capability it cannot deliver, so a
+ * caller reads an empty result as an answer instead of the 501 it should get. Those stubs are what
+ * docs/29-engine-capability-matrix.md's "0 phantom-support rows" asserts, and until this direction
+ * was checked, that claim was true only by inspection — a cell could be marked `not-available`,
+ * quietly stop throwing, and nothing would go red.
  *
- * The allowed gap (not deliberate drift): a method that is `not-available` but does not throw today
- * — a phantom stub. Those are hand-tracked in the matrix; a throw-scan cannot see them. If an adapter
- * method starts or stops throwing, one of the invariants trips and forces a deliberate matrix update.
+ * Both directions now trip on any change, forcing a deliberate matrix update.
  *
  * No engine is instantiated and no Chromium/socket is opened: it reads method bodies via
  * `Class.prototype.method.toString()`, a fast hermetic structural check.
@@ -98,17 +98,14 @@ describe('engine capability matrix — drift invariants', () => {
     expect({ missing, stale }).toEqual({ missing: [], stale: [] });
   });
 
-  it.each(methods)('%s: throws ⇒ not-available, supported ⇒ not-throws', method => {
+  it.each(methods)('%s: throws ⇔ not-available', method => {
     const entry = ENGINE_CAPABILITY_MATRIX[method];
     for (const [adapter, ctor] of ADAPTERS) {
       const throws = liveThrows(ctor, method, adapter);
       const status = entry[adapter].status;
-      if (throws) {
-        expect({ method, adapter, status }).toEqual({ method, adapter, status: 'not-available' });
-      }
-      if (status === 'supported') {
-        expect({ method, adapter, throws }).toEqual({ method, adapter, throws: false });
-      }
+      // A `not-available` cell that does not throw is a phantom stub: the caller gets an empty
+      // answer where the contract promises a 501.
+      expect({ method, adapter, throws }).toEqual({ method, adapter, throws: status === 'not-available' });
     }
   });
 });
