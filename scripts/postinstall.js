@@ -1,7 +1,7 @@
 /**
  * Post-install hook (npm `postinstall`).
  *
- * Five conditional steps, each skipped when its target is absent so the hook is a no-op where the
+ * Six conditional steps, each skipped when its target is absent so the hook is a no-op where the
  * piece is missing (the Docker builder stage copies package*.json long before any source):
  *
  *   1. `npm ci` inside dashboard/ when dashboard/ exists — the dashboard carries its own lockfile and
@@ -21,6 +21,9 @@
  *      repairs, gated the same way as step 3.
  *   5. `node scripts/patch-wwebjs-ready-sync.js --best-effort` when present — the readiness
  *      marker + hasSynced level-check, gated the same way.
+ *   6. `node scripts/patch-baileys-appstate.js --best-effort` when present — the app-state resync
+ *      bound, gated the same way. This is the one step that is not a whatsapp-web.js patch, so a
+ *      Baileys-only install runs it and skips 2-5.
  *
  * Structured like scripts/patch-wwebjs-201832.js: pure planning + injectable spawn, so the spec
  * (scripts/postinstall.spec.js, node:test) exercises every branch without a real npm run.
