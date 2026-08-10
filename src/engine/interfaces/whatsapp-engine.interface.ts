@@ -1072,6 +1072,15 @@ export interface IWhatsAppEngine {
    * the WhatsApp app and can then be demoted here.
    */
   demoteChannelAdmin(channelId: string, userId: string): Promise<void>;
+  /**
+   * Hand a channel this account owns to a new owner. **Irreversible** — the account stops being the
+   * owner and cannot take it back through this API.
+   *
+   * The whatsapp-web.js option to also dismiss yourself as admin in the same call is not exposed:
+   * the page function it relies on no longer exists, and it sits inside a branch that swallows its
+   * own errors, so it would fail silently rather than refusing.
+   */
+  transferChannelOwnership(channelId: string, newOwnerId: string): Promise<void>;
   upsertLabel(label: LabelInput): Promise<void>;
   /** Delete a label. It disappears from every chat it was on. */
   deleteLabel(labelId: string): Promise<void>;

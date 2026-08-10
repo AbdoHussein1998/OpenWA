@@ -61,6 +61,11 @@ export class ChannelService {
     return this.getEngine(sessionId).demoteChannelAdmin(channelId, userId);
   }
 
+  /** Hand the channel to a new owner. Irreversible — the account stops being the owner. */
+  transferChannelOwnership(sessionId: string, channelId: string, newOwnerId: string) {
+    return this.getEngine(sessionId).transferChannelOwnership(channelId, newOwnerId);
+  }
+
   subscribeToChannel(sessionId: string, inviteCode: string) {
     return this.getEngine(sessionId).subscribeToChannel(inviteCode);
   }

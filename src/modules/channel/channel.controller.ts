@@ -6,6 +6,7 @@ import { SubscribeChannelDto } from './dto/subscribe-channel.dto';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { MuteChannelDto } from './dto/mute-channel.dto';
 import { DemoteChannelAdminDto } from './dto/demote-channel-admin.dto';
+import { TransferChannelOwnershipDto } from './dto/transfer-channel-ownership.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import {
@@ -184,6 +185,50 @@ export class ChannelController {
     @Body() dto: DemoteChannelAdminDto,
   ): Promise<{ success: boolean }> {
     await this.channelService.demoteChannelAdmin(sessionId, channelId, dto.userId);
+    return { success: true };
+  }
+
+  @Post(':channelId/owner/transfer')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Transfer channel ownership to another account',
+    description:
+      'IRREVERSIBLE. Once the transfer lands, this session is no longer the owner and cannot take ' +
+      'the channel back through this API. Requires this account to currently own the channel. The ' +
+      'upstream option to also dismiss yourself as an admin in the same call is not exposed, ' +
+      'because the WhatsApp Web function it depends on no longer exists and the branch swallows ' +
+      'its own errors, so it would fail silently.',
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'channelId', description: 'Channel ID' })
+  @ApiBody({ type: TransferChannelOwnershipDto })
+  @ApiResponse({ status: 200, description: 'Ownership transferred', type: ChannelAckResponseDto })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp did not answer within the request budget — the transfer may or may not have applied.',
+  })
+  @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'The engine did not transfer the channel. On whatsapp-web.js this is the only outcome a ' +
+      'failure can produce: the page swallows every error into a plain false, so the cause is not ' +
+      'reported.',
+  })
+  @ApiResponse({
+    status: 501,
+    description:
+      'The whatsapp-web.js engine cannot perform this: its page function rejects every call locally ' +
+      'against a subscriber list the page cannot repopulate. Use the Baileys engine.',
+  })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  async transferOwnership(
+    @Param('sessionId') sessionId: string,
+    @Param('channelId') channelId: string,
+    @Body() dto: TransferChannelOwnershipDto,
+  ): Promise<{ success: boolean }> {
+    await this.channelService.transferChannelOwnership(sessionId, channelId, dto.newOwnerId);
     return { success: true };
   }
 

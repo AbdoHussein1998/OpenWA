@@ -3607,6 +3607,37 @@ fails. Rather than ship a route that always errors on that engine, it answers `5
 owner, or the user is not an admin · `501` the whatsapp-web.js engine cannot perform this ·
 `503` WhatsApp did not answer within the request budget
 
+#### POST /api/sessions/:sessionId/channels/:channelId/owner/transfer
+
+Hand a channel this account owns to a new owner. **Baileys only** — the whatsapp-web.js engine
+answers `501`.
+
+**Auth:** API key (OPERATOR) · **Scope:** session-scoped
+
+> **Irreversible.** Once the transfer lands, this session is no longer the owner and cannot take the
+> channel back through this API.
+
+The upstream option to also dismiss yourself as an admin in the same call is **not exposed**: the
+WhatsApp Web function it depends on no longer exists, and it sits inside a branch that swallows its
+own errors, so it would fail silently instead of refusing.
+
+`whatsapp-web.js` declares `Client.transferChannelOwnership` and its page function is present, but on
+current WhatsApp Web it rejects every call **locally** — measured at 4-9ms against a 352-531ms
+known-server baseline in the same page — against a subscriber list the library has no working path to
+repopulate. Rather than ship a route that always fails on that engine, it answers `501` there.
+
+**Request body** — `TransferChannelOwnershipDto`
+
+| Field        | Type   | Required | Description                                      |
+| ------------ | ------ | -------- | ------------------------------------------------ |
+| `newOwnerId` | string | Yes      | WhatsApp ID of the new owner, e.g. `628xxx@c.us` |
+
+**Response** `200` — `{ "success": true }`
+
+**Errors:** `400` validation, or session not started · `401` · `403` WhatsApp refused the transfer ·
+`501` the whatsapp-web.js engine cannot perform this · `503` WhatsApp did not answer within the
+request budget, and the transfer may or may not have applied
+
 #### POST /api/sessions/:sessionId/channels/subscribe
 
 Subscribe to a channel using its invite code.

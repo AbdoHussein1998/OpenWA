@@ -55,4 +55,16 @@ describe('ChannelService', () => {
       BadRequestException,
     );
   });
+
+  it('transferChannelOwnership forwards the channel and new owner, dropping the sessionId', async () => {
+    const transferChannelOwnership = jest.fn().mockResolvedValue(undefined);
+    await makeService({ transferChannelOwnership }).transferChannelOwnership('s1', 'ch1@newsletter', '628@c.us');
+    expect(transferChannelOwnership).toHaveBeenCalledWith('ch1@newsletter', '628@c.us');
+  });
+
+  it('transferChannelOwnership throws 400 when the session is not started', () => {
+    expect(() => makeService(undefined).transferChannelOwnership('s1', 'ch1@newsletter', '628@c.us')).toThrow(
+      BadRequestException,
+    );
+  });
 });

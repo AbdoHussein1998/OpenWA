@@ -45,3 +45,24 @@ describe('ChannelController.demoteAdmin', () => {
     await expect(controller.demoteAdmin('s1', 'ch1@newsletter', { userId: '628@c.us' })).rejects.toThrow('refused');
   });
 });
+
+describe('ChannelController.transferOwnership', () => {
+  it('forwards the path params and the body field in the right order', async () => {
+    // sessionId, channelId and newOwnerId are all strings, so a swap compiles and type-checks —
+    // and this operation is irreversible, which makes the wrong target unrecoverable.
+    const service = { transferChannelOwnership: jest.fn().mockResolvedValue(undefined) };
+    const controller = new ChannelController(service as unknown as ChannelService);
+    await expect(controller.transferOwnership('s1', 'ch1@newsletter', { newOwnerId: '628@c.us' })).resolves.toEqual({
+      success: true,
+    });
+    expect(service.transferChannelOwnership).toHaveBeenCalledWith('s1', 'ch1@newsletter', '628@c.us');
+  });
+
+  it('lets an engine refusal propagate instead of answering success', async () => {
+    const service = { transferChannelOwnership: jest.fn().mockRejectedValue(new Error('refused')) };
+    const controller = new ChannelController(service as unknown as ChannelService);
+    await expect(controller.transferOwnership('s1', 'ch1@newsletter', { newOwnerId: '628@c.us' })).rejects.toThrow(
+      'refused',
+    );
+  });
+});

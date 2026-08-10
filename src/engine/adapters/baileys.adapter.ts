@@ -691,6 +691,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.channels.demoteChannelAdmin(channelId, userId);
   }
 
+  transferChannelOwnership(channelId: string, newOwnerId: string): Promise<void> {
+    return this.channels.transferChannelOwnership(channelId, newOwnerId);
+  }
+
   getSubscribedChannels(): Promise<Channel[]> {
     return this.unsupported('getSubscribedChannels');
   }

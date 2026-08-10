@@ -147,6 +147,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   createChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   deleteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   muteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  transferChannelOwnership: {
+    wwjs: { status: 'not-available', rootCause: 'library-limitation' },
+    baileys: { status: 'supported' },
+    evidence:
+      'baileys newsletterChangeOwner(jid, newOwnerJid) → void via executeWMexQuery QueryIds.CHANGE_OWNER (Socket/newsletter.d.ts:24; newsletter.js:170-172) — refusal verified live as a server round trip (418ms, WhatsApp code named). wwjs Client.transferChannelOwnership exists and is typed Promise<boolean> (index.d.ts:375), and its page function WAWebChangeNewsletterOwnerAction.changeNewsletterOwnerAction is present, but on Web 2.3000.1044824727-alpha it rejects LOCALLY with contact-not-found-in-newsletter-subscriber-list: 4-9ms against a 352-531ms known-server baseline taken in the same page, unchanged by subscribing the target, promoting it to admin, or restarting the session. WAWebCollections.NewsletterMetadataCollection.update — the only repopulation path, and the line transferChannelOwnership itself calls for an uncached channel — is undefined',
+  },
   demoteChannelAdmin: {
     wwjs: { status: 'not-available', rootCause: 'library-limitation' },
     baileys: { status: 'supported' },
