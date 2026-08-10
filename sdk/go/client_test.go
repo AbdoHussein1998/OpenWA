@@ -1016,6 +1016,7 @@ func TestWebhookEventWireValues(t *testing.T) {
 		EventGroupJoin:            "group.join",
 		EventGroupLeave:           "group.leave",
 		EventGroupUpdate:          "group.update",
+		EventGroupJoinRequest:     "group.join_request",
 		EventCallReceived:         "call.received",
 		EventStatusReceived:       "status.received",
 		EventAll:                  "*",

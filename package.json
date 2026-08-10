@@ -30,6 +30,7 @@
     "check:versions": "node scripts/check-doc-versions.mjs",
     "check:dockerignore": "node scripts/check-dockerignore.mjs",
     "check:sdk-routes": "node scripts/check-sdk-routes.mjs",
+    "check:sdk-events": "node scripts/check-sdk-events.mjs",
     "openapi:export": "ts-node scripts/export-openapi.ts openapi.json",
     "openapi:check": "ts-node scripts/export-openapi.ts /tmp/openapi.generated.json && diff -u openapi.json /tmp/openapi.generated.json",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",

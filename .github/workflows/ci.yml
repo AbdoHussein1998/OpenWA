@@ -61,6 +61,9 @@ jobs:
       - name: Check SDK routes against the contract
         run: npm run check:sdk-routes
 
+      - name: Check SDK webhook events against the contract
+        run: npm run check:sdk-events
+
   # Deliberately its own job rather than a step inside Lint. `npm audit` reports against the
   # advisory database, not against the diff, so a newly published advisory turns red on unrelated
   # PRs. While it lived as the first step of Lint, that failure aborted the job before ESLint, the
