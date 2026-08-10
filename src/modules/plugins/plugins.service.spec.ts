@@ -749,6 +749,52 @@ describe('PluginsService — recovering a plugin whose code went missing', () =>
     expect(() => service.install({ buffer: pkg() })).toThrow(ConflictException);
   });
 
+  it('refuses a plugin path that is a symlink escaping the plugins directory', () => {
+    // `existsSync` follows symlinks, so the unconditional guard this replaced happened to refuse
+    // this too. Narrowing it to registry-owned directories must not hand the reinstall a path that
+    // resolves outside the plugins dir: every write below goes through the link, and so does the
+    // rollback's delete.
+    const outside = path.join(tmpDir, 'outside');
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, 'manifest.json'), 'victim');
+    const { service, storage } = orphan();
+    fs.rmSync(path.join(pluginsDir, 'svc-plg'), { recursive: true, force: true });
+    fs.symlinkSync(outside, path.join(pluginsDir, 'svc-plg'));
+    expect(storage.getPluginEntry('svc-plg')).toBeDefined();
+
+    expect(() => service.install({ buffer: pkg() })).toThrow(ConflictException);
+
+    expect(fs.readFileSync(path.join(outside, 'manifest.json'), 'utf8')).toBe('victim');
+  });
+
+  it('does not delete a file the failed install never got as far as writing', () => {
+    // The rollback removes what this install wrote. Removing every entry path instead would reach
+    // files the write never reached — the previous version's, still sitting in a directory the
+    // reinstall was supposed to leave intact.
+    const { service } = orphan();
+    fs.writeFileSync(path.join(pluginsDir, 'svc-plg', 'index.js'), 'previous version');
+    // Fail the very first write, so the install has written nothing: every entry path still holds
+    // whatever was there before, and the rollback must leave all of it alone.
+    const write = jest.spyOn(fs, 'writeFileSync').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+
+    expect(() => service.install({ buffer: pkg() })).toThrow(BadRequestException);
+
+    expect(fs.readFileSync(path.join(pluginsDir, 'svc-plg', 'index.js'), 'utf8')).toBe('previous version');
+    write.mockRestore();
+  });
+
+  it('answers a conflict, not a crash, when a package entry path is occupied by a directory', () => {
+    // The write fails with EISDIR, and the rollback's `rmSync(..., { force: true })` fails the same
+    // way — `force` suppresses ENOENT, not EISDIR — so without care the second throw escapes the
+    // catch entirely and the route answers 500 where it used to answer 409.
+    const { service } = orphan();
+    fs.mkdirSync(path.join(pluginsDir, 'svc-plg', 'manifest.json'), { recursive: true });
+
+    expect(() => service.install({ buffer: pkg() })).toThrow(ConflictException);
+  });
+
   it('still throws NotFound when uninstalling an id the gateway has never seen', async () => {
     const { service } = build();
     await expect(service.uninstall('never-installed')).rejects.toThrow(NotFoundException);

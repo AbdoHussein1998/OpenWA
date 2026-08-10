@@ -313,31 +313,52 @@ export class PluginsService {
     if (this.pluginLoader.getPlugin(manifest.id)) {
       throw new ConflictException(`Plugin "${manifest.id}" is already installed`);
     }
-    const dir = path.join(this.pluginLoader.getPluginsDir(), manifest.id);
+    const pluginsDir = this.pluginLoader.getPluginsDir();
+    const dir = path.join(pluginsDir, manifest.id);
     // A surviving directory does not prove a surviving package. Under the shipped layout it is also
     // the plugin's `ctx.storage` root, created the first time the plugin was enabled and left behind
     // when the code goes (a container recreate with the packages in the image layer and the data on
     // a volume). Reinstalling is the recovery the boot warning prescribes, so refuse only a
     // directory the gateway never installed — a loaded plugin is already refused above.
     const dirExisted = fs.existsSync(dir);
-    if (dirExisted && !this.pluginLoader.getRegistryEntry(manifest.id)) {
-      throw new ConflictException(`A plugin directory "${manifest.id}" already exists`);
+    if (dirExisted) {
+      if (!this.pluginLoader.getRegistryEntry(manifest.id)) {
+        throw new ConflictException(`A plugin directory "${manifest.id}" already exists`);
+      }
+      // `existsSync` answers for the link's TARGET, so narrowing the guard above must not also
+      // narrow containment: a link planted at this path would send every write below — and the
+      // rollback's delete — wherever it points.
+      if (fs.realpathSync(dir) !== path.join(fs.realpathSync(pluginsDir), manifest.id)) {
+        throw new ConflictException(`A plugin directory "${manifest.id}" already exists`);
+      }
+      // Merging into a pre-existing directory means an entry path can already be occupied by a
+      // directory. Refusing here keeps that a conflict; writing into it fails with EISDIR, which
+      // the rollback below cannot clean up either.
+      for (const entry of entries) {
+        const dest = path.join(dir, entry.relPath);
+        if (fs.existsSync(dest) && fs.statSync(dest).isDirectory()) {
+          throw new ConflictException(`Cannot install "${manifest.id}": "${entry.relPath}" is a directory`);
+        }
+      }
     }
 
     // Write the validated entries then load; roll back on any failure so a bad package never leaves
     // a half-installed plugin behind. Into a pre-existing directory the rollback removes only the
-    // files this install wrote: the directory holds the operator's stored data, and deleting it to
-    // undo a failed reinstall would destroy exactly what the reinstall promised to keep.
+    // files this install actually wrote: the directory holds the operator's stored data, and
+    // deleting it to undo a failed reinstall would destroy exactly what the reinstall promised to
+    // keep.
+    const written: string[] = [];
     try {
       for (const entry of entries) {
         const dest = path.join(dir, entry.relPath);
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         fs.writeFileSync(dest, entry.data);
+        written.push(dest);
       }
       this.pluginLoader.loadPlugin(dir);
     } catch (error) {
       if (dirExisted) {
-        for (const entry of entries) fs.rmSync(path.join(dir, entry.relPath), { force: true });
+        for (const dest of written) fs.rmSync(dest, { force: true });
       } else {
         fs.rmSync(dir, { recursive: true, force: true });
       }
