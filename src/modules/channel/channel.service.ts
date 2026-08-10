@@ -56,6 +56,11 @@ export class ChannelService {
     return this.getEngine(sessionId).muteChannel(channelId, mute);
   }
 
+  /** Demote a channel admin back to a subscriber. There is no promote counterpart on either engine. */
+  demoteChannelAdmin(sessionId: string, channelId: string, userId: string) {
+    return this.getEngine(sessionId).demoteChannelAdmin(channelId, userId);
+  }
+
   subscribeToChannel(sessionId: string, inviteCode: string) {
     return this.getEngine(sessionId).subscribeToChannel(inviteCode);
   }

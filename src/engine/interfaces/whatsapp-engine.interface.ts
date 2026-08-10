@@ -1064,6 +1064,14 @@ export interface IWhatsAppEngine {
   deleteChannel(channelId: string): Promise<void>;
   /** Mute or unmute a channel's notifications for this account. Does not affect subscription. */
   muteChannel(channelId: string, mute: boolean): Promise<void>;
+  /**
+   * Demote a channel admin back to a plain subscriber. Requires this account to own the channel.
+   *
+   * There is deliberately no promote counterpart: neither library has one — Baileys exposes no
+   * `newsletterPromote` and whatsapp-web.js no `promoteChannelAdmin` — so an admin is promoted from
+   * the WhatsApp app and can then be demoted here.
+   */
+  demoteChannelAdmin(channelId: string, userId: string): Promise<void>;
   upsertLabel(label: LabelInput): Promise<void>;
   /** Delete a label. It disappears from every chat it was on. */
   deleteLabel(labelId: string): Promise<void>;

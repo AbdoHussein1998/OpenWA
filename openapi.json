@@ -6874,6 +6874,73 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/channels/{channelId}/admins/demote": {
+      "post": {
+        "description": "Requires this account to own the channel. There is no promote counterpart: neither engine library exposes one, so an admin is promoted from the WhatsApp app and demoted here.",
+        "operationId": "ChannelController_demoteAdmin",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "description": "Channel ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoteChannelAdminDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Admin demoted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelAckResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Session not started, or validation failed"
+          },
+          "403": {
+            "description": "The engine refused — not the owner, or the user is not an admin"
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
+          },
+          "501": {
+            "description": "The whatsapp-web.js engine cannot perform this: the WhatsApp Web module its library method targets no longer exports the function. Use the Baileys engine."
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — the operation may or may not have applied."
+          }
+        },
+        "summary": "Demote a channel admin back to a subscriber",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/channels/subscribe": {
       "post": {
         "operationId": "ChannelController_subscribe",
@@ -13588,6 +13655,19 @@
         },
         "required": [
           "mute"
+        ]
+      },
+      "DemoteChannelAdminDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "WhatsApp ID of the admin to demote back to a subscriber.",
+            "example": "628123456789@c.us"
+          }
+        },
+        "required": [
+          "userId"
         ]
       },
       "OverviewSessionsDto": {

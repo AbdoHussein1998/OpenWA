@@ -3,7 +3,7 @@
 Three-way comparison of every capability: the **Baileys library** (`@whiskeysockets/baileys`
 7.0.0-rc13), the **whatsapp-web.js library** (1.34.7), and what **OpenWA actually exposes** through
 its adapter layer and REST API — including which "supported" cells only work because OpenWA patches
-the installed library. Coverage is total: all 110 `IWhatsAppEngine` methods (29.4), **all 152
+the installed library. Coverage is total: all 111 `IWhatsAppEngine` methods (29.4), **all 152
 Baileys + 81 whatsapp-web.js library methods** (29.5), all 34 + 31 library events (29.5.4), and all
 5 install-time patches (29.3). If it exists upstream or in OpenWA, it has a row here.
 
@@ -24,7 +24,7 @@ Statuses used in the tables:
 
 Two complementary views:
 
-- **29.4 — the OpenWA contract view.** Rows are the 110 `IWhatsAppEngine` methods; use it to see
+- **29.4 — the OpenWA contract view.** Rows are the 111 `IWhatsAppEngine` methods; use it to see
   what a REST caller gets per engine. Source of truth: `src/engine/engine-capability-matrix.ts`
   (per-cell `evidence` strings cite the exact library `file:symbol` inspected).
 - **29.5 — the full engine inventory.** Rows are **every method the installed libraries expose**,
@@ -36,14 +36,14 @@ Two complementary views:
 ## 29.2 Adapter architecture
 
 OpenWA never calls a WhatsApp library directly from a controller. Every session owns one engine
-instance behind the neutral `IWhatsAppEngine` interface (110 methods +
+instance behind the neutral `IWhatsAppEngine` interface (111 methods +
 `EngineEventCallbacks`), and all modules go through it:
 
 ```mermaid
 flowchart LR
     subgraph OpenWA["OpenWA"]
         API["REST API controllers"] --> SVC["Modules / services"]
-        SVC --> IF["IWhatsAppEngine - 110 methods"]
+        SVC --> IF["IWhatsAppEngine - 111 methods"]
         IF --> WA["WwebjsAdapter"]
         IF --> BA["BaileysAdapter"]
         SVC --> STORE["OpenWA-side stores"]
@@ -156,7 +156,7 @@ Rows that are ✅ on **both** engines where one side is patch-dependent: `initia
 rests on the column-wide 🔧¹ (wwjs) and 🔧⁵ (baileys) — no row runs on stock library code on both
 sides.
 
-## 29.4 Full capability matrix — the OpenWA contract view (110 methods)
+## 29.4 Full capability matrix — the OpenWA contract view (111 methods)
 
 Legend recap: **✅** supported · **✅🔧ⁿ** supported via OpenWA patch `🔧ⁿ` (29.3) ·
 **❌ gap** adapter-gap · **❌ lib** library-limitation. Column headers carry the engine-wide
@@ -284,6 +284,7 @@ socket is caught by the transport instead. No REST route: the session watchdog p
 | `createChannel`          | ✅                  | ✅                 | ✅              |
 | `deleteChannel`          | ✅                  | ✅                 | ✅              |
 | `muteChannel`            | ✅                  | ✅                 | ✅              |
+| `demoteChannelAdmin`     | ✅                  | ❌ lib             | ⚠️ baileys only |
 | `getChannelById`         | ✅                  | ✅                 | ✅              |
 | `getChannelMessages`     | ❌ gap              | ✅                 | ⚠️ wwjs only    |
 | `getSubscribedChannels`  | ❌ lib              | ✅                 | ⚠️ wwjs only    |
@@ -346,9 +347,9 @@ answers 501.
 | `rejectCall`          | ✅                  | ✅                 | ✅              |
 | `createCallLink`      | ✅                  | ✅                 | ✅              |
 
-**Totals:** 110 methods → 220 adapter cells: **198 ✅, 22 ❌** (2 adapter-gaps, 20
-library-limitations, 0 uncertain) across 21 methods. From the REST caller's side: **91** methods
-work on any engine (89 fully supported + 2 store-backed status reads), **9** are Baileys-only,
+**Totals:** 111 methods → 222 adapter cells: **199 ✅, 23 ❌** (2 adapter-gaps, 21
+library-limitations, 0 uncertain) across 22 methods. From the REST caller's side: **91** methods
+work on any engine (89 fully supported + 2 store-backed status reads), **10** are Baileys-only,
 **9** are wwjs-only (the 2 store-backed rows excluded), **1** (`sendCatalog`) is 501 on both.
 
 ## 29.5 Full engine method inventory — every library method, mapped to OpenWA
@@ -461,7 +462,7 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 | `newsletterChangeOwner`       | ❌ **not exposed**                           |
 | `newsletterCreate`            | ✅ `createChannel`                           |
 | `newsletterDelete`            | ✅ `deleteChannel`                           |
-| `newsletterDemote`            | ❌ **not exposed**                           |
+| `newsletterDemote`            | ✅ `demoteChannelAdmin`                      |
 | `newsletterFetchMessages`     | ❌ **not exposed** — adapter-gap #1 (29.6.1) |
 | `newsletterFollow`            | ✅ `subscribeToChannel`                      |
 | `newsletterMetadata`          | ✅ `getChannelById`, `subscribeToChannel`    |
@@ -648,7 +649,7 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 | `acceptChannelAdminInvite` | ❌ **not exposed**                                                                                   |
 | `createChannel`            | ✅ `createChannel`                                                                                   |
 | `deleteChannel`            | ✅ `deleteChannel`, `deleteChat`                                                                     |
-| `demoteChannelAdmin`       | ❌ **not exposed**                                                                                   |
+| `demoteChannelAdmin`       | ❌ **not exposed** — page function gone, see 29.4                                                    |
 | `getChannelByInviteCode`   | ❌ **not exposed** — the invite→channel bridge adapter-gap #2 needs (29.6.2)                         |
 | `getChannels`              | ✅ `getSubscribedChannels`, `getChannelMessages`                                                     |
 | `revokeChannelAdminInvite` | ❌ **not exposed**                                                                                   |
@@ -723,10 +724,9 @@ The highest-value backlog: capabilities with first-class symbols on **both** eng
 new `IWhatsAppEngine` method wires both adapters at once. All cross-checked against the installed
 `.d.ts` files.
 
-| Capability                 | Baileys symbol                                        | wwjs symbol                | Note                                        |
-| -------------------------- | ----------------------------------------------------- | -------------------------- | ------------------------------------------- |
-| Channel admin demote       | `newsletterDemote` (`Socket/newsletter.d.ts:25`)      | `demoteChannelAdmin`       | pair with the ❌-exposed invite flows below |
-| Channel ownership transfer | `newsletterChangeOwner` (`Socket/newsletter.d.ts:24`) | `transferChannelOwnership` |                                             |
+| Capability                 | Baileys symbol                                        | wwjs symbol                | Note |
+| -------------------------- | ----------------------------------------------------- | -------------------------- | ---- |
+| Channel ownership transfer | `newsletterChangeOwner` (`Socket/newsletter.d.ts:24`) | `transferChannelOwnership` |      |
 
 Near-misses (both libraries have the area, but the symbol sets only partially overlap — still
 worth an interface method): **channel admin invites** (wwjs
@@ -783,7 +783,7 @@ OpenWA consumes events by normalizing them into `EngineEventCallbacks`; anything
 | `group_leave`               | ✅           |     | `group_update`         | ✅                                                                              |
 | `group_membership_request`  | ✅           |     |                        |                                                                                 |
 
-## 29.6 The 22 not-available cells in detail
+## 29.6 The 23 not-available cells in detail
 
 Every ❌ in 29.4, with the exact library symbol inspected (full evidence strings:
 `engine-capability-matrix.ts`). All of these throw `EngineNotSupportedError` → HTTP 501 at the
@@ -806,20 +806,21 @@ adapter boundary — none silently stubs.
 | `sendCatalog`           | lib   | `AnyMessageContent` (`Types/Message.d.ts:166-210`) has only `{product}` (single product); the catalog CRUD nodes (`Socket/business.js:294-362`) mutate the catalog, they don't send it.                                                                                                                                                                  |
 | `votePoll`              | lib   | No vote-send helper at all; the library only _decrypts incoming_ votes (`decryptPollVote`). Sending needs a hand-built `proto.Message.PollUpdateMessage` with HMAC-SHA256 encryption keyed by the poll creation's `messageSecret`.                                                                                                                       |
 
-### 29.6.2 wwjs adapter (10 cells)
+### 29.6.2 wwjs adapter (11 cells)
 
-| Method                | Cause | What's missing (evidence)                                                                                                                                                                                                                                                                                                                                                                                                  |
-| --------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `subscribeToChannel`  | gap   | `Client.subscribeToChannel(channelId)` (`Client.js:2542`) takes a channel **id** and resolves a boolean — it cannot satisfy the subscribe-by-invite-code contract alone. Correct wiring is two-step: `getChannelByInviteCode(inviteCode)` (`Client.js:1716`) → `subscribeToChannel(channel.id)`, unverified against a live session (the previous one-step call was a phantom success). The one remaining wwjs adapter-gap. |
-| `upsertLabel`         | lib   | 1.34.7 reads labels and assigns them (`getLabels`, `getLabelById`, `getChatLabels`, `getChatsByLabelId`, `addOrRemoveLabels`, `index.d.ts:129-154`) but exposes nothing that creates/edits a label definition.                                                                                                                                                                                                             |
-| `deleteLabel`         | lib   | Same as above.                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `subscribeToPresence` | lib   | Only `sendPresenceAvailable`/`sendPresenceUnavailable` (`index.d.ts:230,233`), which publish the _account's own_ presence; no subscribe call and no presence event is emitted.                                                                                                                                                                                                                                             |
-| `getCatalog`          | lib   | No `Client.getCatalog` in `index.d.ts` (0 hits); `Product`/`Order` are inbound-only parsers.                                                                                                                                                                                                                                                                                                                               |
-| `getProducts`         | lib   | Same as above.                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `getProduct`          | lib   | Only page-internal `getProductMetadata` (`Utils.js:1290`), not a public Client fn.                                                                                                                                                                                                                                                                                                                                         |
-| `sendProduct`         | lib   | No outbound product content type.                                                                                                                                                                                                                                                                                                                                                                                          |
-| `sendCatalog`         | lib   | No `Client.sendCatalog` in `index.d.ts` (0 hits).                                                                                                                                                                                                                                                                                                                                                                          |
-| `setGroupEphemeral`   | lib   | No disappearing-timer setter (0 hits for `ephemeral` in `index.d.ts`); only the create-time `messageTimer` option (`Client.js:2328`).                                                                                                                                                                                                                                                                                      |
+| Method                | Cause | What's missing (evidence)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `subscribeToChannel`  | gap   | `Client.subscribeToChannel(channelId)` (`Client.js:2542`) takes a channel **id** and resolves a boolean — it cannot satisfy the subscribe-by-invite-code contract alone. Correct wiring is two-step: `getChannelByInviteCode(inviteCode)` (`Client.js:1716`) → `subscribeToChannel(channel.id)`, unverified against a live session (the previous one-step call was a phantom success). The one remaining wwjs adapter-gap.                                                                                                                       |
+| `demoteChannelAdmin`  | lib   | `Client.demoteChannelAdmin` exists (`index.d.ts:35`) but its page body calls `window.require('WAWebDemoteNewsletterAdminAction').demoteNewsletterAdmin` (`Client.js:1907-1925`), and a module probe on a live session (Web `2.3000.1044824727-alpha`, unpinned) returned that module resolving with `demoteNewsletterAdmin: undefined`. The sibling path used inside `transferChannelOwnership` (`WAWebNewsletterDemoteAdminJob.demoteNewsletterAdminAction`) is undefined too, so there is nothing to retarget. Baileys serves this capability. |
+| `upsertLabel`         | lib   | 1.34.7 reads labels and assigns them (`getLabels`, `getLabelById`, `getChatLabels`, `getChatsByLabelId`, `addOrRemoveLabels`, `index.d.ts:129-154`) but exposes nothing that creates/edits a label definition.                                                                                                                                                                                                                                                                                                                                   |
+| `deleteLabel`         | lib   | Same as above.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `subscribeToPresence` | lib   | Only `sendPresenceAvailable`/`sendPresenceUnavailable` (`index.d.ts:230,233`), which publish the _account's own_ presence; no subscribe call and no presence event is emitted.                                                                                                                                                                                                                                                                                                                                                                   |
+| `getCatalog`          | lib   | No `Client.getCatalog` in `index.d.ts` (0 hits); `Product`/`Order` are inbound-only parsers.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `getProducts`         | lib   | Same as above.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `getProduct`          | lib   | Only page-internal `getProductMetadata` (`Utils.js:1290`), not a public Client fn.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `sendProduct`         | lib   | No outbound product content type.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `sendCatalog`         | lib   | No `Client.sendCatalog` in `index.d.ts` (0 hits).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `setGroupEphemeral`   | lib   | No disappearing-timer setter (0 hits for `ephemeral` in `index.d.ts`); only the create-time `messageTimer` option (`Client.js:2328`).                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ## 29.7 Caveats on supported rows
 
@@ -876,24 +877,24 @@ adapter boundary — none silently stubs.
 Recomputed from `engine-capability-matrix.ts`, `upstream-surface.snapshot.json`, and a scan of the
 adapter sources — re-derive the same way when anything changes:
 
-- **110** interface methods → **220** adapter cells: **198 ✅** / **22 ❌** (2 adapter-gaps, 20
-  library-limitations, 0 uncertain), spanning **21** methods.
-- Of the 198 ✅ cells, **6 wwjs cells carry an explicit patch dependency** (4 × 🔧² status send,
+- **111** interface methods → **222** adapter cells: **199 ✅** / **23 ❌** (2 adapter-gaps, 21
+  library-limitations, 0 uncertain), spanning **22** methods.
+- Of the 199 ✅ cells, **6 wwjs cells carry an explicit patch dependency** (4 × 🔧² status send,
   1 × 🔧³ channel link preview, 1 × 🔧⁴ ready-sync) and the whole wwjs column additionally
   depends on 🔧¹, the whole Baileys column on 🔧⁵ — so every row rests on a patch on each side,
   even though no row carries a row-level mark on both.
-- REST caller's view: **91** engine-neutral (89 + 2 store-backed status reads), **9** Baileys-only,
+- REST caller's view: **91** engine-neutral (89 + 2 store-backed status reads), **10** Baileys-only,
   **9** wwjs-only, **1** unavailable on both (`sendCatalog`).
 - Full engine inventory (29.5), split by the exposure legend rather than lumped: Baileys **152**
-  socket methods — 47 wired into interface methods, 5 internal wiring, 29 plumbing, **71 ❌ not
+  socket methods — 48 wired into interface methods, 5 internal wiring, 29 plumbing, **70 ❌ not
   exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 47 wired,
   2 internal wiring, 1 class plumbing, **31 ❌ not exposed** (23 real capabilities + 8
   session/transport settings that are not WhatsApp capabilities). The backlog is the ❌ rows minus
   those 8 settings; 🔩 plumbing is correctly never exposed.
 - Events: Baileys **34** (15 consumed / 19 dropped), wwjs **31** (16 consumed / 15 dropped).
-- **2** capabilities are supported by **both** libraries and missing only in OpenWA (29.5.3) — the
-  cheapest backlog: channel admin demote, channel ownership transfer. (Four of the original six are
-  now wired — see `muteChat`, `pinChat`, `createCallLink` and `deleteProfilePicture`.)
+- **1** capability is supported by **both** libraries and missing only in OpenWA (29.5.3): channel
+  ownership transfer. (Five of the original six are now wired — see `muteChat`, `pinChat`,
+  `createCallLink`, `deleteProfilePicture` and `demoteChannelAdmin`.)
 - **5** install-time patches (4 whatsapp-web.js + 1 Baileys), all exact and self-disabling.
 - **0 phantom-support rows** — every `not-available` cell throws at the adapter boundary.
 - Remaining adapter-gaps (fixable in this repo, ranked): **#1** `getChannelMessages` (Baileys —

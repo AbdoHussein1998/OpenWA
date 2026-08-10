@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `POST /sessions/:sessionId/channels/:channelId/admins/demote` demotes a channel admin back to a subscriber on the Baileys engine. There is no promote counterpart because neither engine library has one, so an admin is promoted from the WhatsApp app and demoted here. The whatsapp-web.js engine answers `501`: it declares the method, but the WhatsApp Web module its page body calls no longer exports the function, so wiring it would have produced a route that always failed.
 - `POST /sessions/:id/chats/pin` pins a chat to the top of the list or unpins it, on both engines; `success: false` reports WhatsApp's three-pin cap, which only the whatsapp-web.js engine can observe.
 - `POST /sessions/:id/chats/mute` mutes a chat until an epoch-milliseconds timestamp or unmutes it with an explicit `null`, on both engines; unlike `chats/archive` it has no declined outcome, since the change is not keyed to the chat's last message.
 - `engine-inventory-parity.spec.ts` fails when a `docs/29` exposure or event mark no longer matches the adapters: a symbol marked as used must appear in adapter code rather than only in a comment, and an event marked consumed must have a listener behind it.
