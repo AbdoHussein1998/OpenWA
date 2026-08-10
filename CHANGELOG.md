@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/29-engine-capability-matrix.md` (`docs/29`) now covers all 152 Baileys socket methods, all 81 whatsapp-web.js Client methods, all 34 + 31 library events and all five install-time patches, each mapped to the interface method that uses it or marked unexposed.
 - An onboarding modal the "What's new" probe does not recognise is now logged once with its heading and confirm-button labels (`onboarding_dialog_unrecognized`), so it can be covered via `WWEBJS_ONBOARDING_CONTINUE_LABELS` before WhatsApp unlinks the companion. Refs #1072.
 - `npm run check:sdk-events` compares each typed SDK's webhook event list to the contract, so an event the gateway accepts can no longer be missing from the SDKs.
+- `npm run check:sdk-docs` compares the SDK design doc and the coverage tables to the shipped client surface, so a client method can no longer ship undocumented.
 
 ### Fixed
 
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The chat-media retention purge and orphan sweep now run while `CHAT_MEDIA_ARCHIVE_ENABLED` is off; previously turning archiving off stopped both, leaving files past their TTL and crash-leftover orphans in the store indefinitely. Note the consequence for a deployment that has archiving off: the orphan sweep now deletes any file under the `chat-media/` prefix that no message row references, once it has been unreferenced for the grace window (`CHAT_MEDIA_ORPHAN_GRACE_MS`, default 1h). A file a surviving row points at is never touched.
 - A plugin whose code went missing is recoverable through the API again: reinstalling now writes over its surviving `ctx.storage` directory instead of answering `409`, and uninstalling a known-but-unloaded id no longer answers `404`.
 - A sticker sent through the Baileys engine no longer reaches WhatsApp as non-WebP bytes labelled `image/webp`; the adapter converts `image/*` to a 512×512 WebP before the socket, passes genuine WebP through byte-identical, and refuses anything it cannot convert with a `400` instead of reporting success.
+- `docs/18-sdk-design.md` and the SDK READMEs now list every method the five clients ship: the whole `media` resource plus 26 methods across nine others were missing, so server-side media conversion, presence subscription, session config and webhook delivery diagnostics read as unavailable.
 
 ### Security
 

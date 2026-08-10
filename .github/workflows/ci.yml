@@ -64,6 +64,12 @@ jobs:
       - name: Check SDK webhook events against the contract
         run: npm run check:sdk-events
 
+      # Same reason again: a docs-only PR matches none of sdk-ci.yml's path filter, and the drift this
+      # catches is a documentation one — fourteen feature commits shipped a client method that the
+      # design doc never learned about.
+      - name: Check SDK docs cover the shipped client surface
+        run: npm run check:sdk-docs
+
   # Deliberately its own job rather than a step inside Lint. `npm audit` reports against the
   # advisory database, not against the diff, so a newly published advisory turns red on unrelated
   # PRs. While it lived as the first step of Lint, that failure aborted the job before ESLint, the
