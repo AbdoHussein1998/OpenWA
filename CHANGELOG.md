@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/29-engine-capability-matrix.md` (`docs/29`) now covers all 152 Baileys socket methods, all 81 whatsapp-web.js Client methods, all 34 + 31 library events and all five install-time patches, each mapped to the interface method that uses it or marked unexposed.
 - An onboarding modal the "What's new" probe does not recognise is now logged once with its heading and confirm-button labels (`onboarding_dialog_unrecognized`), so it can be covered via `WWEBJS_ONBOARDING_CONTINUE_LABELS` before WhatsApp unlinks the companion. Refs #1072.
 
+### Fixed
+
+- A webhook's `lastTriggeredAt` is published as a nullable date-time string instead of an object, so a client generated from the contract no longer rejects both of the values the field actually carries. The response itself is unchanged.
+
 ### Security
 
 - An advisory usage-statistics write no longer persists the whole API-key row. A key deleted while a request that had already loaded it was in flight was re-inserted with its original hash and authenticated again; a revocation or a narrowing of role, allowlist, IP allowlist or expiry was likewise reverted to the values that request loaded. The write is now scoped to the two usage columns and affects nothing if the row is gone.

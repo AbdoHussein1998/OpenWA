@@ -9967,7 +9967,9 @@
             "type": "number"
           },
           "lastTriggeredAt": {
-            "type": "object"
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "createdAt": {
             "format": "date-time",

@@ -218,7 +218,9 @@ export class WebhookResponseDto {
   retryCount!: number;
 
   @Expose()
-  @ApiPropertyOptional()
+  // Spelled out because a bare @ApiPropertyOptional() on `Date | null` emits `type: object`, and the
+  // published schema then rejects both values this field actually carries.
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
   lastTriggeredAt?: Date | null;
 
   @Expose()

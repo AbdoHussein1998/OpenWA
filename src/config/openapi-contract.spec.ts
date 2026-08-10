@@ -115,6 +115,29 @@ describe('openapi.json structural invariants', () => {
 
     expect(silent).toEqual([]);
   });
+
+  it('never types a timestamp property as a bare object', () => {
+    const doc = snapshot();
+    // A `Date | null` member with no explicit @ApiProperty type is emitted as `type: object`, and the
+    // published schema then rejects the ISO string the gateway actually sends. Restricted to
+    // timestamp-named properties: the document's other bare objects are genuine Record maps, and the
+    // Unix-seconds fields are legitimately `type: number`.
+    const scanned: string[] = [];
+    const bare: string[] = [];
+
+    for (const [name, schema] of Object.entries(doc.components?.schemas ?? {})) {
+      const properties = (schema as { properties?: Record<string, { type?: string }> }).properties ?? {};
+      for (const [property, spec] of Object.entries(properties)) {
+        if (!/(At|Timestamp)$/.test(property)) continue;
+        scanned.push(`${name}.${property}`);
+        if (spec.type === 'object') bare.push(`${name}.${property}`);
+      }
+    }
+
+    // Guard the selector: if the naming convention changed, this would scan nothing and pass.
+    expect(scanned.length).toBeGreaterThan(20);
+    expect(bare).toEqual([]);
+  });
 });
 
 // The document is produced in TWO places: scripts/export-openapi.ts for the committed snapshot, and
