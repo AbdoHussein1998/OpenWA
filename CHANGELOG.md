@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `npm run check:sdk-events` compares each typed SDK's webhook event list to the contract, so an event the gateway accepts can no longer be missing from the SDKs.
 - `npm run check:sdk-docs` compares the SDK design doc and the coverage tables to the shipped client surface, so a client method can no longer ship undocumented.
 - `POST /sessions/:sessionId/calls/link` generates a shareable WhatsApp call link on both engines, returning the finished `https://call.whatsapp.com/…` URL; a WhatsApp-side failure answers `403` rather than a success carrying an empty link.
+- `docs-29-counts.spec.ts` binds every count-shaped claim in `docs/29` to the capability matrix, so a figure restated in the intro, the architecture prose, a mermaid node or a section heading cannot drift from the source it restates.
 
 ### Fixed
 
