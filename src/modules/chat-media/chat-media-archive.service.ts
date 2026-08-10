@@ -56,10 +56,12 @@ interface InlineMedia {
  * cap: the inline copy is deliberately left in place, since the dashboard renders from it and
  * stripping it would break the response contract.
  *
- * Two recurring sweeps run only while archiving is enabled: a retention purge (when
- * `CHAT_MEDIA_ARCHIVE_TTL_DAYS` is non-zero) that clears files past their TTL along with the
- * columns pointing at them, and an hourly reconciliation sweep that reaps files no row references —
- * the crash leftovers of the narrow window between a file write and its row update.
+ * Two recurring sweeps run regardless of that flag, which gates the writer rather than the store: a
+ * retention purge (when `CHAT_MEDIA_ARCHIVE_TTL_DAYS` is non-zero) that clears files past their TTL
+ * along with the columns pointing at them, and an hourly reconciliation sweep that reaps files no
+ * row references — the crash leftovers of the narrow window between a file write and its row
+ * update. Files and pointers written while the flag was on outlive it being turned off, so the
+ * maintenance they need does not stop with the writer.
  */
 @Injectable()
 export class ChatMediaArchiveService implements OnModuleInit, OnModuleDestroy {
@@ -81,10 +83,6 @@ export class ChatMediaArchiveService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit(): void {
-    // Both sweeps exist only to maintain archived files. With archiving off no row can hold a
-    // mediaPath, so scheduling them would be a recurring no-op walk of the store.
-    if (!this.enabled) return;
-
     const runPurge = (): void => {
       this.purgeExpired(Date.now()).catch(err =>
         this.logger.error('Chat media purge failed', err instanceof Error ? err.stack : String(err)),
