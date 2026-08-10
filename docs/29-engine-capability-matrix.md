@@ -3,7 +3,7 @@
 Three-way comparison of every capability: the **Baileys library** (`@whiskeysockets/baileys`
 7.0.0-rc13), the **whatsapp-web.js library** (1.34.7), and what **OpenWA actually exposes** through
 its adapter layer and REST API — including which "supported" cells only work because OpenWA patches
-the installed library. Coverage is total: all 108 `IWhatsAppEngine` methods (29.4), **all 152
+the installed library. Coverage is total: all 109 `IWhatsAppEngine` methods (29.4), **all 152
 Baileys + 81 whatsapp-web.js library methods** (29.5), all 34 + 31 library events (29.5.4), and all
 5 install-time patches (29.3). If it exists upstream or in OpenWA, it has a row here.
 
@@ -24,7 +24,7 @@ Statuses used in the tables:
 
 Two complementary views:
 
-- **29.4 — the OpenWA contract view.** Rows are the 108 `IWhatsAppEngine` methods; use it to see
+- **29.4 — the OpenWA contract view.** Rows are the 109 `IWhatsAppEngine` methods; use it to see
   what a REST caller gets per engine. Source of truth: `src/engine/engine-capability-matrix.ts`
   (per-cell `evidence` strings cite the exact library `file:symbol` inspected).
 - **29.5 — the full engine inventory.** Rows are **every method the installed libraries expose**,
@@ -36,14 +36,14 @@ Two complementary views:
 ## 29.2 Adapter architecture
 
 OpenWA never calls a WhatsApp library directly from a controller. Every session owns one engine
-instance behind the neutral `IWhatsAppEngine` interface (108 methods +
+instance behind the neutral `IWhatsAppEngine` interface (109 methods +
 `EngineEventCallbacks`), and all modules go through it:
 
 ```mermaid
 flowchart LR
     subgraph OpenWA["OpenWA"]
         API["REST API controllers"] --> SVC["Modules / services"]
-        SVC --> IF["IWhatsAppEngine - 108 methods"]
+        SVC --> IF["IWhatsAppEngine - 109 methods"]
         IF --> WA["WwebjsAdapter"]
         IF --> BA["BaileysAdapter"]
         SVC --> STORE["OpenWA-side stores"]
@@ -156,7 +156,7 @@ Rows that are ✅ on **both** engines where one side is patch-dependent: `initia
 rests on the column-wide 🔧¹ (wwjs) and 🔧⁵ (baileys) — no row runs on stock library code on both
 sides.
 
-## 29.4 Full capability matrix — the OpenWA contract view (108 methods)
+## 29.4 Full capability matrix — the OpenWA contract view (109 methods)
 
 Legend recap: **✅** supported · **✅🔧ⁿ** supported via OpenWA patch `🔧ⁿ` (29.3) ·
 **❌ gap** adapter-gap · **❌ lib** library-limitation. Column headers carry the engine-wide
@@ -345,8 +345,8 @@ answers 501.
 | `rejectCall`          | ✅                  | ✅                 | ✅              |
 | `createCallLink`      | ✅                  | ✅                 | ✅              |
 
-**Totals:** 108 methods → 216 adapter cells: **194 ✅, 22 ❌** (2 adapter-gaps, 20
-library-limitations, 0 uncertain) across 21 methods. From the REST caller's side: **89** methods
+**Totals:** 109 methods → 218 adapter cells: **196 ✅, 22 ❌** (2 adapter-gaps, 20
+library-limitations, 0 uncertain) across 21 methods. From the REST caller's side: **90** methods
 work on any engine (87 fully supported + 2 store-backed status reads), **9** are Baileys-only,
 **9** are wwjs-only (the 2 store-backed rows excluded), **1** (`sendCatalog`) is 501 on both.
 
