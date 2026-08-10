@@ -138,6 +138,22 @@ describe('openapi.json structural invariants', () => {
     expect(scanned.length).toBeGreaterThan(20);
     expect(bare).toEqual([]);
   });
+
+  it('gives each route exactly one path key, whatever its parameters are named', () => {
+    const doc = snapshot();
+    // A path template variable is positional: `/x/{id}` and `/x/{sessionId}` are the same URL. Two
+    // keys for one route split its operations across two Path Items, and a generator emits two
+    // endpoints where the gateway has one.
+    const byShape = new Map<string, string[]>();
+    for (const route of Object.keys(doc.paths)) {
+      const shape = route.replace(/\{[^}]*\}/g, '{}');
+      byShape.set(shape, [...(byShape.get(shape) ?? []), route]);
+    }
+
+    // Guard the grouping: a document that somehow parsed to nothing must not pass silently.
+    expect(byShape.size).toBeGreaterThan(100);
+    expect([...byShape.values()].filter(routes => routes.length > 1)).toEqual([]);
+  });
 });
 
 // The document is produced in TWO places: scripts/export-openapi.ts for the committed snapshot, and

@@ -820,12 +820,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/groups": {
+    "/api/sessions/{sessionId}/groups": {
       "get": {
         "operationId": "SessionController_getGroups",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -872,6 +872,52 @@
         "summary": "Get all groups for a session",
         "tags": [
           "sessions"
+        ]
+      },
+      "post": {
+        "operationId": "GroupController_create",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGroupDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Group created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupSummaryDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
+          }
+        },
+        "summary": "Create a new group",
+        "tags": [
+          "groups"
         ]
       }
     },
@@ -4758,54 +4804,6 @@
         ]
       }
     },
-    "/api/sessions/{sessionId}/groups": {
-      "post": {
-        "operationId": "GroupController_create",
-        "parameters": [
-          {
-            "name": "sessionId",
-            "required": true,
-            "in": "path",
-            "description": "Session ID",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateGroupDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Group created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GroupSummaryDto"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
-          },
-          "409": {
-            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
-          }
-        },
-        "summary": "Create a new group",
-        "tags": [
-          "groups"
-        ]
-      }
-    },
     "/api/sessions/{sessionId}/groups/{groupId}/participants": {
       "post": {
         "operationId": "GroupController_addParticipants",
@@ -6905,7 +6903,7 @@
         ]
       }
     },
-    "/api/sessions/{sessionId}/status/{contactId}": {
+    "/api/sessions/{sessionId}/status/{id}": {
       "get": {
         "operationId": "StatusController_getContactStatus",
         "parameters": [
@@ -6918,9 +6916,10 @@
             }
           },
           {
-            "name": "contactId",
+            "name": "id",
             "required": true,
             "in": "path",
+            "description": "Contact ID",
             "schema": {
               "type": "string"
             }
@@ -6939,6 +6938,50 @@
           }
         },
         "summary": "Get status updates from a specific contact",
+        "tags": [
+          "status"
+        ]
+      },
+      "delete": {
+        "operationId": "StatusController_deleteStatus",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Status ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusDeletedResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
+          }
+        },
+        "summary": "Delete own status",
         "tags": [
           "status"
         ]
@@ -7191,51 +7234,6 @@
           }
         },
         "summary": "Post an audio status as a voice note",
-        "tags": [
-          "status"
-        ]
-      }
-    },
-    "/api/sessions/{sessionId}/status/{statusId}": {
-      "delete": {
-        "operationId": "StatusController_deleteStatus",
-        "parameters": [
-          {
-            "name": "sessionId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "statusId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Status deleted.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusDeletedResponseDto"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
-          },
-          "409": {
-            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
-          }
-        },
-        "summary": "Delete own status",
         "tags": [
           "status"
         ]

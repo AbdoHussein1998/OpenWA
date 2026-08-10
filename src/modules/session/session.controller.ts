@@ -369,9 +369,11 @@ export class SessionController {
     return this.sessionService.requestPairingCode(id, dto.phoneNumber);
   }
 
-  @Get(':id/groups')
+  // `:sessionId`, not `:id`, so this shares a Path Item with GroupController's POST on the same
+  // route. Two names for one positional segment split it into two contract entries.
+  @Get(':sessionId/groups')
   @ApiOperation({ summary: 'Get all groups for a session' })
-  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({
     status: 200,
     description: 'List of groups the session is a member of',
@@ -389,7 +391,7 @@ export class SessionController {
   @ApiQuery({ name: 'limit', required: false, description: 'Max groups to return (1–1000, default 1000)' })
   @ApiQuery({ name: 'offset', required: false, description: 'Number of groups to skip (for paging)' })
   async getGroups(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sessionId', ParseUUIDPipe) id: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ): Promise<{ id: string; name: string; linkedParentJID?: string | null }[]> {

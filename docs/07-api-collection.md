@@ -69,7 +69,7 @@ curl -X GET "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/qr" \
   -H "X-API-Key: $API_KEY"
 ```
 
-#### GET /api/sessions/:id/groups
+#### GET /api/sessions/:sessionId/groups
 
 List groups the session belongs to (paginated).
 

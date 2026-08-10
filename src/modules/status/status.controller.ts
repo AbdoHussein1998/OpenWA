@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Delete, Param, Body, Res, StreamableFile } from '@nestjs/common';
 import type { Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 import { StatusDeletedResponseDto, StatusListResponseDto, StatusResultDto } from './dto/status-response.dto';
 import { StatusService } from './status.service';
 import { SendTextStatusDto } from './dto/send-text-status.dto';
@@ -25,14 +25,18 @@ export class StatusController {
     return { statuses: await this.statusService.getStatuses(sessionId) };
   }
 
-  @Get(':contactId')
+  // The segment is `:id` on both verbs because GET reads a contact's statuses and DELETE removes one
+  // of our own. Naming it per verb gave the same route two contract entries; the meaning belongs in
+  // @ApiParam, which is per-operation.
+  @Get(':id')
   @ApiOperation({ summary: 'Get status updates from a specific contact' })
+  @ApiParam({ name: 'id', description: 'Contact ID' })
   @ApiResponse({ status: 200, description: 'Status updates from the requested contact.', type: StatusListResponseDto })
-  async getContactStatus(@Param('sessionId') sessionId: string, @Param('contactId') contactId: string) {
+  async getContactStatus(@Param('sessionId') sessionId: string, @Param('id') contactId: string) {
     return { statuses: await this.statusService.getContactStatus(sessionId, contactId) };
   }
 
-  // Two path segments (`:statusId/media`) never collides with the single-segment `:contactId`
+  // Two path segments (`:statusId/media`) never collides with the single-segment `:id`
   // route above regardless of declaration order — Nest/Express match on segment count.
   @Get(':statusId/media')
   @ApiOperation({ summary: 'Stream a stored status media file' })
@@ -146,13 +150,14 @@ export class StatusController {
     });
   }
 
-  @Delete(':statusId')
+  @Delete(':id')
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Delete own status' })
+  @ApiParam({ name: 'id', description: 'Status ID' })
   @ApiResponse({ status: 200, description: 'Status deleted.', type: StatusDeletedResponseDto })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiResponse({ status: 404, description: SESSION_NOT_STARTED_404 })
-  async deleteStatus(@Param('sessionId') sessionId: string, @Param('statusId') statusId: string) {
+  async deleteStatus(@Param('sessionId') sessionId: string, @Param('id') statusId: string) {
     await this.statusService.deleteStatus(sessionId, statusId);
     return { message: 'Status deleted successfully' };
   }
