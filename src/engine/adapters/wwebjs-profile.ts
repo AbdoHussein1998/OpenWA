@@ -31,6 +31,20 @@ export class WwebjsProfile {
     return link;
   }
 
+  async deleteProfilePicture(): Promise<void> {
+    this.host.ensureReady();
+    // `Promise<boolean>` understates this. `WWebJS.deletePicture` has three exits
+    // (Injected/Utils.js:1404-1418): `undefined` when `canDelete()` was false and nothing was
+    // attempted, `true` on an HTTP 200, `false` on a ServerStatusCodeError. `undefined` is falsy, so
+    // the usual `if (!ok) throw` would report "there was nothing to delete" as a refusal and turn a
+    // repeat delete into a 403. Only an explicit `false` is WhatsApp saying no.
+    const result = await this.client().deleteProfilePicture();
+    if (result === false) {
+      throw new EngineRefusedError('the engine rejected the profile picture removal');
+    }
+    this.host.logger.log('Deleted profile picture');
+  }
+
   async setProfileName(name: string): Promise<void> {
     this.host.ensureReady();
     // setDisplayName resolves false (rather than throwing) when WhatsApp refuses the rename.

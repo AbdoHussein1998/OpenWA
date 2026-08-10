@@ -1034,6 +1034,16 @@ export interface IWhatsAppEngine {
   setProfileStatus(status: string): Promise<void>;
   /** Set the account's profile picture (a URL payload is fetched server-side). */
   setProfilePicture(media: MediaInput): Promise<void>;
+  /**
+   * Remove the account's own profile picture. Resolves when the removal is acknowledged; deleting a
+   * picture that is not there is a no-op rather than an error, so the call is idempotent.
+   *
+   * Only whatsapp-web.js can report a refusal, and only as an explicit `false` — its page helper
+   * also returns `undefined` when it did not attempt the delete at all, which is NOT a refusal.
+   * Baileys resolves void and has no refusal signal, so it reports success for any acknowledged
+   * write.
+   */
+  deleteProfilePicture(): Promise<void>;
 
   // Labels (Phase 3) - WhatsApp Business only
   getLabels(): Promise<Label[]>;

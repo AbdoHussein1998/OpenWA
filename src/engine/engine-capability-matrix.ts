@@ -395,6 +395,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'wwjs Client.setDisplayName(displayName) → boolean (index.d.ts:251; false → adapter throws); baileys updateProfileName(name) (Socket/chats.d.ts:50)',
   },
+  deleteProfilePicture: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'baileys removeProfilePicture(ownJid) (Socket/groups.d.ts:83), the same symbol deleteGroupPicture already uses, resolving void; wwjs Client.deleteProfilePicture() (index.d.ts:339) forwards WWebJS.deletePicture, which returns undefined when canDelete() is false, true on HTTP 200 and false on a ServerStatusCodeError (Injected/Utils.js:1404-1418)',
+  },
   setProfilePicture: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },

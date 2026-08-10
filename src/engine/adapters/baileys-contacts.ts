@@ -144,6 +144,19 @@ export class BaileysContacts {
     await this.confirmed(this.sock().updateProfilePicture(selfJid, data), 'the profile picture change');
   }
 
+  async deleteProfilePicture(): Promise<void> {
+    this.host.ensureReady();
+    const selfJid = this.host.normalizedSelfJid();
+    if (!selfJid) {
+      // Same guard as setProfilePicture: an empty jid would send the removal at nothing while the
+      // endpoint reported success.
+      throw new Error('cannot delete the profile picture: the own JID is not known yet');
+    }
+    // The same socket call `deleteGroupPicture` already uses, addressed at the account instead of a
+    // group. Baileys resolves void either way, so an acknowledged write is the only signal there is.
+    await this.confirmed(this.sock().removeProfilePicture(selfJid), 'the profile picture removal');
+  }
+
   // eslint-disable-next-line @typescript-eslint/require-await
   async getContacts(): Promise<Contact[]> {
     this.host.ensureReady();

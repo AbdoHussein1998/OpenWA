@@ -1,4 +1,4 @@
-import { Controller, Put, Param, Body } from '@nestjs/common';
+import { Controller, Put, Delete, Param, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
 import { ProfileAckResponseDto } from './dto/profile-response.dto';
 import { ProfileService } from './profile.service';
@@ -73,5 +73,24 @@ export class ProfileController {
   async setPicture(@Param('sessionId') sessionId: string, @Body() dto: SetProfilePictureDto) {
     await this.profileService.setProfilePicture(sessionId, dto);
     return { success: true, message: 'Profile picture updated' };
+  }
+
+  @Delete('picture')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: "Remove the account's profile picture" })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Profile picture removed', type: ProfileAckResponseDto })
+  @ApiResponse({ status: 400, description: 'Session is not started' })
+  @ApiResponse({ status: 403, description: 'The engine refused the picture removal' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'WhatsApp did not answer within the request budget. The change may or may not have been applied — ' +
+      'the gateway stopped waiting for a confirmation that never came.',
+  })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  async deletePicture(@Param('sessionId') sessionId: string) {
+    await this.profileService.deleteProfilePicture(sessionId);
+    return { success: true, message: 'Profile picture removed' };
   }
 }

@@ -2002,6 +2002,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.profile.setProfileStatus(status);
   }
 
+  deleteProfilePicture(): Promise<void> {
+    return this.profile.deleteProfilePicture();
+  }
+
   setProfilePicture(media: MediaInput): Promise<void> {
     return this.profile.setProfilePicture(media);
   }
