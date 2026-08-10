@@ -59,6 +59,11 @@ export class BaileysContacts {
     } catch (err) {
       // A no-picture verdict arrives as a thrown error, so this catch must keep swallowing — but a
       // query that never came back is not a verdict about the picture.
+      //
+      // NOTE the whatsapp-web.js adapter does the OPPOSITE on this same interface method, and
+      // correctly: there the no-picture verdict is delivered as `undefined`, so every throw is a
+      // failure and none of them may become null. Same neutral method, opposite error conventions
+      // underneath — do not harmonise the two into a shared helper.
       if (err instanceof EngineTransportError) {
         throw err;
       }
