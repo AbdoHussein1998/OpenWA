@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The JavaScript, Python, Go and Java SDKs list `group.join_request`, an event the gateway has accepted and dispatched all along, so a typed client can subscribe to it without casting past its own type.
 - A webhook's `lastTriggeredAt` is published as a nullable date-time string instead of an object, so a client generated from the contract no longer rejects both of the values the field actually carries. The response itself is unchanged.
 - The group-list and status routes no longer appear twice in the OpenAPI contract under different path-parameter names, so a client generated from it gets one method per endpoint; the parameters are now `sessionId` and `id`. The URLs themselves are unchanged.
+- A bare `@SkipThrottle()` no longer leaves a route throttled: it writes one metadata key the guard never read, so `/api/metrics` and the `/api/health*` probes were rate-limited despite being documented as exempt, and a 429 on readiness reads as unhealthy to every configured probe. Those four routes are also `@Public()`, so the global IP limit was the only one reaching them and they now carry none — rate-limit them at your proxy if they are internet-facing.
 
 ### Security
 
