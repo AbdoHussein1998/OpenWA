@@ -294,12 +294,14 @@ environment still hits a WA-Web compatibility hang, pin a known-good WA-Web vers
 `WWEBJS_WEB_VERSION`:
 
 ```bash
-# Optional workaround:
-WWEBJS_WEB_VERSION=2.3000.1040641150-alpha
+# Optional workaround — substitute a build that the registry currently serves:
+WWEBJS_WEB_VERSION=<a build from that registry's html/ folder>
 ```
 
-Restart the container after changing it. Browse newer versions at
-[wppconnect-team/wa-version](https://github.com/wppconnect-team/wa-version) (the `html/` folder). With
+Restart the container after changing it. Pick the build from
+[wppconnect-team/wa-version](https://github.com/wppconnect-team/wa-version) (the `html/` folder) — a
+build the registry no longer serves is fetched, missed, and silently ignored, leaving you on the
+default behaviour rather than the pin you asked for. With
 `WWEBJS_WEB_VERSION` unset, `latest`, or `auto` (the default), OpenWA auto-resolves a settled build
 from that registry and pins its HTML — note this HTML is fetched from a third-party repository and
 executed inside the `web.whatsapp.com` origin without an integrity check. Set
