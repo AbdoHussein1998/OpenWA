@@ -6026,6 +6026,45 @@ or
 
 Incoming-call management. A `call.received` webhook/socket event (§6.6) announces an incoming ringing call and carries the `callId` used below.
 
+#### POST /api/sessions/:sessionId/calls/link
+
+Generate a shareable WhatsApp call link.
+
+**Auth:** API key (OPERATOR) · **Scope:** session-scoped
+
+**Request body** — `CreateCallLinkDto`
+
+| Field       | Type   | Required | Constraints                | Description                                           |
+| ----------- | ------ | -------- | -------------------------- | ----------------------------------------------------- |
+| `type`      | string | Yes      | `@IsIn(['audio','video'])` | Which kind of call the link opens                     |
+| `startTime` | number | Yes      | `@IsInt`; `@Min(1)`        | Epoch **milliseconds** the call is scheduled to start |
+
+```json
+{ "type": "video", "startTime": 1800000000000 }
+```
+
+**Response** `200`
+
+```json
+{ "link": "https://call.whatsapp.com/video/XxXxXxXxXxXxXx" }
+```
+
+> **`startTime` is required on purpose.** whatsapp-web.js generates an _event-linked_ call and has no
+> notion of "no start time", so a link for right now is `Date.now()` rather than an omitted field.
+> Sending it in seconds instead of milliseconds produces a link scheduled in 1970.
+
+> **`audio` is the neutral spelling; WhatsApp's own URL path is `/voice/`.** Baileys uses `audio`,
+> whatsapp-web.js uses `voice`, and the generated link reads
+> `https://call.whatsapp.com/voice/…` either way.
+
+> **A refusal is a `403`, never a `200` with an empty link.** whatsapp-web.js returns an empty string
+> when generation fails and Baileys returns no token; both become `EngineRefusedError`, because a
+> caller handed `{ "link": "" }` — or a bare prefix with nothing after it — would pass it to a user
+> before discovering it is dead.
+
+**Errors:** `400` session not ready, or an invalid `type`/`startTime` · `401` missing/invalid API key ·
+`403` WhatsApp generated no link · `503` WhatsApp did not answer within the request budget
+
 #### POST /api/sessions/:sessionId/calls/:callId/reject
 
 Reject a currently ringing incoming call. Only a live call can be rejected — the id is valid while the call rings (a short server-side cache); afterwards it expires.

@@ -12,6 +12,7 @@ import * as qrcode from 'qrcode';
 import * as path from 'path';
 import * as fs from 'fs';
 import {
+  CallLinkType,
   IWhatsAppEngine,
   EngineStatus,
   EngineEventCallbacks,
@@ -1005,6 +1006,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
    * will not become rejectable again); an unknown id or an expired entry maps to CallNotFoundError
    * (HTTP 404). A failure of the library's reject() itself propagates as-is.
    */
+  createCallLink(type: CallLinkType, startTime: number): Promise<string> {
+    return this.profile.createCallLink(type, startTime);
+  }
+
   async rejectCall(callId: string): Promise<void> {
     const entry = this.liveCalls.get(callId);
     this.liveCalls.delete(callId);

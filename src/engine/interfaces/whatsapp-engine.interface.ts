@@ -477,6 +477,12 @@ export interface ChatSummary {
 export type ChatState = 'typing' | 'recording' | 'paused';
 
 /**
+ * Which kind of call a generated link opens. `audio` is the neutral spelling; Baileys uses the same
+ * word, whatsapp-web.js calls it `voice`, and WhatsApp's own URL path is `/voice/`.
+ */
+export type CallLinkType = 'audio' | 'video';
+
+/**
  * Engine-neutral message delivery status. Each adapter maps its native delivery signal
  * (e.g. whatsapp-web.js MessageAck integers, Baileys WAMessageStatus) to this vocabulary,
  * so no consumer outside the adapter sees engine-specific ack codes.
@@ -988,6 +994,17 @@ export interface IWhatsAppEngine {
    * ringing window, and an unknown or expired callId fails with a not-found error (HTTP 404).
    */
   rejectCall(callId: string): Promise<void>;
+  /**
+   * Generate a shareable WhatsApp call link, returning the finished `https://call.whatsapp.com/…`
+   * URL. `startTime` is an absolute epoch-MILLISECONDS timestamp; both engines take seconds on the
+   * wire and each adapter converts.
+   *
+   * The engines return different things and the adapters reconcile them: whatsapp-web.js resolves
+   * the finished link (or `''` on failure), Baileys resolves only the bare token and the adapter
+   * assembles it behind the library's own prefix. A WhatsApp-side failure throws rather than
+   * returning an empty or prefix-only link, which would look like a working link and is not one.
+   */
+  createCallLink(type: CallLinkType, startTime: number): Promise<string>;
 
   // Contact Extended Operations
   getProfilePicture(contactId: string): Promise<string | null>;
