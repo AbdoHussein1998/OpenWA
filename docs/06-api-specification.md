@@ -2198,11 +2198,17 @@ Get the profile picture URL for a contact (best-effort).
 { "url": "https://pps.whatsapp.net/v/..." }
 ```
 
-`url` is `null` when there is no picture, the contact's privacy hides it, or it cannot be resolved.
+`url` is `null` when there is no picture or the contact's privacy hides it — both are answers. A
+lookup that could not reach an answer is **not** reported this way; it answers `503`, so a caller can
+tell "this contact has no avatar" from "we could not find out".
 
 > The path segment is `profile-picture` (hyphenated), not `profile-pic`.
 
-**Errors:** `400` session is not started · `401` missing/invalid API key
+**Errors:** `400` session is not started · `401` missing/invalid API key · `503` the engine could not
+complete the lookup
+
+Note the batch route below keeps its best-effort contract: it has no per-id error channel, so a
+failed lookup there still appears as `null`.
 
 #### GET /api/sessions/:sessionId/contacts/profile-pictures
 

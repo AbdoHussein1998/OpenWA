@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A profile-picture lookup that fails on the whatsapp-web.js engine now answers `503` instead of `{"url": null}`, which is what the route already documented. whatsapp-web.js resolves `undefined` for the only legitimate negative — no picture, or hidden by privacy — so every error reaching the adapter was a failure being reported as "this contact has no avatar". The batch route keeps its best-effort `null`, having no per-id error channel. A dead page during a single-contact lookup likewise stops reading as `404`.
 - The JavaScript, Python, Go and Java SDKs list `group.join_request`, an event the gateway has accepted and dispatched all along, so a typed client can subscribe to it without casting past its own type.
 - A webhook's `lastTriggeredAt` is published as a nullable date-time string instead of an object, so a client generated from the contract no longer rejects both of the values the field actually carries. The response itself is unchanged.
 - The group-list and status routes no longer appear twice in the OpenAPI contract under different path-parameter names, so a client generated from it gets one method per endpoint; the parameters are now `sessionId` and `id`. The URLs themselves are unchanged.

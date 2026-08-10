@@ -5913,13 +5913,24 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
       await expect(adapter.getProfilePicture('12345@c.us')).rejects.toBeInstanceOf(EngineTransportError);
     });
 
-    it('getProfilePicture still maps a genuine lookup failure to null (→ "no picture")', async () => {
-      // A wwebjs "this contact has no picture" rejects with a ServerError — it is NOT a transport
-      // signature. It must resolve to null so the API answers "no avatar" rather than a 503.
+    it('getProfilePicture maps undefined — the library\'s only "no picture" channel — to null', async () => {
+      // `Client.getProfilePicUrl` catches ServerStatusCodeError INSIDE the page and resolves
+      // `undefined` (Client.js:2163-2164), then ends `return profilePic ? profilePic.eurl :
+      // undefined`. So the no-picture verdict reaches us as a VALUE and never as a rejection.
+      const adapter = readyAdapter({ getProfilePicUrl: jest.fn().mockResolvedValue(undefined) });
+      await expect(adapter.getProfilePicture('12345@c.us')).resolves.toBeNull();
+    });
+
+    it('getProfilePicture answers 503 for a page-side exception, which is what the route documents', async () => {
+      // This case used to resolve null. The test that pinned it mocked a rejected ServerError —
+      // a shape the library cannot deliver, since the page swallows exactly that one into
+      // `undefined` above — so it pinned the opposite of the route's own 503 description:
+      // "Deliberately not reported as `url: null` — that is the same answer a contact with no
+      // picture gives, and a caller cannot tell them apart."
       const adapter = readyAdapter({
         getProfilePicUrl: jest.fn().mockRejectedValue(new Error("Server returned error: couldn't get profile picture")),
       });
-      await expect(adapter.getProfilePicture('12345@c.us')).resolves.toBeNull();
+      await expect(adapter.getProfilePicture('12345@c.us')).rejects.toBeInstanceOf(EngineTransportError);
     });
   });
 
