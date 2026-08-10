@@ -400,17 +400,44 @@ describe('ChatMediaArchiveService', () => {
   });
 
   describe('sweep scheduling', () => {
-    it('schedules no timers while archiving is off', () => {
+    const backdate = (id: string, daysAgo: number): Promise<unknown> =>
+      repository.query('UPDATE messages SET createdAt = ? WHERE id = ?', [
+        new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString(),
+        id,
+      ]);
+
+    it('schedules both sweeps even while archiving is off', () => {
       const setInterval = jest.spyOn(global, 'setInterval');
       const svc = build();
 
       svc.onModuleInit();
 
-      // With the archive off no row can hold a mediaPath, so both sweeps would be recurring
-      // no-op walks of a store they must never touch.
-      expect(setInterval).not.toHaveBeenCalled();
+      // The flag gates the WRITER, not the store. Turning it off on a deployment that has been
+      // archiving leaves every file and every pointer in place, so the maintenance the sweeps
+      // perform — TTL expiry and orphan reclamation — is exactly what still has work to do.
+      expect(setInterval).toHaveBeenCalledTimes(2);
       svc.onModuleDestroy();
       setInterval.mockRestore();
+    });
+
+    it('still expires an archived file past its TTL while archiving is off', async () => {
+      const row = await saveRow({ mimetype: 'image/png', data: PNG.toString('base64') });
+      const key = await enabled().archive(row);
+      await backdate(row.id, 10);
+
+      expect(await build({ 'chatMedia.ttlDays': 7 }).purgeExpired(Date.now())).toBe(1);
+
+      await expect(storageService.getFile(key!)).rejects.toThrow();
+      expect((await repository.findOneByOrFail({ id: row.id })).mediaPath).toBeNull();
+    });
+
+    it('still reaps an unreferenced archive file while archiving is off', async () => {
+      await storageService.putFile(`${CHAT_MEDIA_PREFIX}sess-1/orphan.png`, PNG);
+      const svc = build({ 'chatMedia.orphanGraceMs': 0 });
+
+      expect(await svc.sweepOrphanedMedia(Date.now())).toBe(1);
+
+      await expect(storageService.getFile(`${CHAT_MEDIA_PREFIX}sess-1/orphan.png`)).rejects.toThrow();
     });
 
     it('schedules both sweeps once archiving is on, and clears them on destroy', () => {
