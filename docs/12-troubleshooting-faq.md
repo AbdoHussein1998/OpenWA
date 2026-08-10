@@ -1035,7 +1035,7 @@ docker exec openwa-api curl http://host.docker.internal:8080
 ```bash
 # Get group list
 curl -H "X-API-Key: $API_KEY" \
-  http://localhost:2785/api/sessions/{id}/groups
+  http://localhost:2785/api/sessions/{sessionId}/groups
 
 # Send to group
 curl -X POST http://localhost:2785/api/sessions/{id}/messages/send-text \
