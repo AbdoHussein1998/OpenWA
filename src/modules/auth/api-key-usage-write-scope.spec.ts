@@ -10,7 +10,9 @@ import { ApiKey, ApiKeyRole } from './entities/api-key.entity';
  * `lastUsedAt`/`usageCount` on it and persists on a 60s window. Persisting that entity WHOLE writes
  * every column back — including `isActive`, `role`, `allowedSessions`, `allowedIps` and `expiresAt`
  * as they were when the request began. An administrator change committed between the load and the
- * windowed write is silently reverted by an advisory statistics update.
+ * windowed write is silently reverted by an advisory statistics update. Revocation is a hard delete,
+ * so the same write on a removed key is an INSERT rather than an UPDATE: the credential comes back
+ * with its original hash and authenticates again.
  *
  * `forget()` is called by revoke() before its deactivating save and closes the window for a key with
  * only PENDING counters. It cannot reach an entity a request handler is already holding, which is the
@@ -115,9 +117,25 @@ describe('API-key usage write scope', () => {
     const written: Partial<ApiKey> = updateCall ? updateCall[1] : saveCall[0];
 
     expect(Object.keys(written).sort()).toEqual([...USAGE_COLUMNS].sort());
-    // Neither column may arrive undefined: TypeORM's update() writes NULL for an undefined value.
+    // Neither column may arrive undefined. TypeORM strips an undefined value from the SET clause
+    // rather than writing NULL, so an undefined here is not a wipe — it is a write that silently
+    // updates nothing but `updatedAt`, and the statistics stop advancing with no error to notice.
     expect(written.lastUsedAt).toBeInstanceOf(Date);
     expect(typeof written.usageCount).toBe('number');
+  });
+
+  it('aims the write at the row it loaded and no other', async () => {
+    const row = makeRow();
+    const repository = makeRepository(row);
+    const tracker = new ApiKeyUsageTracker(repository as never);
+
+    await tracker.record({ ...row });
+
+    // Blast radius, not column scope. The double writes whatever patch it is handed to the single row
+    // it models, so every assertion about WHAT is written holds just as well for a write aimed at the
+    // wrong rows: `update({ isActive: true }, ...)` — which TypeORM accepts — would stamp one key's
+    // statistics onto every active key, and passes all of the tests above.
+    expect(repository.update.mock.calls[0][0]).toEqual({ id: row.id });
   });
 
   it('still returns the incremented counters on the entity the caller holds', async () => {
