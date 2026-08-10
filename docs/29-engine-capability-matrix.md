@@ -130,8 +130,11 @@ rather than shipping a silently partial patch.
 
 ### 29.3.2 Which matrix rows depend on which patch
 
-This is the patch visibility the matrix cells refer to. **No row requires patches on both
-engines** — every patch is engine-specific (4 on wwjs, 1 on Baileys).
+This is the patch visibility the matrix cells refer to. Every patch is engine-specific (4 on wwjs,
+1 on Baileys), and **no row carries a row-level patch mark on both engines**. The two column-wide
+patches are a separate matter: 🔧¹ underwrites every wwjs cell and 🔧⁵ every baileys cell, so in
+that sense every row does depend on a patch on each side. "Patch-dependent" below means the
+row-level marks.
 
 | Patch                       | Matrix rows that depend on it                                                                                                                                                                                                                                                                                                  |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -143,7 +146,8 @@ engines** — every patch is engine-specific (4 on wwjs, 1 on Baileys).
 
 Rows that are ✅ on **both** engines where one side is patch-dependent: `initialize` (🔧⁴ wwjs),
 `sendTextMessage` (🔧³ wwjs), `postTextStatus` / `postImageStatus` / `postVideoStatus` /
-`postVoiceStatus` (🔧² wwjs). Everything else that is ✅-both runs on stock library code on both
+`postVoiceStatus` (🔧² wwjs). Everything else that is ✅-both carries no row-level mark, but still
+rests on the column-wide 🔧¹ (wwjs) and 🔧⁵ (baileys) — no row runs on stock library code on both
 sides.
 
 ## 29.4 Full capability matrix — the OpenWA contract view (105 methods)
@@ -850,7 +854,8 @@ adapter sources — re-derive the same way when anything changes:
   library-limitations, 0 uncertain), spanning **21** methods.
 - Of the 188 ✅ cells, **6 wwjs cells carry an explicit patch dependency** (4 × 🔧² status send,
   1 × 🔧³ channel link preview, 1 × 🔧⁴ ready-sync) and the whole wwjs column additionally
-  depends on 🔧¹, the whole Baileys column on 🔧⁵. No row is patch-dependent on both engines.
+  depends on 🔧¹, the whole Baileys column on 🔧⁵ — so every row rests on a patch on each side,
+  even though no row carries a row-level mark on both.
 - REST caller's view: **86** engine-neutral (84 + 2 store-backed status reads), **9** Baileys-only,
   **9** wwjs-only, **1** unavailable on both (`sendCatalog`).
 - Full engine inventory (29.5), split by the exposure legend rather than lumped: Baileys **152**
