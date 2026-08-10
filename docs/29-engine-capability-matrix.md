@@ -176,6 +176,14 @@ session runs; ⚠️ depends on the session engine; ❌ 501 on both.
 | `getQRCode`          | ✅                  | ✅                 | ✅          |
 | `requestPairingCode` | ✅                  | ✅                 | ✅          |
 | `getStatus`          | ✅                  | ✅                 | ✅          |
+| `probeLiveness`      | ✅ local            | ✅ round trip      | ⚙️ internal |
+
+`probeLiveness` is the one optional member of `IWhatsAppEngine`, and the two adapters answer it to
+different depths — which is what the optional marker exists to allow. wwjs races a real
+`Client.getState()` round trip against a 10s timeout, because a wedged page keeps reporting
+CONNECTED. Baileys returns a local check (`status === READY && sock != null`), because its keepalive
+already emits a close event within ~35s. So a wedged wwjs page is caught here; a wedged Baileys
+socket is caught by the transport instead. No REST route: the session watchdog polls it.
 
 ### 29.4.2 Sending messages
 
@@ -868,13 +876,13 @@ adapter boundary — none silently stubs.
 Recomputed from `engine-capability-matrix.ts`, `upstream-surface.snapshot.json`, and a scan of the
 adapter sources — re-derive the same way when anything changes:
 
-- **108** interface methods → **216** adapter cells: **194 ✅** / **22 ❌** (2 adapter-gaps, 20
+- **109** interface methods → **218** adapter cells: **196 ✅** / **22 ❌** (2 adapter-gaps, 20
   library-limitations, 0 uncertain), spanning **21** methods.
-- Of the 194 ✅ cells, **6 wwjs cells carry an explicit patch dependency** (4 × 🔧² status send,
+- Of the 196 ✅ cells, **6 wwjs cells carry an explicit patch dependency** (4 × 🔧² status send,
   1 × 🔧³ channel link preview, 1 × 🔧⁴ ready-sync) and the whole wwjs column additionally
   depends on 🔧¹, the whole Baileys column on 🔧⁵ — so every row rests on a patch on each side,
   even though no row carries a row-level mark on both.
-- REST caller's view: **89** engine-neutral (87 + 2 store-backed status reads), **9** Baileys-only,
+- REST caller's view: **90** engine-neutral (88 + 2 store-backed status reads), **9** Baileys-only,
   **9** wwjs-only, **1** unavailable on both (`sendCatalog`).
 - Full engine inventory (29.5), split by the exposure legend rather than lumped: Baileys **152**
   socket methods — 47 wired into interface methods, 5 internal wiring, 29 plumbing, **71 ❌ not
