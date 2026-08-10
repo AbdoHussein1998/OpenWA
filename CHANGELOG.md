@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `POST /sessions/:id/chats/pin` pins a chat to the top of the list or unpins it, on both engines; `success: false` reports WhatsApp's three-pin cap, which only the whatsapp-web.js engine can observe.
 - `POST /sessions/:id/chats/mute` mutes a chat until an epoch-milliseconds timestamp or unmutes it with an explicit `null`, on both engines; unlike `chats/archive` it has no declined outcome, since the change is not keyed to the chat's last message.
 - `engine-inventory-parity.spec.ts` fails when a `docs/29` exposure or event mark no longer matches the adapters: a symbol marked as used must appear in adapter code rather than only in a comment, and an event marked consumed must have a listener behind it.
 - `docs/29-engine-capability-matrix.md` (`docs/29`) now covers all 152 Baileys socket methods, all 81 whatsapp-web.js Client methods, all 34 + 31 library events and all five install-time patches, each mapped to the interface method that uses it or marked unexposed.

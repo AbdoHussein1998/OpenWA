@@ -236,6 +236,16 @@ export class BaileysContacts {
     await this.confirmed(this.sock().chatModify({ mute: muteUntil }, this.host.toEngineJid(chatId)), 'the mute change');
   }
 
+  async pinChat(chatId: string, pin: boolean): Promise<boolean> {
+    this.host.ensureReady();
+    // No lastMessage lookup: the `pin` member of ChatModification carries no `lastMessages`, unlike
+    // archive/clear/delete, so a chat with no known history pins fine. Always true — Baileys writes
+    // the app-state patch and reports nothing back, so it has no equivalent of the whatsapp-web.js
+    // three-pin refusal to surface.
+    await this.confirmed(this.sock().chatModify({ pin }, this.host.toEngineJid(chatId)), 'the pin change');
+    return true;
+  }
+
   async deleteChat(chatId: string): Promise<boolean> {
     this.host.ensureReady();
     const last = this.host.lastMessage(chatId);

@@ -941,6 +941,49 @@ Mute a chat's notifications until a given moment, or unmute it.
 **Errors:** `400` session not ready, or invalid `chatId`/`muteUntil` · `401` missing/invalid API key ·
 `404` session not found · `503` WhatsApp did not confirm within the request budget
 
+#### POST /api/sessions/:id/chats/pin
+
+Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct from
+`messages/pin`, which pins a message inside a chat.
+
+**Auth:** API key (OPERATOR) · **Scope:** session-scoped
+
+**Path parameters**
+
+| Name | Type   | Description  |
+| ---- | ------ | ------------ |
+| `id` | string | Session UUID |
+
+**Request body** — `PinChatDto`
+
+| Field    | Type    | Required | Constraints                                                                                 | Description                                   |
+| -------- | ------- | -------- | ------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `chatId` | string  | Yes      | `@IsString`; `@IsNotEmpty`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Engine-native JID, e.g. `1234567890-123@g.us` |
+| `pin`    | boolean | Yes      | `@IsBoolean` (strict — the string `"false"` is rejected, not coerced to `true`)             | `true` to pin, `false` to unpin               |
+
+```json
+{ "chatId": "1234567890-123@g.us", "pin": true }
+```
+
+**Response** `200`
+
+```json
+{ "success": true }
+```
+
+> **`success: false` means WhatsApp refused the pin, and only a pin can be refused.** WhatsApp allows
+> at most **three** pinned chats. On the whatsapp-web.js engine a fourth pin returns `success: false`
+> without changing anything. Unpinning always succeeds.
+
+> **The Baileys engine cannot see that cap.** It writes an app-state patch and WhatsApp reports
+> nothing back, so it answers `success: true` for every accepted request — including a fourth pin
+> that WhatsApp may then decline on its own. Treat `true` on that engine as "the request was sent",
+> not "the chat is pinned". Unlike `chats/archive` the patch is not keyed to the chat's last message,
+> so a chat with no known history pins normally.
+
+**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found ·
+`503` WhatsApp did not confirm within the request budget
+
 #### POST /api/sessions/:id/chats/delete
 
 Delete a chat from the chat list (e.g. a group you have left).

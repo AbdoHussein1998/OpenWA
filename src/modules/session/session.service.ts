@@ -611,6 +611,21 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     return engine.muteChat(chatId, muteUntil);
   }
 
+  /**
+   * Pin or unpin a chat. Resolves false only when the engine declined — whatsapp-web.js reports
+   * WhatsApp's three-pin cap; Baileys cannot see it and always resolves true.
+   */
+  async pinChat(id: string, chatId: string, pin: boolean): Promise<boolean> {
+    await this.findOne(id); // Verify session exists
+    const engine = this.engines.get(id);
+
+    if (!engine) {
+      throw new BadRequestException('Session is not started');
+    }
+
+    return engine.pinChat(chatId, pin);
+  }
+
   async deleteChat(id: string, chatId: string): Promise<boolean> {
     await this.findOne(id); // Verify session exists
     const engine = this.engines.get(id);

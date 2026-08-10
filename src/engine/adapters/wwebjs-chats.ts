@@ -130,6 +130,22 @@ export class WwebjsChats {
     await this.client().muteChat(chatId, new Date(muteUntil));
   }
 
+  async pinChat(chatId: string, pin: boolean): Promise<boolean> {
+    this.host.ensureReady();
+    if (!pin) {
+      // unpinChat resolves the chat's NEW pin state, which is `false` for every successful unpin —
+      // both on its early-out for an already-unpinned chat and after actually unpinning
+      // (Client.js:2073-2084). Forwarding it would report every success as a refusal, the same trap
+      // archiveChat documents. Discard it: an unpin that did not throw succeeded.
+      await this.client().unpinChat(chatId);
+      return true;
+    }
+    // In this direction the return value IS information. WhatsApp caps pinned chats at three
+    // (MAX_PIN_COUNT, Client.js:2054-2063) and the page returns false without pinning once that is
+    // met, so a false here is a real refusal the caller needs to see.
+    return await this.client().pinChat(chatId);
+  }
+
   async markUnread(chatId: string): Promise<boolean> {
     this.host.ensureReady();
     if (isChannelJid(chatId)) {

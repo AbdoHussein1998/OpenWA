@@ -1358,6 +1358,53 @@
         ]
       }
     },
+    "/api/sessions/{id}/chats/pin": {
+      "post": {
+        "operationId": "SessionController_pinChat",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinChatDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns `{ success }`. `false` means the engine declined, and only a pin can: WhatsApp allows at most three pinned chats and the whatsapp-web.js engine reports the refusal. Unpinning always succeeds, and the Baileys engine always reports success because it cannot observe the cap."
+          },
+          "400": {
+            "description": "Session not ready"
+          },
+          "404": {
+            "description": "Session not found"
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget. The change may or may not have been applied — the gateway stopped waiting for a confirmation that never came."
+          }
+        },
+        "summary": "Pin or unpin a chat at the top of the chat list",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/sessions/{id}/chats/delete": {
       "post": {
         "operationId": "SessionController_deleteChat",
@@ -9858,6 +9905,24 @@
         "required": [
           "chatId",
           "muteUntil"
+        ]
+      },
+      "PinChatDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string",
+            "description": "Chat ID in the active engine's native format (e.g. 1234567890-123@g.us on whatsapp-web.js)",
+            "example": "1234567890-123@g.us"
+          },
+          "pin": {
+            "type": "boolean",
+            "description": "true to pin the chat to the top of the list, false to unpin it."
+          }
+        },
+        "required": [
+          "chatId",
+          "pin"
         ]
       },
       "DeleteChatDto": {

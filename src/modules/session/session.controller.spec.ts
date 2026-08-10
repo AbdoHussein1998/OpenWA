@@ -188,3 +188,42 @@ describe('SessionController — muteChat', () => {
     expect(sessionService.muteChat).toHaveBeenCalledWith('sess-uuid-1', '628123@c.us', null);
   });
 });
+
+// The pin route forwards a boolean the engine can refuse. The value worth pinning is that the
+// engine's `false` reaches the caller: WhatsApp caps pinned chats at three, and a controller that
+// hard-coded `{ success: true }` would report a refused pin as done.
+describe('SessionController — pinChat', () => {
+  let sessionService: { pinChat: jest.Mock };
+  let auditService: { logInfo: jest.Mock };
+  let controller: SessionController;
+
+  beforeEach(() => {
+    sessionService = { pinChat: jest.fn().mockResolvedValue(true) };
+    auditService = { logInfo: jest.fn().mockResolvedValue(undefined) };
+    controller = new SessionControllerClass(
+      sessionService as unknown as SessionService,
+      auditService as unknown as AuditService,
+    );
+  });
+
+  it('forwards the chat id and the pin flag', async () => {
+    const result = await controller.pinChat('sess-uuid-1', { chatId: '628123@c.us', pin: true });
+
+    expect(sessionService.pinChat).toHaveBeenCalledWith('sess-uuid-1', '628123@c.us', true);
+    expect(result).toEqual({ success: true });
+  });
+
+  it('surfaces a refused pin as success:false rather than reporting it done', async () => {
+    sessionService.pinChat.mockResolvedValue(false);
+
+    await expect(controller.pinChat('sess-uuid-1', { chatId: '628123@c.us', pin: true })).resolves.toEqual({
+      success: false,
+    });
+  });
+
+  it('forwards an unpin as pin:false', async () => {
+    await controller.pinChat('sess-uuid-1', { chatId: '628123@c.us', pin: false });
+
+    expect(sessionService.pinChat).toHaveBeenCalledWith('sess-uuid-1', '628123@c.us', false);
+  });
+});
