@@ -5525,7 +5525,11 @@ Install a plugin from an uploaded `.zip` package.
 
 **Response** `201` — the newly installed `PluginDto`.
 
-**Errors:** `400` no file / invalid package / install failed · `401` · `403` · `409` plugin id or directory already exists
+Reinstalling over a plugin whose code went missing is supported and is the recovery the boot warning
+prescribes: its `ctx.storage` directory, config, session activations and enabled-on-boot decision are
+all kept. A directory the gateway did not install is still refused.
+
+**Errors:** `400` no file / invalid package / install failed · `401` · `403` · `409` plugin already loaded, or a directory under that id the gateway did not install
 
 ---
 
@@ -5724,7 +5728,7 @@ Update an installed plugin in place from a URL, preserving config + enabled stat
 
 #### DELETE /api/plugins/:id
 
-Uninstall a plugin: dispatch its `onUnload` lifecycle hook, delete its files, drop its registry entry, and remove its `ctx.storage` data directory (`<dataDir>/plugins/<id>` — a separate tree when `PLUGINS_DIR` points outside the data dir). Built-in plugins are protected.
+Uninstall a plugin: dispatch its `onUnload` lifecycle hook, delete its files, drop its registry entry, and remove its `ctx.storage` data directory (`<dataDir>/plugins/<id>` — a separate tree when `PLUGINS_DIR` points outside the data dir). Built-in plugins are protected. A plugin that is installed but not loaded — one whose code went missing — can be uninstalled too; there is simply no runtime to tear down first. `404` therefore means an id the gateway has no registry entry for.
 
 **Auth:** API key (ADMIN)
 
