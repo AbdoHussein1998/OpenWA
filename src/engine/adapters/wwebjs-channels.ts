@@ -71,6 +71,34 @@ export class WwebjsChannels {
     };
   }
 
+  /**
+   * Not available on this engine, despite `Client.demoteChannelAdmin` existing and being typed
+   * `Promise<boolean>` (`index.d.ts:35`).
+   *
+   * The page body calls `window.require('WAWebDemoteNewsletterAdminAction').demoteNewsletterAdmin`
+   * (`Client.js:1907-1925`), and WhatsApp Web no longer provides that function. Measured against a
+   * live session on Web `2.3000.1044824727-alpha` with no version pin: the call rejects with
+   * `TypeError: window.require(...).demoteNewsletterAdmin is not a function`, which reached the
+   * caller as a bare 500.
+   *
+   * A module-existence probe run in the same page narrows it further — **the module still resolves;
+   * the function is gone**: `WAWebDemoteNewsletterAdminAction` → `demoteNewsletterAdmin: undefined`,
+   * and the second demote path whatsapp-web.js uses elsewhere is equally dead
+   * (`WAWebNewsletterDemoteAdminJob` → `demoteNewsletterAdminAction: undefined`). So there is no
+   * sibling module to retarget, and `muteChannel` answered 200 twice on that session, so the page
+   * and its registry were healthy throughout.
+   *
+   * Wiring it anyway would be a phantom-support row: the matrix would claim the capability while
+   * every call failed. A 501 states the truth. Re-enable by restoring the call here and flipping
+   * the matrix cell once whatsapp-web.js targets a module WhatsApp Web actually exports; the
+   * Baileys engine serves this capability in the meantime.
+   */
+  /* eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars */
+  async demoteChannelAdmin(_channelId: string, _userId: string): Promise<void> {
+    this.host.ensureReady();
+    throw new EngineNotSupportedError('demoteChannelAdmin');
+  }
+
   /** Delete a channel. `false` means the channel was not found or the server refused. */
   async deleteChannel(channelId: string): Promise<void> {
     this.host.ensureReady();

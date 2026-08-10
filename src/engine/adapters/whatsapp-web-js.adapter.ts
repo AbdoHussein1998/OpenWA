@@ -867,6 +867,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.channels.muteChannel(channelId, mute);
   }
 
+  demoteChannelAdmin(channelId: string, userId: string): Promise<void> {
+    return this.channels.demoteChannelAdmin(channelId, userId);
+  }
+
   getChatsByLabel(labelId: string): Promise<ChatSummary[]> {
     return this.labels.getChatsByLabel(labelId);
   }

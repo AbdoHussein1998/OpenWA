@@ -3580,6 +3580,33 @@ soft unsubscribe.
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `422` the engine refused
 
+#### POST /api/sessions/:sessionId/channels/:channelId/admins/demote
+
+Demote a channel admin back to a plain subscriber. **Baileys only** — the whatsapp-web.js engine
+answers `501`.
+
+**Auth:** API key (OPERATOR) · **Scope:** session-scoped
+
+Requires this account to own the channel. There is **no promote counterpart**, and that is an
+upstream limit rather than a gap here: neither engine library exposes one, so an admin is promoted
+from the WhatsApp app and can then be demoted through this endpoint.
+
+`whatsapp-web.js` declares `Client.demoteChannelAdmin`, but its page body calls a WhatsApp Web
+module (`WAWebDemoteNewsletterAdminAction`) that no longer exports the function, so every call
+fails. Rather than ship a route that always errors on that engine, it answers `501` there.
+
+**Request body** — `DemoteChannelAdminDto`
+
+| Field    | Type   | Required | Description                                  |
+| -------- | ------ | -------- | -------------------------------------------- |
+| `userId` | string | Yes      | WhatsApp ID of the admin, e.g. `628xxx@c.us` |
+
+**Response** `200` — `{ "success": true }`
+
+**Errors:** `400` validation, or session not started · `401` · `403` the engine refused — not the
+owner, or the user is not an admin · `501` the whatsapp-web.js engine cannot perform this ·
+`503` WhatsApp did not answer within the request budget
+
 #### POST /api/sessions/:sessionId/channels/subscribe
 
 Subscribe to a channel using its invite code.

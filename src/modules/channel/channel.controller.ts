@@ -5,6 +5,7 @@ import { ChannelService } from './channel.service';
 import { SubscribeChannelDto } from './dto/subscribe-channel.dto';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { MuteChannelDto } from './dto/mute-channel.dto';
+import { DemoteChannelAdminDto } from './dto/demote-channel-admin.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import {
@@ -148,6 +149,41 @@ export class ChannelController {
     @Body() dto: MuteChannelDto,
   ): Promise<{ success: boolean }> {
     await this.channelService.muteChannel(sessionId, channelId, dto.mute);
+    return { success: true };
+  }
+
+  @Post(':channelId/admins/demote')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Demote a channel admin back to a subscriber',
+    description:
+      'Requires this account to own the channel. There is no promote counterpart: neither engine ' +
+      'library exposes one, so an admin is promoted from the WhatsApp app and demoted here.',
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'channelId', description: 'Channel ID' })
+  @ApiBody({ type: DemoteChannelAdminDto })
+  @ApiResponse({ status: 200, description: 'Admin demoted', type: ChannelAckResponseDto })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
+  })
+  @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
+  @ApiResponse({ status: 403, description: 'The engine refused — not the owner, or the user is not an admin' })
+  @ApiResponse({
+    status: 501,
+    description:
+      'The whatsapp-web.js engine cannot perform this: the WhatsApp Web module its library method ' +
+      'targets no longer exports the function. Use the Baileys engine.',
+  })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  async demoteAdmin(
+    @Param('sessionId') sessionId: string,
+    @Param('channelId') channelId: string,
+    @Body() dto: DemoteChannelAdminDto,
+  ): Promise<{ success: boolean }> {
+    await this.channelService.demoteChannelAdmin(sessionId, channelId, dto.userId);
     return { success: true };
   }
 

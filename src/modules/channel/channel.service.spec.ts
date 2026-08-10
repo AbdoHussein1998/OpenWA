@@ -43,4 +43,16 @@ describe('ChannelService', () => {
     await makeService({ getChannelMessages }).getChannelMessages('s1', 'ch1', input);
     expect(getChannelMessages).toHaveBeenCalledWith('ch1', expected);
   });
+
+  it('demoteChannelAdmin forwards the channel and user to the engine, dropping the sessionId', async () => {
+    const demoteChannelAdmin = jest.fn().mockResolvedValue(undefined);
+    await makeService({ demoteChannelAdmin }).demoteChannelAdmin('s1', 'ch1@newsletter', '628@c.us');
+    expect(demoteChannelAdmin).toHaveBeenCalledWith('ch1@newsletter', '628@c.us');
+  });
+
+  it('demoteChannelAdmin throws 400 when the session is not started', () => {
+    expect(() => makeService(undefined).demoteChannelAdmin('s1', 'ch1@newsletter', '628@c.us')).toThrow(
+      BadRequestException,
+    );
+  });
 });

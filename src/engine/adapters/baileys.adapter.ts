@@ -189,6 +189,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
     this.channels = new BaileysChannels({
       ensureReady: () => this.ensureReady(),
       getSocket: () => this.sock!,
+      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
     });
     this.catalog = new BaileysCatalog({
       ensureReady: () => this.ensureReady(),
@@ -684,6 +685,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   muteChannel(channelId: string, mute: boolean): Promise<void> {
     return this.channels.muteChannel(channelId, mute);
+  }
+
+  demoteChannelAdmin(channelId: string, userId: string): Promise<void> {
+    return this.channels.demoteChannelAdmin(channelId, userId);
   }
 
   getSubscribedChannels(): Promise<Channel[]> {

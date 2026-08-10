@@ -147,6 +147,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   createChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   deleteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   muteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  demoteChannelAdmin: {
+    wwjs: { status: 'not-available', rootCause: 'library-limitation' },
+    baileys: { status: 'supported' },
+    evidence:
+      'baileys newsletterDemote(jid, userJid) → void via executeWMexQuery QueryIds.DEMOTE (Socket/newsletter.d.ts:25; newsletter.js:173-175). wwjs Client.demoteChannelAdmin exists and is typed Promise<boolean> (index.d.ts:35) but its page body calls window.require("WAWebDemoteNewsletterAdminAction").demoteNewsletterAdmin (Client.js:1907-1925), a function WhatsApp Web no longer provides — measured live on Web 2.3000.1044824727-alpha (unpinned): TypeError "demoteNewsletterAdmin is not a function", while muteChannel answered 200 on the same session. A module probe in that page shows the module still resolves and only the function is missing, and the alternative path (WAWebNewsletterDemoteAdminJob.demoteNewsletterAdminAction) is undefined too, so there is no sibling module to retarget. Neither library exposes a promote counterpart',
+  },
   muteChat: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
