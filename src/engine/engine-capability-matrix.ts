@@ -262,6 +262,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
   },
   postImageStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   postTextStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  probeLiveness: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'supported' },
+    evidence:
+      'Both implement it, but not to the same depth, which is what the optional marker on the interface allows: wwjs races a real Client.getState() round trip against a 10s timeout (whatsapp-web-js.adapter.ts:1710) and answers alive inside the bounded navigation re-inject window; baileys returns a local check, status === READY && sock != null (baileys-lifecycle.ts:738), because its keepalive already emits a close event within ~35s. So a wedged wwjs page is caught by the probe, while a wedged baileys socket is caught by the transport rather than here',
+  },
   postVideoStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   postVoiceStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   promoteParticipants: {

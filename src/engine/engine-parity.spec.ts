@@ -23,15 +23,31 @@ import { ENGINE_CAPABILITY_MATRIX } from './engine-capability-matrix';
  */
 const UNSUPPORTED_RE = /this\.unsupported\(|EngineNotSupportedError|ChannelMediaNotSupportedError/;
 
+/** A member declaration, optional or not. `\??` is load-bearing — see the test below. */
+const MEMBER_RE = /^\s{2}([a-zA-Z][a-zA-Z0-9]*)\??\s*\(/;
+
 function readInterfaceMethods(): string[] {
   const src = readFileSync(join(__dirname, 'interfaces', 'whatsapp-engine.interface.ts'), 'utf8');
   const names = new Set<string>();
   for (const line of src.split('\n')) {
-    const match = line.match(/^\s{2}([a-zA-Z][a-zA-Z0-9]*)\s*\(/);
+    const match = line.match(MEMBER_RE);
     if (match) names.add(match[1]);
   }
   return [...names].sort();
 }
+
+describe('the interface reader sees every member', () => {
+  // An optional member is still a member. Before `\??` was added, `probeLiveness?()` did not match
+  // here, so the matrix could omit it and this whole file reported green while doing so — every
+  // optional method added to IWhatsAppEngine would have had a permanent free pass.
+  it('matches an optional declaration as well as a required one', () => {
+    expect('  probeLiveness?(): Promise<boolean>;'.match(MEMBER_RE)?.[1]).toBe('probeLiveness');
+    expect('  getStatus(): SessionStatus;'.match(MEMBER_RE)?.[1]).toBe('getStatus');
+    // And still rejects what it should: a nested member, and a property that is not a call.
+    expect('    nested(): void;'.match(MEMBER_RE)).toBeNull();
+    expect('  someProperty: string;'.match(MEMBER_RE)).toBeNull();
+  });
+});
 
 type AdapterCtor = { prototype: Record<string, unknown> };
 type AdapterKey = 'wwjs' | 'baileys';

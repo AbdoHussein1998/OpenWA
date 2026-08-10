@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A plugin whose code went missing is recoverable through the API again: reinstalling now writes over its surviving `ctx.storage` directory instead of answering `409`, and uninstalling a known-but-unloaded id no longer answers `404`.
 - A sticker sent through the Baileys engine no longer reaches WhatsApp as non-WebP bytes labelled `image/webp`; the adapter converts `image/*` to a 512×512 WebP before the socket, passes genuine WebP through byte-identical, and refuses anything it cannot convert with a `400` instead of reporting success.
 - `docs/18-sdk-design.md` and the SDK READMEs now list every method the five clients ship: the whole `media` resource plus 26 methods across nine others were missing, so server-side media conversion, presence subscription, session config and webhook delivery diagnostics read as unavailable.
+- The engine parity check no longer skips optional interface members. `probeLiveness?()` did not match its member pattern, so the capability matrix could omit any optional method while the check reported green; it now has a row recording that wwjs probes with a real round trip and Baileys with a local check.
 
 ### Security
 
