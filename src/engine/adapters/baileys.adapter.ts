@@ -512,6 +512,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.contacts.setProfileStatus(status);
   }
 
+  async deleteProfilePicture(): Promise<void> {
+    return this.contacts.deleteProfilePicture();
+  }
+
   async setProfilePicture(media: MediaInput): Promise<void> {
     return this.contacts.setProfilePicture(media);
   }

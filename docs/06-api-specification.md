@@ -6022,6 +6022,21 @@ or
 
 **Errors:** `400` neither `url` nor `base64` provided / base64 without `mimetype` · `401` · `403` · `500` engine refused the change
 
+#### DELETE /api/sessions/:sessionId/profile/picture
+
+Remove the account profile picture, leaving the account with WhatsApp's default avatar.
+
+**Auth:** API key (OPERATOR)
+
+No request body.
+
+**Response** `200` — `{ "success": true, "message": "Profile picture removed" }`
+
+Removing a picture that is already absent is a no-op and also answers `200`, so the call is safe to
+repeat.
+
+**Errors:** `400` session is not started · `401` · `403` · `500` engine refused the removal
+
 ### 6.4.14 Calls
 
 Incoming-call management. A `call.received` webhook/socket event (§6.6) announces an incoming ringing call and carries the `callId` used below.
