@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `engine-inventory-parity.spec.ts` fails when a `docs/29` exposure or event mark no longer matches the adapters: a symbol marked as used must appear in adapter code rather than only in a comment, and an event marked consumed must have a listener behind it.
 - `docs/29-engine-capability-matrix.md` (`docs/29`) now covers all 152 Baileys socket methods, all 81 whatsapp-web.js Client methods, all 34 + 31 library events and all five install-time patches, each mapped to the interface method that uses it or marked unexposed.
 - An onboarding modal the "What's new" probe does not recognise is now logged once with its heading and confirm-button labels (`onboarding_dialog_unrecognized`), so it can be covered via `WWEBJS_ONBOARDING_CONTINUE_LABELS` before WhatsApp unlinks the companion. Refs #1072.
+- `npm run check:sdk-events` compares each typed SDK's webhook event list to the contract, so an event the gateway accepts can no longer be missing from the SDKs.
 
 ### Fixed
 
+- The JavaScript, Python, Go and Java SDKs list `group.join_request`, an event the gateway has accepted and dispatched all along, so a typed client can subscribe to it without casting past its own type.
 - A webhook's `lastTriggeredAt` is published as a nullable date-time string instead of an object, so a client generated from the contract no longer rejects both of the values the field actually carries. The response itself is unchanged.
 - The group-list and status routes no longer appear twice in the OpenAPI contract under different path-parameter names, so a client generated from it gets one method per endpoint; the parameters are now `sessionId` and `id`. The URLs themselves are unchanged.
 
