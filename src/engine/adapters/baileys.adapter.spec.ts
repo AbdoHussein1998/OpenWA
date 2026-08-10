@@ -2497,8 +2497,16 @@ describe('BaileysAdapter media sends', () => {
 
   it('sendStickerMessage sends the sticker buffer', async () => {
     const adapter = await ready();
-    await adapter.sendStickerMessage('628111@s.whatsapp.net', { mimetype: 'image/webp', data: Buffer.from([7]) });
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', { sticker: Buffer.from([7]) });
+    // A REAL WebP (RIFF….WEBP), not an arbitrary byte: Baileys labels every sticker `image/webp`
+    // without transcoding, so the adapter guarantees the payload actually is one. A placeholder
+    // buffer here would pin the shape this guarantee exists to prevent. Non-WebP conversion and
+    // refusal are covered in baileys-sticker-webp.spec.ts.
+    const webp = Buffer.from(
+      'UklGRlgAAABXRUJQVlA4WAoAAAAQAAAAAAAAAAAAQUxQSAIAAAAAf1ZQOCAwAAAA0AEAnQEqAQABAAFAJiWgAnS6AfgAA7AA/vLrf/zYFc1z7/f/0uD9Lg/S4P/SkAAA',
+      'base64',
+    );
+    await adapter.sendStickerMessage('628111@s.whatsapp.net', { mimetype: 'image/webp', data: webp });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', { sticker: webp });
   });
 
   it('uses the caller-declared mimetype over the fetched content-type for a URL', async () => {

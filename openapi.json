@@ -2503,7 +2503,7 @@
                   "summary": "Fetch the media from a URL",
                   "value": {
                     "chatId": "628123456789@c.us",
-                    "url": "https://example.com/sticker.png"
+                    "url": "https://example.com/sticker.webp"
                   }
                 }
               }
