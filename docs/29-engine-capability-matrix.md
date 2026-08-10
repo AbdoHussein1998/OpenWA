@@ -831,6 +831,18 @@ adapter boundary — none silently stubs.
   `msg.avParams()`, removed in a recent WA Web build (upstream wwebjs#201823, unresolved).
   Text→channel is unaffected, and Baileys has no such restriction — so these five rows are the one
   place where an engine difference does **not** show up as a per-row ❌ in 29.4.
+- **`sendStickerMessage` — what each engine converts.** Both engines guarantee the payload really is
+  WebP, but they reach it differently and they do not accept the same inputs. whatsapp-web.js passes
+  `sendMediaAsSticker: true`, and `Util.formatToWebpSticker` converts `image/*` **and** `video/*`
+  (the latter via ffmpeg), rejecting anything else with `Invalid media format`. Baileys stamps
+  `image/webp` on the payload unconditionally and transcodes nothing
+  (`prepareWAMessageMedia` → `MIMETYPE_MAP.sticker`), so the adapter converts before the socket:
+  WebP passes through byte-identical (preserving its sticker-pack EXIF), other `image/*` input is
+  re-encoded to a 512×512 WebP with animation retained, and everything else — **including
+  `video/*`** — is refused with a `400`. So an animated-video sticker works on wwjs and answers
+  `400` on Baileys. ffmpeg is deliberately not wired in on the Baileys side: the binary ships only
+  in the Docker image, so depending on it would make the same request succeed or fail depending on
+  how the gateway was installed.
 - **`deleteStatus` (baileys).** Marked ✅ (no throw), but the `sendMessage(status@broadcast,
 {delete})` revoke shape is _empirically unverified_ — only posting was live-spiked. May fall back
   to 501 if WA rejects the shape. On wwjs it calls `revokeStatusMessage(statusId)` (own status

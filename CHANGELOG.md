@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An advisory usage-statistics write no longer persists the whole API-key row. A key deleted while a request that had already loaded it was in flight was re-inserted with its original hash and authenticated again; a revocation or a narrowing of role, allowlist, IP allowlist or expiry was likewise reverted to the values that request loaded. The write is now scoped to the two usage columns and affects nothing if the row is gone.
 - `.env.example` no longer ships `ENABLE_SWAGGER=true` uncommented: the template also declares `NODE_ENV=production`, so copying it pinned the opt-in that production withholds and served the schema and running version at `/api/docs`, which sits outside the API-key guard. Bare-metal operators who already copied it should check their own `.env`; Docker and Helm are unaffected.
 
+### Fixed
+
+- A sticker sent through the Baileys engine no longer reaches WhatsApp as non-WebP bytes labelled `image/webp`; the adapter converts `image/*` to a 512×512 WebP before the socket, passes genuine WebP through byte-identical, and refuses anything it cannot convert with a `400` instead of reporting success.
+
 ## [0.15.0] - 2026-08-09
 
 ### Added
