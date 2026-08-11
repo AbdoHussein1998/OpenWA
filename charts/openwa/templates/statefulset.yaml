@@ -12,6 +12,15 @@ spec:
       {{- include "openwa.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      # envFrom is read once, when the container is created — Kubernetes never updates it in a
+      # running container. Without something config-derived here, a `helm upgrade` that changes only
+      # env/secretEnv renders an identical pod template, so no rollout happens and the process keeps
+      # its old values while the release reports success. Hashing the RENDERED objects rather than
+      # `.Values` on purpose: a change to the template itself — a new key, a changed quoting rule —
+      # alters the ConfigMap without altering the values it was built from.
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels:
         {{- include "openwa.selectorLabels" . | nindent 8 }}
     spec:
