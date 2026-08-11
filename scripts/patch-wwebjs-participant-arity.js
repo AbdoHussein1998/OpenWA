@@ -46,7 +46,43 @@ const findFor = (action) => `                ).filter(Boolean);
                     .${action}(chat, participants);
                 return { status: 200 };`;
 
+/**
+ * Which resolved members still need the call. `remove` acts on every member; `promote`/`demote` act
+ * only on those not already in the requested state — WhatsApp Web rejects a status change that would
+ * change nothing, and the minified page bundle reports that as an unnamed error, so promoting an
+ * existing admin answered 500. Skipping them makes the operation idempotent: the requested end state
+ * already holds, which is exactly what the caller asked for.
+ */
+const actionableFor = (action) =>
+  action === 'promoteParticipants'
+    ? 'participants.filter((p) => p && !p.isAdmin)'
+    : action === 'demoteParticipants'
+      ? 'participants.filter((p) => p && p.isAdmin)'
+      : 'participants.filter(Boolean)';
+
 const replaceFor = (action) => `                );
+                const matched = participants.map(Boolean);
+                const present = ${actionableFor(action)};
+                // A requested id that is not a member of this group resolved to undefined above.
+                // Handing an empty list to the request builder trips its repeated-field arity
+                // assertion, so skip the call entirely when nothing resolved, and report which
+                // requested ids did — the batch status alone cannot distinguish a real change
+                // from a silently dropped one.
+                if (present.length) {
+                    await window
+                        .require('WAWebModifyParticipantsGroupAction')
+                        .${action}(chat, present);
+                }
+                return { status: 200, matched };`;
+
+/**
+ * The shape an earlier version of this patcher left behind: same transform, but `present` was every
+ * resolved member regardless of the status change being a no-op. A tree carrying it matches neither
+ * the pristine find nor the current replace, so the patcher would refuse it as an unknown shape.
+ * Reverse it to pristine first and the normal apply path takes over — that is what makes upgrading
+ * the patcher safe on a tree someone already installed against.
+ */
+const LEGACY_REPLACE = (action) => `                );
                 const matched = participants.map(Boolean);
                 const present = participants.filter(Boolean);
                 // A requested id that is not a member of this group resolved to undefined above.
@@ -60,6 +96,23 @@ const replaceFor = (action) => `                );
                         .${action}(chat, present);
                 }
                 return { status: 200, matched };`;
+
+/**
+ * Rewind any legacy-patched body to the pristine upstream shape. A no-op on pristine or current
+ * trees.
+ *
+ * Skips an action whose legacy body is IDENTICAL to the current one — `removeParticipants` acts on
+ * every member in both versions. Rewinding that would undo a correctly patched tree and then re-apply
+ * it, so `applied` would never be empty and the patcher would stop being idempotent.
+ */
+function normalizeLegacy(source) {
+  for (const action of ACTIONS) {
+    const legacy = LEGACY_REPLACE(action);
+    if (legacy === replaceFor(action)) continue;
+    source = source.split(legacy).join(findFor(action));
+  }
+  return source;
+}
 
 const ACTIONS = ['removeParticipants', 'promoteParticipants', 'demoteParticipants'];
 
@@ -78,7 +131,10 @@ function applyParticipantArityPatches(wwjsDir = DEFAULT_WWJS) {
     throw new Error(`whatsapp-web.js GroupChat.js not found at ${groupChatFile}`);
   }
 
-  let source = fs.readFileSync(groupChatFile, 'utf8');
+  const original = fs.readFileSync(groupChatFile, 'utf8');
+  // Rewind a tree patched by an earlier version of this file, so the apply path below sees either
+  // the pristine shape or the current one — never a third state it would have to refuse.
+  let source = normalizeLegacy(original);
   const applied = [];
   const skipped = [];
 
@@ -137,4 +193,6 @@ module.exports = {
   ACTIONS,
   findFor,
   replaceFor,
+  LEGACY_REPLACE,
+  normalizeLegacy,
 };
