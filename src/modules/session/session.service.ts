@@ -61,6 +61,11 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     return this.engineRegistry;
   }
 
+  /** The detached auto-start run; see onApplicationBootstrap. Awaited by onModuleDestroy. */
+  private autoStartRun: Promise<void> = Promise.resolve();
+  /** Set at the top of onModuleDestroy so the detached run stops launching further sessions. */
+  private shuttingDown = false;
+
   constructor(
     @InjectRepository(Session, 'data')
     private readonly sessionRepository: Repository<Session>,
@@ -115,7 +120,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     }
   }
 
-  async onApplicationBootstrap(): Promise<void> {
+  onApplicationBootstrap(): void {
     // Start the liveness watchdog FIRST: it must run even when auto-start is disabled (sessions can
     // be started via the API at any time), so it can't sit behind the auto-start early-return below.
     // The watchdog owns the probe cadence and failure counting; a session it proves dead comes
@@ -137,6 +142,29 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
     if (!resolveFeatureFlags(this.configService).autoStartSessions) return;
 
+    // DETACHED, deliberately. Nest binds the HTTP listener only after every onApplicationBootstrap
+    // hook has settled, and this loop's duration is unbounded: one engine initialization is at least
+    // 60s (resolveEngineInitTimeoutMs) and there is a 2s throttle between sessions, so a host with
+    // ten authenticated sessions kept the port CLOSED — not unhealthy, closed — for ten minutes.
+    // Every liveness probe in that window is a connection refusal, and no probe budget can cover a
+    // bound that scales with the session count: the chart's is ~50s and the Dockerfile HEALTHCHECK
+    // encodes the same expectation. Awaited on shutdown so a launch in flight is accounted for.
+    this.autoStartRun = this.autoStartSessions().catch((error: unknown) => {
+      // Previously this rejected out of the hook and aborted boot, so a transient database error
+      // during the session scan took the whole gateway down rather than the auto-start.
+      this.logger.error('Auto-start scan failed', error instanceof Error ? error.message : String(error), {
+        action: 'auto_start_scan_failed',
+      });
+    });
+  }
+
+  /**
+   * Launch every previously authenticated session this node may claim, one at a time.
+   *
+   * Sequential with a throttle by design — these are Chromium launches — which is exactly why it
+   * cannot run inside the bootstrap hook. See onApplicationBootstrap.
+   */
+  private async autoStartSessions(): Promise<void> {
     // Restricted to sessions this node may claim. Without it every replica scans the same rows and
     // races to launch the same engines, which is a WhatsApp account being opened twice, not merely
     // duplicated work.
@@ -153,6 +181,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     });
 
     for (let i = 0; i < sessions.length; i++) {
+      // A shutdown landing mid-run must not launch anything further: onModuleDestroy tears down what
+      // exists, and a browser launched after that point is never destroyed.
+      if (this.shuttingDown) {
+        this.logger.log(`Auto-start stopped at ${i} of ${sessions.length} session(s): shutting down`, {
+          action: 'auto_start_aborted',
+        });
+        return;
+      }
       const session = sessions[i];
       try {
         await this.start(session.id);
@@ -177,8 +213,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   async onModuleDestroy(): Promise<void> {
     // Stop the watchdog FIRST (before any teardown below can hang): no new probe/disconnect handling
     // may start mid-shutdown. stop() is idempotent, so a second onModuleDestroy call stays safe.
+    this.shuttingDown = true;
     this.watchdog.stop();
     this.ownership?.stopHeartbeat();
+    // A SIGTERM during boot can land while the detached auto-start is mid-launch. Let that one
+    // settle — the flag above stops the loop taking another — so the engine it registers is torn
+    // down below instead of outliving the process as an orphaned browser. Bounded by the launch
+    // already in flight, never by the whole run.
+    await this.autoStartRun;
     // Reconnect timers + engine teardown belong to the lifecycle owner.
     await this.engineLifecycle.shutdown();
     // Released only after the engines are actually down, so a peer never claims a session this
