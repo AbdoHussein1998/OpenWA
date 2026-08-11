@@ -418,6 +418,19 @@ describe('HealthResource + auth — exact paths', () => {
   });
 });
 
+describe('CallsResource — call link', () => {
+  it('createLink posts to /calls/link with the type and start time', async () => {
+    const t = new MockTransport().on('POST', /\/calls\/link$/, { body: { link: 'https://call.whatsapp.com/video/AbC' } });
+    const res = await client(t).calls.createLink('s', { type: 'video', startTime: 1800000000000 });
+
+    expect(t.lastCall!.method).toBe('POST');
+    // Session-wide: no call id in the path, and not the reject route.
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/calls/link');
+    expect(t.lastCall!.body).toEqual({ type: 'video', startTime: 1800000000000 });
+    expect(res.link).toContain('call.whatsapp.com');
+  });
+});
+
 describe('SearchResource — exact path and query forwarding', () => {
   it('forwards params as a query string to /api/search', async () => {
     const t = new MockTransport().on('GET', /\/search$/, {

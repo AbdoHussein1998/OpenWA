@@ -816,6 +816,22 @@ export interface SetOwnPresenceRequest {
   available: boolean;
 }
 
+/** Which kind of call a link opens. WhatsApp's own URL path for `audio` is `/voice/`. */
+export type CallLinkType = 'audio' | 'video';
+
+/** Body for {@link CallsResource.createLink}. */
+export interface CreateCallLinkRequest {
+  type: CallLinkType;
+  /** Absolute epoch MILLISECONDS the call is scheduled to start at. */
+  startTime: number;
+}
+
+/** Result of {@link CallsResource.createLink}. */
+export interface CallLinkResponse {
+  /** The shareable WhatsApp call link. */
+  link: string;
+}
+
 export interface MarkChatRequest {
   chatId: Jid;
 }
