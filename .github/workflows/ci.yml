@@ -61,6 +61,13 @@ jobs:
       - name: Check SDK routes against the contract
         run: npm run check:sdk-routes
 
+      # The other direction. check:sdk-routes verifies every route an SDK builds exists in the
+      # contract; nothing verified that every route the contract publishes has a client method, and
+      # ten reached main without one. Fails PER SDK so a route three clients have and two do not is
+      # a failure rather than a healthy-looking total.
+      - name: Check the contract is covered by every SDK
+        run: npm run check:sdk-coverage
+
       - name: Check SDK webhook events against the contract
         run: npm run check:sdk-events
 

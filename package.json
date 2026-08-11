@@ -31,6 +31,7 @@
     "check:dockerignore": "node scripts/check-dockerignore.mjs",
     "check:chart": "node scripts/check-chart-behaviour.mjs",
     "check:sdk-routes": "node scripts/check-sdk-routes.mjs",
+    "check:sdk-coverage": "node scripts/check-sdk-coverage.mjs",
     "check:sdk-events": "node scripts/check-sdk-events.mjs",
     "check:sdk-docs": "node scripts/check-sdk-docs.mjs",
     "openapi:export": "ts-node scripts/export-openapi.ts openapi.json",
