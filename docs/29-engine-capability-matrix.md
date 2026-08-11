@@ -748,12 +748,18 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 
 ### 29.5.3 Supported by BOTH libraries — missing only in OpenWA
 
-The highest-value backlog: capabilities with first-class symbols on **both** engines, so a single
-new `IWhatsAppEngine` method wires both adapters at once. All cross-checked against the installed
-`.d.ts` files.
+**Currently empty — the backlog is drained.** This list held the highest-value gaps: capabilities
+with a first-class symbol on **both** engines, so one new `IWhatsAppEngine` method wires both
+adapters at once. The last of them were wired in this release — `setOnlinePresence`,
+`getBlockedContacts`, `createCallLink`, `deleteProfilePicture`, `demoteChannelAdmin` and
+`transferChannelOwnership`.
 
-| Capability | Baileys symbol | wwjs symbol | Note |
-| ---------- | -------------- | ----------- | ---- |
+⚠️ Two of those shipped with the whatsapp-web.js side marked `not-available` rather than
+`supported`: `demoteChannelAdmin` and `transferChannelOwnership` both have a typed `Client` method
+and a resolvable page module, and both fail against live WhatsApp Web — see 29.6.2. **A symbol in
+`.d.ts` is not evidence the call works**; it mispredicted a third of the safest-looking sample the
+last time this list was worked. Add a row here from the typings, but do not mark a cell `supported`
+until a live call has returned WhatsApp's own answer.
 
 Near-misses (both libraries have the area, but the symbol sets only partially overlap — still
 worth an interface method): **channel admin invites** (wwjs
