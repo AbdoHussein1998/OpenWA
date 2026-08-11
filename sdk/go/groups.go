@@ -231,9 +231,13 @@ func (s *GroupsService) RejectMembershipRequests(
 func (s *GroupsService) membershipRequestAction(
 	ctx context.Context, sessionID, groupID, verb string, participants []string,
 ) (*ParticipantsResult, error) {
-	body := MembershipRequestActionRequest{}
+	// A nil slice means "every pending request", which the gateway reads from the ABSENCE of the
+	// key — `null` is not absence there, so the bodyless case sends an empty object rather than the
+	// struct. A non-nil slice always sends the key, empty included, so naming nobody stays a 400
+	// instead of collapsing into naming everybody.
+	var body any = struct{}{}
 	if participants != nil {
-		body.Participants = participants
+		body = MembershipRequestActionRequest{Participants: participants}
 	}
 	var out ParticipantsResult
 	err := s.client.do(
