@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Stopping or deleting a session id that does not exist no longer leaves an entry behind in the teardown-mark set. The mark is set synchronously at entry, before the existence check, so a `404` set one too — and nothing could remove it, because the two paths that clear a mark both run after their own lookup and a session id is never re-supplied. The set grew by one for every such request until the process restarted. A refusal against a session that does exist still keeps its mark, which is what the mark is for.
 
+- A plugin loaded from the legacy plugins directory can be enabled, uninstalled and updated like any other. The loader scans that directory in addition to the configured one, but recorded nothing about where each package came from, so every later operation built its path as `<plugins.dir>/<id>`: enabling failed with a missing entry file and left the plugin in `ERROR`, uninstalling deleted the storage directory and reported success while the code stayed on disk and reloaded on the next boot, updating renamed a directory that was not there, and the config UI answered `404`. Each plugin now carries the directory it was loaded from, and installing still writes to the configured one.
+
 ### Security
 
 - An advisory usage-statistics write no longer persists the whole API-key row. A key deleted while a request that had already loaded it was in flight was re-inserted with its original hash and authenticated again; a revocation or a narrowing of role, allowlist, IP allowlist or expiry was likewise reverted to the values that request loaded. The write is now scoped to the two usage columns and affects nothing if the row is gone.
