@@ -5841,15 +5841,16 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
   describe.each([['removeParticipants'], ['promoteParticipants'], ['demoteParticipants']])(
     '%s (batch {status} is honored)',
     op => {
-      it('resolves one batch-confirmed entry per requested participant on {status: 200}', async () => {
+      it('falls back to batch-confirmed entries when the tree is unpatched (no matched marker)', async () => {
+        // Without scripts/patch-wwebjs-participant-arity.js the page reports only the batch status,
+        // so there is nothing per-participant to read. Keeping the old shape is the honest answer
+        // here; inventing an outcome would be the very defect this suite guards against.
         const chat = groupChat({ [op]: jest.fn().mockResolvedValue({ status: 200 }) });
         const adapter = readyAdapter({ getChatById: jest.fn().mockResolvedValue(chat) });
         const results = await (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<unknown>>)[op](
           GROUP,
           ['628111', '628222@c.us'],
         );
-        // wwebjs confirms the batch only — the entries must say so rather than claim an
-        // individually-confirmed outcome the engine never reported.
         expect(results).toEqual([
           {
             id: '628111@c.us',
@@ -5864,6 +5865,71 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
             message: 'confirmed with the batch — wwebjs reports no per-participant outcome',
           },
         ]);
+      });
+
+      it('reports only the participants the page resolved to members', async () => {
+        const chat = groupChat({ [op]: jest.fn().mockResolvedValue({ status: 200, matched: [true, false] }) });
+        const adapter = readyAdapter({ getChatById: jest.fn().mockResolvedValue(chat) });
+        const results = await (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<unknown>>)[op](
+          GROUP,
+          ['628111', '628222@c.us'],
+        );
+        // The second id was dropped page-side, so WhatsApp never acted on it. Reporting it as a
+        // success is what #1220 was: a removal that never happened, confirmed to the caller.
+        expect(results).toEqual([
+          expect.objectContaining({ id: '628111@c.us', success: true, status: 200 }),
+          expect.objectContaining({ id: '628222@c.us', success: false, status: 404 }),
+        ]);
+      });
+
+      it('throws EngineRefusedError when the page resolved none of the requested participants', async () => {
+        const chat = groupChat({ [op]: jest.fn().mockResolvedValue({ status: 200, matched: [false, false] }) });
+        const adapter = readyAdapter({ getChatById: jest.fn().mockResolvedValue(chat) });
+        await expect(
+          (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<unknown>>)[op](GROUP, [
+            '628111',
+            '628222@c.us',
+          ]),
+        ).rejects.toBeInstanceOf(EngineRefusedError);
+      });
+
+      it('ignores a matched marker whose length does not match the request', async () => {
+        // A partially applied patch must degrade to the old behaviour rather than read undefined at
+        // an index and report a real participant as untouched.
+        const chat = groupChat({ [op]: jest.fn().mockResolvedValue({ status: 200, matched: [true] }) });
+        const adapter = readyAdapter({ getChatById: jest.fn().mockResolvedValue(chat) });
+        const results = await (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<unknown>>)[op](
+          GROUP,
+          ['628111', '628222@c.us'],
+        );
+        expect(results).toEqual([
+          expect.objectContaining({ success: true }),
+          expect.objectContaining({ success: true }),
+        ]);
+      });
+
+      it('translates the empty-batch page rejection into a refusal rather than a 500', async () => {
+        const chat = groupChat({
+          [op]: jest
+            .fn()
+            .mockRejectedValue(new Error('Evaluation failed: Error: expected at least 1 children, but found 0')),
+        });
+        const adapter = readyAdapter({ getChatById: jest.fn().mockResolvedValue(chat) });
+        await expect(
+          (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<unknown>>)[op](GROUP, ['628111']),
+        ).rejects.toBeInstanceOf(EngineRefusedError);
+      });
+
+      it('rethrows an unrecognised page failure instead of calling it a refusal', async () => {
+        // A dead transport must not be sold to the caller as a permissions problem — the Baileys
+        // adapter states the same rule for its own empty-results guard.
+        const boom = new Error('Protocol error (Runtime.callFunctionOn): Target closed');
+        const chat = groupChat({ [op]: jest.fn().mockRejectedValue(boom) });
+        const adapter = readyAdapter({ getChatById: jest.fn().mockResolvedValue(chat) });
+        const err = await (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<unknown>>)
+          [op](GROUP, ['628111'])
+          .catch((e: unknown) => e);
+        expect(err).toBe(boom);
       });
 
       it('throws EngineRefusedError on a non-200 batch status instead of reporting success', async () => {
