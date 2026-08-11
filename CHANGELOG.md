@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Turkish (`tr`) dashboard translation. Thanks @codedByCan.
 
+### Documentation
+
+- `RESOLVE_LID_TO_PHONE` was documented nowhere outside `.env.example`, so an operator receiving `@lid` senders had no path to the flag that resolves them; the event catalog now carries the `senderPhone` opt-in callout, the contact-phone endpoint points back to it, and the troubleshooting FAQ covers the symptom.
+
 ## [0.16.0] - 2026-08-11
 
 ### Added
