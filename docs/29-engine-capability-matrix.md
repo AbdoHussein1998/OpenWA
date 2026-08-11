@@ -158,6 +158,30 @@ Rows that are ✅ on **both** engines where one side is patch-dependent: `initia
 rests on the column-wide 🔧¹ (wwjs) and 🔧⁵ (baileys) — no row runs on stock library code on both
 sides.
 
+### 29.3.3 A fifth whatsapp-web.js patch was considered and rejected
+
+`Client.transferChannelOwnership` swallows WhatsApp's own refusal reason —
+`contact-not-found-in-newsletter-subscriber-list` — into a bare `false`, so the caller gets a 403
+with no cause. A patch to surface it looks obviously worthwhile, and it is not. Recorded here with
+the counts that rejected it, because the case is attractive enough to be proposed again.
+
+Parsing every `async` method in `Client.js` for a catch that returns `false` finds **five**, all in
+the channel cluster. Four of them — `acceptChannelAdminInvite`, `revokeChannelAdminInvite`,
+`demoteChannelAdmin`, `deleteChannel` — catch **only** `ServerStatusCodeError` and rethrow everything
+else, which is the behaviour we would want and the same shape as `deleteProfilePicture`. The
+indiscriminate `catch (ignoredError) { return false; }` appears **once**, in
+`transferChannelOwnership` (`Client.js:2627`).
+
+So it is not a house style, and the one method carrying it is the one OpenWA answers 501 for and
+never invokes (29.6.2). The patch would repair a path our code does not take. It is also not an
+upstream oversight but a deliberate design choice — a boolean return means discarding the cause — so
+unlike 🔧⁶ there is no upstream fix that would ever retire it.
+
+One real defect did fall out of that count and is **not** patch-shaped: `deleteChannel`'s page body
+opens `if (!channel) return false;` before its try, so its `false` conflates _channel not found_ with
+_WhatsApp refused_, and the adapter answers 403 for both. That distinction is ours to make in our own
+adapter and involves no library change.
+
 ## 29.4 Full capability matrix — the OpenWA contract view (112 methods)
 
 Legend recap: **✅** supported · **✅🔧ⁿ** supported via OpenWA patch `🔧ⁿ` (29.3) ·
