@@ -626,6 +626,20 @@ export interface GroupInfo {
   linkedParentJID?: string | null;
 }
 
+/** How a pending join request was made, when the engine reports it. */
+export type GroupMembershipRequestMethod = 'invite_link' | 'non_admin_add' | 'linked_group_join';
+
+/** A pending request to join a group. Only `participantId` is always present. */
+export interface GroupMembershipRequest {
+  /** Neutral id of the user asking to join. */
+  participantId: Jid;
+  /** Who created the request — differs from the requester on a non-admin add. */
+  addedById?: Jid;
+  method?: GroupMembershipRequestMethod;
+  /** Unix seconds the request was created. */
+  requestedAt?: number;
+}
+
 export interface CreateGroupRequest {
   name: string;
   participants: Jid[];

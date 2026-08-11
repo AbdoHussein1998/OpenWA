@@ -10,6 +10,7 @@ from typing import Any, TYPE_CHECKING, TypedDict
 from .._http import quote_segment
 from ..types import (
     GroupJoinInfo,
+    GroupMembershipRequest,
     SetGroupPictureRequest,
     CreateGroupRequest,
     GroupInfo,
@@ -143,4 +144,43 @@ class GroupsResource:
         """
         return self._http.request(
             "PUT", f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/settings", body=body
+        )
+
+    def get_membership_requests(self, session_id: str, group_id: str) -> list[GroupMembershipRequest]:
+        """List a group's pending join requests. Requires the account to be a group admin.
+
+        Only ``participantId`` is guaranteed on each entry — the rest is reported by the engine when
+        it has it.
+        """
+        return self._http.request(
+            "GET",
+            f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}/membership-requests",
+        )
+
+    def approve_membership_requests(
+        self, session_id: str, group_id: str, participants: list[str] | None = None
+    ) -> ParticipantsResult:
+        """Approve pending join requests. Omit ``participants`` to approve every pending request.
+
+        A partial refusal answers 200 and reports it per participant in ``results``, so ``success``
+        alone does not mean everyone was let in.
+        """
+        body: dict[str, object] = {} if participants is None else {"participants": participants}
+        return self._http.request(
+            "POST",
+            f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}"
+            "/membership-requests/approve",
+            body=body,
+        )
+
+    def reject_membership_requests(
+        self, session_id: str, group_id: str, participants: list[str] | None = None
+    ) -> ParticipantsResult:
+        """Reject pending join requests. Omit ``participants`` to reject every pending request."""
+        body: dict[str, object] = {} if participants is None else {"participants": participants}
+        return self._http.request(
+            "POST",
+            f"/api/sessions/{quote_segment(session_id)}/groups/{quote_segment(group_id)}"
+            "/membership-requests/reject",
+            body=body,
         )

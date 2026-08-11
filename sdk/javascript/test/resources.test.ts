@@ -58,6 +58,29 @@ describe('GroupsResource — exact paths and bodies', () => {
     expect(t.lastCall!.url).toContain('/invite-code/revoke');
   });
 
+  it('membership requests — list, approve, reject', async () => {
+    const t = new MockTransport()
+      .on('GET', /\/membership-requests$/, { body: [{ participantId: 'a@c.us', method: 'invite_link' }] })
+      .on('POST', /\/membership-requests\/approve$/, { body: { success: true, message: 'ok', results: [] } })
+      .on('POST', /\/membership-requests\/reject$/, { body: { success: true, message: 'ok', results: [] } });
+    const c = client(t);
+
+    const pending = await c.groups.getMembershipRequests('s', 'g1@g.us');
+    expect(t.lastCall!.method).toBe('GET');
+    expect(t.lastCall!.url).toContain('/groups/g1@g.us/membership-requests');
+    expect(pending[0].participantId).toBe('a@c.us');
+
+    await c.groups.approveMembershipRequests('s', 'g1@g.us', ['a@c.us']);
+    expect(t.lastCall!.url).toContain('/membership-requests/approve');
+    expect(t.lastCall!.body).toEqual({ participants: ['a@c.us'] });
+
+    // Omitting the list means "every pending request" — it must send an empty object, not
+    // `{ participants: undefined }`, which would read as an explicit empty selection.
+    await c.groups.rejectMembershipRequests('s', 'g1@g.us');
+    expect(t.lastCall!.url).toContain('/membership-requests/reject');
+    expect(t.lastCall!.body).toEqual({});
+  });
+
   it('joinGroup posts the invite code to /groups/join', async () => {
     const t = new MockTransport().on('POST', /\/groups\/join$/, { body: { success: true, groupId: 'g1@g.us' } });
     const res = await client(t).groups.joinGroup('s', { inviteCode: 'AbCdEf' });

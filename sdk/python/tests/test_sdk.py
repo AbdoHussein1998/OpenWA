@@ -825,3 +825,26 @@ class TestSearch:
         assert "q=x" in url
         assert "limit=5" in url
         assert "sessionId" not in url
+
+
+class TestGroupMembershipRequests:
+    def test_list_approve_reject(self):
+        backend = MockBackend()
+        backend.on("GET", "/membership-requests", body=[{"participantId": "a@c.us", "method": "invite_link"}])
+        backend.on("POST", "/membership-requests/approve", body={"success": True, "message": "ok", "results": []})
+        backend.on("POST", "/membership-requests/reject", body={"success": True, "message": "ok", "results": []})
+        client = make_client(backend)
+
+        pending = client.groups.get_membership_requests("s", "g1@g.us")
+        assert backend.calls[-1].method == "GET"
+        assert backend.calls[-1].url.endswith("/groups/g1@g.us/membership-requests")
+        assert pending[0]["participantId"] == "a@c.us"
+
+        client.groups.approve_membership_requests("s", "g1@g.us", ["a@c.us"])
+        assert backend.calls[-1].url.endswith("/membership-requests/approve")
+        assert backend.calls[-1].body == {"participants": ["a@c.us"]}
+
+        # Omitting the list means "every pending request": an empty body, not a null participants key.
+        client.groups.reject_membership_requests("s", "g1@g.us")
+        assert backend.calls[-1].url.endswith("/membership-requests/reject")
+        assert backend.calls[-1].body == {}
