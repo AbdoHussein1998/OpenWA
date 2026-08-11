@@ -24,11 +24,12 @@ function makeRoot({
   previewPatcher = false,
   statusPatcher = false,
   readySyncPatcher = false,
+  participantArityPatcher = false,
   baileysPatcher = false,
 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openwa-postinstall-'));
   if (dashboard) fs.mkdirSync(path.join(root, 'dashboard'));
-  if (patcher || previewPatcher || statusPatcher || readySyncPatcher || baileysPatcher) {
+  if (patcher || previewPatcher || statusPatcher || readySyncPatcher || participantArityPatcher || baileysPatcher) {
     fs.mkdirSync(path.join(root, 'scripts'));
   }
   if (patcher) {
@@ -42,6 +43,9 @@ function makeRoot({
   }
   if (readySyncPatcher) {
     fs.writeFileSync(path.join(root, 'scripts', 'patch-wwebjs-ready-sync.js'), '// stub\n');
+  }
+  if (participantArityPatcher) {
+    fs.writeFileSync(path.join(root, 'scripts', 'patch-wwebjs-participant-arity.js'), '// stub\n');
   }
   if (baileysPatcher) {
     fs.writeFileSync(path.join(root, 'scripts', 'patch-baileys-appstate.js'), '// stub\n');
@@ -113,6 +117,14 @@ test('planSteps: ready-sync patcher plans its own best-effort repair', () => {
   assert.deepEqual(steps[0].args.slice(1), ['--best-effort']);
 });
 
+test('planSteps: participant-arity patcher plans its own best-effort repair', () => {
+  const steps = planSteps(makeRoot({ participantArityPatcher: true }));
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].command, process.execPath);
+  assert.match(steps[0].args[0], /patch-wwebjs-participant-arity\.js$/);
+  assert.deepEqual(steps[0].args.slice(1), ['--best-effort']);
+});
+
 test('planSteps: dashboard and all patchers run in stable order', () => {
   const steps = planSteps(
     makeRoot({
@@ -121,16 +133,18 @@ test('planSteps: dashboard and all patchers run in stable order', () => {
       previewPatcher: true,
       statusPatcher: true,
       readySyncPatcher: true,
+      participantArityPatcher: true,
       baileysPatcher: true,
     }),
   );
-  assert.equal(steps.length, 6);
+  assert.equal(steps.length, 7);
   assert.equal(steps[0].command, 'npm ci');
   assert.match(steps[1].args[0], /patch-wwebjs-201832\.js$/);
   assert.match(steps[2].args[0], /patch-wwebjs-newsletter-preview\.js$/);
   assert.match(steps[3].args[0], /patch-wwebjs-status\.js$/);
   assert.match(steps[4].args[0], /patch-wwebjs-ready-sync\.js$/);
-  assert.match(steps[5].args[0], /patch-baileys-appstate\.js$/);
+  assert.match(steps[5].args[0], /patch-wwebjs-participant-arity\.js$/);
+  assert.match(steps[6].args[0], /patch-baileys-appstate\.js$/);
 });
 
 test('run: nothing to do exits 0 and never spawns', () => {
