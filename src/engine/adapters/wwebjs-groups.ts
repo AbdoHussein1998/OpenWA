@@ -11,6 +11,7 @@ import {
   ParticipantOperationResult,
 } from '../interfaces/whatsapp-engine.interface';
 import { GroupChat, GroupMetadataRaw, GroupCreateResult, SerializedWid, readWid } from '../types/whatsapp-web-js.types';
+import { toParticipantWid } from '../identity/wa-id';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
@@ -161,7 +162,7 @@ export class WwebjsGroups {
   async createGroup(name: string, participants: string[]): Promise<Group> {
     this.host.ensureReady();
     // Ensure participant IDs are in correct format
-    const participantIds = participants.map(p => (p.includes('@') ? p : `${p}@c.us`));
+    const participantIds = participants.map(toParticipantWid);
     const result = await this.client().createGroup(name, participantIds);
 
     // whatsapp-web.js reports a failed creation by RESOLVING with a plain string
@@ -191,7 +192,7 @@ export class WwebjsGroups {
     if (!chat.isGroup) {
       throw new Error('Chat is not a group');
     }
-    const participantIds = participants.map(p => (p.includes('@') ? p : `${p}@c.us`));
+    const participantIds = participants.map(toParticipantWid);
     const raw = await (chat as unknown as GroupChat).addParticipants(participantIds);
     // whatsapp-web.js reports a batch-level refusal (no admin rights, empty group) by RESOLVING a
     // plain reason string (GroupChat.js:106-107,128-130) instead of throwing — surface it as a
@@ -249,7 +250,7 @@ export class WwebjsGroups {
     if (!chat.isGroup) {
       throw new Error('Chat is not a group');
     }
-    const participantIds = participants.map(p => (p.includes('@') ? p : `${p}@c.us`));
+    const participantIds = participants.map(toParticipantWid);
     const res = await (chat as unknown as GroupChat)[op](participantIds);
     if (res?.status !== 200) {
       throw new EngineRefusedError(`${op} refused for group ${groupId} (status ${res?.status ?? 'unknown'})`);
