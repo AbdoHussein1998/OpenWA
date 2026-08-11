@@ -36,6 +36,17 @@ type CreateChannelRequest struct {
 	Description string `json:"description,omitempty"`
 }
 
+// DemoteChannelAdminRequest is the body for ChannelsService.DemoteAdmin.
+type DemoteChannelAdminRequest struct {
+	UserID string `json:"userId"`
+}
+
+// TransferChannelOwnershipRequest is the body for ChannelsService.TransferOwnership. The transfer
+// is irreversible.
+type TransferChannelOwnershipRequest struct {
+	NewOwnerID string `json:"newOwnerId"`
+}
+
 // MuteChannelRequest is the body for muting or unmuting a channel. The subscription is unaffected
 // either way.
 type MuteChannelRequest struct {

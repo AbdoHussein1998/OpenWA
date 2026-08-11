@@ -66,6 +66,16 @@ class CallLinkResponse(TypedDict):
     """The shareable WhatsApp call link."""
 
     link: str
+class DemoteChannelAdminRequest(TypedDict):
+    """Body for :meth:`ChannelsResource.demote_admin`."""
+
+    userId: str
+
+
+class TransferChannelOwnershipRequest(TypedDict):
+    """Body for :meth:`ChannelsResource.transfer_ownership`. The transfer is irreversible."""
+
+    newOwnerId: str
 
 
 class SuccessResult(TypedDict, total=False):

@@ -35,7 +35,7 @@ All five SDKs expose the same fluent surface:
 | `webhooks`  | list, listAll, deliveryFailures, get, create, update, delete, test                                                                                                                                                                                                                                       |
 | `chats`     | list, subscribePresence, getPresence, markRead, markUnread, archive, pin, mute, clearMessages, delete, sendState                                                                                                                                                                                         |
 | `labels`    | list, get, chats, upsert, delete, forChat, addToChat, removeFromChat _(WhatsApp Business)_                                                                                                                                                                                                               |
-| `channels`  | list, get, messages, create, delete, mute, subscribe, unsubscribe _(Newsletters)_                                                                                                                                                                                                                        |
+| `channels`  | list, get, messages, create, delete, mute, subscribe, unsubscribe, demoteAdmin, transferOwnership _(Newsletters)_                                                                                                                                                                                        |
 | `catalog`   | info, products, product, sendProduct, sendCatalog _(WhatsApp Business)_                                                                                                                                                                                                                                  |
 | `status`    | list, fromContact, media, sendText, sendImage, sendVideo, sendVoice, delete _(Stories)_                                                                                                                                                                                                                  |
 | `search`    | search                                                                                                                                                                                                                                                                                                   |
@@ -261,16 +261,18 @@ Media bodies share the `SendMediaRequest` shape: `{ chatId, url? | base64?, mime
 
 #### `channels` _(Newsletters)_
 
-| Method        | Signature                                | Description                                                                                                                 |
-| ------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `list`        | `list(sessionId)`                        | List all channels/newsletters the session is subscribed to.                                                                 |
-| `get`         | `get(sessionId, channelId)`              | Get a single channel by id.                                                                                                 |
-| `messages`    | `messages(sessionId, channelId, query?)` | Get recent messages from a channel.                                                                                         |
-| `create`      | `create(sessionId, body)`                | Create a channel this account owns. **OPERATOR**                                                                            |
-| `delete`      | `delete(sessionId, channelId)`           | Delete a channel this account owns. Irreversible, and every subscriber loses it — distinct from `unsubscribe`. **OPERATOR** |
-| `mute`        | `mute(sessionId, channelId, body)`       | Mute or unmute a channel's notifications. **OPERATOR**                                                                      |
-| `subscribe`   | `subscribe(sessionId, body)`             | Subscribe to a channel using its invite code. **OPERATOR**                                                                  |
-| `unsubscribe` | `unsubscribe(sessionId, channelId)`      | Unsubscribe from a channel. **OPERATOR**                                                                                    |
+| Method              | Signature                                       | Description                                                                                                                 |
+| ------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `list`              | `list(sessionId)`                               | List all channels/newsletters the session is subscribed to.                                                                 |
+| `get`               | `get(sessionId, channelId)`                     | Get a single channel by id.                                                                                                 |
+| `messages`          | `messages(sessionId, channelId, query?)`        | Get recent messages from a channel.                                                                                         |
+| `create`            | `create(sessionId, body)`                       | Create a channel this account owns. **OPERATOR**                                                                            |
+| `delete`            | `delete(sessionId, channelId)`                  | Delete a channel this account owns. Irreversible, and every subscriber loses it — distinct from `unsubscribe`. **OPERATOR** |
+| `mute`              | `mute(sessionId, channelId, body)`              | Mute or unmute a channel's notifications. **OPERATOR**                                                                      |
+| `subscribe`         | `subscribe(sessionId, body)`                    | Subscribe to a channel using its invite code. **OPERATOR**                                                                  |
+| `unsubscribe`       | `unsubscribe(sessionId, channelId)`             | Unsubscribe from a channel. **OPERATOR**                                                                                    |
+| `demoteAdmin`       | `demoteAdmin(sessionId, channelId, body)`       | Demote a channel admin back to a subscriber; no promote counterpart exists. **OPERATOR**                                    |
+| `transferOwnership` | `transferOwnership(sessionId, channelId, body)` | Hand a channel to a new owner. Irreversible. **OPERATOR**                                                                   |
 
 #### `catalog` _(WhatsApp Business)_
 
@@ -628,16 +630,18 @@ Resources are accessed as properties on the client (e.g. `client.messages`). All
 
 #### `client.channels` _(Newsletters)_
 
-| Method        | Signature                                                                    | Description                                                                                                                 |
-| ------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `list`        | `list(session_id) -> list[ChannelRecord]`                                    | List subscribed channels.                                                                                                   |
-| `get`         | `get(session_id, channel_id) -> ChannelRecord`                               | Get one channel.                                                                                                            |
-| `messages`    | `messages(session_id, channel_id, query=None) -> list[ChannelMessageRecord]` | List channel messages.                                                                                                      |
-| `create`      | `create(session_id, body) -> ChannelRecord`                                  | Create a channel this account owns. **OPERATOR**                                                                            |
-| `delete`      | `delete(session_id, channel_id) -> SuccessResult`                            | Delete a channel this account owns. Irreversible, and every subscriber loses it — distinct from `unsubscribe`. **OPERATOR** |
-| `mute`        | `mute(session_id, channel_id, body) -> SuccessResult`                        | Mute or unmute a channel's notifications. **OPERATOR**                                                                      |
-| `subscribe`   | `subscribe(session_id, body) -> ChannelRecord`                               | Subscribe via invite code. **OPERATOR**                                                                                     |
-| `unsubscribe` | `unsubscribe(session_id, channel_id) -> SuccessResult`                       | Unsubscribe from a channel. **OPERATOR**                                                                                    |
+| Method               | Signature                                                                    | Description                                                                                                                 |
+| -------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `list`               | `list(session_id) -> list[ChannelRecord]`                                    | List subscribed channels.                                                                                                   |
+| `get`                | `get(session_id, channel_id) -> ChannelRecord`                               | Get one channel.                                                                                                            |
+| `messages`           | `messages(session_id, channel_id, query=None) -> list[ChannelMessageRecord]` | List channel messages.                                                                                                      |
+| `create`             | `create(session_id, body) -> ChannelRecord`                                  | Create a channel this account owns. **OPERATOR**                                                                            |
+| `delete`             | `delete(session_id, channel_id) -> SuccessResult`                            | Delete a channel this account owns. Irreversible, and every subscriber loses it — distinct from `unsubscribe`. **OPERATOR** |
+| `mute`               | `mute(session_id, channel_id, body) -> SuccessResult`                        | Mute or unmute a channel's notifications. **OPERATOR**                                                                      |
+| `subscribe`          | `subscribe(session_id, body) -> ChannelRecord`                               | Subscribe via invite code. **OPERATOR**                                                                                     |
+| `unsubscribe`        | `unsubscribe(session_id, channel_id) -> SuccessResult`                       | Unsubscribe from a channel. **OPERATOR**                                                                                    |
+| `demote_admin`       | `demote_admin(session_id, channel_id, body) -> SuccessResult`                | Demote a channel admin back to a subscriber; no promote counterpart exists. **OPERATOR**                                    |
+| `transfer_ownership` | `transfer_ownership(session_id, channel_id, body) -> SuccessResult`          | Hand a channel to a new owner. Irreversible. **OPERATOR**                                                                   |
 
 #### `client.catalog` _(WhatsApp Business)_
 
@@ -968,16 +972,18 @@ All payloads are associative arrays; all listed methods are synchronous and retu
 
 #### `channels` _(Newsletters)_
 
-| Method        | Signature                                                                  | Description                                                                                                                 |
-| ------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `list`        | `list(string $sessionId): array`                                           | List channels.                                                                                                              |
-| `get`         | `get(string $sessionId, string $channelId): array`                         | Get one channel.                                                                                                            |
-| `messages`    | `messages(string $sessionId, string $channelId, array $query = []): array` | Recent channel messages.                                                                                                    |
-| `create`      | `create(string $sessionId, array $body): array`                            | Create a channel this account owns. **OPERATOR**                                                                            |
-| `delete`      | `delete(string $sessionId, string $channelId): array`                      | Delete a channel this account owns. Irreversible, and every subscriber loses it — distinct from `unsubscribe`. **OPERATOR** |
-| `mute`        | `mute(string $sessionId, string $channelId, array $body): array`           | Mute or unmute a channel's notifications. **OPERATOR**                                                                      |
-| `subscribe`   | `subscribe(string $sessionId, array $body): array`                         | Subscribe via invite code (`$body` needs `inviteCode`). **OPERATOR**                                                        |
-| `unsubscribe` | `unsubscribe(string $sessionId, string $channelId): array`                 | Unsubscribe from a channel. **OPERATOR**                                                                                    |
+| Method              | Signature                                                                     | Description                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `list`              | `list(string $sessionId): array`                                              | List channels.                                                                                                              |
+| `get`               | `get(string $sessionId, string $channelId): array`                            | Get one channel.                                                                                                            |
+| `messages`          | `messages(string $sessionId, string $channelId, array $query = []): array`    | Recent channel messages.                                                                                                    |
+| `create`            | `create(string $sessionId, array $body): array`                               | Create a channel this account owns. **OPERATOR**                                                                            |
+| `delete`            | `delete(string $sessionId, string $channelId): array`                         | Delete a channel this account owns. Irreversible, and every subscriber loses it — distinct from `unsubscribe`. **OPERATOR** |
+| `mute`              | `mute(string $sessionId, string $channelId, array $body): array`              | Mute or unmute a channel's notifications. **OPERATOR**                                                                      |
+| `subscribe`         | `subscribe(string $sessionId, array $body): array`                            | Subscribe via invite code (`$body` needs `inviteCode`). **OPERATOR**                                                        |
+| `unsubscribe`       | `unsubscribe(string $sessionId, string $channelId): array`                    | Unsubscribe from a channel. **OPERATOR**                                                                                    |
+| `demoteAdmin`       | `demoteAdmin(string $sessionId, string $channelId, array $body): array`       | Demote a channel admin back to a subscriber; no promote counterpart exists. **OPERATOR**                                    |
+| `transferOwnership` | `transferOwnership(string $sessionId, string $channelId, array $body): array` | Hand a channel to a new owner. Irreversible. **OPERATOR**                                                                   |
 
 #### `catalog` _(WhatsApp Business)_
 

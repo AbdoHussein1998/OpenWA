@@ -896,3 +896,17 @@ class TestCallLink:
         assert backend.calls[-1].url.endswith("/sessions/s/calls/link")
         assert backend.calls[-1].body == {"type": "video", "startTime": 1800000000000}
         assert "call.whatsapp.com" in res["link"]
+class TestChannelAdminOwnership:
+    def test_demote_and_transfer(self):
+        backend = MockBackend()
+        backend.on("POST", "/admins/demote", body={"success": True})
+        backend.on("POST", "/owner/transfer", body={"success": True})
+        client = make_client(backend)
+
+        client.channels.demote_admin("s", "c@newsletter", {"userId": "a@c.us"})
+        assert backend.calls[-1].url.endswith("/channels/c@newsletter/admins/demote")
+        assert backend.calls[-1].body == {"userId": "a@c.us"}
+
+        client.channels.transfer_ownership("s", "c@newsletter", {"newOwnerId": "b@c.us"})
+        assert backend.calls[-1].url.endswith("/channels/c@newsletter/owner/transfer")
+        assert backend.calls[-1].body == {"newOwnerId": "b@c.us"}
