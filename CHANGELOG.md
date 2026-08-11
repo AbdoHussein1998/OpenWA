@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Go SDK no longer approves or rejects every pending join request when handed an empty participant list: `omitempty` dropped the empty slice, so `[]string{}` reached the gateway as the bodyless "act on every request" rather than the `400` the other four clients receive. A nil slice still means every request.
 - The chart's optional ServiceMonitor now selects on a new `openwa.io/scrape-target` label, so it scrapes one target per pod instead of two; series previously collected through the headless target stop appearing, so check anything keyed on the `service` label.
 - The Helm chart's new startup probe stops the kubelet killing a pod that is still booting, allowing 295s (`periodSeconds: 5`, `failureThreshold: 60`) where the liveness settings allowed 50. It fires immediately, so a fast boot goes live sooner than before, not later — and it is not limited to auto-start, since the database connect retry alone can consume 30 of the old 50 seconds.
 - A Helm upgrade that changes only `env` or `secretEnv` now restarts the pod through ConfigMap and Secret checksums, so the new configuration reaches the running container. With `existingSecret` set the chart renders no Secret, so that path still needs `kubectl rollout restart`; `values.yaml` notes what publishing the Secret checksum as a pod annotation means.

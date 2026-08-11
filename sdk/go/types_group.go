@@ -36,10 +36,16 @@ type GroupMembershipRequest struct {
 	RequestedAt float64 `json:"requestedAt,omitempty"`
 }
 
-// MembershipRequestActionRequest is the body for approving or rejecting join requests. An empty
-// Participants slice acts on every pending request.
+// MembershipRequestActionRequest names the requesters to approve or reject. Acting on every pending
+// request is expressed by sending no body field at all, which membershipRequestAction does with an
+// empty body — not by this struct.
+//
+// No `omitempty`: it drops an empty slice as readily as a nil one, so "approve nobody" would reach
+// the gateway as the bodyless "approve everybody". The other four clients key on null rather than
+// emptiness and send `{"participants": []}` for an empty list, which the gateway rejects with 400;
+// the tag made Go the only client where that input silently admitted every pending requester.
 type MembershipRequestActionRequest struct {
-	Participants []string `json:"participants,omitempty"`
+	Participants []string `json:"participants"`
 }
 
 // GroupInfo is the full group detail.
