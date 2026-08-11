@@ -488,6 +488,17 @@ class TestContacts:
         client.contacts.unblock("s", "a@c.us")
         assert backend.calls[-1].method == "DELETE"
 
+    def test_list_blocked_gets_session_wide_route(self):
+        backend = MockBackend().on("GET", "/contacts/blocked", body=["a@c.us", "b@c.us"])
+        client = make_client(backend)
+        res = client.contacts.list_blocked("s")
+        call = backend.calls[-1]
+        assert call.method == "GET"
+        # Session-wide: no contact id in the path, and not the /contacts list route.
+        assert call.url.endswith("/api/sessions/s/contacts/blocked")
+        assert call.body is None
+        assert res == ["a@c.us", "b@c.us"]
+
     def test_profile_pictures_batch_resolves_ids_query(self):
         backend = MockBackend().on("GET", "/contacts/profile-pictures", body={
             "pictures": {"a@c.us": "http://p/a", "b@c.us": None}
