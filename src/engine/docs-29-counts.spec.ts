@@ -86,8 +86,25 @@ describe('docs/29 counts match the capability matrix', () => {
     expect(expected.total).toBeGreaterThan(4);
     expect(expected.wwjs + expected.baileys).toBe(expected.total);
 
+    // 29.3's opening sentence and 29.3.2's split spell the figure in prose rather than digits, which
+    // is why they drifted while the digit-shaped claims held: a patcher was added to each library and
+    // the words stayed at "five" and "1 on Baileys".
+    const WORDS: Record<string, number> = { four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+    const spelled = doc.match(/OpenWA ships (\w+) exact, self-disabling source transforms/);
+    const wrongProse: string[] = [];
+    if (!spelled) wrongProse.push('29.3 opening: phrasing no longer found in the document');
+    else if (WORDS[spelled[1]] !== expected.total) {
+      wrongProse.push(`29.3 opening: says ${spelled[1]}, scripts/ has ${expected.total}`);
+    }
+
     const claims: { label: string; re: RegExp; want: number }[] = [
       { label: 'intro total', re: /(\d+) install-time patches \(29\.3\)/, want: expected.total },
+      { label: '29.3.2 split wwjs', re: /engine-specific \((\d+) on wwjs/, want: expected.wwjs },
+      {
+        label: '29.3.2 split baileys',
+        re: /engine-specific \(\d+ on wwjs,\s*(\d+) on Baileys\)/,
+        want: expected.baileys,
+      },
       { label: 'mermaid wwjs node', re: /whatsapp-web\.js [\d.]+<br\/>\+ (\d+) OpenWA patch/, want: expected.wwjs },
       { label: 'mermaid baileys node', re: /baileys [\w.-]+<br\/>\+ (\d+) OpenWA patch/, want: expected.baileys },
       { label: '29.8 total', re: /- \*\*(\d+)\*\* install-time patches/, want: expected.total },
@@ -111,6 +128,63 @@ describe('docs/29 counts match the capability matrix', () => {
       if (actual !== claim.want) wrong.push(`${claim.label}: says ${actual}, scripts/ has ${claim.want}`);
     }
 
+    expect([...wrongProse, ...wrong]).toEqual([]);
+  });
+
+  /**
+   * The figures below restate something the DOCUMENT itself contains rather than the matrix, so a
+   * matrix-derived check cannot see them drift — and they did: demoting one cell moved the
+   * not-available span, marking three rows moved the patch-dependency count, and the 29.5.2 prose
+   * split kept the pre-demotion numbers. Each is recounted from the table it summarises.
+   */
+  it('summarises its own tables with the numbers those tables contain', () => {
+    const doc = read('docs', '29-engine-capability-matrix.md');
+    const wrong: string[] = [];
+
+    const section = (from: RegExp, to: RegExp): string => {
+      const start = doc.search(from);
+      const end = doc.slice(start + 1).search(to);
+      return end < 0 ? doc.slice(start) : doc.slice(start, start + 1 + end);
+    };
+
+    // 29.8's not-available span must match 29.4's, which the matrix-derived test already pins.
+    const spanning = doc.match(/0 uncertain\), spanning \*\*(\d+)\*\* methods/);
+    const across = doc.match(/0 uncertain\) across (\d+) methods/);
+    if (!spanning || !across) wrong.push('not-available span: one of the two phrasings no longer matches');
+    else if (spanning[1] !== across[1])
+      wrong.push(`not-available span: 29.8 says ${spanning[1]}, 29.4 says ${across[1]}`);
+
+    // 29.8's wwjs patch-dependency count must match the ✅🔧ⁿ marks 29.4 actually carries. 🔧⁶ is the
+    // one baileys row-level mark, so it is excluded from the wwjs figure.
+    const contract = section(/^## 29\.4 /m, /^## 29\.5 /m);
+    const marks = [...contract.matchAll(/✅🔧([¹²³⁴⁵⁶⁷])/g)].map(m => m[1]);
+    const wwjsMarks = marks.filter(m => m !== '⁶').length;
+    const claimed = doc.match(/\*\*(\d+) wwjs cells carry an explicit patch dependency\*\*/);
+    if (!claimed) wrong.push('patch dependency count: phrasing no longer found');
+    else if (Number(claimed[1]) !== wwjsMarks) {
+      wrong.push(`patch dependency count: says ${claimed[1]}, 29.4 carries ${wwjsMarks}`);
+    }
+
+    // 29.8's wwjs inventory split must match the 29.5.2 table it summarises.
+    const inventory = section(/^### 29\.5\.2 /m, /^### 29\.5\.3 /m);
+    const wired = (inventory.match(/^\| `[^|]+\| *✅/gm) ?? []).length;
+    const unexposed = (inventory.match(/^\| `[^|]+\| *❌/gm) ?? []).length;
+    const split = doc.match(
+      /wwjs \*\*\d+\*\* Client methods — (\d+) wired,[\s\S]{0,60}?\*\*(\d+) ❌ not\s+exposed\*\*/,
+    );
+    if (!split) wrong.push('29.5.2 split: phrasing no longer found');
+    else {
+      if (Number(split[1]) !== wired) wrong.push(`29.5.2 wired: says ${split[1]}, the table has ${wired}`);
+      if (Number(split[2]) !== unexposed)
+        wrong.push(`29.5.2 not-exposed: says ${split[2]}, the table has ${unexposed}`);
+    }
+
+    // Guard every selector: a reworded table would make all four comparisons vacuous.
+    expect({ marks: marks.length > 0, wired: wired > 0, unexposed: unexposed > 0 }).toEqual({
+      marks: true,
+      wired: true,
+      unexposed: true,
+    });
     expect(wrong).toEqual([]);
   });
 

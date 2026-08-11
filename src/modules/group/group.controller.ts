@@ -175,6 +175,11 @@ export class GroupController {
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
   @ApiResponse({ status: 400, description: PARTICIPANT_ID_400 })
+  @ApiResponse({
+    status: 501,
+    description:
+      'Not supported by the active engine: whatsapp-web.js reaches a WhatsApp Web internal that no longer exists, so group creation is Baileys-only.',
+  })
   async create(@Param('sessionId') sessionId: string, @Body() dto: CreateGroupDto) {
     return this.groupService.createGroup(sessionId, dto.name, dto.participants);
   }

@@ -4739,7 +4739,7 @@ describe('WhatsAppWebJsAdapter message_ack (unreadable id)', () => {
   });
 });
 
-describe('WhatsAppWebJsAdapter createGroup (failure shapes)', () => {
+describe('WhatsAppWebJsAdapter createGroup (not available on this engine)', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
@@ -4747,35 +4747,24 @@ describe('WhatsAppWebJsAdapter createGroup (failure shapes)', () => {
     return adapter;
   };
 
-  it("surfaces the engine's reason when creation fails", async () => {
-    // whatsapp-web.js RESOLVES with a plain string on failure rather than throwing (Client.js:2376).
-    // Reading `.gid` off it produced an opaque TypeError and threw the actual reason away.
-    const createGroup = jest
-      .fn()
-      .mockResolvedValue('CreateGroupError: An unknown error occupied while creating a group');
+  // The library's own method is typed and present, so the only thing that shows it cannot work is a
+  // live call: its injected evaluate reaches a WhatsApp Web internal with no `findImpl`
+  // (`Client.js:2325`), which reached callers as a bare 500. Measured on two builds — one
+  // auto-resolved, one pinned — so this is a library limitation, not registry pin drift.
+  it('throws EngineNotSupportedError instead of calling the library', async () => {
+    const createGroup = jest.fn();
 
-    await expect(readyAdapter({ createGroup }).createGroup('team', ['628123@c.us'])).rejects.toThrow(
-      /CreateGroupError/,
+    await expect(readyAdapter({ createGroup }).createGroup('team', ['628123456789@c.us'])).rejects.toBeInstanceOf(
+      EngineNotSupportedError,
     );
+    // The point of the demotion: the caller gets a 501 and the broken page call is never made.
+    expect(createGroup).not.toHaveBeenCalled();
   });
 
-  it('never returns a placeholder when the group id cannot be read', async () => {
-    // The old `String(gid._serialized)` coerced an unreadable id into the literal string "undefined"
-    // and handed it back as a real, addressable group id.
-    const createGroup = jest.fn().mockResolvedValue({ gid: { someFutureName: 'x' } });
+  it('refuses before the engine is ready, like every other guarded method', async () => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
 
-    const call = readyAdapter({ createGroup }).createGroup('team', ['628123@c.us']);
-
-    await expect(call).rejects.toThrow(/id could not be read/);
-    await expect(call).rejects.not.toThrow(/undefined/);
-  });
-
-  it('returns the group on success', async () => {
-    const createGroup = jest.fn().mockResolvedValue({ gid: { _serialized: '120363000@g.us' } });
-
-    const res = await readyAdapter({ createGroup }).createGroup('team', ['628123@c.us', '628124@c.us']);
-
-    expect(res).toEqual({ id: '120363000@g.us', name: 'team', participantsCount: 2 });
+    await expect(adapter.createGroup('team', ['628123456789@c.us'])).rejects.toBeDefined();
   });
 });
 

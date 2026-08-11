@@ -106,7 +106,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'wwjs Chat.clearMessages() → boolean (index.d.ts:1896); the injected sendClearChat returns false for an unknown chat (Injected/Utils.js:1220); baileys chatModify({clear:true,lastMessages}, jid) (Types/Chat.d.ts:75-78) — same last-message requirement as archiveChat, so a chat with no known history resolves false',
   },
-  createGroup: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+  createGroup: {
+    wwjs: { status: 'not-available', rootCause: 'library-limitation' },
+    baileys: { status: 'supported' },
+    evidence:
+      'baileys groupCreate(subject, participants) → GroupMetadata (Socket/groups.d.ts). wwjs Client.createGroup exists and is typed Promise<CreateGroupResult | string> (index.d.ts) but its injected evaluate reaches a WhatsApp Web internal that no longer exposes findImpl (Client.js:2325) — measured live on TWO builds, 2.3000.1044858477-alpha auto-resolved and 2.3000.1044770897-alpha pinned, both TypeError "this.findImpl is not a function" reaching the caller as a bare 500. Bare and @c.us-qualified participant ids fail identically, so the id shape is not the variable, and varying the build is what separates this from registry pin drift. findImpl appears in neither the installed Client.js nor any OpenWA patcher, so it is the page\'s, not the library\'s, and cannot be patched around. Baileys creates groups normally on the same account',
+  },
   deleteChat: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   deleteContact: {
     wwjs: { status: 'supported' },
