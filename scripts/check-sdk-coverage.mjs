@@ -179,14 +179,29 @@ const resourceOf = (path) =>
   /^\/api\/sessions\/\*\/([^/]+)/.exec(path)?.[1] ?? /^\/api\/([^/*]+)/.exec(path)?.[1] ?? '';
 
 /**
- * A harvested path whose final segment is a wildcard covers its concrete siblings: the client
- * reaches that family through one builder with the last segment as a variable (`send-image`,
- * `membership-requests/approve`). The forward gate makes the same concession explicitly.
+ * A harvested path whose final segment is a wildcard MAY cover its concrete siblings: the client
+ * reaches that family through one builder with the last segment as a variable (`send-${type}`).
+ * The forward gate makes the same concession explicitly.
+ *
+ * But only when the wildcard is a route NAME. A client that builds `…/contacts/${contactId}` also
+ * produces `…/contacts/*`, and reading that as a family let it stand in for every concrete sibling
+ * — `contacts/blocked` among them — so removing a route from a client entirely still passed. The
+ * two cases are told apart by the contract itself: if it publishes a route OF THAT SHAPE, the
+ * wildcard is that route's path parameter and covers nothing but it (which `exact` already does).
+ * `…/messages/*` is published by no route, so a wildcard there can only be a verb.
  */
-const covers = (built, path) => built.exact.has(path) || built.families.has(path.replace(/\/[^/]+$/, '/*'));
+const isRouteNameFamily = (family) => !contractShapes.has(family);
+const covers = (built, path) => {
+  if (built.exact.has(path)) return true;
+  const family = path.replace(/\/[^/]+$/, '/*');
+  return isRouteNameFamily(family) && built.families.has(family);
+};
 
 const excluded = excludedResources();
 const contract = [...new Set(Object.keys(JSON.parse(readFileSync(join(root, 'openapi.json'), 'utf8')).paths).map(normalize))];
+/** Every shape the contract publishes, including the excluded resources — a wildcard is explained by
+ *  a by-id route whether or not the SDKs are asked to expose it. */
+const contractShapes = new Set(contract);
 const inScope = contract.filter((p) => {
   const resource = resourceOf(p);
   return !excluded.has(resource) && !excluded.has(resource.replace(/-rules$/, ''));
