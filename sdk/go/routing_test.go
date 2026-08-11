@@ -62,6 +62,7 @@ func TestRouting(t *testing.T) {
 		{"Contacts.Delete", func(c *Client) { c.Contacts.Delete(ctx, "s1", "c1") }, "DELETE", "/api/sessions/s1/contacts/c1"},
 		{"Contacts.Block", func(c *Client) { c.Contacts.Block(ctx, "s1", "u1") }, "POST", "/api/sessions/s1/contacts/u1/block"},
 		{"Contacts.Unblock", func(c *Client) { c.Contacts.Unblock(ctx, "s1", "u1") }, "DELETE", "/api/sessions/s1/contacts/u1/block"},
+		{"Contacts.ListBlocked", func(c *Client) { c.Contacts.ListBlocked(ctx, "s1") }, "GET", "/api/sessions/s1/contacts/blocked"},
 
 		{"Groups.GetPicture", func(c *Client) { c.Groups.GetPicture(ctx, "s1", "g1") }, "GET", "/api/sessions/s1/groups/g1/picture"},
 		{"Groups.SetPicture", func(c *Client) { c.Groups.SetPicture(ctx, "s1", "g1", SetGroupPictureRequest{}) }, "PUT", "/api/sessions/s1/groups/g1/picture"},

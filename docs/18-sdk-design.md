@@ -30,7 +30,7 @@ All five SDKs expose the same fluent surface:
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sessions`  | list, get, getConfig, updateConfig, create, delete, start, stop, logout, forceKill, getQrCode, requestPairingCode, setOnlinePresence, stats                                                                                                                                                              |
 | `messages`  | list, sendText, sendImage/Video/Audio/Document/Sticker, sendLocation, sendContact, sendTemplate, sendPoll, reply, forward, react, delete, editMessage, history, reactions, media, pin, unpin, star, votePoll, sendBulk, batchStatus, cancelBatch                                                         |
-| `contacts`  | list, get, check, profilePicture, profilePictures, phone, upsert, delete, block, unblock                                                                                                                                                                                                                 |
+| `contacts`  | list, get, check, profilePicture, profilePictures, phone, upsert, delete, block, unblock, listBlocked                                                                                                                                                                                                    |
 | `groups`    | list, get, create, joinInfo, joinGroup, add/remove/promote/demoteParticipants, setSubject, setDescription, getGroupSettings, updateGroupSettings, leave, getPicture, setPicture, deletePicture, inviteCode, revokeInviteCode, getMembershipRequests, approveMembershipRequests, rejectMembershipRequests |
 | `webhooks`  | list, listAll, deliveryFailures, get, create, update, delete, test                                                                                                                                                                                                                                       |
 | `chats`     | list, subscribePresence, getPresence, markRead, markUnread, archive, clearMessages, delete, sendState                                                                                                                                                                                                    |
@@ -188,6 +188,7 @@ Media bodies share the `SendMediaRequest` shape: `{ chatId, url? | base64?, mime
 | `upsert`          | `upsert(sessionId, contactId, body)`   | Save a contact to the account's addressbook, or edit an existing entry. **OPERATOR** |
 | `delete`          | `delete(sessionId, contactId)`         | Remove a contact from the account's addressbook. **OPERATOR**                        |
 | `unblock`         | `unblock(sessionId, contactId)`        | Unblock a contact. **OPERATOR**                                                      |
+| `listBlocked`     | `listBlocked(sessionId)`               | List the ids this account has blocked. Session-wide, so it takes no contact id.      |
 
 #### `groups`
 
@@ -551,6 +552,7 @@ Resources are accessed as properties on the client (e.g. `client.messages`). All
 | `upsert`           | `upsert(session_id, contact_id, body) -> SuccessResult`             | Save a contact to the account's addressbook, or edit an existing entry. **OPERATOR** |
 | `delete`           | `delete(session_id, contact_id) -> SuccessResult`                   | Remove a contact from the account's addressbook. **OPERATOR**                        |
 | `unblock`          | `unblock(session_id, contact_id) -> SuccessResult`                  | Unblock a contact. **OPERATOR**                                                      |
+| `list_blocked`     | `list_blocked(session_id) -> list[str]`                             | List the ids this account has blocked. Session-wide, so it takes no contact id.      |
 
 #### `client.groups`
 
@@ -887,6 +889,7 @@ All payloads are associative arrays; all listed methods are synchronous and retu
 | `upsert`          | `upsert(string $sessionId, string $contactId, array $body): array` | Save a contact to the account's addressbook, or edit an existing entry. **OPERATOR** |
 | `delete`          | `delete(string $sessionId, string $contactId): array`              | Remove a contact from the account's addressbook. **OPERATOR**                        |
 | `unblock`         | `unblock(string $sessionId, string $contactId): array`             | Unblock a contact. **OPERATOR**                                                      |
+| `listBlocked`     | `listBlocked(string $sessionId): array`                            | List the ids this account has blocked. Session-wide, so it takes no contact id.      |
 
 #### `groups`
 

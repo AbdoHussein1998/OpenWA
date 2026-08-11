@@ -196,6 +196,17 @@ describe('ContactsResource — exact paths', () => {
     expect(t.lastCall!.method).toBe('DELETE');
   });
 
+  it('listBlocked — GET the session-wide blocked list, no contact id and no body', async () => {
+    const t = new MockTransport().on('GET', /\/contacts\/blocked$/, { body: ['a@c.us', 'b@c.us'] });
+    const res = await client(t).contacts.listBlocked('s');
+
+    expect(t.lastCall!.method).toBe('GET');
+    // Session-wide: no contact id in the path, and not the /contacts list route either.
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/contacts/blocked');
+    expect(t.lastCall!.body).toBeUndefined();
+    expect(res).toEqual(['a@c.us', 'b@c.us']);
+  });
+
   it('profilePictures batch-resolves ids via the ids query param', async () => {
     const t = new MockTransport().on('GET', /\/contacts\/profile-pictures$/, {
       body: { pictures: { 'a@c.us': 'http://p/a', 'b@c.us': null } },
