@@ -851,6 +851,18 @@ export interface CallLinkResponse {
   link: string;
 }
 
+/** Body for {@link ChannelsResource.demoteAdmin}. */
+export interface DemoteChannelAdminRequest {
+  /** WhatsApp ID of the admin to demote back to a subscriber. */
+  userId: Jid;
+}
+
+/** Body for {@link ChannelsResource.transferOwnership}. */
+export interface TransferChannelOwnershipRequest {
+  /** WhatsApp ID of the account that becomes the new owner. */
+  newOwnerId: Jid;
+}
+
 export interface MarkChatRequest {
   chatId: Jid;
 }

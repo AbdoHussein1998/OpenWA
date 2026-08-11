@@ -136,6 +136,8 @@ func TestRouting(t *testing.T) {
 		{"Channels.Messages", func(c *Client) { c.Channels.Messages(ctx, "s1", "ch1", nil) }, "GET", "/api/sessions/s1/channels/ch1/messages"},
 		{"Channels.Subscribe", func(c *Client) { c.Channels.Subscribe(ctx, "s1", SubscribeChannelRequest{}) }, "POST", "/api/sessions/s1/channels/subscribe"},
 		{"Channels.Unsubscribe", func(c *Client) { c.Channels.Unsubscribe(ctx, "s1", "ch1") }, "DELETE", "/api/sessions/s1/channels/ch1"},
+		{"Channels.DemoteAdmin", func(c *Client) { c.Channels.DemoteAdmin(ctx, "s1", "c1", DemoteChannelAdminRequest{}) }, "POST", "/api/sessions/s1/channels/c1/admins/demote"},
+		{"Channels.TransferOwnership", func(c *Client) { c.Channels.TransferOwnership(ctx, "s1", "c1", TransferChannelOwnershipRequest{}) }, "POST", "/api/sessions/s1/channels/c1/owner/transfer"},
 
 		{"Catalog.Info", func(c *Client) { c.Catalog.Info(ctx, "s1") }, "GET", "/api/sessions/s1/catalog"},
 		{"Catalog.Products", func(c *Client) { c.Catalog.Products(ctx, "s1", nil) }, "GET", "/api/sessions/s1/catalog/products"},
