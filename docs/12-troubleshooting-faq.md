@@ -772,6 +772,35 @@ WEBHOOK_TIMEOUT=10000      # per-attempt HTTP timeout in ms (default 10000)
 WEBHOOK_RETRY_DELAY=5000   # base retry backoff in ms (default 5000)
 ```
 
+### Issue: An inbound sender arrives as an `@lid` id instead of a phone number
+
+**Symptoms:**
+
+- `message.received` carries `from` (or `author`, in a group) as `162878178984075@lid` rather than `628123456789@c.us`
+- The number cannot be matched against your own contact records, and replies have to be addressed by the `@lid` id
+- `contact.number` on the payload repeats the lid digits, so it is not the phone number either
+
+**Cause:** WhatsApp identifies some accounts by a privacy id (`@lid`) instead of their phone number,
+and the message itself carries no phone number to read. Mapping one back costs a lookup against the
+engine, so the gateway does not do it on every message unless you ask for it.
+
+**Solution:**
+
+```bash
+# Resolve a single id on demand — works whether or not the flag below is set
+curl -H "X-API-Key: $API_KEY" \
+  http://localhost:2785/api/sessions/{sessionId}/contacts/{contactId}/phone
+
+# Or have every inbound message carry it: adds `senderPhone` to the message.received webhook
+# and the websocket event. Set it in the `.env` next to docker-compose.yml (both compose files
+# already forward the variable), then restart the process — an env change is not picked up by a
+# session reload.
+RESOLVE_LID_TO_PHONE=true
+```
+
+`senderPhone` is `null` when the engine cannot map the id — an `@lid` the account has never seen has
+no mapping to return. Both engines support the lookup.
+
 ## 12.5 Performance Issues
 
 ### Issue: High Memory Usage

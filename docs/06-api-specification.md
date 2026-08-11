@@ -2266,6 +2266,8 @@ Resolve a contact id (e.g. an `@lid`) to a phone number (MSISDN digits), best-ef
 
 `phone` is `null` when the engine cannot map the id (e.g. an `@lid` the account has never seen).
 
+For inbound messages the gateway can attach this automatically instead: `RESOLVE_LID_TO_PHONE=true` adds `senderPhone` to every `message.received` payload (§6.6). It is off by default; this endpoint works either way.
+
 **Errors:** `400` session is not started · `401` missing/invalid API key
 
 #### PUT /api/sessions/:sessionId/contacts/:contactId
@@ -6504,6 +6506,8 @@ These are the events OpenWA actually emits. A webhook is registered with an `eve
 > **`status.received` is opt-in and carries no media blob.** Unlike every other event above, `status.received` is only delivered to a webhook whose `events` list explicitly includes `"status.received"` (or `"*"`) — registering for other events does not implicitly subscribe you to it. The payload never embeds media bytes: when `hasMedia` is `true`, fetch the file separately via `GET /api/sessions/:sessionId/status/:statusId/media`. Your own posted statuses never trigger this event — only inbound stories from contacts (an own-send echo is dropped before ingest).
 
 > **`STORE_EPHEMERAL_MESSAGES=false` affects `message.received`.** When `STORE_EPHEMERAL_MESSAGES` is set to `false`, incoming disappearing messages (those with `ephemeralDuration > 0`) are **not** persisted nor dispatched — no DB insert, no webhook delivery, and no websocket event. Downstream consumers and the dashboard both stop seeing them. Default is `true` (backward compatible — store and dispatch everything).
+
+> **`senderPhone` on `message.received` is opt-in (`RESOLVE_LID_TO_PHONE`).** When a sender is identified by a WhatsApp privacy id (`…@lid`) rather than a phone number, setting `RESOLVE_LID_TO_PHONE=true` attaches a best-effort `senderPhone` — MSISDN digits, or `null` when the engine cannot map the id — before dispatch, so the webhook and the websocket event both carry it in the same pass. Default is **off**, and while it is off the field is absent from every payload: resolving costs a per-sender lookup (cached). Only inbound privacy-id senders are resolved — a sender that already is a phone number needs no lookup, and own-sends are skipped. The on-demand `GET /api/sessions/:sessionId/contacts/:contactId/phone` works regardless of this flag.
 
 > **Large media is not inlined into webhook payloads.** A `media` blob whose decoded size exceeds `WEBHOOK_MEDIA_INLINE_MAX_BYTES` (default **1 MiB**; `0` = never inline) is replaced — before the payload is fanned out to your webhook — with the marker form `media: { mimetype, filename?, omitted: true, sizeBytes }`, the same shape the engine emits for capped inbound media. Media at or under the cap stays inline unchanged. Additionally, if the serialized body still exceeds `WEBHOOK_MAX_PAYLOAD_BYTES` (default **1 MiB**) after `webhook:before` hooks ran, any remaining inline media is shed the same way so the event is still delivered; only a payload that is over budget _without_ inline media is dropped (recorded in `GET /api/webhooks/delivery-failures`). Because shedding happens before enqueue, queued and failed BullMQ jobs in Redis never carry the blob either — failed-job retention is bounded by the queue's `removeOnComplete`/`removeOnFail` windows (1h/1000 completed, 24h/5000 failed). Fetch the media itself afterwards via `GET /api/sessions/:sessionId/messages/:chatId/history?includeMedia=true` when you need it.
 
