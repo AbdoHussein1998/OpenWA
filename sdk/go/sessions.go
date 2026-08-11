@@ -136,3 +136,19 @@ func (s *SessionsService) Stats(ctx context.Context) (*SessionStatsOverview, err
 	}
 	return &out, nil
 }
+
+// SetOnlinePresence sets the account's own global presence — appear online, or offline.
+//
+// Available=false hands notifications back to the phone: a linked device that stays online
+// suppresses the phone's own alerts. This is the ACCOUNT's presence, not a chat's — see
+// ChatsService.SendState for per-chat typing/recording states.
+func (s *SessionsService) SetOnlinePresence(
+	ctx context.Context, sessionID string, body SetOwnPresenceRequest,
+) (*SuccessResult, error) {
+	var out SuccessResult
+	err := s.client.do(ctx, "PUT", "/api/sessions/"+pathEscape(sessionID)+"/presence", nil, body, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

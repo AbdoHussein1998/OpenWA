@@ -13,6 +13,12 @@ type ChatSummary struct {
 	Kind        string  `json:"kind"`
 }
 
+// SetOwnPresenceRequest is the body for SessionsService.SetOnlinePresence. Available reports
+// whether the account should appear online (true) or offline (false).
+type SetOwnPresenceRequest struct {
+	Available bool `json:"available"`
+}
+
 // MarkChatRequest marks a chat read/unread.
 type MarkChatRequest struct {
 	ChatID string `json:"chatId"`

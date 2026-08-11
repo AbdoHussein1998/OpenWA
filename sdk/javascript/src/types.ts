@@ -796,6 +796,12 @@ export interface ChatSummary {
   kind?: ChatKind;
 }
 
+/** Body for {@link SessionsResource.setOnlinePresence}. */
+export interface SetOwnPresenceRequest {
+  /** `true` = appear online; `false` = appear offline, handing notifications back to the phone. */
+  available: boolean;
+}
+
 export interface MarkChatRequest {
   chatId: Jid;
 }

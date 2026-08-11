@@ -16,6 +16,8 @@ import type {
   SessionResponse,
   UpdateSessionConfigRequest,
   SessionStatsOverview,
+  SetOwnPresenceRequest,
+  SuccessResult,
 } from '../types.js';
 
 /** Pagination for {@link SessionsResource.list}. The server applies its own default when omitted. */
@@ -95,7 +97,10 @@ export class SessionsResource {
 
   /** Force-kill a stuck session (SIGKILL + teardown). */
   forceKill(id: string): Promise<SessionResponse> {
-    return this.client.request<SessionResponse>({ method: 'POST', path: `/api/sessions/${encodeSegment(id)}/force-kill` });
+    return this.client.request<SessionResponse>({
+      method: 'POST',
+      path: `/api/sessions/${encodeSegment(id)}/force-kill`,
+    });
   }
 
   /** Get the current QR code for authentication (live from the engine, not the DB). */
@@ -117,6 +122,21 @@ export class SessionsResource {
     return this.client.request<SessionStatsOverview>({
       method: 'GET',
       path: '/api/sessions/stats/overview',
+    });
+  }
+
+  /**
+   * Set the account's own global presence — appear online, or offline.
+   *
+   * `available: false` hands notifications back to the phone: a linked device that stays online
+   * suppresses the phone's own alerts. This is the ACCOUNT's presence, not a chat's — see
+   * {@link ChatsResource.sendState} for per-chat typing/recording.
+   */
+  setOnlinePresence(sessionId: string, body: SetOwnPresenceRequest): Promise<SuccessResult> {
+    return this.client.request<SuccessResult>({
+      method: 'PUT',
+      path: `/api/sessions/${encodeSegment(sessionId)}/presence`,
+      body,
     });
   }
 }

@@ -17,6 +17,8 @@ from ..types import (
     RequestPairingCodeRequest,
     SessionResponse,
     SessionStatsOverview,
+    SetOwnPresenceRequest,
+    SuccessResult,
 )
 
 if TYPE_CHECKING:
@@ -104,3 +106,14 @@ class SessionsResource:
     def stats(self) -> SessionStatsOverview:
         """Return the aggregate session stats overview."""
         return self._http.request("GET", "/api/sessions/stats/overview")
+
+    def set_online_presence(self, session_id: str, body: SetOwnPresenceRequest) -> SuccessResult:
+        """Set the account's own global presence — appear online, or offline.
+
+        ``available: False`` hands notifications back to the phone: a linked device that stays
+        online suppresses the phone's own alerts. This is the ACCOUNT's presence, not a chat's —
+        see the chats resource for per-chat typing/recording states.
+        """
+        return self._http.request(
+            "PUT", f"/api/sessions/{quote_segment(session_id)}/presence", body=body
+        )
