@@ -10,7 +10,7 @@ import {
   GroupParticipant,
   ParticipantOperationResult,
 } from '../interfaces/whatsapp-engine.interface';
-import { GroupChat, GroupMetadataRaw, GroupCreateResult, SerializedWid, readWid } from '../types/whatsapp-web-js.types';
+import { GroupChat, GroupMetadataRaw, SerializedWid, readWid } from '../types/whatsapp-web-js.types';
 import { toParticipantWid } from '../identity/wa-id';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
@@ -159,31 +159,29 @@ export class WwebjsGroups {
     }
   }
 
-  async createGroup(name: string, participants: string[]): Promise<Group> {
+  /**
+   * Not available on this engine, despite `Client.createGroup` existing and being typed
+   * `Promise<CreateGroupResult | string>` (`index.d.ts`).
+   *
+   * Its page body reaches a WhatsApp Web internal that no longer exposes `findImpl`
+   * (`Client.js:2325`, inside the injected evaluate). Measured against a live session on two
+   * different WhatsApp Web builds — `2.3000.1044858477-alpha` auto-resolved from the registry, and
+   * `2.3000.1044770897-alpha` pinned explicitly — with identical results:
+   * `TypeError: this.findImpl is not a function`, reaching the caller as a bare 500. Bare and
+   * `@c.us`-qualified participant ids fail the same way, so the id shape is not the variable.
+   *
+   * The build was varied deliberately because this registry pin moves on its own between restarts;
+   * two builds failing the same way is what separates a library limitation from build drift. The
+   * Baileys engine creates groups normally on the same account.
+   *
+   * Nothing here can be patched around: `findImpl` belongs to the page, not to whatsapp-web.js —
+   * it appears in neither the installed `Client.js` nor any OpenWA patcher. Restore this method
+   * when upstream adopts a page API that WhatsApp Web still provides.
+   */
+  /* eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars */
+  async createGroup(_name: string, _participants: string[]): Promise<Group> {
     this.host.ensureReady();
-    // Ensure participant IDs are in correct format
-    const participantIds = participants.map(toParticipantWid);
-    const result = await this.client().createGroup(name, participantIds);
-
-    // whatsapp-web.js reports a failed creation by RESOLVING with a plain string
-    // ('CreateGroupError: …', Client.js:2376) rather than throwing, and its own typings say so
-    // (`Promise<CreateGroupResult | string>`). Reading `.gid` straight off that string threw an opaque
-    // TypeError and discarded the reason upstream actually gave us; surface it instead.
-    if (typeof result === 'string') {
-      throw new Error(result);
-    }
-    const gid = (result as unknown as GroupCreateResult).gid as SerializedWid | undefined;
-    const groupId = readWid(gid);
-    // A group id is not ack-safe the way a message id is: there is no empty-sentinel equivalent, and any
-    // placeholder would be handed back as a real, addressable group. Fail instead of inventing one.
-    if (!groupId) {
-      throw new Error('the group was created but its id could not be read');
-    }
-    return {
-      id: groupId,
-      name: name,
-      participantsCount: participants.length,
-    };
+    throw new EngineNotSupportedError('createGroup');
   }
 
   async addParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]> {

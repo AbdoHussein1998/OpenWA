@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The JavaScript, Python, PHP, Go and Java SDKs expose `POST /sessions/:sessionId/calls/link`, which creates a shareable WhatsApp call link. `startTime` is absolute epoch milliseconds and is required, so a link for right now carries the current timestamp rather than an omitted field.
 - The JavaScript, Python, PHP, Go and Java SDKs expose the two channel administration routes — demote an admin back to a subscriber, and transfer ownership. Both need an `OPERATOR` key, the transfer is irreversible, and the whatsapp-web.js engine answers `501` for either.
 
+### Changed
+
+- ⚠️ **Breaking (behavior).** `POST /sessions/:sessionId/groups` answers `501` on the whatsapp-web.js engine instead of attempting the creation. whatsapp-web.js still declares `createGroup`, but its page code reaches a WhatsApp Web internal that no longer exists, so every call already failed — as an opaque `500` rather than a stated refusal. Measured against a live session on two WhatsApp Web builds, one auto-resolved and one pinned, with the same `TypeError`; bare and `@c.us`-qualified participant ids fail identically. Action required: create groups through the Baileys engine, which is unaffected. The route, its body and its Baileys behaviour are unchanged.
+
 ### Fixed
 
 - `docs/29`'s architecture diagram counted four whatsapp-web.js patches and one Baileys patch while this release shipped a fifth and a second, and `🔧⁷` marked no cell, so the three whatsapp-web.js participant writes read as working against a stock library. The patch counts are now derived from `scripts/` by `docs-29-counts.spec.ts`, which bound only the interface figures before. `docs/09` §9.6 also omitted the two gates added to CI and described the release workflow as a lighter gate than the one it now runs.
