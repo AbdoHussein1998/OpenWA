@@ -5910,6 +5910,33 @@ Note: this DELETE returns `200` with a body (not the usual `204`).
 
 ---
 
+#### POST /api/integration/instances/:pluginId/:instanceId/redrive
+
+Re-dispatch one bounded batch of dead-lettered inbound deliveries for an integration instance (see
+**doc 25, Integration Fabric** for the DLQ and redrive design). Rows are drained oldest-first up to the
+batch size; `remaining` reports the DLQ depth still outstanding after this batch.
+
+**Auth:** API key (ADMIN) · **Scope:** session-scoped (a key restricted to `allowedSessions` may only
+redrive an instance whose current `sessionScope` is inside that allowlist; out of scope and missing
+instances both answer `404`, so redrive can't be used to probe other sessions)
+
+**Path parameters**
+
+| Name         | Type   | Description                   |
+| ------------ | ------ | ----------------------------- |
+| `pluginId`   | string | Plugin id owning the instance |
+| `instanceId` | string | Instance id to redrive        |
+
+**Response** `201`
+
+```json
+{ "redriven": 3, "remaining": 0, "batchSize": 100 }
+```
+
+**Errors:** `401` · `403` key role < ADMIN · `404` unknown instance, or a scoped key's instance outside its `allowedSessions`
+
+---
+
 #### POST /mcp
 
 MCP Streamable-HTTP / JSON-RPC 2.0 transport that exposes the agent-tool registry over the Model Context Protocol. **This is a transport, not a REST resource** — there is no NestJS controller, no DTO, and no `{success,data}` shape.
