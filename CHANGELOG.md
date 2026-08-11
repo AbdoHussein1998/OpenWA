@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The JavaScript, Python, PHP, Go and Java SDKs expose `POST /sessions/:id/chats/pin` and `chats/mute`, which the gateway has published since v0.15.0 with no client counterpart. `muteUntil` is epoch milliseconds and `null` unmutes; both are required, since an omitted value reads as either.
+- The JavaScript, Python, PHP, Go and Java SDKs expose `POST /sessions/:id/chats/pin` and `chats/mute`, the two routes this release adds, so neither ships without a client. `muteUntil` is epoch milliseconds and `null` unmutes; both are required, since an omitted value reads as either.
 - `POST /sessions/:sessionId/channels/:channelId/owner/transfer` hands a channel to a new owner on the Baileys engine; it is irreversible, and the account cannot take the channel back. The whatsapp-web.js engine answers `501`.
 - `POST /sessions/:sessionId/channels/:channelId/admins/demote` demotes a channel admin back to a subscriber on the Baileys engine; neither library has a promote counterpart, so promote from the WhatsApp app. The whatsapp-web.js engine answers `501`.
 - `POST /sessions/:id/chats/pin` pins a chat to the top of the list or unpins it, on both engines; `success: false` reports WhatsApp's three-pin cap, which only the whatsapp-web.js engine can observe.
