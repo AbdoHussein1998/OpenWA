@@ -606,7 +606,12 @@ export class WwebjsGroups {
   ): Promise<ParticipantOperationResult[]> {
     this.host.ensureReady();
     const raw = await this.client()[op](groupId, {
-      requesterIds: participants ?? null,
+      // Qualified like every other participant write in this file: the service blesses a bare phone
+      // number, and the page maps requesterIds straight through `createWid` (Injected/Utils.js) —
+      // which upstream itself never hands a bare number, appending '@c.us' first. Unqualified it
+      // threw inside the minified bundle and the caller got an undiagnosable 500, while the same
+      // input succeeded on Baileys. `null` still means every pending request.
+      requesterIds: participants?.map(toParticipantWid) ?? null,
       sleep: [250, 500],
     });
     // {requesterId, error?, message} per requester; requesterId is a page-context value that can
