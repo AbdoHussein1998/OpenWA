@@ -103,13 +103,17 @@ export class GroupService {
   /**
    * Deliberately NOT paced, unlike addParticipants: the people here asked for the contact
    * themselves, so approving (or rejecting) them draws nothing from the cold-reachout budget.
-   * `participants` omitted means every pending request.
+   * `participants` omitted means every pending request — so the shape guard is conditional, not
+   * skipped: these routes take the same participant ids as the writes above, and whatsapp-web.js
+   * feeds a named requester straight to `requesterIds.map(createWid)`.
    */
   approveGroupMembershipRequests(sessionId: string, groupId: string, participants?: string[]) {
+    if (participants) this.assertAddressableParticipants(participants);
     return this.getEngine(sessionId).approveGroupMembershipRequests(groupId, participants);
   }
 
   rejectGroupMembershipRequests(sessionId: string, groupId: string, participants?: string[]) {
+    if (participants) this.assertAddressableParticipants(participants);
     return this.getEngine(sessionId).rejectGroupMembershipRequests(groupId, participants);
   }
 

@@ -115,6 +115,18 @@ describe('wa-id', () => {
       ['status@broadcast', false],
       ['abc@newsletter', false],
       ['abc@weird', false],
+      // A recognised domain is not enough: the user-part has to look like a WhatsApp id, or the
+      // string still reaches the page-side createWid and throws there — the very failure the guard
+      // exists to prevent. Reproduced against a live session before this row was added.
+      ['NOT A USER@c.us', false],
+      ['abc@c.us', false],
+      ['abc@s.whatsapp.net', false],
+      ['abc@lid', false],
+      ['@c.us', false],
+      ['x y@c.us', false],
+      ['0@c.us', false],
+      ['-1@c.us', false],
+      ['+628123456789@c.us', false],
     ])('classifies %s as %s', (value, expected) => {
       expect(isAddressableParticipant(value)).toBe(expected);
     });
@@ -131,10 +143,15 @@ describe('wa-id', () => {
       expect(toParticipantWid('628123456789@s.whatsapp.net')).toBe('628123456789@s.whatsapp.net');
     });
 
-    it('does not append a second domain to a string that already carries one', () => {
-      // The difference from the old `p.includes('@')` test: an unrecognised domain must pass
-      // through rather than become `abc@weird@c.us`.
-      expect(toParticipantWid('abc@weird')).toBe('abc@weird');
-    });
+    it.each([['abc@weird'], ['abc'], ['NOT A USER'], ['']])(
+      'leaves %s alone rather than minting a nonsense id from it',
+      value => {
+        // The old rule was `p.includes('@') ? p : p + '@c.us'`, which turned every un-domained
+        // string into one — `abc` became `abc@c.us`, a well-formed id naming nobody. Keying on the
+        // bare-number shape instead means only a number is ever qualified. (`abc@weird` alone would
+        // NOT show this: the old rule passed it through too, so it discriminates nothing.)
+        expect(toParticipantWid(value)).toBe(value);
+      },
+    );
   });
 });

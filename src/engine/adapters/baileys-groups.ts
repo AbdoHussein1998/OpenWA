@@ -17,6 +17,7 @@ import { EngineTransportError } from '../../common/errors/engine-transport.error
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { type createLogger } from '../../common/services/logger.service';
 import { BAILEYS_QUERY_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
+import { toParticipantWid } from '../identity/wa-id';
 
 /**
  * Group-domain operations extracted from BaileysAdapter. The adapter keeps the public
@@ -89,9 +90,15 @@ export async function mapServerRefusal<T>(
 /**
  * Fold neutral `<phone>@c.us` participant ids back to the engine wire dialect (`@s.whatsapp.net`) before
  * a group write. `@lid` (a first-class addressing mode) and the group id itself are left untouched.
+ *
+ * A BARE number is qualified first. `toEngineJid` folds only an already-domained user id, so a bare
+ * number used to travel verbatim into the participant node — and Baileys' encoder writes an
+ * un-domained string as a packed nibble rather than a JID_PAIR, so WhatsApp received an attribute
+ * that was not a JID and the write did nothing. The bare form is the documented convenience input on
+ * these routes and the service guard accepts it, so it has to be addressable by the time it lands here.
  */
 export function toEngineParticipants(participants: string[], toEngineJid: (jid: string) => string): string[] {
-  return participants.map(toEngineJid);
+  return participants.map(p => toEngineJid(toParticipantWid(p)));
 }
 
 /** The neutral method tokens — Baileys' wire tokens are already this vocabulary. */

@@ -3027,6 +3027,23 @@ describe('BaileysAdapter group management', () => {
     expect(fakeSock.groupParticipantsUpdate).toHaveBeenCalledWith('123-456@g.us', ['628111@s.whatsapp.net'], action);
   });
 
+  // A bare number is the documented convenience form on these routes, and the guard accepts it. It
+  // must be qualified BEFORE the engine fold: `toEngineJid` only folds an already-domained user id,
+  // so a bare number went out verbatim and Baileys' encoder wrote it as a packed nibble STRING
+  // rather than a JID_PAIR — WhatsApp received an attribute that was not a JID at all.
+  it.each([
+    ['addParticipants', 'add'],
+    ['removeParticipants', 'remove'],
+    ['promoteParticipants', 'promote'],
+    ['demoteParticipants', 'demote'],
+  ])('%s qualifies a bare number before folding to the engine dialect', async (method, action) => {
+    const adapter = await ready();
+    await (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<void>>)[method]('123-456@g.us', [
+      '628111',
+    ]);
+    expect(fakeSock.groupParticipantsUpdate).toHaveBeenCalledWith('123-456@g.us', ['628111@s.whatsapp.net'], action);
+  });
+
   it('participant ops pass @lid ids through unchanged (lid addressing mode)', async () => {
     const adapter = await ready();
     await adapter.addParticipants('123-456@g.us', ['111@lid']);
@@ -3036,8 +3053,14 @@ describe('BaileysAdapter group management', () => {
   it('createGroup folds neutral @c.us participants to the engine dialect, keeping @lid raw', async () => {
     fakeSock.groupCreate.mockResolvedValue(META);
     const adapter = await ready();
-    await adapter.createGroup('G', ['628111@c.us', '222@lid']);
-    expect(fakeSock.groupCreate).toHaveBeenCalledWith('G', ['628111@s.whatsapp.net', '222@lid']);
+    // The bare number belongs here too: it is the documented convenience form, and unqualified it
+    // reaches the socket as a non-JID string.
+    await adapter.createGroup('G', ['628111@c.us', '222@lid', '628333']);
+    expect(fakeSock.groupCreate).toHaveBeenCalledWith('G', [
+      '628111@s.whatsapp.net',
+      '222@lid',
+      '628333@s.whatsapp.net',
+    ]);
   });
 
   it('leaveGroup / setGroupSubject / setGroupDescription delegate to the socket', async () => {
