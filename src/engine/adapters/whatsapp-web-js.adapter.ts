@@ -322,12 +322,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   private readonly logger = createLogger('WhatsAppWebJsAdapter');
   // Bound concurrent inbound media downloads: downloadMedia() materialises the full base64 blob, so an
   // unbounded burst could stack many multi-MB allocations.
-  private readonly inboundLimiter = new ConcurrencyLimiter(
-    inboundMediaConcurrency(),
-    // Queue cap == active slots: beyond (active + queued) concurrent media messages, reject instead of
-    // parking, so a burst can't grow heap without bound (each parked closure holds the message).
-    inboundMediaConcurrency(),
-  );
+  // The queue is UNBOUNDED. A cap equal to the active slots made admission a constant
+  // (active + queued) whatever the batch size, so a burst lost the media of everything past the
+  // eighth — the same defect repaired on the Baileys side. Parking costs one held Message per
+  // waiting download, and only the download runs inside the limiter: each message awaits its own
+  // capInboundMediaFor, so a parked one delays itself and a text message never enters the gate.
+  private readonly inboundLimiter = new ConcurrencyLimiter(inboundMediaConcurrency());
 
   private readonly host: WwebjsEngineHost;
   private readonly groups: WwebjsGroups;
@@ -392,14 +392,20 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         () => undefined,
       );
     });
-    // The slot-holder runs in the background. It only rejects when the limiter's waiter queue is
-    // saturated (queue full) — in which case the download task never ran and boundedReady would hang.
-    // Resolve null so the caller unblocks and emits the message without media, matching the
+    // The slot-holder runs in the background. With an unbounded queue the only rejection left is the
+    // limiter CLOSING at teardown — in which case the download task never ran and boundedReady would
+    // hang. Resolve null so the caller unblocks and emits the message without media, matching the
     // timeout/byte-cap no-media path. Never let it surface as an unhandled rejection either.
-    void slotHeld.catch(() => {
-      this.logger.warn('Inbound media limiter saturated; emitting message without media', {
-        msgId: msg.id._serialized,
-      });
+    // Naming the teardown as saturation sent operators to look at concurrency settings for a problem
+    // that was never there, so say which one happened.
+    void slotHeld.catch((error: unknown) => {
+      const closed = error instanceof Error && error.message.startsWith('ConcurrencyLimiter closed');
+      this.logger.warn(
+        closed
+          ? 'Inbound media limiter closed during teardown; emitting message without media'
+          : 'Inbound media download could not be admitted; emitting message without media',
+        { msgId: msg.id._serialized, ...(closed ? {} : { error: String(error) }) },
+      );
       resolveBounded(null);
     });
     const media = await boundedReady;
