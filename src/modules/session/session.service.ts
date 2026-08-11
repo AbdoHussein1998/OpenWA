@@ -326,9 +326,28 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // COUNT, or delete()'s own requireSession — would let the mark land after that window. A mark
     // left behind when the fence refuses (409) is harmless and is cleared by the next start().
     this.engineLifecycle.markStopping(id);
-    if (this.ownership) await this.assertNotHeldElsewhere(id);
-    await this.engineLifecycle.delete(id);
-    await this.ownership?.release(id);
+    try {
+      if (this.ownership) await this.assertNotHeldElsewhere(id);
+      await this.engineLifecycle.delete(id);
+      await this.ownership?.release(id);
+    } catch (error) {
+      this.discardStopMarkForMissingSession(id, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reclaim the entry-time stop mark when the id turns out to have no session row.
+   *
+   * The mark is set synchronously, before the awaited existence check — deliberately, and the
+   * comments above say why. A mark left behind by a refusal is harmless because the next start()
+   * clears it, but that presupposes a row: start() and delete() both clear the mark only after
+   * their own requireSession, so for an id that never had one the entry is unreachable by every
+   * reclamation path and survives for the life of the process. A 404 also means there is no engine
+   * and no in-flight start() for the mark to guard, so dropping it is safe as well as necessary.
+   */
+  private discardStopMarkForMissingSession(id: string, error: unknown): void {
+    if (error instanceof NotFoundException) this.engineLifecycle.clearStopping(id);
   }
 
   /**
@@ -371,8 +390,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   async stop(id: string): Promise<Session> {
     // Synchronous stop-mark before the awaited fence — see delete() for why.
     this.engineLifecycle.markStopping(id);
-    if (this.ownership) await this.assertNotHeldElsewhere(id);
-    const session = await this.engineLifecycle.stop(id);
+    let session: Session;
+    try {
+      if (this.ownership) await this.assertNotHeldElsewhere(id);
+      session = await this.engineLifecycle.stop(id);
+    } catch (error) {
+      this.discardStopMarkForMissingSession(id, error);
+      throw error;
+    }
     // Handed back on the way out so a peer can pick it up immediately rather than waiting for the
     // lease to lapse. Stop is the deliberate end of this process's ownership — but a start() that
     // began before this stop and is still mid-launch owns the claim now, so the same

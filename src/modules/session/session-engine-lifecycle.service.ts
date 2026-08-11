@@ -451,6 +451,18 @@ export class SessionEngineLifecycle {
   }
 
   /**
+   * Drop a mark set by markStopping().
+   *
+   * The "harmless, cleared by the next start()" reasoning above holds only while a session row
+   * exists. start() and delete() clear the mark after their own requireSession, so for an id that
+   * has no row neither reclamation path is reachable and the entry would outlive the process. Used
+   * by SessionService for exactly that case; a refusal against a real session still leaves its mark.
+   */
+  clearStopping(id: string): void {
+    this.stoppingSessions.delete(id);
+  }
+
+  /**
    * True while this process still has anything alive for the session: a registered engine, an
    * in-flight start(), or reconnect state whose armed/executing attempt will re-register one.
    * The ownership heartbeat consults this so a claim that no longer covers an engine stops being

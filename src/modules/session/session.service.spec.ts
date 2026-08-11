@@ -1171,6 +1171,41 @@ describe('SessionService', () => {
       // Synchronously, on the same tick, the mark must already be set.
       expect(stopping.has('sess-uuid-1')).toBe(true);
     });
+
+    // The mark is deliberately set before the existence check, so a request for an id that has no
+    // row sets one too. Nothing can reclaim it: start() and delete() clear the mark only after
+    // their own requireSession, both of which 404 first, and a session id is DB-generated so the
+    // id is never re-supplied. Left alone the Set grows one entry per 404 for the life of the
+    // process.
+    it.each([
+      ['stop', (s: SessionService) => s.stop('sess-uuid-1')],
+      ['delete', (s: SessionService) => s.delete('sess-uuid-1')],
+    ])('%s() against an id with no session row leaves no stop mark behind', async (_verb, call) => {
+      (repository.findOne as jest.Mock).mockResolvedValue(null);
+      const stopping = (lifecycle as unknown as { stoppingSessions: Set<string> }).stoppingSessions;
+
+      await expect(call(service)).rejects.toThrow(NotFoundException);
+
+      expect(stopping.has('sess-uuid-1')).toBe(false);
+    });
+
+    // The counterpart, and the reason the reclamation is narrowed to 404 rather than every failure:
+    // a refusal against a session that DOES exist must still leave its mark, which is the
+    // documented "harmless, cleared by the next start()" behaviour the mark relies on.
+    it.each([
+      ['stop', (s: SessionService) => s.stop('sess-uuid-1')],
+      ['delete', (s: SessionService) => s.delete('sess-uuid-1')],
+    ])('%s() refused by the ownership fence keeps its stop mark', async (_verb, call) => {
+      const ownership = withOwnership();
+      ownership.isHeldByOtherNode.mockResolvedValue(true);
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      const stopping = (lifecycle as unknown as { stoppingSessions: Set<string> }).stoppingSessions;
+
+      await expect(call(service)).rejects.toThrow(ConflictException);
+
+      expect(stopping.has('sess-uuid-1')).toBe(true);
+      stopping.delete('sess-uuid-1');
+    });
   });
 
   describe('isEngineActive', () => {
