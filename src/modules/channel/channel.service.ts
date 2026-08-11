@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
+import { isAddressableParticipant, toParticipantWid } from '../../engine/identity/wa-id';
 
 /**
  * Owns engine access for channel/newsletter operations so the "session not started" guard
@@ -56,14 +57,34 @@ export class ChannelService {
     return this.getEngine(sessionId).muteChannel(channelId, mute);
   }
 
+  /**
+   * The user id both admin writes address, qualified for the engine.
+   *
+   * Their DTOs only require a non-empty string, and `toEngineJid` passes anything it cannot
+   * classify through verbatim — so free text, a group id or a bare `@c.us` reached the socket and
+   * failed opaquely, while the group participant writes reject the same input with a naming 400.
+   * Guarded here rather than in the DTO so the MCP tools are covered like the REST routes, which is
+   * where the group guard sits for the same reason.
+   */
+  private addressableUser(userId: string): string {
+    if (!isAddressableParticipant(userId)) {
+      throw new BadRequestException(
+        `Not an individual user id: ${userId} — pass a phone number, <phone>@c.us or <lid>@lid`,
+      );
+    }
+    return toParticipantWid(userId);
+  }
+
   /** Demote a channel admin back to a subscriber. There is no promote counterpart on either engine. */
   demoteChannelAdmin(sessionId: string, channelId: string, userId: string) {
-    return this.getEngine(sessionId).demoteChannelAdmin(channelId, userId);
+    const engine = this.getEngine(sessionId);
+    return engine.demoteChannelAdmin(channelId, this.addressableUser(userId));
   }
 
   /** Hand the channel to a new owner. Irreversible — the account stops being the owner. */
   transferChannelOwnership(sessionId: string, channelId: string, newOwnerId: string) {
-    return this.getEngine(sessionId).transferChannelOwnership(channelId, newOwnerId);
+    const engine = this.getEngine(sessionId);
+    return engine.transferChannelOwnership(channelId, this.addressableUser(newOwnerId));
   }
 
   subscribeToChannel(sessionId: string, inviteCode: string) {
