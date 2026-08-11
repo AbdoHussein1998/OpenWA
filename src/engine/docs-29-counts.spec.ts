@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -59,6 +59,60 @@ describe('docs/29 counts match the capability matrix', () => {
     { label: '29.8 restated supported', re: /Of the (\d+) ✅ cells/, of: 'supported' },
     { label: '29.8 REST view', re: /REST caller's view: \*\*(\d+)\*\* engine-neutral/, of: 'neutral' },
   ];
+
+  /**
+   * The patch counts are a SEPARATE source — `scripts/` — and were outside the claim list above, so
+   * they drifted exactly the way the interface figures used to: this release added a patcher to each
+   * library and the mermaid node kept saying 4 and 1. Derived from disk the same way
+   * `scripts/dockerfile-patchers.spec.js` derives its list, so adding a patcher updates the expected
+   * value rather than requiring someone to remember the prose.
+   */
+  const patchCounts = () => {
+    const files = readdirSync(join(__dirname, '..', '..', 'scripts')).filter(
+      f => f.startsWith('patch-') && f.endsWith('.js') && !f.endsWith('.spec.js'),
+    );
+    return {
+      total: files.length,
+      wwjs: files.filter(f => f.startsWith('patch-wwebjs-')).length,
+      baileys: files.filter(f => f.startsWith('patch-baileys-')).length,
+    };
+  };
+
+  it('states the install-time patch counts the scripts directory actually contains', () => {
+    const expected = patchCounts();
+    const doc = read('docs', '29-engine-capability-matrix.md');
+
+    // Guard the derivation: a renamed prefix would make every expectation below zero and pass.
+    expect(expected.total).toBeGreaterThan(4);
+    expect(expected.wwjs + expected.baileys).toBe(expected.total);
+
+    const claims: { label: string; re: RegExp; want: number }[] = [
+      { label: 'intro total', re: /(\d+) install-time patches \(29\.3\)/, want: expected.total },
+      { label: 'mermaid wwjs node', re: /whatsapp-web\.js [\d.]+<br\/>\+ (\d+) OpenWA patch/, want: expected.wwjs },
+      { label: 'mermaid baileys node', re: /baileys [\w.-]+<br\/>\+ (\d+) OpenWA patch/, want: expected.baileys },
+      { label: '29.8 total', re: /- \*\*(\d+)\*\* install-time patches/, want: expected.total },
+      { label: '29.8 split', re: /install-time patches \((\d+) whatsapp-web\.js/, want: expected.wwjs },
+      {
+        label: '29.8 split baileys',
+        re: /install-time patches \(\d+ whatsapp-web\.js \+ (\d+) Baileys\)/,
+        want: expected.baileys,
+      },
+    ];
+
+    const wrong: string[] = [];
+    for (const claim of claims) {
+      const found = doc.match(claim.re);
+      // A phrasing that stopped matching is drift too — the claim did not disappear, the check did.
+      if (!found) {
+        wrong.push(`${claim.label}: phrasing no longer found in the document`);
+        continue;
+      }
+      const actual = Number(found[1]);
+      if (actual !== claim.want) wrong.push(`${claim.label}: says ${actual}, scripts/ has ${claim.want}`);
+    }
+
+    expect(wrong).toEqual([]);
+  });
 
   it('states the same figures everywhere it states them', () => {
     const expected = recount();
