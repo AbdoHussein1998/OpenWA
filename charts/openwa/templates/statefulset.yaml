@@ -35,6 +35,31 @@ spec:
                 name: {{ include "openwa.fullname" . }}
             - secretRef:
                 name: {{ include "openwa.secretName" . }}
+          # The port is bound only after Nest has run every bootstrap hook — migrations, the database
+          # connect retry (up to 10 attempts, 3s apart), plugin load and the backfills — so during
+          # boot the endpoint is not unhealthy, it is closed, and every probe is a connection
+          # refusal. Without a startupProbe the liveness block below governs that window and allows
+          # 30s + 10s x (3-1) = 50s before the kubelet restarts the container, which the connect
+          # retry alone can consume.
+          #
+          # Budget here is periodSeconds x failureThreshold = 5 x 60 = 300s. That converts "killed
+          # at 50s by default" into "killed at a budget we chose" — a large improvement, and not a
+          # guarantee for a boot that is genuinely unbounded.
+          #
+          # initialDelaySeconds is deliberately left at its default of 0: the first probe fires
+          # immediately, so a fast boot is recognised in ~5s instead of waiting out a fixed delay.
+          # The pod therefore becomes live SOONER than it does today, not later.
+          #
+          # Kubernetes suspends the liveness and readiness probes until a startupProbe succeeds, so
+          # the values below keep their meaning for steady state and stop governing boot. (That
+          # suspension is documented kubelet behaviour, not something this chart's tests observe —
+          # rendering a manifest cannot demonstrate a runtime scheduling rule.)
+          startupProbe:
+            httpGet:
+              path: /api/health/live
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /api/health/live
