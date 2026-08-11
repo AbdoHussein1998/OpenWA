@@ -392,23 +392,32 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         () => undefined,
       );
     });
-    // The slot-holder runs in the background. With an unbounded queue the only rejection left is the
-    // limiter CLOSING at teardown — in which case the download task never ran and boundedReady would
-    // hang. Resolve null so the caller unblocks and emits the message without media, matching the
-    // timeout/byte-cap no-media path. Never let it surface as an unhandled rejection either.
-    // Naming the teardown as saturation sent operators to look at concurrency settings for a problem
-    // that was never there, so say which one happened.
+    // Defensive only, and deliberately kept. `run()` rejects on a full queue (gone — the queue is
+    // unbounded) or on close(), which nothing calls on this limiter; the task itself swallows both
+    // download outcomes. So nothing is expected here — but an unhandled rejection from a
+    // fire-and-forget promise is not an acceptable way to find that out.
     void slotHeld.catch((error: unknown) => {
-      const closed = error instanceof Error && error.message.startsWith('ConcurrencyLimiter closed');
-      this.logger.warn(
-        closed
-          ? 'Inbound media limiter closed during teardown; emitting message without media'
-          : 'Inbound media download could not be admitted; emitting message without media',
-        { msgId: msg.id._serialized, ...(closed ? {} : { error: String(error) }) },
-      );
+      this.logger.warn('Inbound media slot holder rejected unexpectedly; emitting message without media', {
+        msgId: msg.id._serialized,
+        error: String(error),
+      });
       resolveBounded(null);
     });
-    const media = await boundedReady;
+    // The caller's wait spans the QUEUE as well as the download, and BOTH are unbounded: the queue by
+    // design now, and the wait for a slot because a slot is held until its download really settles —
+    // which a hung page never does. The inner race only starts once this message is admitted, so it
+    // cannot cover the waiting. Without a bound here, a burst behind stuck slots parks forever and
+    // those messages are never emitted AT ALL — strictly worse than the media loss this change set
+    // out to fix. The old queue cap provided that degradation by rejecting; this restores it without
+    // shedding at a fixed batch size.
+    const media = await withInboundDownloadTimeout(boundedReady, inboundMediaTimeoutMs(), () =>
+      this.logger.warn(
+        'Inbound media did not arrive within MEDIA_DOWNLOAD_TIMEOUT_MS; emitting message without media',
+        {
+          msgId: msg.id._serialized,
+        },
+      ),
+    );
     if (!media) {
       return declaredOnlyMedia(msg);
     }
