@@ -908,6 +908,9 @@
               }
             }
           },
+          "400": {
+            "description": "A participant does not name an individual. Pass a phone number, `<phone>@c.us` or `<lid>@lid`; a group id or free text is rejected."
+          },
           "403": {
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
           },
@@ -4942,6 +4945,9 @@
               }
             }
           },
+          "400": {
+            "description": "A participant does not name an individual. Pass a phone number, `<phone>@c.us` or `<lid>@lid`; a group id or free text is rejected."
+          },
           "403": {
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
           },
@@ -4999,6 +5005,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "A participant does not name an individual. Pass a phone number, `<phone>@c.us` or `<lid>@lid`; a group id or free text is rejected."
           },
           "403": {
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
@@ -5060,6 +5069,9 @@
               }
             }
           },
+          "400": {
+            "description": "A participant does not name an individual. Pass a phone number, `<phone>@c.us` or `<lid>@lid`; a group id or free text is rejected."
+          },
           "403": {
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."
           },
@@ -5119,6 +5131,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "A participant does not name an individual. Pass a phone number, `<phone>@c.us` or `<lid>@lid`; a group id or free text is rejected."
           },
           "403": {
             "description": "WhatsApp refused the operation. The request was well formed — the refusal happened WhatsApp-side, most often because the account lacks the admin rights the operation requires."

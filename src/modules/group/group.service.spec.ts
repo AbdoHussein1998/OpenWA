@@ -304,3 +304,76 @@ describe('GroupService membership requests', () => {
     expect(() => svc.getGroupMembershipRequests('s1', 'g1')).toThrow(BadRequestException);
   });
 });
+
+describe('GroupService participant id validation (#1220)', () => {
+  const GROUP = '120363165619688042@g.us';
+
+  const makeService = (engine: Partial<IWhatsAppEngine>, pacing: SendPacingService = inertPacing()) => {
+    const engines = new EngineRegistry();
+    engines.set('s1', engine as IWhatsAppEngine);
+    return new GroupService(engines, pacing);
+  };
+
+  /**
+   * The three status-only writes are synchronous forwarders, so their guard throws synchronously,
+   * while createGroup/addParticipants are async. Routing both through a promise lets one table
+   * cover all five without asserting the wrong failure mode for half of them.
+   */
+  const call = (svc: GroupService, op: string, participants: string[]) =>
+    Promise.resolve().then(() =>
+      op === 'createGroup'
+        ? svc.createGroup('s1', 'Team', participants)
+        : (svc as unknown as Record<string, (s: string, g: string, p: string[]) => Promise<unknown>>)[op](
+            's1',
+            GROUP,
+            participants,
+          ),
+    );
+
+  it.each([
+    ['removeParticipants'],
+    ['promoteParticipants'],
+    ['demoteParticipants'],
+    ['addParticipants'],
+    ['createGroup'],
+  ])('%s rejects an unaddressable id with 400 before reaching the engine', async op => {
+    const engineOp = jest.fn();
+    const svc = makeService({ [op]: engineOp });
+
+    await expect(call(svc, op, ['NOT A USER'])).rejects.toBeInstanceOf(BadRequestException);
+    expect(engineOp).not.toHaveBeenCalled();
+  });
+
+  it('names every offending entry and leaves the valid ones out of the message', async () => {
+    const svc = makeService({ removeParticipants: jest.fn() });
+
+    const err = await call(svc, 'removeParticipants', ['628123456789@c.us', 'NOT A USER', '12036@g.us']).catch(
+      (e: unknown) => e,
+    );
+
+    expect((err as Error).message).toContain('NOT A USER');
+    expect((err as Error).message).toContain('12036@g.us');
+    expect((err as Error).message).not.toContain('628123456789@c.us');
+  });
+
+  it('accepts a bare number, a c.us id and a lid, forwarding them verbatim', async () => {
+    const removeParticipants = jest.fn().mockResolvedValue([]);
+    const svc = makeService({ removeParticipants });
+
+    await call(svc, 'removeParticipants', ['628123456789', '628999@c.us', '12345678901234567890@lid']);
+
+    expect(removeParticipants).toHaveBeenCalledWith(GROUP, ['628123456789', '628999@c.us', '12345678901234567890@lid']);
+  });
+
+  it('rejects a malformed participant before it can consume reachout budget', async () => {
+    // createGroup and addParticipants are paced; a batch that can never reach WhatsApp must not
+    // draw on the cold-reachout budget on its way to a 400.
+    const assertReachoutAllowed = jest.fn().mockResolvedValue(undefined);
+    const svc = makeService({ addParticipants: jest.fn() }, {
+      assertReachoutAllowed,
+    } as unknown as SendPacingService);
+
+    await expect(call(svc, 'addParticipants', ['NOT A USER'])).rejects.toBeInstanceOf(BadRequestException);
+    expect(assertReachoutAllowed).not.toHaveBeenCalled();
+  });
+});

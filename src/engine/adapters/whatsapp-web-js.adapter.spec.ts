@@ -5873,6 +5873,21 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
           (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<unknown>>)[op](GROUP, ['628111']),
         ).rejects.toBeInstanceOf(EngineRefusedError);
       });
+
+      it('qualifies only bare numbers, never double-qualifying an id that carries a domain', async () => {
+        // Characterisation: the old rule (`p.includes('@')`) agreed with toParticipantWid on every
+        // input that reaches here, so this pins the behaviour rather than driving the change. It is
+        // the guard against a future qualifier that appends to an already-domained id.
+        const libOp = jest.fn().mockResolvedValue({ status: 200 });
+        const chat = groupChat({ [op]: libOp });
+        const adapter = readyAdapter({ getChatById: jest.fn().mockResolvedValue(chat) });
+        await (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<unknown>>)[op](GROUP, [
+          '628111',
+          '628222@c.us',
+          '12345678901234567890@lid',
+        ]);
+        expect(libOp).toHaveBeenCalledWith(['628111@c.us', '628222@c.us', '12345678901234567890@lid']);
+      });
     },
   );
 

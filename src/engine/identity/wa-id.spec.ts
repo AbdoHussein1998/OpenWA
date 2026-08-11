@@ -1,4 +1,12 @@
-import { chatKind, isChannelJid, parseWaId, toNeutralJid, userPart } from './wa-id';
+import {
+  chatKind,
+  isAddressableParticipant,
+  isChannelJid,
+  parseWaId,
+  toNeutralJid,
+  toParticipantWid,
+  userPart,
+} from './wa-id';
 
 describe('wa-id', () => {
   describe('userPart', () => {
@@ -89,6 +97,44 @@ describe('wa-id', () => {
       ['', 'unknown'],
     ])('classifies %s as %s', (jid, expected) => {
       expect(chatKind(jid)).toBe(expected);
+    });
+  });
+
+  describe('isAddressableParticipant', () => {
+    it.each([
+      ['628123456789', true],
+      ['628123456789@c.us', true],
+      ['628123456789@s.whatsapp.net', true],
+      ['12345678901234567890@lid', true],
+      ['628123456789:12@c.us', true],
+      ['  628123456789@c.us  ', true],
+      ['NOT A USER', false],
+      ['', false],
+      ['1234', false],
+      ['12036@g.us', false],
+      ['status@broadcast', false],
+      ['abc@newsletter', false],
+      ['abc@weird', false],
+    ])('classifies %s as %s', (value, expected) => {
+      expect(isAddressableParticipant(value)).toBe(expected);
+    });
+  });
+
+  describe('toParticipantWid', () => {
+    it('qualifies a bare number to the c.us dialect', () => {
+      expect(toParticipantWid('628123456789')).toBe('628123456789@c.us');
+    });
+
+    it('leaves an already-qualified id untouched', () => {
+      expect(toParticipantWid('628123456789@c.us')).toBe('628123456789@c.us');
+      expect(toParticipantWid('12345678901234567890@lid')).toBe('12345678901234567890@lid');
+      expect(toParticipantWid('628123456789@s.whatsapp.net')).toBe('628123456789@s.whatsapp.net');
+    });
+
+    it('does not append a second domain to a string that already carries one', () => {
+      // The difference from the old `p.includes('@')` test: an unrecognised domain must pass
+      // through rather than become `abc@weird@c.us`.
+      expect(toParticipantWid('abc@weird')).toBe('abc@weird');
     });
   });
 });

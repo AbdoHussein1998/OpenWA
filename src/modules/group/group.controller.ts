@@ -44,6 +44,12 @@ const PARTICIPANTS_503 =
   'Deliberately not folded into the 200 above — a participant WhatsApp turned down is reported inside ' +
   '`results` and is an answer; an update that never came back is not.';
 
+// Shared by group creation and the four participant writes: an entry that does not name an individual
+// is rejected here rather than handed to the engine, where it produced an unnamed page-side failure.
+const PARTICIPANT_ID_400 =
+  'A participant does not name an individual. Pass a phone number, `<phone>@c.us` or `<lid>@lid`; ' +
+  'a group id or free text is rejected.';
+
 // NOTE: the session→groups LIST lives on the SessionController at GET /sessions/:id/groups (it
 // registered first and owns the canonical narrow projection). A bare @Get() here would collide on
 // the same path pattern (/sessions/{x}/groups) and be shadowed, so this controller owns only the
@@ -168,6 +174,7 @@ export class GroupController {
   @ApiResponse({ status: 201, description: 'Group created', type: GroupSummaryDto })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
+  @ApiResponse({ status: 400, description: PARTICIPANT_ID_400 })
   async create(@Param('sessionId') sessionId: string, @Body() dto: CreateGroupDto) {
     return this.groupService.createGroup(sessionId, dto.name, dto.participants);
   }
@@ -187,6 +194,7 @@ export class GroupController {
   @ApiResponse({ status: 503, description: PARTICIPANTS_503 })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
+  @ApiResponse({ status: 400, description: PARTICIPANT_ID_400 })
   @HttpCode(HttpStatus.OK)
   async addParticipants(
     @Param('sessionId') sessionId: string,
@@ -212,6 +220,7 @@ export class GroupController {
   @ApiResponse({ status: 503, description: PARTICIPANTS_503 })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
+  @ApiResponse({ status: 400, description: PARTICIPANT_ID_400 })
   async removeParticipants(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,
@@ -237,6 +246,7 @@ export class GroupController {
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
   @HttpCode(HttpStatus.OK)
+  @ApiResponse({ status: 400, description: PARTICIPANT_ID_400 })
   async promoteParticipants(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,
@@ -262,6 +272,7 @@ export class GroupController {
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiResponse({ status: 403, description: ENGINE_REFUSED_403 })
   @HttpCode(HttpStatus.OK)
+  @ApiResponse({ status: 400, description: PARTICIPANT_ID_400 })
   async demoteParticipants(
     @Param('sessionId') sessionId: string,
     @Param('groupId') groupId: string,

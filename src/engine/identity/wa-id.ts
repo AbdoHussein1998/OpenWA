@@ -70,6 +70,38 @@ export function parseWaId(jid: string): ParsedWaId {
   return { kind, userPart: local, device, raw };
 }
 
+/** A digits-only id, e.g. `628123456789` — accepted for convenience and qualified by {@link toParticipantWid}. */
+const BARE_NUMBER = /^\d{5,}$/;
+
+/**
+ * Whether a string can address an individual participant of a group.
+ *
+ * A participant names a person, so only the individual dialects qualify: `<phone>@c.us` (and its
+ * raw-protocol twin `@s.whatsapp.net`), `<lid>@lid`, or a bare phone number. A group id is rejected —
+ * a group cannot be a member of a group — as is anything else.
+ *
+ * Nothing validated the shape before, so free text reached whatsapp-web.js's page-side `createWid`,
+ * which threw a minified `t: t` and left the caller with an undiagnosable 500 (#1220). The same
+ * failure was diagnosed once already for message mentions (#1068, see is-mention-wid.validator.ts).
+ */
+export function isAddressableParticipant(value: string): boolean {
+  const trimmed = value.trim();
+  const { kind } = parseWaId(trimmed);
+  return kind === 'user' || kind === 'lid' || (kind === 'unknown' && BARE_NUMBER.test(trimmed));
+}
+
+/**
+ * Qualify a bare number to the neutral `@c.us` dialect. Anything else passes through verbatim.
+ *
+ * Deliberately keyed on the bare-number shape rather than on the absence of `@`: the old test
+ * (`p.includes('@') ? p : p + '@c.us'`) agrees for every valid input, but this form cannot turn an
+ * unrecognised domain into a double-qualified `abc@weird@c.us`.
+ */
+export function toParticipantWid(value: string): string {
+  const trimmed = value.trim();
+  return BARE_NUMBER.test(trimmed) ? `${trimmed}@c.us` : trimmed;
+}
+
 /**
  * Reduce any WhatsApp JID to the neutral dialect (see the module contract above). `resolvePhone` maps a
  * lid to its phone user-part when the engine knows the mapping; an unresolvable lid is kept as
