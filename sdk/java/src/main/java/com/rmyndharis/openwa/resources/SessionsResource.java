@@ -12,6 +12,8 @@ import com.rmyndharis.openwa.model.RequestPairingCodeRequest;
 import com.rmyndharis.openwa.model.SessionConfig;
 import com.rmyndharis.openwa.model.SessionResponse;
 import com.rmyndharis.openwa.model.SessionStatsOverview;
+import com.rmyndharis.openwa.model.SetOwnPresenceRequest;
+import com.rmyndharis.openwa.model.SuccessResult;
 import com.rmyndharis.openwa.model.UpdateSessionConfigRequest;
 import java.util.List;
 
@@ -108,4 +110,16 @@ public final class SessionsResource {
     public SessionStatsOverview stats() {
         return client.request(HttpMethod.GET, "/api/sessions/stats/overview", null, null, SessionStatsOverview.class);
     }
+
+    /**
+     * Set the account's own global presence — appear online, or offline.
+     *
+     * <p>{@code available: false} hands notifications back to the phone: a linked device that stays
+     * online suppresses the phone's own alerts. This is the ACCOUNT's presence, not a chat's — see
+     * {@code ChatsResource.sendState} for per-chat typing/recording states.
+     */
+    public SuccessResult setOnlinePresence(String id, SetOwnPresenceRequest body) {
+        return client.request(HttpMethod.PUT, "/api/sessions/" + encodeSegment(id) + "/presence", null, body, SuccessResult.class);
+    }
+
 }

@@ -38,6 +38,16 @@ WebhookEvent = Literal[
 ]
 
 
+class SetOwnPresenceRequest(TypedDict):
+    """Body for :meth:`SessionsResource.set_online_presence`.
+
+    ``available`` is True to appear online, False to appear offline (handing notifications back
+    to the phone).
+    """
+
+    available: bool
+
+
 class SuccessResult(TypedDict, total=False):
     success: bool
     message: str

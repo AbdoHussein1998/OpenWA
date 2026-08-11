@@ -305,6 +305,16 @@ class TestSessions:
         client.sessions.stats()
         assert "/sessions/stats/overview" in backend.calls[-1].url
 
+    def test_set_online_presence(self):
+        backend = MockBackend()
+        backend.on("PUT", "/presence", body={"success": True})
+        client = make_client(backend)
+        client.sessions.set_online_presence("s1", {"available": False})
+        # The account's own presence: no chat id in the path and no /subscribe suffix.
+        assert backend.calls[-1].method == "PUT"
+        assert backend.calls[-1].url.endswith("/sessions/s1/presence")
+        assert backend.calls[-1].body == {"available": False}
+
 
 # ── Groups, Contacts, Webhooks, Chats, Health ──────────────────────
 
