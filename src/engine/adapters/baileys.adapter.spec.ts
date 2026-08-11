@@ -3224,6 +3224,43 @@ describe('BaileysAdapter group management', () => {
     );
   });
 
+  it.each([['addParticipants'], ['removeParticipants'], ['promoteParticipants'], ['demoteParticipants']])(
+    '%s maps a batch-level server refusal to 403 rather than letting a raw Boom escape',
+    async method => {
+      // The per-participant array is the usual refusal channel, but WhatsApp can also reject the IQ
+      // itself — assertNodeErrorFree then throws with the WA code on `data`, and without a mapping
+      // that reaches the caller as an unhandled 500. Every other write in this adapter maps it.
+      fakeSock.groupParticipantsUpdate.mockRejectedValueOnce(Object.assign(new Error('not-authorized'), { data: 403 }));
+      const adapter = await ready();
+      const err = await (adapter as unknown as Record<string, (g: string, p: string[]) => Promise<unknown>>)
+        [method]('123-456@g.us', ['628111@c.us'])
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(EngineRefusedError);
+    },
+  );
+
+  it('rethrows a transport failure on a participant update instead of calling it a refusal', async () => {
+    // A dead socket carries a DisconnectReason-shaped statusCode but no numeric `data`; folding it
+    // into a refusal would report "admin rights may be missing" for a connection that simply died.
+    const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
+    fakeSock.groupParticipantsUpdate.mockRejectedValueOnce(connectionClosed);
+    const adapter = await ready();
+    const err = await adapter.removeParticipants('123-456@g.us', ['628111@c.us']).catch((e: unknown) => e);
+    expect(err).toBe(connectionClosed);
+  });
+
+  it('keeps an unanswered participant update a 503, not a 403', async () => {
+    // The query deadline sits INSIDE the refusal mapping, so the timeout's own error travels through
+    // mapServerRefusal on its way out. It must arrive unchanged: an unanswered write is a transport
+    // failure, and reporting it as "admin rights may be missing" sends operators to the wrong layer.
+    const unanswered = new EngineTransportError('WhatsApp did not answer the participant remove in time');
+    fakeSock.groupParticipantsUpdate.mockRejectedValueOnce(unanswered);
+    const adapter = await ready();
+    const err = await adapter.removeParticipants('123-456@g.us', ['628111@c.us']).catch((e: unknown) => e);
+    expect(err).toBe(unanswered);
+    expect(err).not.toBeInstanceOf(EngineRefusedError);
+  });
+
   it.each([
     ['setGroupMessagesAdminsOnly', true, 'announcement'],
     ['setGroupMessagesAdminsOnly', false, 'not_announcement'],

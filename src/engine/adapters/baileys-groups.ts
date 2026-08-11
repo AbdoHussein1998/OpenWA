@@ -198,6 +198,13 @@ export class BaileysGroups {
    * every not-admin/not-registered/already-member refusal into a reported success. Map the entries
    * verbatim; THROW only when the operation failed for every requested participant (a refusal of
    * the operation itself → HTTP 403) or the server returned no outcome at all.
+   *
+   * The per-participant array is not the only refusal channel: WhatsApp can reject the IQ itself,
+   * and `assertNodeErrorFree` then throws with the WA code on `data`. Every other write in this file
+   * routes through {@link mapServerRefusal} for exactly that; this one did not, so a batch-level
+   * refusal escaped as an unhandled error (HTTP 500) instead of the 403 its siblings give. The
+   * deadline stays INSIDE the mapping so a timeout is still reported as a timeout — `refusedStatusCode`
+   * only classifies a numeric `data`, so a transport Boom passes through untouched.
    */
   private async runParticipantsUpdate(
     groupId: string,
@@ -207,10 +214,12 @@ export class BaileysGroups {
     this.host.ensureReady();
     // An unanswered query yields [], which the empty-results guard below would report as a refusal
     // — a dead transport sold to the caller as a permissions problem.
-    const raw = await withQueryDeadline(
-      this.sock().groupParticipantsUpdate(groupId, this.toEngineParticipants(participants), action),
-      this.queryBudgetMs,
-      `WhatsApp did not answer the participant ${action} in time`,
+    const raw = await mapServerRefusal(`The participant ${action}`, () =>
+      withQueryDeadline(
+        this.sock().groupParticipantsUpdate(groupId, this.toEngineParticipants(participants), action),
+        this.queryBudgetMs,
+        `WhatsApp did not answer the participant ${action} in time`,
+      ),
     );
     const results: ParticipantOperationResult[] = (raw ?? []).map(entry => ({
       id: entry.jid ? this.host.toNeutralJid(entry.jid) : '',
