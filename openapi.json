@@ -6941,6 +6941,73 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/channels/{channelId}/owner/transfer": {
+      "post": {
+        "description": "IRREVERSIBLE. Once the transfer lands, this session is no longer the owner and cannot take the channel back through this API. Requires this account to currently own the channel. The upstream option to also dismiss yourself as an admin in the same call is not exposed, because the WhatsApp Web function it depends on no longer exists and the branch swallows its own errors, so it would fail silently.",
+        "operationId": "ChannelController_transferOwnership",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "description": "Channel ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferChannelOwnershipDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ownership transferred",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelAckResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Session not started, or validation failed"
+          },
+          "403": {
+            "description": "The engine did not transfer the channel. On whatsapp-web.js this is the only outcome a failure can produce: the page swallows every error into a plain false, so the cause is not reported."
+          },
+          "409": {
+            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
+          },
+          "501": {
+            "description": "The whatsapp-web.js engine cannot perform this: its page function rejects every call locally against a subscriber list the page cannot repopulate. Use the Baileys engine."
+          },
+          "503": {
+            "description": "WhatsApp did not answer within the request budget — the transfer may or may not have applied."
+          }
+        },
+        "summary": "Transfer channel ownership to another account",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/channels/subscribe": {
       "post": {
         "operationId": "ChannelController_subscribe",
@@ -13668,6 +13735,19 @@
         },
         "required": [
           "userId"
+        ]
+      },
+      "TransferChannelOwnershipDto": {
+        "type": "object",
+        "properties": {
+          "newOwnerId": {
+            "type": "string",
+            "description": "WhatsApp ID of the account that becomes the new owner. This is irreversible: once the transfer lands, this session can no longer take the channel back.",
+            "example": "628123456789@c.us"
+          }
+        },
+        "required": [
+          "newOwnerId"
         ]
       },
       "OverviewSessionsDto": {

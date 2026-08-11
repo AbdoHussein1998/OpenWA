@@ -116,6 +116,25 @@ export class BaileysChannels {
     );
   }
 
+  /**
+   * Hand the channel to a new owner. IRREVERSIBLE: the account stops being the owner and cannot
+   * take it back through this API.
+   *
+   * Bounded, unlike `createChannel` above. That one stays unbounded because a retried create leaves
+   * a duplicate channel behind; here a retry after a transfer that actually landed is refused, since
+   * the account no longer owns the channel. So the deadline costs an ambiguous 503 ("may or may not
+   * have applied") and buys a request that ends.
+   */
+  async transferChannelOwnership(channelId: string, newOwnerId: string): Promise<void> {
+    this.host.ensureReady();
+    const newOwnerJid = this.host.toEngineJid(newOwnerId);
+    await mapServerRefusal(
+      'Transferring the channel ownership',
+      () => this.bounded(this.sock().newsletterChangeOwner(channelId, newOwnerJid), 'the channel ownership transfer'),
+      wmexRefusalCode,
+    );
+  }
+
   async deleteChannel(channelId: string): Promise<void> {
     this.host.ensureReady();
     await mapServerRefusal(

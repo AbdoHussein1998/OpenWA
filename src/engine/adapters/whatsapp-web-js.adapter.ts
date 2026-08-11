@@ -871,6 +871,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.channels.demoteChannelAdmin(channelId, userId);
   }
 
+  transferChannelOwnership(channelId: string, newOwnerId: string): Promise<void> {
+    return this.channels.transferChannelOwnership(channelId, newOwnerId);
+  }
+
   getChatsByLabel(labelId: string): Promise<ChatSummary[]> {
     return this.labels.getChatsByLabel(labelId);
   }
