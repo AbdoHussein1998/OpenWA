@@ -70,36 +70,47 @@ export function parseWaId(jid: string): ParsedWaId {
   return { kind, userPart: local, device, raw };
 }
 
-/** A digits-only id, e.g. `628123456789` — accepted for convenience and qualified by {@link toParticipantWid}. */
-const BARE_NUMBER = /^\d{5,}$/;
+/**
+ * The user-part of every id that names a person: a phone number or a lid, both digits-only. The
+ * floor rules out `0`, `-1` and the empty string, none of which is a WhatsApp id.
+ */
+const NUMERIC_ID = /^\d{5,}$/;
 
 /**
- * Whether a string can address an individual participant of a group.
+ * Whether a string names an individual in a qualified dialect: `<phone>@c.us` (and its raw-protocol
+ * twin `@s.whatsapp.net`) or `<lid>@lid`. A `:<device>` suffix is fine — {@link parseWaId} strips it.
  *
- * A participant names a person, so only the individual dialects qualify: `<phone>@c.us` (and its
- * raw-protocol twin `@s.whatsapp.net`), `<lid>@lid`, or a bare phone number. A group id is rejected —
- * a group cannot be a member of a group — as is anything else.
- *
- * Nothing validated the shape before, so free text reached whatsapp-web.js's page-side `createWid`,
- * which threw a minified `t: t` and left the caller with an undiagnosable 500 (#1220). The same
- * failure was diagnosed once already for message mentions (#1068, see is-mention-wid.validator.ts).
+ * **The domain alone is not enough.** `parseWaId` classifies anything ending in `@c.us` as a user, so
+ * a check that stops at the kind accepts `NOT A USER@c.us` and `@c.us`. Those still reach WhatsApp
+ * Web's page-side `createWid`, which throws an error the minified bundle reports without a name, and
+ * the caller gets the undiagnosable 500 this check exists to prevent — reproduced against a live
+ * session. The user-part has to look like a WhatsApp id too (#1220, and #1068 before it).
+ */
+export function isIndividualWid(value: string): boolean {
+  const { kind, userPart } = parseWaId(value.trim());
+  return (kind === 'user' || kind === 'lid') && NUMERIC_ID.test(userPart);
+}
+
+/**
+ * Whether a string can address an individual participant of a group: an individual WID, or a bare
+ * phone number accepted for convenience and qualified by {@link toParticipantWid}. A group id is
+ * rejected — a group cannot be a member of a group — as is anything else.
  */
 export function isAddressableParticipant(value: string): boolean {
   const trimmed = value.trim();
-  const { kind } = parseWaId(trimmed);
-  return kind === 'user' || kind === 'lid' || (kind === 'unknown' && BARE_NUMBER.test(trimmed));
+  return isIndividualWid(trimmed) || NUMERIC_ID.test(trimmed);
 }
 
 /**
  * Qualify a bare number to the neutral `@c.us` dialect. Anything else passes through verbatim.
  *
- * Deliberately keyed on the bare-number shape rather than on the absence of `@`: the old test
- * (`p.includes('@') ? p : p + '@c.us'`) agrees for every valid input, but this form cannot turn an
- * unrecognised domain into a double-qualified `abc@weird@c.us`.
+ * Deliberately keyed on the bare-number shape rather than on the absence of `@`: the old rule
+ * (`p.includes('@') ? p : p + '@c.us'`) minted an id out of ANY un-domained string, so `abc` became
+ * `abc@c.us` — a well-formed id naming nobody.
  */
 export function toParticipantWid(value: string): string {
   const trimmed = value.trim();
-  return BARE_NUMBER.test(trimmed) ? `${trimmed}@c.us` : trimmed;
+  return NUMERIC_ID.test(trimmed) ? `${trimmed}@c.us` : trimmed;
 }
 
 /**
