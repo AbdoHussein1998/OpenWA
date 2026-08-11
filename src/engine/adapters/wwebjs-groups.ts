@@ -232,13 +232,18 @@ export class WwebjsGroups {
   }
 
   /**
-   * whatsapp-web.js remove/promote/demote resolve `{status: 200}` for the whole batch and reject on
-   * a page-side failure (GroupChat.js:267-298,305-340,343-374) — there is no per-participant
-   * breakdown to map: the page-side code even drops requested ids it can't find in the group and
-   * still resolves 200, so a 200 confirms the batch, not any individual. A non-200 status is a
-   * batch refusal. Within the per-participant shape the truthful report is one entry per requested
-   * participant carrying the batch status, annotated so a consumer can tell it apart from an
-   * individually-confirmed outcome (addParticipants); nothing per-participant exists to map.
+   * whatsapp-web.js resolves each requested id against the group's OWN participant collection and
+   * silently drops what it cannot find (GroupChat.js:289), then resolves `{status: 200}` for the
+   * whole batch. Reporting that as one success per requested participant claimed removals WhatsApp
+   * never performed, and an all-dropped batch reached a request builder that asserts at least one
+   * child — surfacing as an unnamed `500` (#1220).
+   *
+   * `scripts/patch-wwebjs-participant-arity.js` makes the page report `matched`, one boolean per
+   * requested id, and skip the call when nothing resolved. An absent or wrong-length `matched` means
+   * the installed tree is unpatched: keep the previous batch-confirmed shape rather than invent an
+   * outcome, mirroring the `eventsAttached` marker convention from the ready-sync patcher. A batch
+   * where nothing matched is a refusal of the operation itself (HTTP 403) via
+   * {@link assertParticipantResults}.
    */
   private async runStatusOnlyParticipantOp(
     op: 'removeParticipants' | 'promoteParticipants' | 'demoteParticipants',
@@ -251,16 +256,45 @@ export class WwebjsGroups {
       throw new Error('Chat is not a group');
     }
     const participantIds = participants.map(toParticipantWid);
-    const res = await (chat as unknown as GroupChat)[op](participantIds);
+    const res = await this.runParticipantBatch(op, groupId, chat as unknown as GroupChat, participantIds);
     if (res?.status !== 200) {
       throw new EngineRefusedError(`${op} refused for group ${groupId} (status ${res?.status ?? 'unknown'})`);
     }
-    return participantIds.map(id => ({
-      id,
-      success: true,
-      status: 200,
-      message: 'confirmed with the batch — wwebjs reports no per-participant outcome',
-    }));
+    const matched = Array.isArray(res.matched) && res.matched.length === participantIds.length ? res.matched : null;
+    const results = participantIds.map((id, i) => {
+      const resolved = matched ? matched[i] === true : true;
+      return {
+        id,
+        success: resolved,
+        status: resolved ? 200 : 404,
+        message: resolved
+          ? 'confirmed with the batch — wwebjs reports no per-participant outcome'
+          : 'not a member of this group — WhatsApp was not asked to act on this participant',
+      };
+    });
+    return this.assertParticipantResults(op, groupId, results);
+  }
+
+  /**
+   * An unpatched tree hands the WA Web request builder an empty participant list when nothing
+   * resolved, and its repeated-field arity assertion rejects. Classify ONLY that: anything else — a
+   * closed target, a dead transport — must keep its own identity rather than be sold to the caller
+   * as a permissions problem, the same rule the Baileys adapter states for its empty-results guard.
+   */
+  private async runParticipantBatch(
+    op: 'removeParticipants' | 'promoteParticipants' | 'demoteParticipants',
+    groupId: string,
+    chat: GroupChat,
+    participantIds: string[],
+  ): Promise<{ status?: number; matched?: unknown }> {
+    try {
+      return await chat[op](participantIds);
+    } catch (error) {
+      if (/expected at least 1 children/.test((error as Error)?.message ?? '')) {
+        throw new EngineRefusedError(`${op}: none of the requested participants is a member of group ${groupId}`);
+      }
+      throw error;
+    }
   }
 
   /**
