@@ -62,10 +62,10 @@ Key adapter facts:
   The REST surface is identical for both; availability differences surface only as 501s, which the
   matrix in 29.4 enumerates.
 - **The 501 contract is deliberate.** A capability the engine cannot deliver throws
-  `EngineNotSupportedError` (HTTP 501) at the adapter boundary — never a fabricated success. The
-  wwjs catalog reads used to silently return `null`/`[]` ("phantom support"); those stubs were
-  replaced with explicit 501s, and any future `not-available` row must keep throwing to stay
-  verifiable.
+  `EngineNotSupportedError` (HTTP 501) at the adapter boundary — never a fabricated success, and
+  never a stub returning `null`/`[]` that a caller reads as an answer. `engine-parity.spec.ts`
+  enforces the biconditional in both directions: a cell is `not-available` if and only if the
+  adapter method throws, so a row cannot quietly stop throwing.
 - **The two adapters are structured differently.** `WwebjsAdapter` methods are thin forwarders to
   delegate modules (`wwebjs-catalog.ts`, `wwebjs-groups.ts`, …), so their throws live in the
   delegates. `BaileysAdapter` throws inline via `this.unsupported(...)`. The drift gate below
@@ -159,12 +159,12 @@ Rows that are ✅ on **both** engines where one side is patch-dependent: `initia
 rests on the column-wide 🔧¹ (wwjs) and 🔧⁵ (baileys) — no row runs on stock library code on both
 sides.
 
-### 29.3.3 A fifth whatsapp-web.js patch was considered and rejected
+### 29.3.3 Why no patch surfaces `transferChannelOwnership`'s swallowed reason
 
 `Client.transferChannelOwnership` swallows WhatsApp's own refusal reason —
 `contact-not-found-in-newsletter-subscriber-list` — into a bare `false`, so the caller gets a 403
-with no cause. A patch to surface it looks obviously worthwhile, and it is not. Recorded here with
-the counts that rejected it, because the case is attractive enough to be proposed again.
+with no cause. A patch to surface it looks obviously worthwhile, and it is not. The counts that
+rule it out are below, because the case is attractive enough to be proposed again.
 
 Parsing every `async` method in `Client.js` for a catch that returns `false` finds **five**, all in
 the channel cluster. Four of them — `acceptChannelAdminInvite`, `revokeChannelAdminInvite`,
@@ -748,18 +748,16 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 
 ### 29.5.3 Supported by BOTH libraries — missing only in OpenWA
 
-**Currently empty — the backlog is drained.** This list held the highest-value gaps: capabilities
-with a first-class symbol on **both** engines, so one new `IWhatsAppEngine` method wires both
-adapters at once. The last of them were wired in this release — `setOnlinePresence`,
-`getBlockedContacts`, `createCallLink`, `deleteProfilePicture`, `demoteChannelAdmin` and
-`transferChannelOwnership`.
+**Empty.** No capability has a first-class symbol on both engines and no `IWhatsAppEngine` method.
 
-⚠️ Two of those shipped with the whatsapp-web.js side marked `not-available` rather than
-`supported`: `demoteChannelAdmin` and `transferChannelOwnership` both have a typed `Client` method
-and a resolvable page module, and both fail against live WhatsApp Web — see 29.6.2. **A symbol in
-`.d.ts` is not evidence the call works**; it mispredicted a third of the safest-looking sample the
-last time this list was worked. Add a row here from the typings, but do not mark a cell `supported`
-until a live call has returned WhatsApp's own answer.
+A row belongs here when both libraries expose a symbol for the same capability and the interface
+has no method for it, because one new interface method then wires both adapters at once.
+
+⚠️ **A symbol in `.d.ts` is not evidence the call works.** `demoteChannelAdmin` and
+`transferChannelOwnership` each have a typed `Client` method and a resolvable page module on
+whatsapp-web.js, and each fails against live WhatsApp Web — both are `not-available` there and
+detailed in 29.6.2. Add a row here from the typings; do not mark its cell `supported` until a live
+call has returned WhatsApp's own answer.
 
 Near-misses (both libraries have the area, but the symbol sets only partially overlap — still
 worth an interface method): **channel admin invites** (wwjs
@@ -926,13 +924,12 @@ adapter sources — re-derive the same way when anything changes:
   session/transport settings that are not WhatsApp capabilities). The backlog is the ❌ rows minus
   those 8 settings; 🔩 plumbing is correctly never exposed.
 - Events: Baileys **34** (15 consumed / 19 dropped), wwjs **31** (16 consumed / 15 dropped).
-- **0** capabilities remain in 29.5.3: every capability with first-class symbols on both libraries
-  is now either wired or classified with evidence. The six that opened this backlog were `muteChat`,
-  `pinChat`, `createCallLink`, `deleteProfilePicture`, `demoteChannelAdmin` and
-  `transferChannelOwnership`. **Two of the six do not work on whatsapp-web.js and only a live session
-  showed it** — `demoteChannelAdmin`'s page function is gone, and `transferChannelOwnership`'s page
-  function rejects locally against a list it cannot repopulate (both in 29.6.2). Both are Baileys-only
-  and both are 501 on wwjs. `.d.ts` presence is not capability.
+- **0** capabilities in 29.5.3: every capability with first-class symbols on both libraries is
+  either wired or classified with evidence. Two of them are Baileys-only despite typed
+  whatsapp-web.js symbols — `demoteChannelAdmin`, whose page function WhatsApp Web no longer
+  provides, and `transferChannelOwnership`, whose page function rejects locally against a
+  subscriber list it cannot repopulate (both in 29.6.2). Both answer 501 on wwjs. `.d.ts` presence
+  is not capability, and only a live call distinguishes the two.
 - **7** install-time patches (5 whatsapp-web.js + 2 Baileys), all exact and self-disabling.
 - **0 phantom-support rows** — every `not-available` cell throws at the adapter boundary.
 - Remaining adapter-gaps (fixable in this repo, ranked): **#1** `getChannelMessages` (Baileys —
