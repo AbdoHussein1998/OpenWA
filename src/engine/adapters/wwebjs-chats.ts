@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { MessageTypes, type Client } from 'whatsapp-web.js';
 import { ChatSummary, ChatState } from '../interfaces/whatsapp-engine.interface';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
@@ -119,8 +120,29 @@ export class WwebjsChats {
     }
   }
 
+  /**
+   * whatsapp-web.js signals a chat it cannot resolve by rejecting deep inside the page — `No LID for
+   * user` from pin's WID lookup, a TypeError from the evaluate inside `Client._muteUnmuteChat` for
+   * mute. Both surfaced as a bare 500, a status neither route declares, while every older member of
+   * this family answers an unknown chat gracefully.
+   *
+   * Resolving the chat first turns that into the 400 the contract already promises. It deliberately
+   * does NOT wrap the pin/mute call itself: a page-side rejection for a chat that DOES exist is the
+   * one signal a renamed page internal produces, and demoting it to "bad input" would hide a total
+   * capability failure — the shape `createGroup` turned out to have. `getChatById` is the same
+   * resolution five neighbours here already trust, and it reports an unknown chat either way it can,
+   * by resolving undefined or by rejecting.
+   */
+  private async requireResolvableChat(chatId: string): Promise<void> {
+    const chat = await this.client()
+      .getChatById(chatId)
+      .catch(() => undefined);
+    if (!chat) throw new BadRequestException(`Chat ${chatId} does not exist on this session`);
+  }
+
   async muteChat(chatId: string, muteUntil: number | null): Promise<void> {
     this.host.ensureReady();
+    await this.requireResolvableChat(chatId);
     if (muteUntil === null) {
       await this.client().unmuteChat(chatId);
       return;
@@ -132,6 +154,10 @@ export class WwebjsChats {
 
   async pinChat(chatId: string, pin: boolean): Promise<boolean> {
     this.host.ensureReady();
+    // Not `return false` for an unknown chat: `false` is already taken here, and means the three-pin
+    // cap refused a real chat. Conflating the two would tell a caller with a stale chatId that its
+    // pin quota is full.
+    await this.requireResolvableChat(chatId);
     if (!pin) {
       // unpinChat resolves the chat's NEW pin state, which is `false` for every successful unpin —
       // both on its early-out for an already-unpinned chat and after actually unpinning

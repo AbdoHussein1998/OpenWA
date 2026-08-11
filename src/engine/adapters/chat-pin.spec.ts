@@ -34,6 +34,7 @@ describe('WwebjsChats.pinChat', () => {
     const client = {
       pinChat: jest.fn().mockResolvedValue(true),
       unpinChat: jest.fn().mockResolvedValue(false),
+      getChatById: jest.fn().mockResolvedValue({ id: { _serialized: '628123@c.us' } }),
     };
     const host = {
       ensureReady: jest.fn(),
@@ -64,6 +65,43 @@ describe('WwebjsChats.pinChat', () => {
     await expect(chats.pinChat('628123@c.us', false)).resolves.toBe(true);
     expect(client.unpinChat).toHaveBeenCalledWith('628123@c.us');
     expect(client.pinChat).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Live, pinning a chat the page could not resolve rejected with `Error: No LID for user` and
+   * surfaced as a bare 500 — undeclared on this route, while `chats/read` and `chats/archive`
+   * answer the same unknown chat gracefully.
+   *
+   * `false` is deliberately NOT the answer here, unlike those two: on this route `false` already
+   * means the three-pin cap refused a real chat, so reusing it would tell a caller holding a stale
+   * chatId that its pin quota is full.
+   */
+  describe.each([
+    ['the page resolves no such chat', (c: { [k: string]: jest.Mock }) => c.getChatById.mockResolvedValue(undefined)],
+    [
+      'the page rejects the lookup',
+      (c: { [k: string]: jest.Mock }) => c.getChatById.mockRejectedValue(new Error('No LID for user')),
+    ],
+  ])('an unknown chat is bad input, and must not read as the pin cap — %s', (_label, arrange) => {
+    it.each([true, false])('rejects with a 400 rather than false, pin=%s', async pin => {
+      const { chats, client } = makeChats();
+      arrange(client);
+      const call = chats.pinChat('628123@c.us', pin);
+      await expect(call).rejects.toMatchObject({ status: 400 });
+      // The distinction the cap depends on: a refusal is `false`, an unknown chat never resolves.
+      await expect(call).rejects.not.toBe(false);
+      expect(client.pinChat).not.toHaveBeenCalled();
+      expect(client.unpinChat).not.toHaveBeenCalled();
+    });
+  });
+
+  // The guard resolves the chat rather than wrapping the pin call, so a page-side break on a chat
+  // that DOES exist still reaches the caller — the signal that caught wwjs `createGroup`.
+  it('a page failure on a chat that DOES resolve stays a server error, not a 400', async () => {
+    const { chats, client } = makeChats();
+    client.pinChat.mockRejectedValue(new TypeError('this.findImpl is not a function'));
+    await expect(chats.pinChat('628123@c.us', true)).rejects.toThrow('findImpl');
+    await expect(chats.pinChat('628123@c.us', true)).rejects.not.toMatchObject({ status: 400 });
   });
 });
 
