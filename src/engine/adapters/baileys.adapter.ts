@@ -61,12 +61,14 @@ export class BaileysAdapter implements IWhatsAppEngine {
   private readonly logger = createLogger('BaileysAdapter');
   // Bound concurrent inbound media downloads: each materialises a full decrypted buffer in heap, so an
   // unbounded fire-and-forget loop lets a sender flood the gateway with N parallel multi-MB allocations.
-  private readonly inboundLimiter = new ConcurrencyLimiter(
-    inboundMediaConcurrency(),
-    // Queue cap == active slots: beyond (active + queued) concurrent media messages, reject instead of
-    // parking, so a burst can't grow heap without bound (each parked closure holds the message).
-    inboundMediaConcurrency(),
-  );
+  //
+  // The QUEUE is deliberately unbounded. handleMessagesUpsert submits a whole upsert synchronously,
+  // so admission is decided before any download finishes: a queue capped at the active slots admitted
+  // a constant 2n regardless of batch size, and everything past it was re-processed with skipMedia —
+  // a 40-message upsert lost the media of 32. A parked closure holds the message, not the file, and
+  // inbound-media-cap.ts bounds what any one download may allocate, so capping the queue again needs
+  // a threshold an ordinary burst does not reach. That is its own question.
+  private readonly inboundLimiter = new ConcurrencyLimiter(inboundMediaConcurrency());
   private readonly authPath: string;
   private readonly sessionStore: BaileysSessionStore;
   private readonly groups: BaileysGroups;

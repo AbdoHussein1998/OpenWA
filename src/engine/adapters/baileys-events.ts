@@ -159,15 +159,23 @@ export class BaileysEvents {
       }
       // Throttle through the limiter so a burst of media messages can't run unbounded parallel
       // downloads (each a full decrypted buffer in heap). Ordering stays correct — the message store
-      // keeps the newest by timestamp. When the waiter queue is saturated we REJECT instead of parking
-      // forever, and re-process the message WITHOUT media: the message (body + metadata) is still
-      // emitted, but we skip the heap-heavy download that the limiter exists to bound.
+      // keeps the newest by timestamp. The queue is unbounded, so a burst parks rather than shedding
+      // and the message keeps its media either way; on any rejection we still re-process WITHOUT
+      // media, so the body and metadata are emitted rather than lost.
       void this.host.inboundLimiter
         .run(() => this.processInboundMessage(msg))
-        .catch(() => {
-          this.host.logger.warn('Inbound media limiter saturated; emitting message without media', {
-            msgId: msg.key?.id ?? 'unknown',
-          });
+        .catch((error: unknown) => {
+          // Two different failures land here and they are not the same event. The limiter closing is
+          // an orderly teardown; anything else is a real download failure, and reporting it as
+          // "saturated" sent operators to look at concurrency settings for a problem that was never
+          // there. Say which one happened.
+          const closed = error instanceof Error && error.message.startsWith('ConcurrencyLimiter closed');
+          this.host.logger.warn(
+            closed
+              ? 'Inbound media limiter closed during teardown; emitting message without media'
+              : 'Inbound media download failed; emitting message without media',
+            { msgId: msg.key?.id ?? 'unknown', ...(closed ? {} : { error: String(error) }) },
+          );
           return this.processInboundMessage(msg, { skipMedia: true });
         });
     }
