@@ -26,10 +26,19 @@ function makeRoot({
   readySyncPatcher = false,
   participantArityPatcher = false,
   baileysPatcher = false,
+  baileysNewsletterPatcher = false,
 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openwa-postinstall-'));
   if (dashboard) fs.mkdirSync(path.join(root, 'dashboard'));
-  if (patcher || previewPatcher || statusPatcher || readySyncPatcher || participantArityPatcher || baileysPatcher) {
+  if (
+    patcher ||
+    previewPatcher ||
+    statusPatcher ||
+    readySyncPatcher ||
+    participantArityPatcher ||
+    baileysPatcher ||
+    baileysNewsletterPatcher
+  ) {
     fs.mkdirSync(path.join(root, 'scripts'));
   }
   if (patcher) {
@@ -49,6 +58,9 @@ function makeRoot({
   }
   if (baileysPatcher) {
     fs.writeFileSync(path.join(root, 'scripts', 'patch-baileys-appstate.js'), '// stub\n');
+  }
+  if (baileysNewsletterPatcher) {
+    fs.writeFileSync(path.join(root, 'scripts', 'patch-baileys-newsletter-create.js'), '// stub\n');
   }
   return root;
 }
@@ -135,9 +147,12 @@ test('planSteps: dashboard and all patchers run in stable order', () => {
       readySyncPatcher: true,
       participantArityPatcher: true,
       baileysPatcher: true,
+      baileysNewsletterPatcher: true,
     }),
   );
-  assert.equal(steps.length, 7);
+  // One assertion per patcher on disk: the test is named for ALL of them, so a patcher that is
+  // planned but never named here would leave the claim false while the suite stayed green.
+  assert.equal(steps.length, 8);
   assert.equal(steps[0].command, 'npm ci');
   assert.match(steps[1].args[0], /patch-wwebjs-201832\.js$/);
   assert.match(steps[2].args[0], /patch-wwebjs-newsletter-preview\.js$/);
@@ -145,6 +160,7 @@ test('planSteps: dashboard and all patchers run in stable order', () => {
   assert.match(steps[4].args[0], /patch-wwebjs-ready-sync\.js$/);
   assert.match(steps[5].args[0], /patch-wwebjs-participant-arity\.js$/);
   assert.match(steps[6].args[0], /patch-baileys-appstate\.js$/);
+  assert.match(steps[7].args[0], /patch-baileys-newsletter-create\.js$/);
 });
 
 test('run: nothing to do exits 0 and never spawns', () => {
