@@ -1,7 +1,7 @@
 /**
  * Post-install hook (npm `postinstall`).
  *
- * Six conditional steps, each skipped when its target is absent so the hook is a no-op where the
+ * Seven conditional steps, each skipped when its target is absent so the hook is a no-op where the
  * piece is missing (the Docker builder stage copies package*.json long before any source):
  *
  *   1. `npm ci` inside dashboard/ when dashboard/ exists — the dashboard carries its own lockfile and
@@ -22,8 +22,10 @@
  *   5. `node scripts/patch-wwebjs-ready-sync.js --best-effort` when present — the readiness
  *      marker + hasSynced level-check, gated the same way.
  *   6. `node scripts/patch-baileys-appstate.js --best-effort` when present — the app-state resync
- *      bound, gated the same way. This is the one step that is not a whatsapp-web.js patch, so a
- *      Baileys-only install runs it and skips 2-5.
+ *      bound, gated the same way.
+ *   7. `node scripts/patch-baileys-newsletter-create.js --best-effort` when present — the
+ *      newsletter-create parse fix. Steps 6-7 are the Baileys patches, so a Baileys-only install
+ *      runs those and skips 2-5.
  *
  * Structured like scripts/patch-wwebjs-201832.js: pure planning + injectable spawn, so the spec
  * (scripts/postinstall.spec.js, node:test) exercises every branch without a real npm run.
@@ -109,6 +111,15 @@ function planSteps(root, env = process.env) {
       name: 'Baileys app-state resync bound (scripts/patch-baileys-appstate.js --best-effort)',
       command: process.execPath,
       args: [baileysAppStatePatcher, '--best-effort'],
+      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
+    });
+  }
+  const baileysNewsletterPatcher = path.join(root, 'scripts', 'patch-baileys-newsletter-create.js');
+  if (fs.existsSync(baileysNewsletterPatcher)) {
+    steps.push({
+      name: 'Baileys newsletter-create parse fix (scripts/patch-baileys-newsletter-create.js --best-effort)',
+      command: process.execPath,
+      args: [baileysNewsletterPatcher, '--best-effort'],
       options: { stdio: 'inherit', cwd: root, env: cleanEnv },
     });
   }
