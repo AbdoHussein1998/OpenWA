@@ -338,7 +338,7 @@ Media bodies share the `SendMediaRequest` shape: `{ chatId, url? | base64?, mime
 
 ### Error Handling
 
-On a non-2xx response the SDK throws a typed `OpenWAApiError` subclass carrying `.status` (HTTP status), `.body` (parsed JSON error envelope, or raw text), and `.errorKind` (the NestJS `error` field). All error classes extend `OpenWAError` and are exported, so they are `instanceof`-checkable. A timeout throws `OpenWATimeoutError`, which extends `OpenWAError` directly (not `OpenWAApiError`).
+On a non-2xx response the SDK throws a typed `OpenWAApiError` subclass carrying `.status` (HTTP status), `.body` (parsed JSON error envelope, or raw text), and `.errorKind` (the NestJS `error` field, `undefined` when the gateway omits it — which is the norm for a validation rejection in production, where `disableErrorMessages` is on). All error classes extend `OpenWAError` and are exported, so they are `instanceof`-checkable. A timeout throws `OpenWATimeoutError`, which extends `OpenWAError` directly (not `OpenWAApiError`).
 
 | Error class                     | HTTP status | Meaning                                                                                       |
 | ------------------------------- | ----------- | --------------------------------------------------------------------------------------------- |
