@@ -445,13 +445,13 @@ Exposure column values:
 | `groupJoinApprovalMode`          | ❌ **not exposed**                                                                      |
 | `groupLeave`                     | ✅ `leaveGroup`                                                                         |
 | `groupMemberAddMode`             | ✅ `setGroupMemberAddMode`                                                              |
-| `groupMetadata`                  | ✅ `getGroupInfo`, `getGroups`                                                          |
+| `groupMetadata`                  | ✅ `getGroupInfo`                                                                       |
 | `groupParticipantsUpdate`        | ✅ `addParticipants`, `removeParticipants`, `promoteParticipants`, `demoteParticipants` |
 | `groupRequestParticipantsList`   | ✅ `getGroupMembershipRequests`                                                         |
 | `groupRequestParticipantsUpdate` | ✅ `approveGroupMembershipRequests`, `rejectGroupMembershipRequests`                    |
 | `groupRevokeInvite`              | ✅ `revokeGroupInviteCode`                                                              |
 | `groupRevokeInviteV4`            | ❌ **not exposed**                                                                      |
-| `groupSettingUpdate`             | ✅ `setGroupMessagesAdminsOnly`, `setGroupInfoAdminsOnly`, `setGroupMemberAddMode`      |
+| `groupSettingUpdate`             | ✅ `setGroupMessagesAdminsOnly`, `setGroupInfoAdminsOnly`                               |
 | `groupToggleEphemeral`           | ✅ `setGroupEphemeral`                                                                  |
 | `groupUpdateDescription`         | ✅ `setGroupDescription`                                                                |
 | `groupUpdateSubject`             | ✅ `setGroupSubject`                                                                    |
@@ -591,7 +591,7 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `appPatch`                        | 🔩 plumbing                                                                                                                                                                 |
 | `assertSessions`                  | 🔩 plumbing                                                                                                                                                                 |
-| `chatModify`                      | ✅ `upsertContact`, `markUnread`, `clearChatMessages`, `archiveChat`, `muteChat`, `pinChat`, `deleteChat`, `deleteMessage`, `starMessage`                                   |
+| `chatModify`                      | ✅ `markUnread`, `clearChatMessages`, `archiveChat`, `muteChat`, `pinChat`, `deleteChat`, `deleteMessage`, `starMessage`                                                    |
 | `cleanDirtyBits`                  | 🔩 plumbing                                                                                                                                                                 |
 | `createParticipantNodes`          | 🔩 plumbing                                                                                                                                                                 |
 | `digestKeyBundle`                 | 🔩 plumbing                                                                                                                                                                 |
@@ -602,7 +602,7 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 | `profilePictureUrl`               | ✅ `getProfilePicture`                                                                                                                                                      |
 | `query`                           | ⚙️ internal transport (deadline-bounded iq queries inside read methods)                                                                                                     |
 | `registerSocketEndHandler`        | 🔩 plumbing                                                                                                                                                                 |
-| `rejectCall`                      | ✅ `rejectCall`, `disconnect`                                                                                                                                               |
+| `rejectCall`                      | ✅ `rejectCall`                                                                                                                                                             |
 | `requestPairingCode`              | ✅ `requestPairingCode`                                                                                                                                                     |
 | `resyncAppState`                  | ⚙️ internal wiring                                                                                                                                                          |
 | `rotateSignedPreKey`              | 🔩 plumbing                                                                                                                                                                 |
@@ -623,7 +623,7 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 | `getState`                 | ⚙️ internal wiring                                                                                |
 | `getWWebVersion`           | ❌ **not exposed** — the build is pinned from `wa-web-version.ts`, never read back off the client |
 | `initialize`               | ✅ `initialize`                                                                                   |
-| `logout`                   | ✅ `initialize`, `logout`, `disconnect`                                                           |
+| `logout`                   | ✅ `logout`                                                                                       |
 | `on`                       | ⚙️ EventEmitter surface — the adapter's event wiring (29.5.4)                                     |
 | `requestPairingCode`       | ✅ `requestPairingCode`                                                                           |
 | `resetState`               | ❌ **not exposed** — session/transport setting, not a WhatsApp capability                         |
@@ -649,17 +649,17 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 
 **Chats** (9)
 
-| Library method   | OpenWA exposure                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `archiveChat`    | ✅ `archiveChat`, `clearChatMessages`                                                                                                                                                                                                                                                                                                                                                                                    |
-| `getChatById`    | ✅ `muteChannel`, `sendSeen`, `clearChatMessages`, `markUnread`, `deleteChat`, `sendChatState`, `getGroups`, `getGroupInfo`, `addParticipants`, `leaveGroup`, `setGroupSubject`, `setGroupDescription`, `getGroupInviteCode`, `revokeGroupInviteCode`, `getChatsByLabel`, `getChatLabels`, `replyToMessage`, `forwardMessage`, `reactToMessage`, `getMessageReactions`, `getChatHistory`, `deleteMessage`, `editMessage` |
-| `getChats`       | ✅ `getChats`, `getGroups`                                                                                                                                                                                                                                                                                                                                                                                               |
-| `markChatUnread` | ❌ **not exposed**                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `muteChat`       | ✅ `muteChat`                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `pinChat`        | ✅ `pinChat`                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `unarchiveChat`  | ✅ `archiveChat`                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `unmuteChat`     | ✅ `muteChat`                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `unpinChat`      | ✅ `pinChat`                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Library method   | OpenWA exposure                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `archiveChat`    | ✅ `archiveChat`                                                                                                                                                                                                                                                                                                                                                                         |
+| `getChatById`    | ✅ `muteChannel`, `sendSeen`, `clearChatMessages`, `markUnread`, `deleteChat`, `sendChatState`, `getGroupInfo`, `addParticipants`, `leaveGroup`, `setGroupSubject`, `setGroupDescription`, `getGroupInviteCode`, `revokeGroupInviteCode`, `getChatLabels`, `replyToMessage`, `forwardMessage`, `reactToMessage`, `getMessageReactions`, `getChatHistory`, `deleteMessage`, `editMessage` |
+| `getChats`       | ✅ `getChats`, `getGroups`                                                                                                                                                                                                                                                                                                                                                               |
+| `markChatUnread` | ❌ **not exposed**                                                                                                                                                                                                                                                                                                                                                                       |
+| `muteChat`       | ✅ `muteChat`                                                                                                                                                                                                                                                                                                                                                                            |
+| `pinChat`        | ✅ `pinChat`                                                                                                                                                                                                                                                                                                                                                                             |
+| `unarchiveChat`  | ✅ `archiveChat`                                                                                                                                                                                                                                                                                                                                                                         |
+| `unmuteChat`     | ✅ `muteChat`                                                                                                                                                                                                                                                                                                                                                                            |
+| `unpinChat`      | ✅ `pinChat`                                                                                                                                                                                                                                                                                                                                                                             |
 
 **Groups** (7)
 
@@ -679,7 +679,7 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 | -------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `acceptChannelAdminInvite` | ❌ **not exposed**                                                                                   |
 | `createChannel`            | ✅ `createChannel`                                                                                   |
-| `deleteChannel`            | ✅ `deleteChannel`, `deleteChat`                                                                     |
+| `deleteChannel`            | ✅ `deleteChannel`                                                                                   |
 | `demoteChannelAdmin`       | ❌ **not exposed** — page function gone, see 29.4                                                    |
 | `getChannelByInviteCode`   | ❌ **not exposed** — the invite→channel bridge adapter-gap #2 needs (29.6.2)                         |
 | `getChannels`              | ✅ `getSubscribedChannels`, `getChannelMessages`                                                     |
@@ -692,13 +692,13 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 
 **Labels** (5)
 
-| Library method      | OpenWA exposure                            |
-| ------------------- | ------------------------------------------ |
-| `addOrRemoveLabels` | ✅ `addLabelToChat`, `removeLabelFromChat` |
-| `getChatLabels`     | ✅ `getChatLabels`                         |
-| `getChatsByLabelId` | ✅ `getChatsByLabel`                       |
-| `getLabelById`      | ✅ `getLabelById`, `getChatsByLabel`       |
-| `getLabels`         | ✅ `getLabels`, `getChatLabels`            |
+| Library method      | OpenWA exposure                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| `addOrRemoveLabels` | ✅ `addLabelToChat`, `removeLabelFromChat`                                                          |
+| `getChatLabels`     | ❌ **not exposed** — the adapter reads the chat and calls `Chat.getLabels()`, not the Client method |
+| `getChatsByLabelId` | ✅ `getChatsByLabel`                                                                                |
+| `getLabelById`      | ✅ `getLabelById`                                                                                   |
+| `getLabels`         | ✅ `getLabels`                                                                                      |
 
 **Status & broadcasts** (3)
 
@@ -733,15 +733,15 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 
 **Profile & presence** (7)
 
-| Library method            | OpenWA exposure                           |
-| ------------------------- | ----------------------------------------- |
-| `deleteProfilePicture`    | ✅ `deleteProfilePicture`                 |
-| `getProfilePicUrl`        | ✅ `getProfilePicture`                    |
-| `sendPresenceAvailable`   | ✅ `setOnlinePresence`                    |
-| `sendPresenceUnavailable` | ✅ `setOnlinePresence`                    |
-| `setDisplayName`          | ✅ `setProfileName`                       |
-| `setProfilePicture`       | ✅ `setProfilePicture`, `setGroupPicture` |
-| `setStatus`               | ✅ `setProfileStatus`                     |
+| Library method            | OpenWA exposure           |
+| ------------------------- | ------------------------- |
+| `deleteProfilePicture`    | ✅ `deleteProfilePicture` |
+| `getProfilePicUrl`        | ✅ `getProfilePicture`    |
+| `sendPresenceAvailable`   | ✅ `setOnlinePresence`    |
+| `sendPresenceUnavailable` | ✅ `setOnlinePresence`    |
+| `setDisplayName`          | ✅ `setProfileName`       |
+| `setProfilePicture`       | ✅ `setProfilePicture`    |
+| `setStatus`               | ✅ `setProfileStatus`     |
 
 **Misc** (1)
 
@@ -924,8 +924,8 @@ adapter sources — re-derive the same way when anything changes:
   **9** wwjs-only, **1** unavailable on both (`sendCatalog`).
 - Full engine inventory (29.5), split by the exposure legend rather than lumped: Baileys **152**
   socket methods — 48 wired into interface methods, 5 internal wiring, 29 plumbing, **70 ❌ not
-  exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 45 wired,
-  2 internal wiring, 1 class plumbing, **33 ❌ not exposed** (25 real capabilities + 8
+  exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 44 wired,
+  2 internal wiring, 1 class plumbing, **34 ❌ not exposed** (26 real capabilities + 8
   session/transport settings that are not WhatsApp capabilities). The backlog is the ❌ rows minus
   those 8 settings; 🔩 plumbing is correctly never exposed.
 - Events: Baileys **34** (15 consumed / 19 dropped), wwjs **31** (16 consumed / 15 dropped).
