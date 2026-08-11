@@ -1024,15 +1024,15 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return isNewCall;
   }
 
+  createCallLink(type: CallLinkType, startTime: number): Promise<string> {
+    return this.profile.createCallLink(type, startTime);
+  }
+
   /**
    * Reject a currently-ringing call. The entry is evicted on ANY attempt (a rejected/ended call
    * will not become rejectable again); an unknown id or an expired entry maps to CallNotFoundError
    * (HTTP 404). A failure of the library's reject() itself propagates as-is.
    */
-  createCallLink(type: CallLinkType, startTime: number): Promise<string> {
-    return this.profile.createCallLink(type, startTime);
-  }
-
   async rejectCall(callId: string): Promise<void> {
     const entry = this.liveCalls.get(callId);
     this.liveCalls.delete(callId);

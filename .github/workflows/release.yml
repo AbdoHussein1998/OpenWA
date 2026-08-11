@@ -87,7 +87,7 @@ jobs:
       # The same gates ci.yml runs. Its comment there notes this workflow never ran them, which is
       # the gap: a tag pushed with `--follow-tags` starts both workflows, and only the branch one
       # could see an SDK left behind by a contract change. The release path has to stand on its own,
-      # and it is the path that actually publishes the image and the chart.
+      # and it is the path that actually publishes the image and the GitHub Release.
       - name: Check SDK routes against the contract
         run: npm run check:sdk-routes
 
@@ -296,8 +296,9 @@ jobs:
 
       # What the rendered chart would DO in a cluster, which neither helm lint nor kubeconform can
       # see: config changes roll the pods, the startup budget exceeds the liveness budget, the
-      # metrics selector names one Service. This is the path that publishes the chart, so a chart
-      # that renders validly but misbehaves must not get past it.
+      # metrics selector names one Service. Nothing here publishes the chart — operators install it
+      # from this ref — so the tag is the last gate it passes, and a chart that renders validly but
+      # misbehaves must not get past it.
       - name: Check chart behaviour
         run: npm run check:chart
 
