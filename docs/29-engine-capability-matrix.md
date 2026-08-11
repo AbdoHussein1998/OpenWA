@@ -48,8 +48,8 @@ flowchart LR
         IF --> BA["BaileysAdapter"]
         SVC --> STORE["OpenWA-side stores"]
     end
-    WA --> WLIB["whatsapp-web.js 1.34.7<br/>+ 4 OpenWA patches"]
-    BA --> BLIB["@whiskeysockets/baileys 7.0.0-rc13<br/>+ 1 OpenWA patch"]
+    WA --> WLIB["whatsapp-web.js 1.34.7<br/>+ 5 OpenWA patches"]
+    BA --> BLIB["@whiskeysockets/baileys 7.0.0-rc13<br/>+ 2 OpenWA patches"]
     WLIB --> WEB["WhatsApp Web<br/>headless Chromium"]
     BLIB --> WAS["WhatsApp servers<br/>browser-free socket"]
     WA -.->|"not-available"| E["EngineNotSupportedError<br/>HTTP 501"]
@@ -284,9 +284,9 @@ socket is caught by the transport instead. No REST route: the session watchdog p
 | `getGroups`                      | ✅                  | ✅                 | ✅              |
 | `getGroupInfo`                   | ✅                  | ✅                 | ✅              |
 | `addParticipants`                | ✅                  | ✅                 | ✅              |
-| `removeParticipants`             | ✅                  | ✅                 | ✅              |
-| `promoteParticipants`            | ✅                  | ✅                 | ✅              |
-| `demoteParticipants`             | ✅                  | ✅                 | ✅              |
+| `removeParticipants`             | ✅                  | ✅🔧⁷              | ✅              |
+| `promoteParticipants`            | ✅                  | ✅🔧⁷              | ✅              |
+| `demoteParticipants`             | ✅                  | ✅🔧⁷              | ✅              |
 | `approveGroupMembershipRequests` | ✅                  | ✅                 | ✅              |
 | `rejectGroupMembershipRequests`  | ✅                  | ✅                 | ✅              |
 | `getGroupMembershipRequests`     | ✅                  | ✅                 | ✅              |
