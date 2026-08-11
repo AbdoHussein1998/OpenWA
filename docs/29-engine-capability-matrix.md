@@ -570,20 +570,20 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 
 **Profile, contacts & presence** (12)
 
-| Library method           | OpenWA exposure                                 |
-| ------------------------ | ----------------------------------------------- |
-| `addOrEditContact`       | ✅ `upsertContact`                              |
-| `createCallLink`         | ✅ `createCallLink`                             |
-| `presenceSubscribe`      | ✅ `subscribeToPresence`                        |
-| `removeContact`          | ✅ `deleteContact`                              |
-| `removeCoverPhoto`       | ❌ **not exposed**                              |
-| `removeProfilePicture`   | ✅ `deleteGroupPicture`, `deleteProfilePicture` |
-| `star`                   | ✅ `starMessage`                                |
-| `updateCoverPhoto`       | ❌ **not exposed**                              |
-| `updateProfileName`      | ✅ `setProfileName`                             |
-| `updateProfilePicture`   | ✅ `setProfilePicture`, `setGroupPicture`       |
-| `updateProfileStatus`    | ✅ `setProfileStatus`                           |
-| `updateServerTimeOffset` | 🔩 plumbing                                     |
+| Library method           | OpenWA exposure                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `addOrEditContact`       | ✅ `upsertContact`                                                                                     |
+| `createCallLink`         | ✅ `createCallLink`                                                                                    |
+| `presenceSubscribe`      | ✅ `subscribeToPresence`                                                                               |
+| `removeContact`          | ✅ `deleteContact`                                                                                     |
+| `removeCoverPhoto`       | ❌ **not exposed**                                                                                     |
+| `removeProfilePicture`   | ✅ `deleteGroupPicture`, `deleteProfilePicture`                                                        |
+| `star`                   | ❌ **not exposed** — `starMessage` is implemented with `chatModify({ star })`, on the `chatModify` row |
+| `updateCoverPhoto`       | ❌ **not exposed**                                                                                     |
+| `updateProfileName`      | ✅ `setProfileName`                                                                                    |
+| `updateProfilePicture`   | ✅ `setProfilePicture`, `setGroupPicture`                                                              |
+| `updateProfileStatus`    | ✅ `setProfileStatus`                                                                                  |
+| `updateServerTimeOffset` | 🔩 plumbing                                                                                            |
 
 **Socket, session & plumbing** (21)
 
@@ -645,7 +645,7 @@ with zero OpenWA surface. Baileys-only; whatsapp-web.js has no community API at 
 | `sendMessage`                  | ✅ `sendTextMessage`, `sendImageMessage`, `sendVideoMessage`, `sendAudioMessage`, `sendDocumentMessage`, `sendStickerMessage`, `sendLocationMessage`, `sendContactMessage`, `sendPollMessage`, `postTextStatus`, `postImageStatus`, `postVideoStatus`, `postVoiceStatus` |
 | `sendReaction`                 | ❌ **not exposed**                                                                                                                                                                                                                                                       |
 | `sendResponseToScheduledEvent` | ❌ **not exposed**                                                                                                                                                                                                                                                       |
-| `sendSeen`                     | ✅ `sendSeen`, `clearChatMessages`                                                                                                                                                                                                                                       |
+| `sendSeen`                     | ❌ **not exposed** — the adapter reads the chat and calls `Chat.sendSeen()`, not the Client method                                                                                                                                                                       |
 
 **Chats** (9)
 
@@ -923,9 +923,9 @@ adapter sources — re-derive the same way when anything changes:
 - REST caller's view: **90** engine-neutral (88 + 2 store-backed status reads), **12** Baileys-only,
   **9** wwjs-only, **1** unavailable on both (`sendCatalog`).
 - Full engine inventory (29.5), split by the exposure legend rather than lumped: Baileys **152**
-  socket methods — 49 wired into interface methods, 5 internal wiring, 29 plumbing, **69 ❌ not
-  exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 46 wired,
-  2 internal wiring, 1 class plumbing, **32 ❌ not exposed** (24 real capabilities + 8
+  socket methods — 48 wired into interface methods, 5 internal wiring, 29 plumbing, **70 ❌ not
+  exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 45 wired,
+  2 internal wiring, 1 class plumbing, **33 ❌ not exposed** (25 real capabilities + 8
   session/transport settings that are not WhatsApp capabilities). The backlog is the ❌ rows minus
   those 8 settings; 🔩 plumbing is correctly never exposed.
 - Events: Baileys **34** (15 consumed / 19 dropped), wwjs **31** (16 consumed / 15 dropped).
