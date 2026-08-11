@@ -863,6 +863,26 @@ class ArchiveChatRequest(TypedDict):
     archive: bool
 
 
+class PinChatRequest(TypedDict):
+    """Pin a chat to the top of the list, or unpin it."""
+
+    chatId: str
+    pin: bool
+
+
+class MuteChatRequest(TypedDict):
+    """Mute a chat until an absolute timestamp, or unmute it.
+
+    ``muteUntil`` is epoch **milliseconds**, or ``None`` to unmute now. Milliseconds, not seconds:
+    a seconds-scale value is an instant in 1970, so the mute expires immediately while the request
+    still answers 200. Required rather than optional because the two readings of an omitted value,
+    unmute now and mute indefinitely, are opposites.
+    """
+
+    chatId: str
+    muteUntil: Optional[int]
+
+
 class VotePollRequest(TypedDict):
     """Vote on a poll. options are option TEXTS (no ids); [] clears the vote."""
 
