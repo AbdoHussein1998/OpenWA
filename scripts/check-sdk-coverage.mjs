@@ -70,8 +70,9 @@ const CHAIN = new RegExp(`${TERM}(?:\\s*\\+\\s*${TERM})*`, 'g');
  *
  * `baseValue` is a resolved `…Service.base()` body (Go). Each rule exists because its absence
  * produced a false positive:
- *   (a) quoted literals in any quote style — the JS client writes some paths in single quotes, and
- *       a backtick-only scan silently skips them (the shipped forward gate still does).
+ *   (a) quoted literals in any quote style — the JS client writes some paths in single quotes, which
+ *       a backtick-only scan silently skips. The forward gate (check-sdk-routes.mjs) was blind to
+ *       exactly those nine literals until it was widened to match this one.
  *   (b) `+`-chains — Java and Go assemble paths rather than writing them whole.
  *   (c) base plus a bare suffix, with and without an interposed id segment — Go's per-service
  *       helpers take `"/read"` or `"reply"` and the caller never names the whole path.
