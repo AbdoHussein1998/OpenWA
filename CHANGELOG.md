@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-11
+
 ### Added
 
 - The JavaScript, Python, PHP, Go and Java SDKs expose `POST /sessions/:id/chats/pin` and `chats/mute`, the two routes this release adds, so neither ships without a client. `muteUntil` is epoch milliseconds and `null` unmutes; both are required, since an omitted value reads as either.
