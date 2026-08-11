@@ -139,6 +139,34 @@ describe('openapi.json structural invariants', () => {
     expect(bare).toEqual([]);
   });
 
+  it('declares nullability on every property whose description offers null', () => {
+    const doc = snapshot();
+    // A property documented as carrying null must publish it, or a client generated from the
+    // contract rejects a value the gateway both sends and accepts. `lastTriggeredAt` was fixed that
+    // way; `filters` — stored as `dto.filters ?? null` for every webhook created without one — was
+    // the sibling left behind, which is why this is an invariant rather than three more spellings.
+    //
+    // A container satisfies it through its members: `pictures` is never null, but its values are,
+    // and it declares that on additionalProperties.
+    const scanned: string[] = [];
+    const undeclared: string[] = [];
+
+    type Spec = { description?: string; nullable?: boolean; items?: Spec; additionalProperties?: Spec | boolean };
+    for (const [name, schema] of Object.entries(doc.components?.schemas ?? {})) {
+      const properties = (schema as { properties?: Record<string, Spec> }).properties ?? {};
+      for (const [property, spec] of Object.entries(properties)) {
+        if (!/\bnull\b/i.test(spec.description ?? '')) continue;
+        scanned.push(`${name}.${property}`);
+        const member = typeof spec.additionalProperties === 'object' ? spec.additionalProperties : spec.items;
+        if (spec.nullable !== true && member?.nullable !== true) undeclared.push(`${name}.${property}`);
+      }
+    }
+
+    // Guard the selector: a description reworded away from the word would scan nothing and pass.
+    expect(scanned.length).toBeGreaterThan(15);
+    expect(undeclared).toEqual([]);
+  });
+
   it('gives each route exactly one path key, whatever its parameters are named', () => {
     const doc = snapshot();
     // A path template variable is positional: `/x/{id}` and `/x/{sessionId}` are the same URL. Two
