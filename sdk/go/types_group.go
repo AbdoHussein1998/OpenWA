@@ -25,6 +25,23 @@ type GroupSummary struct {
 	LinkedParentJID   *string `json:"linkedParentJID,omitempty"`
 }
 
+// GroupMembershipRequest is a pending request to join a group. Only ParticipantID is always
+// present; the engine reports the rest when it has it.
+type GroupMembershipRequest struct {
+	ParticipantID string `json:"participantId"`
+	AddedByID     string `json:"addedById,omitempty"`
+	// Method is one of: invite_link, non_admin_add, linked_group_join.
+	Method string `json:"method,omitempty"`
+	// RequestedAt is Unix seconds.
+	RequestedAt float64 `json:"requestedAt,omitempty"`
+}
+
+// MembershipRequestActionRequest is the body for approving or rejecting join requests. An empty
+// Participants slice acts on every pending request.
+type MembershipRequestActionRequest struct {
+	Participants []string `json:"participants,omitempty"`
+}
+
 // GroupInfo is the full group detail.
 type GroupInfo struct {
 	ID              string             `json:"id"`

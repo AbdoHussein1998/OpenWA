@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DELETE /sessions/:sessionId/profile/picture` removes the account profile picture on both engines; removing one that is already absent is a no-op answering `200`, so the call is safe to repeat.
 - `docs-29-counts.spec.ts` binds every count-shaped claim in `docs/29` to the capability matrix, so a figure restated in the intro, the architecture prose, a mermaid node or a section heading cannot drift from the source it restates.
 - The JavaScript, Python, PHP, Go and Java SDKs expose `PUT /sessions/:id/presence`, which sets the account's own global presence. The gateway has published the route since v0.15.0 with no client counterpart, so a typed client had to fall back to a raw request. It is the account's presence, not a chat's — the per-chat typing and recording states are unchanged on the chats resource.
+- The JavaScript, Python, PHP, Go and Java SDKs expose the three group membership-request routes — list, approve and reject. The gateway has published them since v0.15.0 with no client counterpart. Omitting the participant list acts on every pending request, and an approval that WhatsApp refuses for some requesters still answers `200`, reporting the outcome per participant in `results`.
 
 ### Fixed
 

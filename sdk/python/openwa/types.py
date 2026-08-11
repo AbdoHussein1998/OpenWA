@@ -603,6 +603,22 @@ class GroupSummary(TypedDict, total=False):
     linkedParentJID: str | None
 
 
+GroupMembershipRequestMethod = Literal["invite_link", "non_admin_add", "linked_group_join"]
+
+
+class GroupMembershipRequest(TypedDict, total=False):
+    """A pending request to join a group.
+
+    Only ``participantId`` is always present; the engine reports the rest when it has it, so treat
+    ``addedById``, ``method`` and ``requestedAt`` as absent rather than assuming a shape.
+    """
+
+    participantId: str
+    addedById: str
+    method: GroupMembershipRequestMethod
+    requestedAt: float
+
+
 class GroupInfo(TypedDict, total=False):
     """Full detail returned by ``GET /sessions/:id/groups/:groupId``."""
 

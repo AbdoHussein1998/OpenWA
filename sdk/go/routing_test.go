@@ -79,6 +79,9 @@ func TestRouting(t *testing.T) {
 		{"Groups.Leave", func(c *Client) { c.Groups.Leave(ctx, "s1", "g1") }, "POST", "/api/sessions/s1/groups/g1/leave"},
 		{"Groups.InviteCode", func(c *Client) { c.Groups.InviteCode(ctx, "s1", "g1") }, "GET", "/api/sessions/s1/groups/g1/invite-code"},
 		{"Groups.RevokeInviteCode", func(c *Client) { c.Groups.RevokeInviteCode(ctx, "s1", "g1") }, "POST", "/api/sessions/s1/groups/g1/invite-code/revoke"},
+		{"Groups.GetMembershipRequests", func(c *Client) { c.Groups.GetMembershipRequests(ctx, "s1", "g1") }, "GET", "/api/sessions/s1/groups/g1/membership-requests"},
+		{"Groups.ApproveMembershipRequests", func(c *Client) { c.Groups.ApproveMembershipRequests(ctx, "s1", "g1", nil) }, "POST", "/api/sessions/s1/groups/g1/membership-requests/approve"},
+		{"Groups.RejectMembershipRequests", func(c *Client) { c.Groups.RejectMembershipRequests(ctx, "s1", "g1", nil) }, "POST", "/api/sessions/s1/groups/g1/membership-requests/reject"},
 		{"Groups.GetGroupSettings", func(c *Client) { c.Groups.GetGroupSettings(ctx, "s1", "g1") }, "GET", "/api/sessions/s1/groups/g1/settings"},
 		{"Groups.UpdateGroupSettings", func(c *Client) { c.Groups.UpdateGroupSettings(ctx, "s1", "g1", GroupSettings{}) }, "PUT", "/api/sessions/s1/groups/g1/settings"},
 

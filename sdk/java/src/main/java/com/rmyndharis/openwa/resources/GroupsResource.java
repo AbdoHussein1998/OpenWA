@@ -8,6 +8,8 @@ import com.rmyndharis.openwa.model.CreateGroupRequest;
 import com.rmyndharis.openwa.model.GroupDescriptionRequest;
 import com.rmyndharis.openwa.model.GroupInfo;
 import com.rmyndharis.openwa.model.GroupJoinInfo;
+import com.rmyndharis.openwa.model.GroupMembershipRequest;
+import com.rmyndharis.openwa.model.MembershipRequestActionRequest;
 import com.rmyndharis.openwa.model.GroupSettings;
 import com.rmyndharis.openwa.model.GroupSubjectRequest;
 import com.rmyndharis.openwa.model.GroupSummary;
@@ -228,4 +230,49 @@ public final class GroupsResource {
             null,
             InviteCodeResponse.class);
     }
+
+    /**
+     * List a group's pending join requests. Requires the account to be a group admin.
+     *
+     * <p>Only {@code participantId} is guaranteed on each entry — the engine reports the rest when
+     * it has it.
+     */
+    public List<GroupMembershipRequest> getMembershipRequests(String sessionId, String groupId) {
+        return client.requestList(
+            HttpMethod.GET,
+            "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId) + "/membership-requests",
+            null,
+            null,
+            GroupMembershipRequest.class);
+    }
+
+    /**
+     * Approve pending join requests. A body with no participants approves every pending request.
+     *
+     * <p>A partial refusal answers 200 and reports it per participant in {@code results}, so
+     * {@code success} alone does not mean everyone was let in.
+     */
+    public ParticipantsResult approveMembershipRequests(
+            String sessionId, String groupId, MembershipRequestActionRequest body) {
+        return client.request(
+            HttpMethod.POST,
+            "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId)
+                + "/membership-requests/approve",
+            null,
+            body,
+            ParticipantsResult.class);
+    }
+
+    /** Reject pending join requests. A body with no participants rejects every pending request. */
+    public ParticipantsResult rejectMembershipRequests(
+            String sessionId, String groupId, MembershipRequestActionRequest body) {
+        return client.request(
+            HttpMethod.POST,
+            "/api/sessions/" + encodeSegment(sessionId) + "/groups/" + encodeSegment(groupId)
+                + "/membership-requests/reject",
+            null,
+            body,
+            ParticipantsResult.class);
+    }
+
 }
