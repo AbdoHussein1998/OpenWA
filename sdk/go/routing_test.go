@@ -106,6 +106,8 @@ func TestRouting(t *testing.T) {
 		{"Chats.MarkUnread", func(c *Client) { c.Chats.MarkUnread(ctx, "s1", MarkChatRequest{}) }, "POST", "/api/sessions/s1/chats/unread"},
 		{"Chats.ClearMessages", func(c *Client) { c.Chats.ClearMessages(ctx, "s1", "c1") }, "DELETE", "/api/sessions/s1/chats/c1/messages"},
 		{"Chats.Archive", func(c *Client) { c.Chats.Archive(ctx, "s1", ArchiveChatRequest{}) }, "POST", "/api/sessions/s1/chats/archive"},
+		{"Chats.Pin", func(c *Client) { c.Chats.Pin(ctx, "s1", PinChatRequest{}) }, "POST", "/api/sessions/s1/chats/pin"},
+		{"Chats.Mute", func(c *Client) { c.Chats.Mute(ctx, "s1", MuteChatRequest{}) }, "POST", "/api/sessions/s1/chats/mute"},
 		{"Chats.Delete", func(c *Client) { c.Chats.Delete(ctx, "s1", DeleteChatRequest{}) }, "POST", "/api/sessions/s1/chats/delete"},
 		{"Chats.SendState", func(c *Client) { c.Chats.SendState(ctx, "s1", SendChatStateRequest{}) }, "POST", "/api/sessions/s1/chats/typing"},
 

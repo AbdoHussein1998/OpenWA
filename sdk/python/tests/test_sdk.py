@@ -661,6 +661,31 @@ class TestChatsAndHealth:
         assert backend.last_call.url == "http://localhost:2785/api/sessions/s/chats/archive"
         assert backend.last_call.body == {"chatId": "a@c.us", "archive": True}
 
+    def test_chats_pin(self):
+        backend = MockBackend().on("POST", "/chats/pin", body={"success": True})
+        make_client(backend).chats.pin("s", {"chatId": "a@c.us", "pin": True})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/chats/pin"
+        assert backend.last_call.body == {"chatId": "a@c.us", "pin": True}
+
+    def test_chats_pin_reports_refusal(self):
+        backend = MockBackend().on("POST", "/chats/pin", body={"success": False})
+        assert make_client(backend).chats.pin("s", {"chatId": "a@c.us", "pin": True}) == {"success": False}
+
+    def test_chats_mute_sends_epoch_milliseconds_unchanged(self):
+        # The value must arrive as the exact millisecond number given. A client that divided by 1000
+        # would still get a 200 back; the wrong unit is only visible on the wire.
+        backend = MockBackend().on("POST", "/chats/mute", body={"success": True})
+        make_client(backend).chats.mute("s", {"chatId": "a@c.us", "muteUntil": 1893456000000})
+        assert backend.last_call.url == "http://localhost:2785/api/sessions/s/chats/mute"
+        assert backend.last_call.body == {"chatId": "a@c.us", "muteUntil": 1893456000000}
+
+    def test_chats_mute_sends_explicit_null_to_unmute(self):
+        # None is the unmute signal and is NOT the same as omitting the key, which the route rejects.
+        backend = MockBackend().on("POST", "/chats/mute", body={"success": True})
+        make_client(backend).chats.mute("s", {"chatId": "a@c.us", "muteUntil": None})
+        assert backend.last_call.body == {"chatId": "a@c.us", "muteUntil": None}
+        assert "muteUntil" in backend.last_call.body
+
     def test_health_and_auth(self):
         backend = MockBackend()
         backend.on("GET", "/api/health", body={"status": "ok", "version": "0.7.2"})

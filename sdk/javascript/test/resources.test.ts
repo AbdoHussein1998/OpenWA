@@ -400,6 +400,39 @@ describe('ChatsResource.archive', () => {
   });
 });
 
+describe('ChatsResource.pin', () => {
+  it('posts chatId and the pin flag', async () => {
+    const t = new MockTransport().on('POST', /\/chats\/pin$/, { body: { success: true } });
+    await client(t).chats.pin('s', { chatId: 'a@c.us', pin: true });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/chats/pin');
+    expect(t.lastCall!.body).toEqual({ chatId: 'a@c.us', pin: true });
+  });
+
+  it('reports the three-pin refusal rather than throwing', async () => {
+    const t = new MockTransport().on('POST', /\/chats\/pin$/, { body: { success: false } });
+    await expect(client(t).chats.pin('s', { chatId: 'a@c.us', pin: true })).resolves.toEqual({ success: false });
+  });
+});
+
+describe('ChatsResource.mute', () => {
+  // muteUntil must survive as the exact epoch-millisecond number given. A client that divided by
+  // 1000, or stringified it, would still get a 200 back — the wrong unit is only visible here.
+  it('sends muteUntil as epoch milliseconds, unchanged', async () => {
+    const t = new MockTransport().on('POST', /\/chats\/mute$/, { body: { success: true } });
+    await client(t).chats.mute('s', { chatId: 'a@c.us', muteUntil: 1893456000000 });
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/chats/mute');
+    expect(t.lastCall!.body).toEqual({ chatId: 'a@c.us', muteUntil: 1893456000000 });
+  });
+
+  // null is the unmute signal and is NOT the same as omitting the field, which the route rejects.
+  it('sends an explicit null to unmute rather than dropping the key', async () => {
+    const t = new MockTransport().on('POST', /\/chats\/mute$/, { body: { success: true } });
+    await client(t).chats.mute('s', { chatId: 'a@c.us', muteUntil: null });
+    expect(t.lastCall!.body).toEqual({ chatId: 'a@c.us', muteUntil: null });
+    expect(Object.keys(t.lastCall!.body as object)).toContain('muteUntil');
+  });
+});
+
 describe('HealthResource + auth — exact paths', () => {
   it('health/live/ready and auth validate', async () => {
     const t = new MockTransport()

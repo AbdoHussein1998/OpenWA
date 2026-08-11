@@ -341,6 +341,25 @@ export interface ArchiveChatRequest {
   archive: boolean;
 }
 
+export interface PinChatRequest {
+  chatId: Jid;
+  /** true to pin the chat to the top of the list, false to unpin it. */
+  pin: boolean;
+}
+
+export interface MuteChatRequest {
+  chatId: Jid;
+  /**
+   * Absolute epoch **milliseconds** at which the mute expires, or `null` to unmute now.
+   *
+   * Milliseconds, not seconds — a seconds-scale value is an instant in 1970, so the mute expires
+   * immediately while the request still answers 200 and nothing in the response says otherwise.
+   * Required rather than optional because the two readings of an omitted value, unmute now and mute
+   * indefinitely, are opposites.
+   */
+  muteUntil: number | null;
+}
+
 export interface VotePollRequest {
   chatId: Jid;
   /** The poll creation message to vote on. */
