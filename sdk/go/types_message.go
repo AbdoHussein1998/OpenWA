@@ -217,13 +217,43 @@ type ChatHistoryMessage struct {
 	IsGroup           bool              `json:"isGroup"`
 	IsStatusBroadcast bool              `json:"isStatusBroadcast"`
 	Kind              string            `json:"kind"`
+	EphemeralDuration int               `json:"ephemeralDuration,omitempty"`
 	Author            string            `json:"author,omitempty"`
 	MentionedIDs      []string          `json:"mentionedIds,omitempty"`
+	Call              *MessageCall      `json:"call,omitempty"`
 	IsLidSender       bool              `json:"isLidSender,omitempty"`
 	SenderPhone       *string           `json:"senderPhone,omitempty"`
+	Contact           *MessageContact   `json:"contact,omitempty"`
+	BackgroundColor   string            `json:"backgroundColor,omitempty"`
+	Font              int               `json:"font,omitempty"`
 	Media             *ChatHistoryMedia `json:"media,omitempty"`
 	QuotedMessage     *QuotedMessage    `json:"quotedMessage,omitempty"`
 	Location          *MessageLocation  `json:"location,omitempty"`
+}
+
+// MessageCall is the call block on a live history message, present on call messages only.
+type MessageCall struct {
+	Video  bool `json:"video"`
+	Missed bool `json:"missed"`
+}
+
+// MessageContact is the sender contact block on a live history message. History carries PushName
+// only; the richer fields arrive on message.received when WEBHOOK_CONTACT_DETAILS is enabled.
+type MessageContact struct {
+	ID            string   `json:"id,omitempty"`
+	Number        string   `json:"number,omitempty"`
+	Name          string   `json:"name,omitempty"`
+	PushName      string   `json:"pushName,omitempty"`
+	ShortName     string   `json:"shortName,omitempty"`
+	Type          string   `json:"type,omitempty"`
+	IsMyContact   bool     `json:"isMyContact,omitempty"`
+	IsWAContact   bool     `json:"isWAContact,omitempty"`
+	IsBusiness    bool     `json:"isBusiness,omitempty"`
+	IsEnterprise  bool     `json:"isEnterprise,omitempty"`
+	VerifiedName  string   `json:"verifiedName,omitempty"`
+	VerifiedLevel int      `json:"verifiedLevel,omitempty"`
+	IsBlocked     bool     `json:"isBlocked,omitempty"`
+	Labels        []string `json:"labels,omitempty"`
 }
 
 // ReactionSender is one sender within a ReactionRecord.

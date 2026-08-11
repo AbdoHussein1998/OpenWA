@@ -465,11 +465,38 @@ export interface ChatHistoryMessage {
   isGroup: boolean;
   isStatusBroadcast?: boolean;
   kind?: ChatKind;
+  /** Disappearing-messages timer on the chat, in seconds. Absent when the chat has none set. */
+  ephemeralDuration?: number;
   /** For group messages, the participant who sent it (`from` is the group JID). */
   author?: Jid;
   mentionedIds?: Jid[];
+  /** Present on `call` messages only. */
+  call?: { video: boolean; missed: boolean };
   isLidSender?: boolean;
   senderPhone?: string | null;
+  /**
+   * Sender contact info, best-effort from the engine's cache. History carries `pushName` only;
+   * the richer fields arrive on `message.received` when `WEBHOOK_CONTACT_DETAILS=true`.
+   */
+  contact?: {
+    id?: Jid;
+    number?: string;
+    name?: string;
+    pushName?: string;
+    shortName?: string;
+    type?: string;
+    isMyContact?: boolean;
+    isWAContact?: boolean;
+    isBusiness?: boolean;
+    isEnterprise?: boolean;
+    verifiedName?: string;
+    verifiedLevel?: number;
+    isBlocked?: boolean;
+    labels?: string[];
+  };
+  /** Status/story styling. Declared by the engine payload; this route never sets either. */
+  backgroundColor?: string;
+  font?: number;
   media?: {
     mimetype: string;
     filename?: string;

@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Turkish (`tr`) dashboard translation. Thanks @codedByCan.
 
+### Fixed
+
+- The JavaScript, Python, Go and Java SDKs omitted `contact`, `call` and `ephemeralDuration` from their chat-history message type, so a typed client had to cast to read three fields the endpoint returns; all four now mirror the engine payload, and a type-level contract assertion in the JavaScript SDK fails the build if that type and the engine interface drift apart again.
+
 ### Documentation
 
 - `RESOLVE_LID_TO_PHONE` was documented nowhere outside `.env.example`, so an operator receiving `@lid` senders had no path to the flag that resolves them; the event catalog now carries the `senderPhone` opt-in callout, the contact-phone endpoint points back to it, and the troubleshooting FAQ covers the symptom.

@@ -446,6 +446,33 @@ class MessageLocation(TypedDict, total=False):
     url: str
 
 
+class MessageCall(TypedDict, total=False):
+    """Call block on a live history message, present on ``call`` messages only."""
+
+    video: bool
+    missed: bool
+
+
+class MessageContact(TypedDict, total=False):
+    """Sender contact block. History carries ``pushName`` only; the richer fields arrive on
+    ``message.received`` when ``WEBHOOK_CONTACT_DETAILS`` is enabled."""
+
+    id: Jid
+    number: str
+    name: str
+    pushName: str
+    shortName: str
+    type: str
+    isMyContact: bool
+    isWAContact: bool
+    isBusiness: bool
+    isEnterprise: bool
+    verifiedName: str
+    verifiedLevel: int
+    isBlocked: bool
+    labels: list
+
+
 # A message read live from WhatsApp by ``messages.history()`` — the engine
 # payload, richer and differently shaped than the persisted MessageRecord.
 ChatHistoryMessage = TypedDict(
@@ -462,10 +489,15 @@ ChatHistoryMessage = TypedDict(
         "isGroup": bool,
         "isStatusBroadcast": bool,
         "kind": str,
+        "ephemeralDuration": int,
         "author": Jid,
         "mentionedIds": list,
+        "call": MessageCall,
         "isLidSender": bool,
         "senderPhone": Optional[str],
+        "contact": MessageContact,
+        "backgroundColor": str,
+        "font": int,
         "media": ChatHistoryMedia,
         "quotedMessage": QuotedMessage,
         "location": MessageLocation,
