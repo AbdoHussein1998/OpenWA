@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException, 
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PluginLoaderService, PluginStatus, resolvePluginMainPath } from '../../core/plugins';
+import { PluginLoaderService, PluginStatus, resolvePluginEntryPath } from '../../core/plugins';
 import { pluginUpdateBackupDirName, pluginUpdateStagingDirName } from '../../core/plugins';
 import type { PluginConfigSchema } from '../../core/plugins';
 import { PluginDto } from './dto/plugin.dto';
@@ -281,10 +281,12 @@ export class PluginsService {
     if (!entry || typeof entry !== 'string') {
       throw new NotFoundException(`Plugin ${id} has no config UI`);
     }
-    const base = path.resolve(this.pluginLoader.getPluginsDir(), id);
+    // Anchored to the package's own directory: the plugin is loaded by this point, and a package
+    // found in the legacy plugins directory does not live under the configured root.
+    const base = path.resolve(this.pluginLoader.getPluginPackageDir(id));
     let file: string;
     try {
-      file = resolvePluginMainPath(this.pluginLoader.getPluginsDir(), id, entry);
+      file = resolvePluginEntryPath(base, entry);
     } catch {
       throw new NotFoundException(`Config UI entry not found for plugin ${id}`);
     }
@@ -468,11 +470,15 @@ export class PluginsService {
     }
 
     const wasEnabled = plugin.status === PluginStatus.ENABLED;
-    const pluginsDir = this.pluginLoader.getPluginsDir();
-    const dir = path.join(pluginsDir, id);
-    // Dot-prefixed siblings inside pluginsDir: same filesystem (so the renames stay EXDEV-safe) but
-    // skipped by the loader's directory scan, so a crash mid-update can't leave them loaded as a
-    // duplicate. The loader's boot-time recovery keys off these exact names.
+    // The tree the package was loaded from, which is the legacy plugins directory for a host that
+    // has not migrated. Updating in the configured root instead renames a directory that is not
+    // there, after unloadPlugin has already dropped the plugin from the runtime.
+    const dir = this.pluginLoader.getPluginPackageDir(id);
+    const pluginsDir = path.dirname(dir);
+    // Dot-prefixed siblings inside that same directory: same filesystem (so the renames stay
+    // EXDEV-safe) but skipped by the loader's directory scan, so a crash mid-update can't leave them
+    // loaded as a duplicate. The loader's boot-time recovery runs per scanned directory and keys off
+    // these exact names, so it reconciles the legacy tree too.
     const backup = path.join(pluginsDir, pluginUpdateBackupDirName(id));
     const staging = path.join(pluginsDir, pluginUpdateStagingDirName(id));
 
