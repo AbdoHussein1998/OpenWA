@@ -86,8 +86,25 @@ describe('docs/29 counts match the capability matrix', () => {
     expect(expected.total).toBeGreaterThan(4);
     expect(expected.wwjs + expected.baileys).toBe(expected.total);
 
+    // 29.3's opening sentence and 29.3.2's split spell the figure in prose rather than digits, which
+    // is why they drifted while the digit-shaped claims held: a patcher was added to each library and
+    // the words stayed at "five" and "1 on Baileys".
+    const WORDS: Record<string, number> = { four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+    const spelled = doc.match(/OpenWA ships (\w+) exact, self-disabling source transforms/);
+    const wrongProse: string[] = [];
+    if (!spelled) wrongProse.push('29.3 opening: phrasing no longer found in the document');
+    else if (WORDS[spelled[1]] !== expected.total) {
+      wrongProse.push(`29.3 opening: says ${spelled[1]}, scripts/ has ${expected.total}`);
+    }
+
     const claims: { label: string; re: RegExp; want: number }[] = [
       { label: 'intro total', re: /(\d+) install-time patches \(29\.3\)/, want: expected.total },
+      { label: '29.3.2 split wwjs', re: /engine-specific \((\d+) on wwjs/, want: expected.wwjs },
+      {
+        label: '29.3.2 split baileys',
+        re: /engine-specific \(\d+ on wwjs,\s*(\d+) on Baileys\)/,
+        want: expected.baileys,
+      },
       { label: 'mermaid wwjs node', re: /whatsapp-web\.js [\d.]+<br\/>\+ (\d+) OpenWA patch/, want: expected.wwjs },
       { label: 'mermaid baileys node', re: /baileys [\w.-]+<br\/>\+ (\d+) OpenWA patch/, want: expected.baileys },
       { label: '29.8 total', re: /- \*\*(\d+)\*\* install-time patches/, want: expected.total },
@@ -111,7 +128,7 @@ describe('docs/29 counts match the capability matrix', () => {
       if (actual !== claim.want) wrong.push(`${claim.label}: says ${actual}, scripts/ has ${claim.want}`);
     }
 
-    expect(wrong).toEqual([]);
+    expect([...wrongProse, ...wrong]).toEqual([]);
   });
 
   it('states the same figures everywhere it states them', () => {
