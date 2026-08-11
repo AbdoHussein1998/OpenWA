@@ -196,10 +196,17 @@ export interface GroupParticipant {
  * Outcome of a group membership write (add/remove/promote/demote) for ONE participant. Engines
  * that report per-participant results map them verbatim (whatsapp-web.js `addParticipants` resolves
  * a `{[participantId]: {code, message}}` object; Baileys `groupParticipantsUpdate` resolves a
- * `[{status, jid}]` array); engines that only confirm the batch as a whole (whatsapp-web.js
- * remove/promote/demote resolve `{status: 200}`) report one success entry per requested participant.
+ * `[{status, jid}]` array).
+ *
+ * whatsapp-web.js remove/promote/demote confirm only the batch, but an install-time patch
+ * (`scripts/patch-wwebjs-participant-arity.js`) makes the page report which requested ids resolved
+ * to actual members, so those entries are per-participant too: an id the page dropped is reported
+ * `404` rather than confirmed. On a tree where that patch was not applied the marker is absent and
+ * the adapter falls back to one batch-confirmed entry per requested participant, which is all the
+ * library reports there.
+ *
  * `status` is the engine's own code when it reported one (e.g. 200 ok, 403 invite-only/not-admin,
- * 404 not registered, 409 already a member).
+ * 404 not registered or not a member, 409 already a member).
  */
 export interface ParticipantOperationResult {
   /** Neutral participant id the outcome belongs to. */
