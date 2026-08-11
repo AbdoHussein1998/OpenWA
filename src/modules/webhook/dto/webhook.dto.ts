@@ -105,7 +105,11 @@ export class CreateWebhookDto {
   @IsHeaderMap()
   headers?: Record<string, string>;
 
-  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE })
+  // `nullable` spelled out for the same reason lastTriggeredAt spells out its type: the field is
+  // STORED as null whenever a webhook is created without filters (`dto.filters ?? null`), and the
+  // description offers null as an input, so a schema without it rejects a value the route both
+  // sends and accepts.
+  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE, nullable: true })
   @IsOptional()
   @IsValidWebhookFilters()
   filters?: WebhookFilters | null;
@@ -154,7 +158,11 @@ export class UpdateWebhookDto {
   @IsHeaderMap()
   headers?: Record<string, string>;
 
-  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE })
+  // `nullable` spelled out for the same reason lastTriggeredAt spells out its type: the field is
+  // STORED as null whenever a webhook is created without filters (`dto.filters ?? null`), and the
+  // description offers null as an input, so a schema without it rejects a value the route both
+  // sends and accepts.
+  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE, nullable: true })
   @IsOptional()
   @IsValidWebhookFilters()
   filters?: WebhookFilters | null;
@@ -206,7 +214,11 @@ export class WebhookResponseDto {
   events!: string[];
 
   @Expose()
-  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE })
+  // `nullable` spelled out for the same reason lastTriggeredAt spells out its type: the field is
+  // STORED as null whenever a webhook is created without filters (`dto.filters ?? null`), and the
+  // description offers null as an input, so a schema without it rejects a value the route both
+  // sends and accepts.
+  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE, nullable: true })
   filters?: WebhookFilters | null;
 
   @Expose()
