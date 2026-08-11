@@ -63,8 +63,13 @@ export class ChannelService {
    * Their DTOs only require a non-empty string, and `toEngineJid` passes anything it cannot
    * classify through verbatim — so free text, a group id or a bare `@c.us` reached the socket and
    * failed opaquely, while the group participant writes reject the same input with a naming 400.
-   * Guarded here rather than in the DTO so the MCP tools are covered like the REST routes, which is
-   * where the group guard sits for the same reason.
+   *
+   * Guarded here rather than in the DTO to match where the group guard sits, so the rule holds for
+   * any caller and not only the HTTP body. Note the group guard's stated reason does NOT carry over
+   * verbatim: it covers the agent tools because `AgentToolDeps` injects `GroupService`, and there is
+   * no channel tool family — `src/core/agent-tools/tools/index.ts` wires session, message, contact,
+   * group, webhook, labels and automation, and nothing else. Today the controller is the only
+   * caller; the placement is for the next one.
    */
   private addressableUser(userId: string): string {
     if (!isAddressableParticipant(userId)) {
