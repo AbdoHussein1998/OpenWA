@@ -48,6 +48,26 @@ class SetOwnPresenceRequest(TypedDict):
     available: bool
 
 
+CallLinkType = Literal["audio", "video"]
+
+
+class CreateCallLinkRequest(TypedDict):
+    """Body for :meth:`CallsResource.create_link`.
+
+    ``start_time`` is absolute epoch MILLISECONDS; a link for right now is the current timestamp
+    rather than an omitted field.
+    """
+
+    type: CallLinkType
+    startTime: float
+
+
+class CallLinkResponse(TypedDict):
+    """The shareable WhatsApp call link."""
+
+    link: str
+
+
 class SuccessResult(TypedDict, total=False):
     success: bool
     message: str

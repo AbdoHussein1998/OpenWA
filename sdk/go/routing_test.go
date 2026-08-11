@@ -159,6 +159,7 @@ func TestRouting(t *testing.T) {
 		{"Profile.SetProfilePicture", func(c *Client) { c.Profile.SetProfilePicture(ctx, "s1", SetProfilePictureRequest{}) }, "PUT", "/api/sessions/s1/profile/picture"},
 
 		{"Calls.RejectCall", func(c *Client) { c.Calls.RejectCall(ctx, "s1", "call1") }, "POST", "/api/sessions/s1/calls/call1/reject"},
+		{"Calls.CreateLink", func(c *Client) { c.Calls.CreateLink(ctx, "s1", CreateCallLinkRequest{}) }, "POST", "/api/sessions/s1/calls/link"},
 	}
 
 	for _, tc := range cases {

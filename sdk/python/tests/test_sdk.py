@@ -859,3 +859,15 @@ class TestGroupMembershipRequests:
         client.groups.reject_membership_requests("s", "g1@g.us")
         assert backend.calls[-1].url.endswith("/membership-requests/reject")
         assert backend.calls[-1].body == {}
+
+
+class TestCallLink:
+    def test_create_link(self):
+        backend = MockBackend()
+        backend.on("POST", "/calls/link", body={"link": "https://call.whatsapp.com/video/AbC"})
+        client = make_client(backend)
+        res = client.calls.create_link("s", {"type": "video", "startTime": 1800000000000})
+        assert backend.calls[-1].method == "POST"
+        assert backend.calls[-1].url.endswith("/sessions/s/calls/link")
+        assert backend.calls[-1].body == {"type": "video", "startTime": 1800000000000}
+        assert "call.whatsapp.com" in res["link"]

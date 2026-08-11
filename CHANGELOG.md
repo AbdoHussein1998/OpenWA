@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The JavaScript, Python, PHP, Go and Java SDKs expose `PUT /sessions/:id/presence`, which sets the account's own global presence — not a chat's; the per-chat typing and recording states are unchanged.
 - The JavaScript, Python, PHP, Go and Java SDKs expose the three group membership-request routes — list, approve and reject; omitting the participant list acts on every pending request, and a partial refusal still answers `200` with each outcome in `results`.
 - The JavaScript, Python, PHP, Go and Java SDKs expose `GET /sessions/:sessionId/contacts/blocked` as `listBlocked` (`list_blocked` in Python), reading back what `block` and `unblock` have done. It needs only a read-level key.
+- The JavaScript, Python, PHP, Go and Java SDKs expose `POST /sessions/:sessionId/calls/link`, which creates a shareable WhatsApp call link. `startTime` is absolute epoch milliseconds and is required, so a link for right now carries the current timestamp rather than an omitted field.
 
 ### Fixed
 
