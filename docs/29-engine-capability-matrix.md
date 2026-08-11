@@ -914,17 +914,18 @@ Recomputed from `engine-capability-matrix.ts`, `upstream-surface.snapshot.json`,
 adapter sources — re-derive the same way when anything changes:
 
 - **112** interface methods → **224** adapter cells: **199 ✅** / **25 ❌** (2 adapter-gaps, 23
-  library-limitations, 0 uncertain), spanning **23** methods.
-- Of the 199 ✅ cells, **6 wwjs cells carry an explicit patch dependency** (4 × 🔧² status send,
-  1 × 🔧³ channel link preview, 1 × 🔧⁴ ready-sync) and the whole wwjs column additionally
+  library-limitations, 0 uncertain), spanning **24** methods.
+- Of the 199 ✅ cells, **9 wwjs cells carry an explicit patch dependency** (4 × 🔧² status send,
+  1 × 🔧³ channel link preview, 1 × 🔧⁴ ready-sync, 3 × 🔧⁷ participant arity) and one baileys cell
+  does (1 × 🔧⁶ newsletter-create parse); the whole wwjs column additionally
   depends on 🔧¹, the whole Baileys column on 🔧⁵ — so every row rests on a patch on each side,
   even though no row carries a row-level mark on both.
 - REST caller's view: **90** engine-neutral (88 + 2 store-backed status reads), **12** Baileys-only,
   **9** wwjs-only, **1** unavailable on both (`sendCatalog`).
 - Full engine inventory (29.5), split by the exposure legend rather than lumped: Baileys **152**
   socket methods — 49 wired into interface methods, 5 internal wiring, 29 plumbing, **69 ❌ not
-  exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 47 wired,
-  2 internal wiring, 1 class plumbing, **31 ❌ not exposed** (23 real capabilities + 8
+  exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 46 wired,
+  2 internal wiring, 1 class plumbing, **32 ❌ not exposed** (24 real capabilities + 8
   session/transport settings that are not WhatsApp capabilities). The backlog is the ❌ rows minus
   those 8 settings; 🔩 plumbing is correctly never exposed.
 - Events: Baileys **34** (15 consumed / 19 dropped), wwjs **31** (16 consumed / 15 dropped).
