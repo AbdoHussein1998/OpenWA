@@ -648,7 +648,14 @@ export class SessionController {
       'at most three pinned chats and the whatsapp-web.js engine reports the refusal. Unpinning always ' +
       'succeeds, and the Baileys engine always reports success because it cannot observe the cap.',
   })
-  @ApiResponse({ status: 400, description: 'Session not ready' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Session not ready, or a chatId the session cannot resolve. An unknown chat is reported here ' +
+      'rather than as `success: false`, which on this route means only that the three-pin cap ' +
+      'refused a real chat. The Baileys engine cannot resolve chats ahead of the write and answers ' +
+      '`success: true` for an unknown chat.',
+  })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({
     status: 503,

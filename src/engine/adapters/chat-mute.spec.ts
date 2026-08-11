@@ -33,6 +33,7 @@ describe('WwebjsChats.muteChat', () => {
     const client = {
       muteChat: jest.fn().mockResolvedValue({ isMuted: true, muteExpiration: MUTE_UNTIL }),
       unmuteChat: jest.fn().mockResolvedValue({ isMuted: false, muteExpiration: 0 }),
+      getChatById: jest.fn().mockResolvedValue({ id: { _serialized: '628123@c.us' } }),
     };
     const host = {
       ensureReady: jest.fn(),
@@ -64,6 +65,48 @@ describe('WwebjsChats.muteChat', () => {
     const { chats, client } = makeChats();
     client.muteChat.mockRejectedValue(new Error('page died'));
     await expect(chats.muteChat('628123@c.us', MUTE_UNTIL)).rejects.toThrow('page died');
+  });
+
+  /**
+   * Live against a real session, muting a chat the page could not resolve rejected from inside
+   * `Client._muteUnmuteChat`'s evaluate with `TypeError: this.findImpl is not a function`, which
+   * NestJS turns into a bare 500 — a status this route never declares, while its own 400 already
+   * reads "an invalid chatId". The same call against a real chat succeeded, so the capability was
+   * never the problem; only the unresolvable-chat path was.
+   */
+  describe.each([
+    ['the page resolves no such chat', (c: { [k: string]: jest.Mock }) => c.getChatById.mockResolvedValue(undefined)],
+    [
+      'the page rejects the lookup',
+      (c: { [k: string]: jest.Mock }) => c.getChatById.mockRejectedValue(new Error('No LID for user')),
+    ],
+  ])('an unknown chat is bad input, not a server fault — %s', (_label, arrange) => {
+    it('rejects with a 400 and never reaches the mute call', async () => {
+      const { chats, client } = makeChats();
+      arrange(client);
+      await expect(chats.muteChat('628123@c.us', MUTE_UNTIL)).rejects.toMatchObject({ status: 400 });
+      expect(client.muteChat).not.toHaveBeenCalled();
+    });
+
+    it('guards the unmute direction too', async () => {
+      const { chats, client } = makeChats();
+      arrange(client);
+      await expect(chats.muteChat('628123@c.us', null)).rejects.toMatchObject({ status: 400 });
+      expect(client.unmuteChat).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The other half of the same fix, and the reason the guard resolves the chat instead of wrapping
+   * the mute call: a page-side rejection for a chat that DOES exist is exactly what a renamed page
+   * internal produces, and that is how `createGroup` was caught. Demoting it to 400 would relabel a
+   * dead capability as the caller's bad input.
+   */
+  it('a page failure on a chat that DOES resolve stays a server error, not a 400', async () => {
+    const { chats, client } = makeChats();
+    client.muteChat.mockRejectedValue(new TypeError('this.findImpl is not a function'));
+    await expect(chats.muteChat('628123@c.us', MUTE_UNTIL)).rejects.toThrow('findImpl');
+    await expect(chats.muteChat('628123@c.us', MUTE_UNTIL)).rejects.not.toMatchObject({ status: 400 });
   });
 });
 
