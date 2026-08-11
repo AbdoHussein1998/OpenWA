@@ -51,9 +51,14 @@ spec:
           # 30s + 10s x (3-1) = 50s before the kubelet restarts the container, which the connect
           # retry alone can consume.
           #
-          # Budget here is periodSeconds x failureThreshold = 5 x 60 = 300s. That converts "killed
-          # at 50s by default" into "killed at a budget we chose" — a large improvement, and not a
-          # guarantee for a boot that is genuinely unbounded.
+          # Budget here is periodSeconds x (failureThreshold - 1) = 5s x (60-1) = 295s — the same
+          # arithmetic as the 50s above, because the first probe fires at initialDelaySeconds and the
+          # verdict lands on the Nth consecutive failure, not one period after it. The Kubernetes
+          # docs' shorthand (period x threshold) would say 300s; it is one period long, and applying
+          # it to the liveness probe above would give 60s rather than the 50s stated there. Do not
+          # "correct" this back without changing that one too. The point of either figure is that it
+          # converts "killed at 50s by default" into "killed at a budget we chose" — a large
+          # improvement, and not a guarantee for a boot that is genuinely unbounded.
           #
           # initialDelaySeconds is deliberately left at its default of 0: the first probe fires
           # immediately, so a fast boot is recognised in ~5s instead of waiting out a fixed delay.
