@@ -12,6 +12,7 @@ const {
   ACTIONS,
   findFor,
   replaceFor,
+  LEGACY_REPLACE,
 } = require('./patch-wwebjs-participant-arity');
 
 /**
@@ -125,6 +126,46 @@ test('never calls the WA Web action with an empty list', () => {
                         .${action}(chat, present);
                 }`;
     assert.equal(out.split(guardedCall).length - 1, 1, `${action} is not guarded by the arity check`);
+  }
+});
+
+test('acts only on members whose status would actually change', () => {
+  // WhatsApp Web rejects a status change that changes nothing, and the minified bundle reports that
+  // as an unnamed error — promoting an existing admin answered 500. Reproduced live before this test
+  // was written. `remove` keeps acting on every member; only the two status ops narrow.
+  const { dir, file } = fakeWwjs(readInstalled());
+  applyParticipantArityPatches(dir);
+  const out = fs.readFileSync(file, 'utf8');
+
+  assert.equal(out.split('const present = participants.filter((p) => p && !p.isAdmin);').length - 1, 1);
+  assert.equal(out.split('const present = participants.filter((p) => p && p.isAdmin);').length - 1, 1);
+  assert.equal(out.split('const present = participants.filter(Boolean);').length - 1, 1);
+});
+
+test('upgrades a tree left behind by the previous version of this patcher', () => {
+  // The legacy shape matches neither the pristine find nor the current replace, so without the
+  // rewind the patcher would refuse an already-installed tree as an unknown shape — the upgrade
+  // would fail on exactly the machines that already had the fix.
+  let legacy = readInstalled();
+  for (const action of ACTIONS) {
+    legacy = legacy.split(findFor(action)).join(LEGACY_REPLACE(action));
+  }
+  assert.notEqual(legacy, readInstalled(), 'the legacy fixture must differ, or this proves nothing');
+
+  const { dir, file } = fakeWwjs(legacy);
+  const { applied, skipped } = applyParticipantArityPatches(dir);
+
+  // Two applied, not three: removeParticipants' body is unchanged between versions, so the legacy
+  // tree already carries its final shape and it is skipped rather than rewritten.
+  assert.deepEqual(applied.sort(), ['demoteParticipants batch truth', 'promoteParticipants batch truth']);
+  assert.deepEqual(skipped, ['removeParticipants batch truth']);
+  const out = fs.readFileSync(file, 'utf8');
+  assert.equal(out.split('const present = participants.filter((p) => p && !p.isAdmin);').length - 1, 1);
+  assert.equal(out.split('const present = participants.filter((p) => p && p.isAdmin);').length - 1, 1);
+  // Only the two status ops changed between versions; removeParticipants' body is identical in both,
+  // so asserting its legacy text is gone would assert the wrong thing.
+  for (const action of ['promoteParticipants', 'demoteParticipants']) {
+    assert.equal(out.split(LEGACY_REPLACE(action)).length - 1, 0, `${action} still carries the legacy body`);
   }
 });
 
