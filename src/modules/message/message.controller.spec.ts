@@ -1,3 +1,5 @@
+import { StreamableFile } from '@nestjs/common';
+import { RESPONSE_PASSTHROUGH_METADATA } from '@nestjs/common/constants';
 import { MessageController } from './message.controller';
 import type { MessageService } from './message.service';
 import type { BulkMessageService } from './bulk-message.service';
@@ -34,5 +36,30 @@ describe('MessageController — stored media download', () => {
 
   it('sends the media as an attachment, so it is never rendered on the API origin', async () => {
     expect((await mediaResponseHeaders())['Content-Disposition']).toBe('attachment');
+  });
+
+  /**
+   * The headers above are set on the response object directly, so they survive a handler that sends
+   * no body at all — a `404` with a perfect `Content-Disposition` would satisfy both. What actually
+   * carries the bytes is the returned `StreamableFile`, and Nest only sends that when the response
+   * parameter is declared passthrough: without it Nest treats the handler as having taken the
+   * response over and discards the return value entirely. Both halves are asserted here so the pair
+   * above cannot end up describing a response that is never sent.
+   *
+   * Nest records the flag under its own metadata key rather than in the route arguments, and only
+   * when it is truthy — so reading it back is what distinguishes `@Res({ passthrough: true })` from
+   * a bare `@Res()`.
+   */
+  it('declares the response passthrough, so Nest sends the returned file rather than discarding it', () => {
+    expect(Reflect.getMetadata(RESPONSE_PASSTHROUGH_METADATA, MessageController, 'getChatMedia')).toBe(true);
+  });
+
+  it('returns the stored bytes as the response body', async () => {
+    const res = { set: () => undefined } as unknown as Response;
+
+    const body = await controller.getChatMedia('session-1', '628123@c.us', 'msg-1', res);
+
+    expect(body).toBeInstanceOf(StreamableFile);
+    expect(body.getStream().read()).toEqual(Buffer.from('GIF89a'));
   });
 });
