@@ -170,9 +170,9 @@ describe('ContactService', () => {
       ['a phone jid', '628123456789@c.us'],
       ['the engine dialect', '628123456789@s.whatsapp.net'],
       ['a bare number', '628123456789'],
-    ])('still accepts %s', (_label, id) => {
+    ])('still accepts %s', async (_label, id) => {
       const upsertContact = jest.fn();
-      makeService({ upsertContact }).upsertContact('s1', id, 'Ada');
+      await makeService({ upsertContact }).upsertContact('s1', id, 'Ada');
       expect(upsertContact).toHaveBeenCalled();
     });
   });
