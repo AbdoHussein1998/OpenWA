@@ -5910,6 +5910,38 @@ Note: this DELETE returns `200` with a body (not the usual `204`).
 
 ---
 
+#### POST /api/integration/instances/:pluginId/:instanceId/redrive
+
+Re-dispatch one bounded batch of dead-lettered inbound deliveries for an integration instance (see
+**doc 25, Integration Fabric** for the DLQ and redrive design). Rows are drained fewest-attempts-first,
+then oldest-first, up to `batchSize` (100) — so a row that keeps failing moves behind never-retried
+rows instead of livelocking the window, while staying redrivable. `remaining` reports the DLQ depth
+still outstanding after this batch.
+
+**Auth:** API key (ADMIN) · **Scope:** session-scoped (a key restricted to `allowedSessions` may only
+redrive an instance whose current `sessionScope` is inside that allowlist; out of scope and missing
+instances both answer `404`, so redrive can't be used to probe other sessions). An unrestricted key is
+not fenced this way: it may drain retained rows for an instance that no longer exists, which is
+deliberate — those rows still carry the deleted binding's `sessionId` and only an unscoped caller may
+replay them.
+
+**Path parameters**
+
+| Name         | Type   | Description                   |
+| ------------ | ------ | ----------------------------- |
+| `pluginId`   | string | Plugin id owning the instance |
+| `instanceId` | string | Instance id to redrive        |
+
+**Response** `201`
+
+```json
+{ "redriven": 3, "remaining": 0, "batchSize": 100 }
+```
+
+**Errors:** `401` · `403` key role < ADMIN · `404` a **scoped** key's instance that is missing or outside its `allowedSessions` (an unrestricted key gets `201` with `redriven: 0` instead)
+
+---
+
 #### POST /mcp
 
 MCP Streamable-HTTP / JSON-RPC 2.0 transport that exposes the agent-tool registry over the Model Context Protocol. **This is a transport, not a REST resource** — there is no NestJS controller, no DTO, and no `{success,data}` shape.
