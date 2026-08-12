@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The JavaScript, Python, Go and Java SDKs omitted `contact`, `call` and `ephemeralDuration` from their chat-history message type, so a typed client had to cast to read three fields the endpoint returns; all four now mirror the engine payload, and a type-level contract assertion in the JavaScript SDK fails the build if that type and the engine interface drift apart again.
+- The JavaScript, Python, Go and Java SDKs omitted `contact`, `call` and `ephemeralDuration` from their chat-history message type, so a typed client had to cast to read three fields the endpoint returns; all four now mirror the engine payload.
 
 ### Documentation
 

@@ -206,29 +206,31 @@ type MessageLocation struct {
 // ChatHistoryMessage is a message read live from WhatsApp by Messages.History —
 // the richer engine payload, differently shaped from MessageRecord.
 type ChatHistoryMessage struct {
-	ID                string            `json:"id"`
-	From              string            `json:"from"`
-	To                string            `json:"to"`
-	ChatID            string            `json:"chatId"`
-	Body              string            `json:"body,omitempty"`
-	Type              string            `json:"type"`
-	Timestamp         int64             `json:"timestamp"`
-	FromMe            bool              `json:"fromMe"`
-	IsGroup           bool              `json:"isGroup"`
-	IsStatusBroadcast bool              `json:"isStatusBroadcast"`
-	Kind              string            `json:"kind"`
-	EphemeralDuration int               `json:"ephemeralDuration,omitempty"`
-	Author            string            `json:"author,omitempty"`
-	MentionedIDs      []string          `json:"mentionedIds,omitempty"`
-	Call              *MessageCall      `json:"call,omitempty"`
-	IsLidSender       bool              `json:"isLidSender,omitempty"`
-	SenderPhone       *string           `json:"senderPhone,omitempty"`
-	Contact           *MessageContact   `json:"contact,omitempty"`
-	BackgroundColor   string            `json:"backgroundColor,omitempty"`
-	Font              int               `json:"font,omitempty"`
-	Media             *ChatHistoryMedia `json:"media,omitempty"`
-	QuotedMessage     *QuotedMessage    `json:"quotedMessage,omitempty"`
-	Location          *MessageLocation  `json:"location,omitempty"`
+	ID                string          `json:"id"`
+	From              string          `json:"from"`
+	To                string          `json:"to"`
+	ChatID            string          `json:"chatId"`
+	Body              string          `json:"body,omitempty"`
+	Type              string          `json:"type"`
+	Timestamp         int64           `json:"timestamp"`
+	FromMe            bool            `json:"fromMe"`
+	IsGroup           bool            `json:"isGroup"`
+	IsStatusBroadcast bool            `json:"isStatusBroadcast"`
+	Kind              string          `json:"kind"`
+	EphemeralDuration int             `json:"ephemeralDuration,omitempty"`
+	Author            string          `json:"author,omitempty"`
+	MentionedIDs      []string        `json:"mentionedIds,omitempty"`
+	Call              *MessageCall    `json:"call,omitempty"`
+	IsLidSender       bool            `json:"isLidSender,omitempty"`
+	SenderPhone       *string         `json:"senderPhone,omitempty"`
+	Contact           *MessageContact `json:"contact,omitempty"`
+	BackgroundColor   string          `json:"backgroundColor,omitempty"`
+	// Pointer because font index 0 is a real style, so a value type could not tell it from absent.
+	// Matches StatusRecord.Font, which carries the same wire field.
+	Font          *int              `json:"font,omitempty"`
+	Media         *ChatHistoryMedia `json:"media,omitempty"`
+	QuotedMessage *QuotedMessage    `json:"quotedMessage,omitempty"`
+	Location      *MessageLocation  `json:"location,omitempty"`
 }
 
 // MessageCall is the call block on a live history message, present on call messages only.
@@ -240,18 +242,19 @@ type MessageCall struct {
 // MessageContact is the sender contact block on a live history message. History carries PushName
 // only; the richer fields arrive on message.received when WEBHOOK_CONTACT_DETAILS is enabled.
 type MessageContact struct {
-	ID            string   `json:"id,omitempty"`
-	Number        string   `json:"number,omitempty"`
-	Name          string   `json:"name,omitempty"`
-	PushName      string   `json:"pushName,omitempty"`
-	ShortName     string   `json:"shortName,omitempty"`
-	Type          string   `json:"type,omitempty"`
-	IsMyContact   bool     `json:"isMyContact,omitempty"`
-	IsWAContact   bool     `json:"isWAContact,omitempty"`
-	IsBusiness    bool     `json:"isBusiness,omitempty"`
-	IsEnterprise  bool     `json:"isEnterprise,omitempty"`
-	VerifiedName  string   `json:"verifiedName,omitempty"`
-	VerifiedLevel int      `json:"verifiedLevel,omitempty"`
+	ID           string `json:"id,omitempty"`
+	Number       string `json:"number,omitempty"`
+	Name         string `json:"name,omitempty"`
+	PushName     string `json:"pushName,omitempty"`
+	ShortName    string `json:"shortName,omitempty"`
+	Type         string `json:"type,omitempty"`
+	IsMyContact  bool   `json:"isMyContact,omitempty"`
+	IsWAContact  bool   `json:"isWAContact,omitempty"`
+	IsBusiness   bool   `json:"isBusiness,omitempty"`
+	IsEnterprise bool   `json:"isEnterprise,omitempty"`
+	VerifiedName string `json:"verifiedName,omitempty"`
+	// Pointer for the same reason as Font: level 0 (unverified) is a real value, not "absent".
+	VerifiedLevel *int     `json:"verifiedLevel,omitempty"`
 	IsBlocked     bool     `json:"isBlocked,omitempty"`
 	Labels        []string `json:"labels,omitempty"`
 }

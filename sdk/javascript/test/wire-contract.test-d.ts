@@ -76,6 +76,13 @@ interface WireChannelMessage {
  * that interface serialized. `backgroundColor`/`font` are set by the Baileys extended-text mapper but
  * are not reachable through this route (Baileys answers `getChatHistory` with `unsupported`); they are
  * declared for the same forward-compatibility reason as on `WireStatus`.
+ *
+ * Scope, so nobody reads more into a green build than it carries: `Mirrors` compares TOP-LEVEL keys,
+ * so drift inside `contact`, `call`, `media`, `quotedMessage` or `location` compiles clean. And like
+ * every `Wire*` type here this one is a hand transcription, so a field added to the server's
+ * `IncomingMessage` does not fail this build either — `sdk-ci.yml` re-runs the job when that file
+ * changes, which prompts a human to update the transcription. What this pair does lock is the SDK
+ * type against the transcription: neither side can lose or gain a top-level key unnoticed.
  */
 interface WireChatHistoryMessage {
   id: string;
