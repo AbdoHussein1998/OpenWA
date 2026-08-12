@@ -315,7 +315,16 @@ describe('every key the dashboard writes is commented out in .env.example', () =
   it('ships the built-in datastore toggles commented out in .env.minimal', () => {
     const toggles = ['POSTGRES_BUILTIN', 'REDIS_BUILTIN', 'MINIO_BUILTIN'];
     expect(toggles.every(t => dashboardOwned().includes(t))).toBe(true); // control: they ARE dashboard-owned
-    expect(uncommentedKeys('.env.minimal').filter(key => toggles.includes(key))).toEqual([]);
+
+    // Non-vacuity control on the OTHER side. The assertion below is a `.filter(...).toEqual([])`,
+    // which an empty parse satisfies just as well as a correct file — a renamed template, a parser
+    // that stops matching, or a file that became all comments would all read as "no pins found" and
+    // pass while binding nothing. Anchor on a key this template exists to pin.
+    const uncommented = uncommentedKeys('.env.minimal');
+    expect(uncommented.length).toBeGreaterThan(0);
+    expect(uncommented).toContain('REDIS_ENABLED');
+
+    expect(uncommented.filter(key => toggles.includes(key))).toEqual([]);
   });
 });
 

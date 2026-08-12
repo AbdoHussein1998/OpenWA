@@ -322,4 +322,25 @@ describe('StorageService.createExportStream enumerates the whole store', () => {
     expect(iterateFiles).toHaveBeenCalled();
     expect(listFiles).not.toHaveBeenCalled();
   });
+
+  /**
+   * The count is the OTHER half of the same fix and had no test of its own — reverting it to the
+   * capped listing left the suite green. It is the pre-check an operator runs before that migration,
+   * so a count truncated at the cap hides precisely the gap they are checking for, and hides it
+   * while agreeing with itself.
+   */
+  it('counts with the uncapped iterator too, so the pre-check cannot hide the gap', async () => {
+    const { service } = makeLocalService();
+    const listFiles = jest.spyOn(service, 'listFiles');
+    const iterateFiles = jest.spyOn(service, 'iterateFiles').mockImplementation(async function* () {
+      yield await Promise.resolve('media/a.bin');
+      yield await Promise.resolve('media/b.bin');
+    });
+
+    const { count } = await service.getFileCount();
+
+    expect(iterateFiles).toHaveBeenCalled();
+    expect(listFiles).not.toHaveBeenCalled();
+    expect(count).toBe(2); // the iterator's items are what was counted, not an unrelated walk
+  });
 });
