@@ -90,6 +90,7 @@ function makeBridge(opts: {
     getPluginInstanceService: () => ({
       resolve: (pluginId: string, instanceId: string) =>
         Promise.resolve(opts.rows.find(r => r.pluginId === pluginId && r.instanceId === instanceId) ?? null),
+      list: (pluginId: string) => Promise.resolve(opts.rows.filter(r => r.pluginId === pluginId)),
     }),
   } as unknown as PluginHostServices;
 
@@ -137,6 +138,65 @@ describe('ingress dispatch resolves config per INSTANCE, not per session scope',
     await bridge.dispatchWebhookForInstance(job('acct-b'));
 
     expect(calls[0].config).toEqual({ apiToken: 'token-B' });
+  });
+
+  /**
+   * Layering the row on top corrects only the keys the row DEFINES. Every key it leaves unset falls
+   * through to the layer underneath — and for two instances sharing a scope that layer is not a
+   * schema default, it is the other tenant's projected config. So a sparse row, which is the normal
+   * shape when an instance relies on a plugin default, still received the sibling's live value.
+   *
+   * The scope slice cannot be attributed to an instance once siblings exist, so it is not consulted
+   * there at all. With a single instance on the scope it still applies: that slice is either that
+   * instance's own projection or the operator's deliberate per-session override.
+   */
+  it('does not hand a sparse instance the sibling tenant value for a key it left unset', async () => {
+    const a = instanceRow('acct-a', { apiToken: 'token-A', endpoint: 'https://a.example' }, SHARED_SCOPE);
+    const b = instanceRow('acct-b', { apiToken: 'token-B' }, SHARED_SCOPE); // relies on the default
+    const { bridge, calls } = makeBridge({
+      rows: [a, b],
+      baseConfig: { endpoint: 'https://default.example' },
+      // acct-a was provisioned last, so the scope slice carries ITS endpoint.
+      sessionConfig: { [SHARED_SCOPE]: { apiToken: 'token-A', endpoint: 'https://a.example' } },
+    });
+
+    await bridge.dispatchWebhookForInstance(job('acct-b'));
+
+    expect(calls[0].config).toEqual({ apiToken: 'token-B', endpoint: 'https://default.example' });
+  });
+
+  // Negative twin: with no sibling the slice IS attributable, so an operator's per-session override
+  // must keep applying — dropping it everywhere would break the surface it exists for.
+  it('still applies the per-session override when one instance binds the scope', async () => {
+    const a = instanceRow('acct-a', { apiToken: 'token-A' }, SHARED_SCOPE);
+    const { bridge, calls } = makeBridge({
+      rows: [a],
+      baseConfig: { endpoint: 'https://default.example' },
+      sessionConfig: { [SHARED_SCOPE]: { endpoint: 'https://operator.example' } },
+    });
+
+    await bridge.dispatchWebhookForInstance(job('acct-a'));
+
+    expect(calls[0].config).toEqual({ apiToken: 'token-A', endpoint: 'https://operator.example' });
+  });
+
+  /**
+   * A DISABLED sibling is not a tenant receiving deliveries, so it cannot be the one the slice was
+   * projected for in any way that matters — counting it would drop the operator's override for a
+   * deployment that has only one live instance.
+   */
+  it('a disabled sibling does not make the scope unattributable', async () => {
+    const a = instanceRow('acct-a', { apiToken: 'token-A' }, SHARED_SCOPE);
+    const retired = { ...instanceRow('acct-b', { apiToken: 'token-B' }, SHARED_SCOPE), enabled: false };
+    const { bridge, calls } = makeBridge({
+      rows: [a, retired],
+      baseConfig: { endpoint: 'https://default.example' },
+      sessionConfig: { [SHARED_SCOPE]: { endpoint: 'https://operator.example' } },
+    });
+
+    await bridge.dispatchWebhookForInstance(job('acct-a'));
+
+    expect(calls[0].config).toEqual({ apiToken: 'token-A', endpoint: 'https://operator.example' });
   });
 
   it('keeps plugin-level defaults underneath the instance override', async () => {

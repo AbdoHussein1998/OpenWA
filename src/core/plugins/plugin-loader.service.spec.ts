@@ -707,7 +707,13 @@ describe('PluginLoaderService — enable-failure hook cleanup', () => {
 
 describe('PluginLoaderService.dispatchWebhookForInstance config delivery', () => {
   it('delivers the instance-session-resolved config to the sandbox host', async () => {
-    const fakeInstanceService = { resolve: jest.fn().mockResolvedValue({ sessionScope: 'sess-1' }) };
+    // `list` is part of the real service and the dispatch path consults it to decide whether the
+    // scope-keyed slice can be attributed to this instance. One enabled instance on the scope, so
+    // the slice IS attributable and the per-session override below must still apply.
+    const fakeInstanceService = {
+      resolve: jest.fn().mockResolvedValue({ sessionScope: 'sess-1' }),
+      list: jest.fn().mockResolvedValue([{ instanceId: 'acct1', enabled: true, sessionScope: 'sess-1' }]),
+    };
     const configService = { get: jest.fn().mockReturnValue(undefined) } as unknown as ConfigService;
     const pluginStorage = {
       getPluginEntry: jest.fn().mockReturnValue(undefined),
