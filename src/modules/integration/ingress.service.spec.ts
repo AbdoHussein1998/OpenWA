@@ -119,6 +119,34 @@ describe('IngressService.handle', () => {
     expect(d.events.recordOrSkip).not.toHaveBeenCalled();
   });
 
+  // `Buffer.byteLength(rawBody) > route.maxBodyBytes` is always false when the manifest omits the
+  // field, so a route declaring no cap silently enforced none — the 413 the published contract
+  // promises was inert, and every accepted delivery is persisted with the body stored twice. A
+  // manifest that forgets one field must not turn a route into an unbounded write amplifier.
+  it.each([
+    ['omitted', undefined],
+    ['non-numeric', 'lots' as unknown as number],
+    ['zero', 0],
+    ['negative', -1],
+  ])('falls back to a real cap when maxBodyBytes is %s', async (_label, maxBodyBytes) => {
+    const d = deps({
+      manifestRoute: jest.fn().mockReturnValue({
+        route: 'chatwoot',
+        mode: 'async',
+        verify: 'core',
+        maxBodyBytes,
+        signature: { scheme: 'none' },
+        dedupHeader: 'x-delivery',
+      }),
+    });
+    const svc = new IngressService(d);
+    const huge = { ...req, rawBody: 'x'.repeat(64 * 1024 * 1024) };
+    const res = await svc.handle(huge);
+
+    expect(res.status).toBe(413);
+    expect(d.events.recordOrSkip).not.toHaveBeenCalled();
+  });
+
   it('rejects a bad signature with 401 before any dedup or enqueue', async () => {
     const d = deps({
       manifestRoute: jest.fn().mockReturnValue({

@@ -5,6 +5,9 @@ import { IngressJobData } from '../queue/processors/ingress.processor';
 import type { EngineStatus } from '../../engine/interfaces/whatsapp-engine.interface';
 import { evaluatePreflight } from './ingress-preflight';
 import { renderAck } from './ingress-ack';
+import { parseBodyLimitBytes } from '../../config/inflight-body-budget';
+import { resolveBodyLimit } from '../../config/bootstrap-security';
+import { createLogger } from '../../common/services/logger.service';
 
 export interface IngressRequest {
   pluginId: string;
@@ -64,7 +67,27 @@ export interface IngressDeps {
  * body → dedup (persist-before-ack) → best-effort conversation id → enqueue (or inline) → 202.
  */
 export class IngressService {
+  private readonly logger = createLogger('IngressService');
+
   constructor(private readonly deps: IngressDeps) {}
+
+  /**
+   * The cap to apply when a manifest route declares none. Warned once per route so an incomplete
+   * manifest is visible to the operator rather than silently degrading to the global limit.
+   */
+  private readonly warnedMissingCap = new Set<string>();
+
+  private fallbackMaxBodyBytes(pluginId: string, route: string): number {
+    const key = `${pluginId}:${route}`;
+    if (!this.warnedMissingCap.has(key)) {
+      this.warnedMissingCap.add(key);
+      this.logger.warn(
+        `Ingress route ${key} declares no usable maxBodyBytes; falling back to the process body limit. ` +
+          'Set a per-route maxBodyBytes in the plugin manifest.',
+      );
+    }
+    return parseBodyLimitBytes(resolveBodyLimit(process.env.BODY_SIZE_LIMIT));
+  }
 
   async handle(req: IngressRequest): Promise<{ status: number; body?: string; headers?: Record<string, string> }> {
     const instance = await this.deps.instances.resolve(req.pluginId, req.instanceId);
@@ -85,7 +108,21 @@ export class IngressService {
       return { status: 403, body: 'challenge failed' };
     }
 
-    if (Buffer.byteLength(req.rawBody, 'utf8') > route.maxBodyBytes) return { status: 413, body: 'payload too large' };
+    // `n > undefined` is always false, so a manifest that omits maxBodyBytes — or carries a
+    // non-numeric or non-positive value — left this check inert: the 413 the published contract
+    // promises never fired, and every accepted delivery is persisted with the body stored twice
+    // (payload.body and payload.rawBody) and carried into the queue. A third-party adapter forgetting
+    // one field turned its route into a write amplifier with no load-time error and no runtime signal.
+    //
+    // The fallback is the process-wide body limit, which is what such a route was already bounded by
+    // in practice, so no delivery that is accepted today starts failing. What changes is that the
+    // check can no longer be vacuous, and the gap is now stated in the log instead of being silent.
+    const declaredCap = route.maxBodyBytes;
+    const effectiveCap =
+      typeof declaredCap === 'number' && Number.isFinite(declaredCap) && declaredCap > 0
+        ? declaredCap
+        : this.fallbackMaxBodyBytes(req.pluginId, route.route);
+    if (Buffer.byteLength(req.rawBody, 'utf8') > effectiveCap) return { status: 413, body: 'payload too large' };
 
     const verdict = verifyIngressSignature(route.signature, {
       rawBody: req.rawBody,
