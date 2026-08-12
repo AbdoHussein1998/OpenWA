@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- `.env.example` calls itself the single source of truth for configuration, and the Helm chart and `docs/10` both defer to it, but seven live operator knobs were missing from it — including `SERVE_DASHBOARD`, which the bundled compose forwards explicitly, so an operator wanting an API-only deployment was told the capability did not exist. A new spec binds the file to the key lists `env.validation.ts`, `env-precedence.ts` and compose already maintain, so the next one cannot go missing quietly.
 - `RESOLVE_LID_TO_PHONE` was documented nowhere outside `.env.example`, so an operator receiving `@lid` senders had no path to the flag that resolves them; the event catalog now carries the `senderPhone` opt-in callout, the contact-phone endpoint points back to it, and the troubleshooting FAQ covers the symptom.
 - The chat-history response example advertised a `senderPhone` field that endpoint has never returned, and showed it on a plain `@c.us` sender that not even the inbound path would resolve; the example now matches what the route emits, and points at the contact-phone endpoint instead.
 - `WEBHOOK_CONTACT_DETAILS` was absent from `docs/`; the event catalog now names the twelve fields it adds to `contact` on `message.received`, notes that opting in costs no extra WhatsApp lookup, and records that only the whatsapp-web.js path reads the flag — which `.env.example` now says too.
