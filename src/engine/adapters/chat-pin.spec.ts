@@ -40,6 +40,10 @@ describe('WwebjsChats.pinChat', () => {
       ensureReady: jest.fn(),
       getClient: () => client as unknown as Client,
       logger,
+      // Declared on WwebjsEngineHost and called unguarded throughout this adapter; a stub without
+      // them is a host shape production never has.
+      isPageTransportError: () => false,
+      reportIfPageTransportError: jest.fn(),
     } as unknown as WwebjsEngineHost;
     return { chats: new WwebjsChats(host, {} as unknown as WwebjsMessaging), client };
   }

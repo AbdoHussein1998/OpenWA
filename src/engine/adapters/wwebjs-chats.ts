@@ -155,9 +155,19 @@ export class WwebjsChats {
    * by resolving undefined or by rejecting.
    */
   private async requireResolvableChat(chatId: string): Promise<void> {
-    const chat = await this.client()
-      .getChatById(chatId)
-      .catch(() => undefined);
+    let chat: unknown;
+    try {
+      chat = await this.client().getChatById(chatId);
+    } catch (error) {
+      // A dead page resolves NOTHING, so swallowing every rejection here reported it as "no such
+      // chat" and named the caller's chatId as the problem. Five operations in this adapter already
+      // split that case out; without this, the same file answered a dead page two different ways.
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'requireResolvableChat');
+        throw new EngineTransportError('Transport died while resolving a chat');
+      }
+      chat = undefined; // an unknown chat rejects too — that is the 400 below
+    }
     if (!chat) throw new BadRequestException(`Chat ${chatId} does not exist on this session`);
   }
 
