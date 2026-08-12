@@ -179,12 +179,15 @@ test('English start teardown-pending copy is a retryable warning, not an error',
   assert.ok(title && title !== 'sessions.start.teardownPendingTitle');
 });
 
-// A locale JSON file is only reachable in the UI once it is wired into index.ts in four separate
-// places. `check-i18n-parity.mjs` scans the locales DIRECTORY and never opens index.ts, so a fully
-// translated catalogue can pass that gate while being unreachable — no import, absent from the
-// language picker, or missing from i18next's resources. Read index.ts as text (the same technique
-// this file already uses for Sessions.tsx) rather than importing it, which would pull in
-// `i18next-browser-languagedetector` and `document` under the bare node test runner.
+// A locale JSON file is only reachable in the UI once it is wired into index.ts. The catalogues are
+// loaded by a dynamic import whose specifier is built from the language id, which reaches every file
+// in the directory at once, so what is left to get wrong by hand is the pair of lists: a locale
+// absent from `supportedLanguages` is refused by i18next, and one absent from `languageOptions`
+// cannot be picked. `check-i18n-parity.mjs` scans the locales DIRECTORY and never opens index.ts, so
+// a fully translated catalogue can pass that gate while being unreachable. Read index.ts as text
+// (the same technique this file already uses for Sessions.tsx) rather than importing it, which would
+// pull in `i18next-browser-languagedetector` and `document`; `lazy-locales.test.ts` is where the
+// module is imported for real, under JSDOM, to exercise what it does at runtime.
 const I18N_INDEX_SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'index.ts'), 'utf8');
 
 const section = (start: string, source = I18N_INDEX_SOURCE): string => {
@@ -201,18 +204,10 @@ const localeIdsIn = (text: string): string[] => [
   ...new Set([...text.matchAll(/['"]([a-z]{2}(?:-[A-Za-z]{2,4})?)['"]/g)].map(m => m[1])),
 ];
 
-test('every locale file is registered in all four index.ts sites', () => {
+test('every locale file is registered in both hand-maintained index.ts sites', () => {
   const registrations: Array<[string, string[]]> = [
-    ['import', [...I18N_INDEX_SOURCE.matchAll(/from '\.\/locales\/([^']+)\.json'/g)].map(m => m[1])],
     ['supportedLanguages', localeIdsIn(section('export const supportedLanguages = ['))],
     ['languageOptions', localeIdsIn(section('export const languageOptions:'))],
-    // Anchored on `: { translation:` — the resources map is the only place that shape occurs, and
-    // it quotes only hyphenated ids ('zh-CN') while leaving simple ones bare (en), so both forms
-    // must be accepted.
-    [
-      'resources',
-      [...I18N_INDEX_SOURCE.matchAll(/(?:'([\w-]+)'|([\w-]+))\s*:\s*\{\s*translation:/g)].map(m => m[1] ?? m[2]),
-    ],
   ];
 
   for (const [site, found] of registrations) {
@@ -222,6 +217,28 @@ test('every locale file is registered in all four index.ts sites', () => {
       `${site} in index.ts does not match the locale files on disk — a locale here is unreachable in the UI`,
     );
   }
+});
+
+// The variable dynamic import is the third registration site, and the only one that covers a new
+// locale file for free. It is also what makes the build split one chunk per language: Vite can only
+// do that while the directory and the extension around the variable stay literal, so a specifier
+// assembled further up would quietly stop splitting while still loading correctly in dev.
+test('the locale loader imports the whole locales directory by variable', () => {
+  assert.match(
+    I18N_INDEX_SOURCE,
+    /import\(\s*`\.\/locales\/\$\{\s*\w+\s*\}\.json`\s*\)/,
+    'index.ts no longer loads locales through a variable dynamic import over ./locales/*.json',
+  );
+});
+
+// Every catalogue used to be imported statically, which put all of them in one chunk the page
+// preloaded to read a single language. A reinstated import would restore that quietly: the build
+// stays green, the parity gates stay green, and only the byte count moves.
+test('no locale catalogue is imported statically', () => {
+  const staticImports = [...I18N_INDEX_SOURCE.matchAll(/^import\s[^\n]*from\s*['"]\.\/locales\/[^\n]*$/gm)].map(
+    m => m[0],
+  );
+  assert.deepEqual(staticImports, [], 'a static locale import is back — every language is on the critical path again');
 });
 
 // rtlLanguages is deliberately a SUBSET (only he/ar today), so it is checked for validity, not parity:
