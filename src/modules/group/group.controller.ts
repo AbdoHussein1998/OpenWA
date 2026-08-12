@@ -447,7 +447,7 @@ export class GroupController {
     description: 'Picture URL, or null when the group has none',
     type: GroupPictureResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'The id does not name a group' })
+  @ApiResponse({ status: 400, description: 'The id does not name a group, or the session is not active' })
   @ApiResponse({
     status: 503,
     description: 'WhatsApp did not answer within the request budget — nothing could be read.',
@@ -493,7 +493,7 @@ export class GroupController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'groupId', description: 'Group ID' })
   @ApiResponse({ status: 200, description: 'Group picture removed', type: GroupAckResponseDto })
-  @ApiResponse({ status: 400, description: 'The id does not name a group' })
+  @ApiResponse({ status: 400, description: 'The id does not name a group, or the session is not active' })
   @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights required' })
   @ApiResponse({
     status: 503,

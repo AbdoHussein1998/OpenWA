@@ -492,7 +492,7 @@ export class InfraDataController {
   @ApiResponse({
     status: 400,
     description:
-      'Body rejected before the restore ran: `tables` absent or not an object, a flag spelled as anything but a boolean or exact `true`/`false`, or a property this route does not accept. Nothing was written. Field-level detail is suppressed in production unless VALIDATION_ERROR_DETAIL=true.',
+      'Body rejected before the restore ran: `tables` absent or not an object, a table whose value is not an array of rows, a row that is not an object (`null`, a bare string, a nested array), a flag spelled as anything but a boolean or exact `true`/`false`, or a property this route does not accept. Nothing was written. Field-level detail is suppressed in production unless VALIDATION_ERROR_DETAIL=true.',
   })
   @ApiResponse({
     status: 409,

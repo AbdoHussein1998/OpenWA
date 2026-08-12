@@ -4,8 +4,9 @@ import "net/url"
 
 // ContactRecord is a contact.
 //
-// IsBlocked is best-effort: the Baileys adapter does not track blocklist state and always reports
-// false.
+// IsBlocked reflects the account's real blocklist on both engines. When the blocklist query fails
+// the field stays at its default rather than reporting "nobody is blocked", and the gateway logs a
+// warning — so a false is not proof the contact is unblocked if the session's link is unhealthy.
 type ContactRecord struct {
 	ID            string  `json:"id"`
 	Name          *string `json:"name,omitempty"`

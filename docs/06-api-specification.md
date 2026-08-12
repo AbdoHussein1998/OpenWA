@@ -2495,6 +2495,8 @@ Get the group's picture URL.
 **Response** `200` — `{ "url": "https://…" }`, or `{ "url": null }` when the group has no picture or
 it is hidden by privacy settings.
 
+**Errors:** `400` the id does not name a group, or the session is not active · `401` missing/invalid API key · `409` engine not ready
+
 #### PUT /api/sessions/:sessionId/groups/:groupId/picture
 
 Set the group's picture. The account must be a group admin.
@@ -2511,7 +2513,7 @@ Set the group's picture. The account must be a group admin.
 
 **Response** `200` — `{ "success": true, "message": "Group picture updated" }`
 
-**Errors:** `400` session not active, or neither `url` nor `base64` supplied · `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` group not found
+**Errors:** `400` the id does not name a group, the session is not active, or neither `url` nor `base64` was supplied · `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` no such group
 
 #### DELETE /api/sessions/:sessionId/groups/:groupId/picture
 
@@ -2521,7 +2523,7 @@ Remove the group's picture. The account must be a group admin.
 
 **Response** `200` — `{ "success": true, "message": "Group picture removed" }`
 
-**Errors:** `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` group not found
+**Errors:** `400` the id does not name a group, or the session is not active · `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` no such group
 
 #### GET /api/sessions/:sessionId/groups/:groupId/invite-code
 

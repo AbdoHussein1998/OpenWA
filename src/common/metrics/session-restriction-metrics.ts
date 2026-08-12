@@ -3,9 +3,14 @@
  *
  * A gauge and not a counter: what an operator alerts on is "an account is restricted right now", and
  * a restriction that is applied, lifted and re-applied is the same one fact recurring, not a total to
- * accumulate. It is mirrored here rather than read from the store at render time so the metrics
- * module does not have to depend on the session module for one number — `SessionRestrictionStore` is
- * the single writer and republishes its own size after every mutation.
+ * accumulate. The value is mirrored here rather than read from the store at render time so the
+ * metrics module does not have to depend on the session module for one number —
+ * `SessionRestrictionStore` is the single writer and republishes its own size after every mutation.
+ *
+ * The mirror is the FALLBACK, not what a scrape normally reads: once the store registers a live
+ * recount, `getRestrictedSessionCount` calls that instead. A restriction that lapses by its own
+ * `expiresAt` is not a mutation, so nothing republishes and the mirror would go stale exactly when
+ * an alert on `> 0` is still firing.
  */
 let restrictedSessions = 0;
 

@@ -224,9 +224,11 @@ export class BaileysContacts {
     if (this.blocklistMemo && Date.now() - this.blocklistMemo.at < BaileysContacts.BLOCKLIST_MEMO_MS) {
       return this.blocklistMemo.ids;
     }
-    // Share one query with every caller that arrives while it is open. Without this the burst the
-    // memo exists for — a status seed resolving each poster through getContactById — opened one
-    // query per read, because the memo is only written once an answer is back.
+    // Share one query with every caller that arrives while it is open, so a burst costs one round
+    // trip rather than one per caller. Note which callers this actually helps: the status seed
+    // resolves posters SEQUENTIALLY (`await resolvePoster(...)` per item) and memoises per jid, so it
+    // never has two lookups in flight — the memo above is what bounds that loop. This bounds
+    // genuinely concurrent readers instead, such as two contact requests arriving together.
     this.blocklistInFlight ??= this.queryBlockedIds();
     return this.blocklistInFlight;
   }
