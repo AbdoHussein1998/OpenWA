@@ -258,3 +258,44 @@ describe.each(['docker-compose.yml', 'docker-compose.dev.yml'])('every blank for
     expect(uncommented.filter(key => blankForwards().includes(key))).toEqual([]);
   });
 });
+
+/**
+ * The rule above binds only the keys compose forwards blank. `.env.example`'s own header promises
+ * something wider — "every setting the dashboard owns is commented out" — and the dashboard owns
+ * keys that have no blank forward at all (DATABASE_SSL, POSTGRES_BUILTIN, REDIS_BUILTIN,
+ * MINIO_BUILTIN, DATABASE_SSL_REJECT_UNAUTHORIZED, DATABASE_POOL_SIZE, REDIS_PASSWORD). Those slipped
+ * past the compose-derived check and shipped uncommented, pinning the matching Infrastructure control
+ * for anyone who ran the documented `cp .env.example .env`.
+ *
+ * Derived from the appliers that write data/.env.generated, so a key added to a section is covered
+ * without anyone remembering this file exists.
+ */
+describe('every key the dashboard writes is commented out in .env.example', () => {
+  const sectionsSource = fs.readFileSync(path.join(__dirname, '../modules/infra/config-sections.ts'), 'utf8');
+
+  /** `updates.KEY = …` */
+  const directlyAssigned = (): string[] => [...sectionsSource.matchAll(/updates\.([A-Z0-9_]+)\s*=/g)].map(m => m[1]);
+  /** `setSecret(updates, 'KEY', …)` — an indirection the direct form cannot see. */
+  const viaSecretHelper = (): string[] =>
+    [...sectionsSource.matchAll(/setSecret\(\s*updates\s*,\s*'([A-Z0-9_]+)'/g)].map(m => m[1]);
+
+  const dashboardOwned = (): string[] => [...new Set([...directlyAssigned(), ...viaSecretHelper()])].sort();
+
+  // Guard both extractors independently. The direct form alone finds 27 keys and silently misses
+  // every key routed through setSecret, so a single combined count would look healthy while the
+  // secret keys went unchecked.
+  it('extracts keys from both write forms', () => {
+    expect(directlyAssigned()).toContain('DATABASE_SSL');
+    expect(viaSecretHelper()).toContain('REDIS_PASSWORD');
+  });
+
+  it('ships none of them uncommented', () => {
+    const example = fs.readFileSync(path.join(__dirname, '../../.env.example'), 'utf8');
+    const uncommented = example
+      .split('\n')
+      .map(line => /^([A-Z0-9_]+)=/.exec(line)?.[1])
+      .filter((key): key is string => key !== undefined);
+    expect(uncommented).toContain('NODE_ENV'); // the file really does ship some keys uncommented
+    expect(uncommented.filter(key => dashboardOwned().includes(key))).toEqual([]);
+  });
+});
