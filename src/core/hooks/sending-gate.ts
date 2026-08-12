@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { HookManager } from './hook-manager.service';
+import { createLogger } from '../../common/services/logger.service';
+
+const logger = createLogger('SendingGate');
 
 /**
  * Run the pre-send `message:sending` plugin gate for one piece of outbound content and return the
@@ -41,8 +44,9 @@ export async function applySendingGate<T extends object>(
   if (!shouldContinue) {
     throw new BadRequestException('Message sending blocked by plugin');
   }
-  // A chain that replies with nothing changed nothing: keep the caller's own input. This is the
-  // ordinary no-plugin path and must not be treated as a malformed reply.
+  // No data at all means nothing in the chain rewrote the input, so keep the caller's own. This
+  // covers both the ordinary no-plugin path and a handler that deliberately returned nothing;
+  // neither is a malformed reply.
   if (hookData === undefined) {
     return input;
   }
@@ -61,6 +65,15 @@ export async function applySendingGate<T extends object>(
     typeof envelope.input !== 'object' ||
     envelope.input === null
   ) {
+    // The 400 reaches the API caller, who cannot fix a plugin. This refusal stops EVERY send on the
+    // session, so the operator needs it in the server log — with the session and call site, since
+    // the chain's aggregated reply does not say which handler produced it.
+    logger.warn('A message:sending handler returned a payload without a usable `input`; refusing the send', {
+      sessionId,
+      source,
+      type,
+      received: hookData === null ? 'null' : typeof hookData,
+    });
     throw new BadRequestException(
       'A message:sending handler returned a payload without a usable `input`; the send was refused rather than sent unmoderated',
     );
