@@ -9,12 +9,26 @@
  */
 let restrictedSessions = 0;
 
+/**
+ * A live recount, registered by the store. The mirrored value above is refreshed on every mutation,
+ * but a restriction that lapses by its own `expiresAt` is not a mutation — nothing fires, and the
+ * gauge kept reporting the pre-expiry count while every read path already reported the session as
+ * unrestricted. Registering a function rather than importing the store keeps the dependency pointing
+ * one way: the session module knows about metrics, not the reverse.
+ */
+let recount: (() => number) | null = null;
+
 /** Publish the current number of restricted sessions (called by SessionRestrictionStore). */
 export function setRestrictedSessionCount(count: number): void {
   restrictedSessions = count;
 }
 
+/** Register the store's live recount. Called once, when the store is constructed. */
+export function registerRestrictedSessionRecount(fn: () => number): void {
+  recount = fn;
+}
+
 /** Sessions under a WhatsApp-imposed restriction at this moment. */
 export function getRestrictedSessionCount(): number {
-  return restrictedSessions;
+  return recount ? recount() : restrictedSessions;
 }
