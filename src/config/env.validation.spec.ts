@@ -61,6 +61,26 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ STORAGE_TYPE: 's3' })).not.toThrow();
   });
 
+  // Every production hardening in the repo compares NODE_ENV against the exact string 'production',
+  // so an unrecognised value silently selects the permissive branch of each one — including the
+  // ALLOW_DEV_API_KEY rejection that stops the public `dev-admin-key` being seeded as an ADMIN
+  // credential. A typo must fail the boot, not downgrade it.
+  it('rejects a NODE_ENV typo instead of silently selecting the permissive branch', () => {
+    expect(() => validateEnv({ NODE_ENV: 'prod' })).toThrow(/NODE_ENV/);
+    expect(() => validateEnv({ NODE_ENV: 'staging' })).toThrow(/NODE_ENV/);
+    expect(() => validateEnv({ NODE_ENV: 'Production' })).toThrow(/NODE_ENV/);
+    // Padded values must fail too: every reader compares the RAW `process.env.NODE_ENV` against
+    // 'production', so a value that only matches after trimming validates clean and then selects the
+    // permissive branch anyway — the exact silent downgrade this check exists to stop.
+    expect(() => validateEnv({ NODE_ENV: ' production ' })).toThrow(/NODE_ENV/);
+    expect(() => validateEnv({ NODE_ENV: 'production' })).not.toThrow();
+    expect(() => validateEnv({ NODE_ENV: 'development' })).not.toThrow();
+    expect(() => validateEnv({ NODE_ENV: 'test' })).not.toThrow();
+    // Unset stays legal: it is the standard Node default and every shipped deployment sets it
+    // explicitly (Dockerfile, both compose files, the Helm chart, .env.example).
+    expect(() => validateEnv({})).not.toThrow();
+  });
+
   it('rejects a non-integer rate-limit / webhook / pool-size / redis-timeout / session-cap value', () => {
     expect(() => validateEnv({ RATE_LIMIT_SHORT_LIMIT: 'abc' })).toThrow(/RATE_LIMIT_SHORT_LIMIT/);
     expect(() => validateEnv({ WEBHOOK_TIMEOUT: '10s' })).toThrow(/WEBHOOK_TIMEOUT/);

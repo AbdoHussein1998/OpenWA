@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ⚠️ **Breaking (config).** `NODE_ENV` is checked at boot, so a value outside `production`, `development` and `test` fails startup with a named error instead of silently selecting the permissive branch of every production hardening — CORS, Swagger, DTO error detail, the default-secret guard and the `ALLOW_DEV_API_KEY` rejection that stops the public `dev-admin-key` being seeded as an ADMIN credential. The value is compared verbatim, so a padded ` production ` is rejected too: every reader compares the raw variable. Action required: a deployment running `NODE_ENV=staging` (or any other value) now refuses to boot where it previously started with development-grade security. Set `production`, or leave the variable unset. Unset remains legal and unchanged.
+
 ### Fixed
 
 - Two enabled instances of one integration plugin that share a session scope no longer collapse onto a single config, so an ingress delivery authenticated with one instance's secret is no longer handled with the credentials of whichever instance was provisioned last. Dispatch now layers the instance's own config over the base config and any per-session override.

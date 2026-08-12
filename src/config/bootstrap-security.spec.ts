@@ -147,6 +147,25 @@ describe('assertNoDefaultSecretsInProduction', () => {
     ).not.toThrow();
   });
 
+  // main.ts runs this guard BEFORE NestFactory.create, i.e. before ConfigModule validates NODE_ENV,
+  // so at this point the value is still arbitrary. Recognising only 'production' made every
+  // unrecognised value skip the guard entirely; it now recognises only the values that are
+  // deliberately NOT production and treats everything else as production.
+  it('treats an unrecognised NODE_ENV as production rather than skipping the guard', () => {
+    expect(() => assertNoDefaultSecretsInProduction({ nodeEnv: 'prod', allowDevApiKey: 'true' })).toThrow(
+      /ALLOW_DEV_API_KEY/,
+    );
+    expect(() =>
+      assertNoDefaultSecretsInProduction({ nodeEnv: 'staging', databaseType: 'postgres', databasePassword: 'openwa' }),
+    ).toThrow(/DATABASE_PASSWORD/);
+  });
+
+  it('still skips the guard for the two environments that are deliberately not production', () => {
+    for (const nodeEnv of ['development', 'test', undefined]) {
+      expect(() => assertNoDefaultSecretsInProduction({ nodeEnv, allowDevApiKey: 'true' })).not.toThrow();
+    }
+  });
+
   it('refuses prod with a default Postgres password', () => {
     expect(() =>
       assertNoDefaultSecretsInProduction({

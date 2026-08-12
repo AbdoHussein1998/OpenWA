@@ -70,6 +70,20 @@ export function validateEnv(config: EnvConfig): EnvConfig {
   };
   checkEnum('ENGINE_TYPE', ['whatsapp-web.js', 'baileys']);
   checkEnum('STORAGE_TYPE', ['local', 's3']);
+  // Every production hardening in the repo gates on the exact string 'production', so an
+  // unrecognised value silently selects the permissive branch of each one — CORS, Swagger, DTO
+  // error detail, the default-secret guard and the ALLOW_DEV_API_KEY rejection that stops the public
+  // `dev-admin-key` being seeded as ADMIN. Unset stays legal (the standard Node default); every
+  // shipped deployment sets it explicitly.
+  //
+  // Checked RAW rather than through `str()`: the readers compare `process.env.NODE_ENV` verbatim, so
+  // a padded ' production ' that only matches after trimming would validate clean here and still take
+  // the permissive branch at runtime — blessing the very downgrade this check exists to stop.
+  const nodeEnvAllowed = ['production', 'development', 'test'];
+  const rawNodeEnv = config.NODE_ENV;
+  if (typeof rawNodeEnv === 'string' && rawNodeEnv !== '' && !nodeEnvAllowed.includes(rawNodeEnv)) {
+    errors.push(`NODE_ENV must be one of ${nodeEnvAllowed.map(v => `"${v}"`).join(', ')} (got "${rawNodeEnv}")`);
+  }
 
   if (dbType === 'postgres') {
     for (const key of ['DATABASE_HOST', 'DATABASE_USERNAME', 'DATABASE_PASSWORD']) {

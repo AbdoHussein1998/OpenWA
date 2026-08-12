@@ -169,7 +169,14 @@ export interface SecretCheckEnv {
  * whenever it is set. Throws with the offending var names so the operator can fix them.
  */
 export function assertNoDefaultSecretsInProduction(env: SecretCheckEnv): void {
-  if (env.nodeEnv !== 'production') return;
+  // Deny-list, not an allow-list: main.ts calls this BEFORE NestFactory.create, so NODE_ENV has not
+  // been through boot validation yet and is still an arbitrary string here. Recognising only
+  // 'production' meant every unrecognised value — a `prod` typo, a `staging` deployment — skipped the
+  // guard silently, including the ALLOW_DEV_API_KEY rejection below. Only the two values that are
+  // deliberately not production (and an unset variable, the standard Node default for local runs)
+  // skip it; everything else is treated as production. Mirrors shutdown.service.ts's drain window,
+  // which already fails toward the production behaviour the same way.
+  if (env.nodeEnv === 'development' || env.nodeEnv === 'test' || env.nodeEnv === undefined) return;
 
   const isWeak = (value?: string): boolean => !value || FORBIDDEN_PROD_SECRETS.has(value.trim().toLowerCase());
   const problems: string[] = [];
