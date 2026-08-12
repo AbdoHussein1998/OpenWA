@@ -6,7 +6,7 @@ Backed by ``src/modules/channel/channel.controller.ts``
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 from .._http import quote_segment
 from ..types import (
@@ -37,7 +37,7 @@ class ChannelsResource:
 
     def messages(
         self, session_id: str, channel_id: str, query: ChannelMessageQuery | None = None
-    ) -> list[ChannelMessageRecord]:
+    ) -> List[ChannelMessageRecord]:
         return self._http.request(
             "GET", f"/api/sessions/{quote_segment(session_id)}/channels/{quote_segment(channel_id)}/messages", query=query
         )
