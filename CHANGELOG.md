@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The root tree's dependency audit now applies its `high` threshold per advisory instead of all-or-nothing, via `npm run check:audit`. `GHSA-jmr9-qjv8-65gv` (`extract-zip` unvalidated symlink path traversal) was published between two CI runs on the same dependency tree and has no patched version — it covers `extract-zip *`, and it reaches the tree through `@puppeteer/browsers <=2.13.2`, which `puppeteer-core` pins exactly and `whatsapp-web.js` pins exactly in turn, so no `overrides` entry moves it. Forcing `@puppeteer/browsers` 3.x does remove it, but that version replaces `extract-zip` with dependencies that are ESM-only, and 60 Jest suites then fail to load. The advisory is therefore excused by id in `scripts/check-audit.mjs`, with its reachability recorded: the vulnerable path is zip extraction inside `puppeteer browsers install`, which runs once at image-build time on amd64 only, against a version-pinned Chrome for Testing build fetched from Google over HTTPS — nothing in the shipped image extracts a zip through it at runtime. The alternative, dropping the job to `--audit-level=critical`, would have un-gated every future high. An allowlist entry whose advisory has since disappeared fails the job, so the exception cannot outlive its cause. `dashboard/` keeps the plain `npm audit --audit-level=high`.
+
 ## [0.18.0] - 2026-08-13
 
 ### Added
