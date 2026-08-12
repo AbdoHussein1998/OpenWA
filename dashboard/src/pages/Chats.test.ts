@@ -66,6 +66,29 @@ const DB_MESSAGE: ChatMessage = {
   createdAt: new Date(1_700_000_000_000).toISOString(),
 };
 
+// A row whose media the server did not inline: past MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES the
+// message list replaces the payload with this marker, so the bubble has no bytes to render and the
+// per-message media route is the only way to reach them.
+const OMITTED_MEDIA_MESSAGE: ChatMessage = {
+  id: 'db-2',
+  waMessageId: 'wamid.2',
+  chatId: CHAT.id,
+  from: CHAT.id,
+  to: 'me',
+  body: '',
+  type: 'image',
+  direction: 'incoming',
+  status: 'delivered',
+  timestamp: 1_700_000_001,
+  createdAt: new Date(1_700_000_001_000).toISOString(),
+  metadata: { media: { mimetype: 'image/jpeg', filename: 'photo.jpg', omitted: true, sizeBytes: 9_000_000 } },
+};
+
+/** The per-message media route the omitted marker sends the viewer to. */
+const MEDIA_PATH = `/api/sessions/${SESSION.id}/messages/${encodeURIComponent(CHAT.id)}/${encodeURIComponent(
+  OMITTED_MEDIA_MESSAGE.waMessageId as string,
+)}/media`;
+
 // Contact for the status-compose recipient picker (Baileys requires an explicit allow-list).
 const CONTACT = { id: '15550002222@c.us', name: 'Bob', number: '15550002222' };
 const STATUS_TEXT = 'status text here';
@@ -136,7 +159,11 @@ function installFetchStub(): void {
       return Promise.resolve(jsonResponse([CONTACT]));
     }
     if (method === 'GET' && path.startsWith(`/api/sessions/${SESSION.id}/messages?`)) {
-      return Promise.resolve(jsonResponse({ messages: [DB_MESSAGE], total: 1 }));
+      return Promise.resolve(jsonResponse({ messages: [DB_MESSAGE, OMITTED_MEDIA_MESSAGE], total: 2 }));
+    }
+    // The media route answers bytes, not JSON — Content-Disposition: attachment.
+    if (method === 'GET' && path === MEDIA_PATH) {
+      return Promise.resolve(new Response(new Blob(['jpeg-bytes']), { status: 200 }));
     }
     if (method === 'GET' && /\/messages\/[^/]+\/history/.test(path)) {
       return Promise.resolve(jsonResponse([]));
@@ -369,4 +396,44 @@ test('a staged attachment is dropped when a different chat is opened', async () 
     null,
     "Alice's attachment followed the user into Carol's room",
   );
+});
+
+/**
+ * The server-side inline-media budget replaces an over-budget payload with `{ omitted: true }`. This
+ * thread requests the largest page size and caches it with staleTime Infinity, so without a fetch of
+ * its own the marker is terminal — the bytes exist on the server and the viewer cannot reach them.
+ * Asserting the WIRE call, not the label: a placeholder that merely looks clickable would pass a
+ * DOM-only check.
+ */
+test('an omitted media bubble fetches the bytes from the per-message media route', async () => {
+  const { screen, fireEvent, within, waitFor } = rtl;
+  resetFetchCalls();
+
+  // jsdom implements neither, and the component uses both to hand the blob to a download link.
+  const createdUrls: string[] = [];
+  const revokedUrls: string[] = [];
+  URL.createObjectURL = (): string => {
+    const url = `blob:mock-${createdUrls.length}`;
+    createdUrls.push(url);
+    return url;
+  };
+  URL.revokeObjectURL = (url: string): void => void revokedUrls.push(url);
+
+  const { container } = renderChats();
+  fireEvent.click(await screen.findByText('Alice'));
+  const thread = container.querySelector('.room-messages') as HTMLElement;
+
+  const placeholder = (await within(thread).findByRole('button', { name: /Media/ })) as HTMLButtonElement;
+  assert.equal(countFetchCalls('GET', MEDIA_PATH), 0, 'the media route must not be hit until asked');
+
+  fireEvent.click(placeholder);
+
+  await waitFor(() => {
+    assert.equal(countFetchCalls('GET', MEDIA_PATH), 1, 'expected one GET to the per-message media route');
+  });
+  // The object URL is released once the download is handed off, so browsing a media-heavy thread
+  // does not accumulate blobs.
+  await waitFor(() => {
+    assert.deepEqual(revokedUrls, createdUrls, 'every object URL created must be revoked');
+  });
 });

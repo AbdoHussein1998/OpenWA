@@ -895,11 +895,28 @@
   object-fit: cover;
 }
 
+/* A button, not a label: the bytes are fetchable from the per-message media route, so this is the
+   viewer's handle on media the list did not inline. Styled to keep the previous inert appearance
+   apart from the affordance. */
 .chats-page .message-media-omitted {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--text-muted);
   font-style: italic;
   font-size: 0.9em;
+  font-family: inherit;
   margin-bottom: 0.25rem;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.chats-page .message-media-omitted:disabled {
+  cursor: default;
+  text-decoration: none;
 }
 
 .chats-page .chat-video-media {
