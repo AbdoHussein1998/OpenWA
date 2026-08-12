@@ -205,6 +205,7 @@ services:
       - SEND_PACING_BREAKER_COOLDOWN_MS=${SEND_PACING_BREAKER_COOLDOWN_MS:-}
       # Server-side media conversion (opt-in). The image ships ffmpeg, but without these forwards
       # the feature could not be switched on from .env at all.
+      - MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES=${MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES:-}
       - MEDIA_DOWNLOAD_ENABLED=${MEDIA_DOWNLOAD_ENABLED:-}
       - MEDIA_DOWNLOAD_MAX_BYTES=${MEDIA_DOWNLOAD_MAX_BYTES:-}
       - MEDIA_DOWNLOAD_TIMEOUT_MS=${MEDIA_DOWNLOAD_TIMEOUT_MS:-}

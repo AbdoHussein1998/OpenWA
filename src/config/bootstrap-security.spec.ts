@@ -160,6 +160,15 @@ describe('assertNoDefaultSecretsInProduction', () => {
     ).toThrow(/DATABASE_PASSWORD/);
   });
 
+  // Boot validation treats a blank NODE_ENV as UNSET and lets it through, so this guard must agree:
+  // otherwise `NODE_ENV=` boots clean and then gets production-grade enforcement, and the two halves
+  // of the same rule disagree about the same string.
+  it('treats a blank NODE_ENV the way boot validation does — as unset', () => {
+    for (const nodeEnv of ['', '   ']) {
+      expect(() => assertNoDefaultSecretsInProduction({ nodeEnv, allowDevApiKey: 'true' })).not.toThrow();
+    }
+  });
+
   it('still skips the guard for the two environments that are deliberately not production', () => {
     for (const nodeEnv of ['development', 'test', undefined]) {
       expect(() => assertNoDefaultSecretsInProduction({ nodeEnv, allowDevApiKey: 'true' })).not.toThrow();

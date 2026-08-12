@@ -65,6 +65,17 @@ describe('validateEnv', () => {
   // so an unrecognised value silently selects the permissive branch of each one — including the
   // ALLOW_DEV_API_KEY rejection that stops the public `dev-admin-key` being seeded as an ADMIN
   // credential. A typo must fail the boot, not downgrade it.
+  // The knob that raises the message-list media budget parses with parseInt, so `8MiB` silently
+  // means 8 BYTES — every payload omitted — exactly the trap its sibling
+  // EXPORT_INLINE_MEDIA_BUDGET_BYTES is boot-checked for.
+  it('rejects a non-integer message-list media budget', () => {
+    expect(() => validateEnv({ MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES: '8MiB' })).toThrow(
+      /MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES/,
+    );
+    expect(() => validateEnv({ MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES: '8388608' })).not.toThrow();
+    expect(() => validateEnv({ MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES: '0' })).not.toThrow();
+  });
+
   it('rejects a NODE_ENV typo instead of silently selecting the permissive branch', () => {
     expect(() => validateEnv({ NODE_ENV: 'prod' })).toThrow(/NODE_ENV/);
     expect(() => validateEnv({ NODE_ENV: 'staging' })).toThrow(/NODE_ENV/);

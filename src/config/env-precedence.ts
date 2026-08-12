@@ -26,6 +26,7 @@ export const BLANK_SHADOWED_ENV_KEYS: string[] = [
   // Inbound-media knobs. Not dashboard-managed, but every blank compose forward must be cleared or
   // the empty value shadows .env / data/.env.generated — which is why the gate above requires an
   // entry for each one.
+  'MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES',
   'MEDIA_DOWNLOAD_ENABLED',
   'MEDIA_DOWNLOAD_MAX_BYTES',
   'MEDIA_DOWNLOAD_TIMEOUT_MS',

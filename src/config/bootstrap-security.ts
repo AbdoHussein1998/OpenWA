@@ -176,7 +176,11 @@ export function assertNoDefaultSecretsInProduction(env: SecretCheckEnv): void {
   // deliberately not production (and an unset variable, the standard Node default for local runs)
   // skip it; everything else is treated as production. Mirrors shutdown.service.ts's drain window,
   // which already fails toward the production behaviour the same way.
-  if (env.nodeEnv === 'development' || env.nodeEnv === 'test' || env.nodeEnv === undefined) return;
+  // A blank value means the same here as it does to boot validation, which treats '' as unset:
+  // otherwise `NODE_ENV=` boots clean and then gets production-grade secret enforcement, and the
+  // two halves of this guard disagree about the same string.
+  const nodeEnv = env.nodeEnv?.trim();
+  if (nodeEnv === 'development' || nodeEnv === 'test' || !nodeEnv) return;
 
   const isWeak = (value?: string): boolean => !value || FORBIDDEN_PROD_SECRETS.has(value.trim().toLowerCase());
   const problems: string[] = [];
