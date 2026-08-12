@@ -188,4 +188,32 @@ describe('SessionTakeoverService', () => {
     resolveFirst();
     svc.onModuleDestroy();
   });
+
+  /**
+   * There are TWO shutdown guards: one at sweep entry and one per adoption. Every existing case has
+   * at least one eligible session, so the per-adoption guard stops the work either way and the entry
+   * guard binds nothing — deleting it left the whole suite green.
+   *
+   * The ownership QUERY is what separates them: it runs before the per-adoption guard, so a sweep
+   * that never queries proves the entry guard fired. That also matters on its own — a sweep entered
+   * during shutdown otherwise still hits the database on every remaining tick.
+   */
+  it('a sweep entered during shutdown does not even query ownership', async () => {
+    const ownershipCalls = jest.fn().mockResolvedValue([lapsed({ name: 'any' })]);
+    const config = {
+      get: (key: string, def?: unknown) =>
+        ({ features: { autoStartSessions: true }, 'session.takeoverSweepMs': 1000 })[key as 'features'] ?? def,
+    } as unknown as ConfigService;
+    const svc = new SessionTakeoverService(
+      { start: jest.fn().mockResolvedValue(undefined) } as unknown as SessionService,
+      { lapsedHeldByOthers: ownershipCalls } as unknown as SessionOwnershipService,
+      { reapProcessingBatches: jest.fn().mockResolvedValue(0) } as unknown as BulkMessageService,
+      config,
+    );
+
+    svc.onModuleDestroy(); // flips the shutting-down signal
+    await svc.sweep();
+
+    expect(ownershipCalls).not.toHaveBeenCalled();
+  });
 });

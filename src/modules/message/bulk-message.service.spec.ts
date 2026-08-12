@@ -348,6 +348,21 @@ describe('BulkMessageService.processBatch', () => {
     expect(finalPartial.results[0].error?.message).toMatch(/message:sending/);
   });
 
+  /**
+   * The ONLY reason this second copy of the gate exists is that it must flag a plugin refusal apart
+   * from a delivery failure, so the per-item `message:failed` hook is skipped. Nothing bound that:
+   * deleting the flag on the envelope-refusal branch left the whole suite green, which means the
+   * refusal would have been reported to every plugin as a failed delivery with no test noticing.
+   */
+  it('does not report an unusable envelope to plugins as a delivery failure', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    hookManager.execute.mockResolvedValue({ continue: true, data: { notInput: 1 } });
+
+    await runProcessBatch();
+
+    expect(hookManager.execute).not.toHaveBeenCalledWith('message:failed', expect.anything(), expect.anything());
+  });
+
   // Negative twin: a chain that returns nothing is the ordinary no-plugin path.
   it('keeps the original content when the hook chain returns no data', async () => {
     repo.findOne.mockResolvedValue(makeBatch(1));
@@ -393,6 +408,35 @@ describe('BulkMessageService.processBatch', () => {
     ).at(-1)![1];
     expect(finalPartial.results[0].status).toBe(BatchMessageStatus.FAILED);
     expect(finalPartial.results[0].error?.message).toMatch(/character limit/i);
+  });
+
+  /**
+   * The cap covers text AND caption — a caption is the other caller-supplied string a template can
+   * inflate without bound, and it lands in the same `messages.body` column. Only the text half was
+   * bound: narrowing the loop to `['text']` left the suite green, so the caption half was a claim
+   * with nothing behind it.
+   */
+  it('fails an item whose rendered CAPTION exceeds the cap', async () => {
+    const huge = 'x'.repeat(70 * 1024);
+    repo.findOne.mockResolvedValue({
+      ...makeBatch(1),
+      messages: [
+        {
+          chatId: 'c0@c.us',
+          type: 'image',
+          content: { image: { base64: 'AAAA', mimetype: 'image/jpeg' }, caption: '{{v}}' },
+          variables: { v: huge },
+        },
+      ],
+    });
+
+    await runProcessBatch();
+
+    const finalPartial = (
+      repo.update.mock.calls as Array<[unknown, { status: BatchStatus; results: BatchMessageResult[] }]>
+    ).at(-1)![1];
+    expect(finalPartial.results[0].status).toBe(BatchMessageStatus.FAILED);
+    expect(finalPartial.results[0].error?.message).toMatch(/caption/i);
   });
 
   it('still sends an item whose render stays under the cap', async () => {
