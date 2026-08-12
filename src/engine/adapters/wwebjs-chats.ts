@@ -76,6 +76,13 @@ export class WwebjsChats {
       const chat = await this.client().getChatById(chatId);
       return await chat.sendSeen();
     } catch (error) {
+      // A dead page is a 503 and an early death signal, not an opaque `false` under a status that
+      // still says READY — the same split getChats and every sibling read already makes. Reporting
+      // this as "WhatsApp declined" let the caller retry against a corpse.
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'sendSeen');
+        throw new EngineTransportError('Transport died while marking a chat as read');
+      }
       this.host.logger.error(`Error marking chat ${chatId} as read`, String(error));
       return false;
     }
@@ -90,6 +97,13 @@ export class WwebjsChats {
       const chat = await this.client().getChatById(chatId);
       return await chat.clearMessages();
     } catch (error) {
+      // A dead page is a 503 and an early death signal, not an opaque `false` under a status that
+      // still says READY — the same split getChats and every sibling read already makes. Reporting
+      // this as "WhatsApp declined" let the caller retry against a corpse.
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'clearChatMessages');
+        throw new EngineTransportError('Transport died while clearing a chat');
+      }
       this.host.logger.error(`Error clearing messages in chat ${chatId}`, String(error));
       return false;
     }
@@ -115,6 +129,13 @@ export class WwebjsChats {
       }
       return true;
     } catch (error) {
+      // A dead page is a 503 and an early death signal, not an opaque `false` under a status that
+      // still says READY — the same split getChats and every sibling read already makes. Reporting
+      // this as "WhatsApp declined" let the caller retry against a corpse.
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'archiveChat');
+        throw new EngineTransportError('Transport died while archiving a chat');
+      }
       this.host.logger.error(`Error ${archive ? 'archiving' : 'unarchiving'} chat ${chatId}`, String(error));
       return false;
     }
@@ -134,9 +155,19 @@ export class WwebjsChats {
    * by resolving undefined or by rejecting.
    */
   private async requireResolvableChat(chatId: string): Promise<void> {
-    const chat = await this.client()
-      .getChatById(chatId)
-      .catch(() => undefined);
+    let chat: unknown;
+    try {
+      chat = await this.client().getChatById(chatId);
+    } catch (error) {
+      // A dead page resolves NOTHING, so swallowing every rejection here reported it as "no such
+      // chat" and named the caller's chatId as the problem. Five operations in this adapter already
+      // split that case out; without this, the same file answered a dead page two different ways.
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'requireResolvableChat');
+        throw new EngineTransportError('Transport died while resolving a chat');
+      }
+      chat = undefined; // an unknown chat rejects too — that is the 400 below
+    }
     if (!chat) throw new BadRequestException(`Chat ${chatId} does not exist on this session`);
   }
 
@@ -185,6 +216,13 @@ export class WwebjsChats {
       await chat.markUnread();
       return true;
     } catch (error) {
+      // A dead page is a 503 and an early death signal, not an opaque `false` under a status that
+      // still says READY — the same split getChats and every sibling read already makes. Reporting
+      // this as "WhatsApp declined" let the caller retry against a corpse.
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'markUnread');
+        throw new EngineTransportError('Transport died while marking a chat as unread');
+      }
       this.host.logger.error(`Error marking chat ${chatId} as unread`, String(error));
       return false;
     }
@@ -201,6 +239,13 @@ export class WwebjsChats {
       const chat = await this.client().getChatById(chatId);
       return await chat.delete();
     } catch (error) {
+      // A dead page is a 503 and an early death signal, not an opaque `false` under a status that
+      // still says READY — the same split getChats and every sibling read already makes. Reporting
+      // this as "WhatsApp declined" let the caller retry against a corpse.
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, 'deleteChat');
+        throw new EngineTransportError('Transport died while deleting a chat');
+      }
       this.host.logger.error(`Error deleting chat ${chatId}`, String(error));
       return false;
     }

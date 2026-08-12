@@ -70,6 +70,25 @@ export function validateEnv(config: EnvConfig): EnvConfig {
   };
   checkEnum('ENGINE_TYPE', ['whatsapp-web.js', 'baileys']);
   checkEnum('STORAGE_TYPE', ['local', 's3']);
+  // Every production hardening in the repo gates on the exact string 'production', so an
+  // unrecognised value silently selects the permissive branch of each one — CORS, Swagger, DTO
+  // error detail, the default-secret guard and the ALLOW_DEV_API_KEY rejection that stops the public
+  // `dev-admin-key` being seeded as ADMIN.
+  //
+  // Unset stays legal because it is the standard Node default AND the published image does not set
+  // it: the Dockerfile carries no runtime `ENV NODE_ENV`, so refusing an unset value would stop a
+  // plain `docker run` of the image from booting. Note what that means in practice — both compose
+  // files set it (`${NODE_ENV:-production}` and a hardcoded `development`), but running the image
+  // directly without passing it takes the permissive branch of every hardening listed above.
+  //
+  // Checked RAW rather than through `str()`: the readers compare `process.env.NODE_ENV` verbatim, so
+  // a padded ' production ' that only matches after trimming would validate clean here and still take
+  // the permissive branch at runtime — blessing the very downgrade this check exists to stop.
+  const nodeEnvAllowed = ['production', 'development', 'test'];
+  const rawNodeEnv = config.NODE_ENV;
+  if (typeof rawNodeEnv === 'string' && rawNodeEnv !== '' && !nodeEnvAllowed.includes(rawNodeEnv)) {
+    errors.push(`NODE_ENV must be one of ${nodeEnvAllowed.map(v => `"${v}"`).join(', ')} (got "${rawNodeEnv}")`);
+  }
 
   if (dbType === 'postgres') {
     for (const key of ['DATABASE_HOST', 'DATABASE_USERNAME', 'DATABASE_PASSWORD']) {
@@ -173,6 +192,7 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'AUTOMATION_MAX_PER_SESSION', // 0 = unlimited
     'WEBHOOK_MEDIA_INLINE_MAX_BYTES', // 0 = never inline media
     'EXPORT_INLINE_MEDIA_BUDGET_BYTES', // 0 = a data export carries no inline media at all
+    'MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES', // 0 = a message list carries no inline media at all
   ]) {
     checkNonNegativeInt(key);
   }

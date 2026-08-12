@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { BadRequestException, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
-import { MessageService } from './message.service';
+import { MessageService, spendInlineMediaBudget } from './message.service';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
 import { SessionService } from '../session/session.service';
 import { EngineRegistry } from '../../engine/engine-registry.service';
@@ -1965,5 +1965,138 @@ describe('MessageService', () => {
         mimetype: 'image/jpeg',
       });
     });
+  });
+
+  // The budget is only worth anything if the read path actually applies it: the wiring is one line and
+  // would vanish silently. This drives getMessages through a faked query builder and asserts the
+  // response is bounded, not just that the helper exists.
+  describe('MessageService.getMessages bounds its inline media', () => {
+    it('applies the budget to the rows it returns', async () => {
+      const prev = process.env.MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES;
+      process.env.MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES = '25000';
+      try {
+        const rows = Array.from(
+          { length: 100 },
+          (_, i) =>
+            ({
+              id: `m${i}`,
+              metadata: { media: { mimetype: 'image/jpeg', data: 'x'.repeat(10_000) } },
+            }) as unknown as Message,
+        );
+        const builder = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          skip: jest.fn().mockReturnThis(),
+          take: jest.fn().mockReturnThis(),
+          getManyAndCount: jest.fn().mockResolvedValue([rows, 100]),
+        };
+        (repository.createQueryBuilder as unknown as jest.Mock).mockReturnValue(builder);
+
+        const result = await service.getMessages('sess-1', { limit: 100 });
+
+        const inlineBytes = result.messages
+          .map(m => (m.metadata as { media?: { data?: unknown } }).media?.data)
+          .filter((d): d is string => typeof d === 'string')
+          .reduce((sum, d) => sum + d.length, 0);
+        expect(result.messages).toHaveLength(100); // the page is intact
+        expect(inlineBytes).toBeLessThanOrEqual(25_000); // its payload is not
+      } finally {
+        if (prev === undefined) delete process.env.MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES;
+        else process.env.MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES = prev;
+      }
+    });
+  });
+});
+
+describe('spendInlineMediaBudget', () => {
+  const row = (id: string, base64Len: number, extra: Record<string, unknown> = {}): Message =>
+    ({
+      id,
+      metadata: { media: { mimetype: 'image/jpeg', filename: 'a.jpg', data: 'x'.repeat(base64Len), ...extra } },
+    }) as unknown as Message;
+
+  const mediaOf = (m: Message): Record<string, unknown> => (m.metadata as { media: Record<string, unknown> }).media;
+
+  it('keeps payloads while the budget lasts', () => {
+    const rows = [row('a', 100), row('b', 100)];
+    spendInlineMediaBudget(rows, 1000);
+    expect(mediaOf(rows[0]).data).toHaveLength(100);
+    expect(mediaOf(rows[1]).data).toHaveLength(100);
+  });
+
+  // The rows arrive newest-first, so the budget is spent on the most recent media and older rows
+  // fall back to the marker the engine itself emits when inbound media is skipped.
+  it('replaces the payload with the omitted marker once the budget is spent', () => {
+    const rows = [row('newest', 600), row('older', 600)];
+    spendInlineMediaBudget(rows, 1000);
+
+    expect(mediaOf(rows[0]).data).toHaveLength(600);
+    expect(mediaOf(rows[1]).data).toBeUndefined();
+    expect(mediaOf(rows[1]).omitted).toBe(true);
+    expect(mediaOf(rows[1]).mimetype).toBe('image/jpeg'); // the descriptive fields survive
+    expect(typeof mediaOf(rows[1]).sizeBytes).toBe('number');
+  });
+
+  it('bounds the total inline bytes it lets through', () => {
+    const rows = Array.from({ length: 100 }, (_, i) => row(`m${i}`, 10_000));
+    spendInlineMediaBudget(rows, 25_000);
+
+    const total = rows
+      .map(m => mediaOf(m).data)
+      .filter((d): d is string => typeof d === 'string')
+      .reduce((sum, d) => sum + d.length, 0);
+    expect(total).toBeLessThanOrEqual(25_000);
+  });
+
+  it('never touches a URL pointer, which is not a payload', () => {
+    const rows = [row('pointer', 0, { data: 'https://cdn.example/a.jpg' })];
+    spendInlineMediaBudget(rows, 0);
+    expect(mediaOf(rows[0]).data).toBe('https://cdn.example/a.jpg');
+    expect(mediaOf(rows[0]).omitted).toBeUndefined();
+  });
+
+  it('reports the decoded size the caller asked about, preferring a stored sizeBytes', () => {
+    const rows = [row('a', 400, { sizeBytes: 4242 })];
+    spendInlineMediaBudget(rows, 0);
+    expect(mediaOf(rows[0]).sizeBytes).toBe(4242);
+  });
+
+  /**
+   * A payload bigger than the whole budget was omitted even as the only media on the page, so a
+   * single large photo or video — well inside the 50 MiB the gateway stores inline — could never be
+   * read back through this route. The dashboard's thread has no other media source and fetches with
+   * staleTime: Infinity, so the user saw a permanent 📎 placeholder for an image WhatsApp shows.
+   *
+   * The newest payload is therefore always let through when inlining is enabled at all. The budget
+   * still bounds everything after it, and a budget of 0 still means "no inline media", so an
+   * operator who switched inlining off does not get one payload back.
+   */
+  it('lets the newest payload through even when it alone exceeds the budget', () => {
+    const rows = [row('huge', 5000)];
+    spendInlineMediaBudget(rows, 1000);
+
+    expect(mediaOf(rows[0]).data).toHaveLength(5000);
+    expect(mediaOf(rows[0]).omitted).toBeUndefined();
+  });
+
+  // Negative twin: the allowance is for the FIRST payload only — it must not become a blanket pass.
+  it('still omits the rows after an oversized newest payload', () => {
+    const rows = [row('huge', 5000), row('next', 10), row('later', 10)];
+    spendInlineMediaBudget(rows, 1000);
+
+    expect(mediaOf(rows[0]).data).toHaveLength(5000);
+    expect(mediaOf(rows[1]).data).toBeUndefined();
+    expect(mediaOf(rows[1]).omitted).toBe(true);
+    expect(mediaOf(rows[2]).omitted).toBe(true);
+  });
+
+  // A budget of 0 is an explicit "do not inline", not a small budget — no allowance applies.
+  it('grants no allowance when inlining is switched off entirely', () => {
+    const rows = [row('huge', 5000)];
+    spendInlineMediaBudget(rows, 0);
+
+    expect(mediaOf(rows[0]).data).toBeUndefined();
+    expect(mediaOf(rows[0]).omitted).toBe(true);
   });
 });

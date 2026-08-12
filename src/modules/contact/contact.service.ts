@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { paginate, ListOptions } from '../../common/utils/paginate';
-import { parseWaId } from '../../engine/identity/wa-id';
+import { isIndividualWid, parseWaId } from '../../engine/identity/wa-id';
 
 /**
  * Owns engine access for contact operations so the "session not started" guard and
@@ -122,7 +122,12 @@ export class ContactService {
     // Allow-list rather than deny-list: only a user id (or a bare number, which parses as
     // `unknown`) names a phone. A group/newsletter/broadcast/status id also carries digits that
     // whatsapp-web.js would happily store as a phone number for a contact that does not exist.
-    if (kind === 'user' || this.isBareNumber(contactId)) return;
+    // The DOMAIN alone is not enough: `parseWaId('NOT A USER@c.us').kind` is 'user', so free text
+    // cleared this guard and reached the engine, which reported a successful save for an entry
+    // keyed by something that is not a phone number. isIndividualWid additionally requires the
+    // user-part to be numeric — the same predicate the group-participant, channel-admin and
+    // message-mention surfaces already apply to these very shapes.
+    if ((kind === 'user' && isIndividualWid(contactId)) || this.isBareNumber(contactId)) return;
     if (kind === 'lid') {
       throw new BadRequestException(
         `Contact ${contactId} is a privacy id (@lid) with no known phone number; the addressbook is keyed by phone number, so pass a phone-based contact id instead`,

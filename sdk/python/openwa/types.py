@@ -631,8 +631,9 @@ class BatchStatusResponse(TypedDict, total=False):
 class ContactRecord(TypedDict, total=False):
     """A contact as the gateway returns it.
 
-    ``isBlocked`` is best-effort: the Baileys adapter does not track blocklist state and always
-    reports ``False``.
+    ``isBlocked`` reflects the account's real blocklist on both engines. When the blocklist query
+    fails the field stays at its default rather than reporting "nobody is blocked", and the gateway
+    logs a warning — so a ``False`` is not proof the contact is unblocked if the link is unhealthy.
     """
 
     id: Jid

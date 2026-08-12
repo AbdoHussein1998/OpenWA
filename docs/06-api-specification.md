@@ -790,7 +790,7 @@ Mark a chat as read/seen.
 
 Returns HTTP `200`, matching the OpenAPI contract.
 
-**Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found
+**Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:id/chats/unread
 
@@ -822,7 +822,7 @@ Mark a chat as unread.
 
 Returns HTTP `200`, matching the OpenAPI contract.
 
-**Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found
+**Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### DELETE /api/sessions/:id/chats/:chatId/messages
 
@@ -847,7 +847,7 @@ Delete every message in a chat, keeping the chat itself in the list.
 > whatsapp-web.js, or on Baileys a chat with no known history — the clear is an app-state
 > modification keyed to the chat's last message.
 
-**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found
+**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:id/chats/archive
 
@@ -887,7 +887,7 @@ Archive or unarchive a chat.
 > account itself made (remote-device archives arrive later via chat-update diffing), and
 > whatsapp-web.js's `chat_archived` event is not wired. Treat the HTTP response as the outcome.
 
-**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found
+**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:id/chats/mute
 
@@ -939,7 +939,7 @@ Mute a chat's notifications until a given moment, or unmute it.
 > always `{ "success": true }` or an error.
 
 **Errors:** `400` session not ready, or invalid `chatId`/`muteUntil` · `401` missing/invalid API key ·
-`404` session not found · `503` WhatsApp did not confirm within the request budget
+`404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:id/chats/pin
 
@@ -982,7 +982,7 @@ Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct fro
 > so a chat with no known history pins normally.
 
 **Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found ·
-`503` WhatsApp did not confirm within the request budget
+`409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:id/chats/delete
 
@@ -1014,7 +1014,7 @@ Delete a chat from the chat list (e.g. a group you have left).
 
 Returns HTTP `200`, matching the OpenAPI contract.
 
-**Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found
+**Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:id/chats/typing
 
@@ -1116,6 +1116,8 @@ Get persisted message history for a session from the local DB (paginated, filter
 ```
 
 Each `Message`: `{ id (uuid), sessionId, waMessageId (string|null), chatId, from, to, body (string|null), type, direction ('incoming'|'outgoing'), timestamp (number|null), metadata (object|null), status ('pending'|'sent'|'delivered'|'read'|'failed'), createdAt (ISO date) }`. Ordered by `createdAt` DESC. The response is the raw service object (no envelope). Unlike the live `IncomingMessage` shape below, this persisted `Message` does **not** carry `kind` — re-derive the chat kind from `chatId` (see `ChatKind` / `chatKind()`) if needed.
+
+> **Inline media is carried up to a budget, then omitted.** `MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES` (8 MiB of encoded base64 by default) bounds how much inline media one response may hold across its rows. A row is not a bounded object — `limit` is clamped to `[1,100]` but each row can carry its base64 in `metadata.media.data`, so a page of media rows could otherwise reach hundreds of megabytes and fail the read outright. The budget is spent newest-first, matching the `createdAt` DESC order above, so a page that cannot carry everything keeps the most recent media. Past it a payload is replaced with `{ mimetype, filename?, omitted: true, sizeBytes }` — the same marker the engine emits for inbound media over `MEDIA_DOWNLOAD_MAX_BYTES` — and the bytes remain available from [`GET /messages/:chatId/:messageId/media`](#get-apisessionssessionidmessageschatidmessageidmedia). Two rules bound the edges: the newest payload is always inlined even when it alone exceeds the budget (otherwise a single large photo would be permanently unreadable through this route), and a budget of `0` means "never inline" and grants no such allowance. The knob is validated at boot — `8MiB` would parse to 8 bytes — and is forwarded by both compose files. The MCP `MessageList` tool shares this path and the same budget.
 
 **Errors:** `401` missing/invalid API key
 
@@ -2028,6 +2030,8 @@ Each `BulkMessageItemDto`: `{ chatId: string, type: 'text'|'image'|'video'|'audi
 
 Each item's base64 media is checked against the media byte cap (`MEDIA_DOWNLOAD_MAX_BYTES`) twice: at batch creation, and again per item after `variables` and the `message:sending` plugin gate are applied. An item that outgrows the cap only after rendering fails individually (`failed` in `results`, with `message:failed` fired) instead of being sent. `totalMessages` in the response reflects the de-duplicated item count.
 
+The rendered text is bounded the same way, by `TEMPLATE_RENDER_MAX_CHARS` (default 64 KiB) — the limit the single-send template path already applied. `content.text` and `content.caption` are length-validated _before_ substitution, so caller-supplied `variables` could otherwise inflate each item without bound while the request body stayed far below the in-flight body budget. An item whose `text` or `caption` exceeds the limit after substitution fails individually with a message naming it, rather than being truncated silently or sent. Media is not bounded by this cap — `MEDIA_DOWNLOAD_MAX_BYTES` governs it, three orders of magnitude higher, because a 100 KB image is already ~137,000 base64 characters and would fail the character limit on every personalised media send.
+
 ```json
 {
   "messages": [
@@ -2495,6 +2499,8 @@ Get the group's picture URL.
 **Response** `200` — `{ "url": "https://…" }`, or `{ "url": null }` when the group has no picture or
 it is hidden by privacy settings.
 
+**Errors:** `400` the id does not name a group, or the session is not active · `401` missing/invalid API key · `409` engine not ready · `503` WhatsApp did not answer within the request budget — nothing could be read
+
 #### PUT /api/sessions/:sessionId/groups/:groupId/picture
 
 Set the group's picture. The account must be a group admin.
@@ -2511,7 +2517,7 @@ Set the group's picture. The account must be a group admin.
 
 **Response** `200` — `{ "success": true, "message": "Group picture updated" }`
 
-**Errors:** `400` session not active, or neither `url` nor `base64` supplied · `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` group not found
+**Errors:** `400` the id does not name a group, the session is not active, or neither `url` nor `base64` was supplied · `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` no such group · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget — the change may or may not have been applied
 
 #### DELETE /api/sessions/:sessionId/groups/:groupId/picture
 
@@ -2521,7 +2527,7 @@ Remove the group's picture. The account must be a group admin.
 
 **Response** `200` — `{ "success": true, "message": "Group picture removed" }`
 
-**Errors:** `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` group not found
+**Errors:** `400` the id does not name a group, or the session is not active · `401` missing/invalid API key · `403` key lacks OPERATOR role, or the engine refused (admin rights required) · `404` no such group · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget — the change may or may not have been applied
 
 #### GET /api/sessions/:sessionId/groups/:groupId/invite-code
 
@@ -4863,6 +4869,11 @@ Prometheus exposition scrape of OpenWA process + session + message metrics; gate
 
 Content-Type `text/plain; version=0.0.4; charset=utf-8`, `Cache-Control: no-store`. Raw text (no JSON envelope):
 
+When the data database cannot be read the database-derived series (`openwa_sessions*`,
+`openwa_messages*`) are OMITTED rather than reported as zero — a zero would fire an alert
+claiming every session had dropped. `openwa_stats_available` is what tells the two cases apart,
+so alert on it rather than reading a missing series as zero. `docs/10` lists every series.
+
 ```
 # HELP openwa_up 1 if the OpenWA process is running
 # TYPE openwa_up gauge
@@ -4873,6 +4884,8 @@ openwa_process_uptime_seconds 3600
 openwa_process_resident_memory_bytes 187432960
 # TYPE openwa_process_heap_used_bytes gauge
 openwa_process_heap_used_bytes 64512000
+# TYPE openwa_stats_available gauge
+openwa_stats_available 1
 # TYPE openwa_sessions_total gauge
 openwa_sessions_total 3
 # TYPE openwa_sessions_active gauge
@@ -5524,7 +5537,9 @@ Because that pre-flight runs _before_ the transaction, its teardown is not cover
 
 Inside the transaction every migration table is emptied. `webhooks` and `sessions` are DELETEd directly, so a missing table there fails the restore; 11 more go through a tolerant helper where a _genuinely missing_ table is skipped; and `automation_rules` is emptied by the `DELETE FROM sessions` cascade rather than by the helper. Any other DELETE failure propagates to the rollback. Rows are then re-inserted, sessions first. JSON object/array fields are auto-stringified before insert, and the Postgres-form `$N` placeholders are rewritten for SQLite. Two guards return `imported:false` after a rollback: any `warnings`, and a payload that restores **zero** rows in total (a wrong/empty backup would otherwise commit a silent wipe — the response then carries `Backup contained no rows to restore; refused to replace existing data. Check the file.`). On commit the lid→phone mirror is reloaded from the restored rows.
 
-**Errors:** `400` `tables` absent/not an object, a flag spelled as anything but a boolean or exact `true`/`false`, or a property the route does not accept — nothing is written, and field-level detail is suppressed in production unless `VALIDATION_ERROR_DETAIL=true` · `401` · `403` · `409` refused, with the reason in `code` — `IMPORT_WOULD_ORPHAN_ENGINES` (live engines exist for sessions the backup does not contain; retry with `stopOrphans` or `force`), `IMPORT_ALREADY_RUNNING` (another import is running; wait for it), `IMPORT_NESTED_TRANSACTION` (another database transaction holds the connection; retry with nothing else in flight) · `500` `tables` missing/null or unrecoverable DB error
+**Errors:** `400` `tables` absent/not an object, a table whose value is not an array of rows, a row that is not an object (`null`, a bare string, a nested array), a flag spelled as anything but a boolean or exact `true`/`false`, or a property the route does not accept — nothing is written, and field-level detail is suppressed in production unless `VALIDATION_ERROR_DETAIL=true` · `401` · `403` · `409` refused, with the reason in `code` — `IMPORT_WOULD_ORPHAN_ENGINES` (live engines exist for sessions the backup does not contain; retry with `stopOrphans` or `force`), `IMPORT_ALREADY_RUNNING` (another import is running; wait for it), `IMPORT_NESTED_TRANSACTION` (another database transaction holds the connection; retry with nothing else in flight) · `500` unrecoverable DB error
+
+> A malformed archive is answered before the restore opens its transaction. Every table present is checked for being an array, and every row in it for being an object — not just `sessions`, since the rest are read inside the transaction where the same mistake would fail mid-restore instead of ahead of it. A hand-edited or truncated backup therefore reports `400` naming the offending `tables.<name>[<index>]`, rather than the `500` that told the operator the server had broken when their file was simply wrong.
 
 ---
 

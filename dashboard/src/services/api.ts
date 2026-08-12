@@ -767,6 +767,12 @@ export const sessionApi = {
         includeMedia ? '&includeMedia=true' : ''
       }`,
     ),
+  // A message's stored media, fetched on demand. The message list carries its media inline only up to
+  // MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES; past that budget the payload arrives as the
+  // `{ omitted: true, sizeBytes }` marker and the bytes are only reachable here. Served as an
+  // attachment (Content-Disposition), so callers download it rather than rendering it inline.
+  getMessageMediaBlob: (id: string, chatId: string, messageId: string) =>
+    requestBlob(`/sessions/${id}/messages/${encodeURIComponent(chatId)}/${encodeURIComponent(messageId)}/media`),
   getSubscribedChannels: (id: string) => request<Channel[]>(`/sessions/${id}/channels`),
   getChannelMessages: (id: string, channelId: string, limit = 50) =>
     request<ChannelMessage[]>(`/sessions/${id}/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}`),

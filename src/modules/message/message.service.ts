@@ -35,6 +35,72 @@ export interface GetMessagesOptions {
 /** Default cap on a rendered template's final text; overridable via TEMPLATE_RENDER_MAX_CHARS. */
 export const DEFAULT_TEMPLATE_RENDER_MAX_CHARS = 64 * 1024;
 
+/**
+ * Aggregate budget for the inline base64 media ONE message-list response may carry, counted in the
+ * encoded bytes that actually land in the JSON body. Override with
+ * MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES; 0 omits every payload.
+ *
+ * The row count was already clamped to 1..100, but a row is not a bounded object: `metadata.media.data`
+ * holds the whole base64 payload, so a hundred media rows serialise to hundreds of megabytes — past
+ * V8's string ceiling the read fails outright, and the dashboard requests the maximum page size with
+ * no way to ask for less. Mirrors the export path's budget rather than inventing a second policy.
+ *
+ * NOT a hard ceiling on the response. The newest payload is let through whatever its size (see
+ * spendInlineMediaBudget), so the real bound is `max(budget, one payload)` — and one payload is
+ * bounded upstream by `capInboundMedia` at MEDIA_DOWNLOAD_MAX_BYTES (50 MiB by default, ~68 MiB once
+ * base64-encoded). That is well inside V8's string ceiling and is the point: the alternative is a
+ * large photo no client can ever read back. Raising MEDIA_DOWNLOAD_MAX_BYTES raises this too.
+ */
+export const DEFAULT_MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES = 8 * 1024 * 1024;
+
+export function resolveMessageListInlineMediaBudgetBytes(): number {
+  const parsed = Number.parseInt(process.env.MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES ?? '', 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : DEFAULT_MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES;
+}
+
+/** `metadata.media.data` holds `base64 || url`, so a pointer must never be mistaken for a payload. */
+const MEDIA_URL_POINTER = /^https?:\/\//i;
+
+/**
+ * Spend the budget over an already-ordered (newest-first) page, replacing each payload past it with
+ * the engine's own `{ omitted: true, sizeBytes }` marker — the same shape `capInboundMedia` writes
+ * when inbound media is skipped on the way in, so a trimmed row is not a new shape consumers must
+ * learn. Mutates and returns the rows.
+ *
+ * A budget, not a blanket strip: the recent media a caller is most likely reading still arrives
+ * inline, and anything dropped remains fetchable from GET /:chatId/:messageId/media.
+ */
+export function spendInlineMediaBudget(messages: Message[], budgetBytes: number): Message[] {
+  let spent = 0;
+  for (const message of messages) {
+    const metadata = message.metadata as Record<string, unknown> | null | undefined;
+    if (!metadata || typeof metadata !== 'object') continue;
+    const media = metadata.media as { data?: unknown; sizeBytes?: number } | null | undefined;
+    if (!media || typeof media.data !== 'string' || MEDIA_URL_POINTER.test(media.data)) continue;
+
+    const encoded = Buffer.byteLength(media.data, 'utf8');
+    // The newest payload is always let through when inlining is enabled at all. Without this an
+    // item larger than the whole budget was omitted even as the ONLY media on the page, so a single
+    // large photo or video — well inside the bytes the gateway stores inline — could never be read
+    // back through this route: the dashboard thread has no other media source and caches with
+    // staleTime: Infinity, leaving a permanent placeholder for media WhatsApp displays.
+    // A budget of 0 means "do not inline", not "a very small budget", so it grants no allowance.
+    const allowanceApplies = spent === 0 && budgetBytes > 0;
+    if (spent + encoded <= budgetBytes || allowanceApplies) {
+      spent += encoded;
+      continue;
+    }
+    const { data, ...withoutPayload } = media;
+    metadata.media = {
+      ...withoutPayload,
+      omitted: true,
+      // Decoded bytes, matching what capInboundMedia reports — the caller asked how big it WAS.
+      sizeBytes: media.sizeBytes ?? Buffer.byteLength(data, 'base64'),
+    };
+  }
+  return messages;
+}
+
 /** Pin window applied when the caller does not choose one — WhatsApp's own default of 24h. */
 export const DEFAULT_PIN_DURATION_SECONDS = 86400;
 
@@ -410,7 +476,10 @@ export class MessageService {
     }
 
     const [messages, total] = await query.getManyAndCount();
-    return { messages, total };
+    // The 1..100 clamp above bounds the ROW COUNT, not the response: each row carries its inline
+    // base64 in metadata.media.data. Spent newest-first (the query orders createdAt DESC), so the
+    // most recently viewed media still arrives inline and the rest keeps its omitted marker.
+    return { messages: spendInlineMediaBudget(messages, resolveMessageListInlineMediaBudgetBytes()), total };
   }
 
   /**

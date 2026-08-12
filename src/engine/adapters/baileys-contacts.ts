@@ -104,11 +104,13 @@ export class BaileysContacts {
   async blockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
     await this.confirmed(this.sock().updateBlockStatus(contactId, 'block'), 'the block');
+    this.invalidateBlocklist();
   }
 
   async unblockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
     await this.confirmed(this.sock().updateBlockStatus(contactId, 'unblock'), 'the unblock');
+    this.invalidateBlocklist();
   }
 
   /**
@@ -117,11 +119,11 @@ export class BaileysContacts {
    * a claim about the account sold in place of a transport failure. Wire items without a jid attr
    * are dropped rather than reported as "undefined".
    */
-  async getBlockedContacts(): Promise<string[]> {
+  async getBlockedContacts(budgetMs: number = this.queryBudgetMs): Promise<string[]> {
     this.host.ensureReady();
     const jids = await withQueryDeadline(
       this.sock().fetchBlocklist(),
-      this.queryBudgetMs,
+      budgetMs,
       'WhatsApp did not answer the blocklist query in time',
     );
     return (jids ?? []).filter((jid): jid is string => Boolean(jid)).map(jid => this.host.toNeutralJid(jid));
@@ -162,16 +164,119 @@ export class BaileysContacts {
     await this.confirmed(this.sock().removeProfilePicture(selfJid), 'the profile picture removal');
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async getContacts(): Promise<Contact[]> {
     this.host.ensureReady();
-    return this.host.listContacts();
+    return this.withBlockedState(this.host.listContacts());
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async getContactById(contactId: string): Promise<Contact | null> {
     this.host.ensureReady();
-    return this.host.findContact(contactId);
+    const contact = this.host.findContact(contactId);
+    if (!contact) return null;
+    return (await this.withBlockedState([contact]))[0];
+  }
+
+  /**
+   * Stamp the real blocklist state onto contacts the store mapped.
+   *
+   * The store has no socket, so its mapper defaulted `isBlocked` to a literal `false` for everyone —
+   * a claim about the account, not a reading of it, while THIS session's own blocklist query returns
+   * the real ids. Automation that skips blocked contacts before sending therefore messaged people the
+   * account had explicitly blocked.
+   *
+   * A failed blocklist query degrades rather than failing the read: contacts are still useful, and
+   * getBlockedContacts deliberately throws instead of returning an empty list precisely so a
+   * transport failure is not sold as "nobody is blocked". The default is kept and the gap is warned
+   * about, so the degradation is visible instead of silent.
+   */
+  private async withBlockedState(contacts: Contact[]): Promise<Contact[]> {
+    if (contacts.length === 0) return contacts;
+    const blocked = await this.blockedIds();
+    if (!blocked) return contacts;
+    return contacts.map(contact => ({ ...contact, isBlocked: blocked.has(contact.id) }));
+  }
+
+  /** Memoised blocklist. See {@link blockedIds} for why this is not queried per read. */
+  private blocklistMemo?: { at: number; ids: Set<string> | null };
+
+  /** The open query, shared by every caller that arrives while it is in flight. */
+  private blocklistInFlight?: Promise<Set<string> | null>;
+
+  /** Incremented on every block/unblock so a query started earlier cannot write a stale memo. */
+  private blocklistGeneration = 0;
+
+  /**
+   * How long one blocklist answer is reused. Short enough that a block made elsewhere shows up
+   * quickly, long enough that a burst of reads costs one query.
+   */
+  private static readonly BLOCKLIST_MEMO_MS = 5_000;
+
+  /**
+   * Deadline for the blocklist query when it is ENRICHING a contact read, deliberately far below the
+   * engine-wide budget `/contacts/blocked` uses. There the blocklist is the answer and waiting is
+   * right; here it is one field on rows the caller already has, and a contact read used to be an
+   * in-memory lookup. Past this the read returns with isBlocked at its default and a warning —
+   * the same degradation a failed query already produces.
+   */
+  private static readonly BLOCKLIST_ENRICHMENT_BUDGET_MS = 5_000;
+
+  /**
+   * The account's blocked ids, or null when the query failed.
+   *
+   * Memoised because a single contact read is not the only caller: a session seeding its status
+   * history resolves each unique poster through getContactById purely to read a NAME
+   * (session-engine-leaf-events), so querying per read turned one connect into N network round-trips,
+   * each with its own deadline. The failure is memoised too — a broken blocklist must not cost N
+   * queries either — and block/unblock invalidate it so a just-changed state is not read stale.
+   */
+  private async blockedIds(): Promise<Set<string> | null> {
+    if (this.blocklistMemo && Date.now() - this.blocklistMemo.at < BaileysContacts.BLOCKLIST_MEMO_MS) {
+      return this.blocklistMemo.ids;
+    }
+    // Share one query with every caller that arrives while it is open, so a burst costs one round
+    // trip rather than one per caller. Note which callers this actually helps: the status seed
+    // resolves posters SEQUENTIALLY (`await resolvePoster(...)` per item) and memoises per jid, so it
+    // never has two lookups in flight — the memo above is what bounds that loop. This bounds
+    // genuinely concurrent readers instead, such as two contact requests arriving together.
+    this.blocklistInFlight ??= this.queryBlockedIds();
+    return this.blocklistInFlight;
+  }
+
+  private async queryBlockedIds(): Promise<Set<string> | null> {
+    // Read before the query so an invalidation that lands DURING it can be detected: block/unblock
+    // clears the memo, and a pre-change answer arriving afterwards would re-memoise the state the
+    // caller just changed, for the whole window.
+    const generation = this.blocklistGeneration;
+    let ids: Set<string> | null;
+    try {
+      ids = new Set(await this.getBlockedContacts(BaileysContacts.BLOCKLIST_ENRICHMENT_BUDGET_MS));
+    } catch (error) {
+      this.host.logger.warn('Blocklist unavailable; contact isBlocked left at its default', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      ids = null;
+    } finally {
+      // Only if the handle is still this query's. After an invalidation the field belongs to a query
+      // started later, and clearing it there would send the next reader into a third query while the
+      // second was still open — defeating the sharing exactly inside the window it introduced.
+      if (generation === this.blocklistGeneration) {
+        this.blocklistInFlight = undefined;
+      }
+    }
+    // Stamped with the time the ANSWER arrived, not the time the query started. Stamping the start
+    // wrote an already-expired memo for any query slower than the window — so the memo absorbed
+    // only the fast queries and collapsed on exactly the slow ones it was added for.
+    if (generation === this.blocklistGeneration) {
+      this.blocklistMemo = { at: Date.now(), ids };
+    }
+    return ids;
+  }
+
+  /** Bumped by block/unblock so an in-flight query cannot memoise pre-change state afterwards. */
+  private invalidateBlocklist(): void {
+    this.blocklistMemo = undefined;
+    this.blocklistInFlight = undefined;
+    this.blocklistGeneration += 1;
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await

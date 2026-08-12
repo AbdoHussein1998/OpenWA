@@ -94,6 +94,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+          # Both trees are installed below, so both lockfiles belong in the cache key.
+          cache-dependency-path: |
+            package-lock.json
+            dashboard/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -101,9 +105,21 @@ jobs:
       - name: Security audit
         # high (not critical): the `overrides` in package.json clear the root tree's HIGH advisories
         # (brace-expansion CVE-2026-14257, js-yaml GHSA-pm4m-ph32-ghv5), so this threshold now fences
-        # HIGH regressions instead of only catching criticals. Scoped to the root tree; the dashboard
-        # carries its own `overrides` and its remaining HIGH pair (react-router) rides Dependabot.
+        # HIGH regressions instead of only catching criticals.
         run: npm audit --audit-level=high
+
+      # The dashboard is a SECOND dependency tree, and it is the one that reaches a browser: its
+      # runtime deps are bundled into dashboard/dist, which the production image copies and serves.
+      # It went unscanned by every job in both the PR and the tag path — the image scan sees OS
+      # packages and the bundled output, not the npm graph behind it — so a HIGH advisory in a
+      # runtime dep could ride a release undetected. Audited here rather than as a step in the
+      # `dashboard` job for the same reason this job exists at all: an advisory must not abort that
+      # job's lint, typecheck, i18n, build and unit tests before they run.
+      - name: Install dashboard dependencies
+        run: cd dashboard && npm ci
+
+      - name: Security audit (dashboard)
+        run: cd dashboard && npm audit --audit-level=high
 
   test:
     name: Test
@@ -409,3 +425,21 @@ jobs:
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The image carries no USER directive by design: docker-entrypoint.sh starts as root to fix
+      # named-volume ownership, then drops with `exec gosu openwa`. Nothing verified that drop —
+      # smoke-test-non-root.sh existed but no job ran it, so a change leaving Node on uid 0 passed
+      # every gate above and reached `latest`. Loaded single-arch from the same gha cache the
+      # multi-arch build just populated, so this reuses those layers rather than building twice.
+      - name: Load a single-arch image for the runtime smoke test
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          load: true
+          tags: openwa-ci:non-root-smoke
+          cache-from: type=gha
+
+      - name: Verify the image drops from root to the openwa user
+        env:
+          OPENWA_SMOKE_IMAGE: openwa-ci:non-root-smoke
+        run: ./scripts/smoke-test-non-root.sh

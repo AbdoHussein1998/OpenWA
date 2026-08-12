@@ -3989,7 +3989,7 @@
             }
           },
           "400": {
-            "description": "Body rejected before the restore ran: `tables` absent or not an object, a flag spelled as anything but a boolean or exact `true`/`false`, or a property this route does not accept. Nothing was written. Field-level detail is suppressed in production unless VALIDATION_ERROR_DETAIL=true."
+            "description": "Body rejected before the restore ran: `tables` absent or not an object, a table whose value is not an array of rows, a row that is not an object (`null`, a bare string, a nested array), a flag spelled as anything but a boolean or exact `true`/`false`, or a property this route does not accept. Nothing was written. Field-level detail is suppressed in production unless VALIDATION_ERROR_DETAIL=true."
           },
           "409": {
             "description": "Refused, with the reason in `code`. IMPORT_ALREADY_RUNNING: another import is running — wait for it. IMPORT_NESTED_TRANSACTION: another database transaction holds this connection, so a restore could not be made durable — retry with nothing else in flight. IMPORT_WOULD_ORPHAN_ENGINES: live engines exist for sessions the backup would remove — retry with stopOrphans=true to stop them in-request, or force=true to proceed and restart after. Only the last of these is retryable with stopOrphans; the others leave nothing to decide"
@@ -4055,7 +4055,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "string"
+                "$ref": "#/components/schemas/ImportStorageDto"
               }
             }
           }
@@ -5510,6 +5510,9 @@
               }
             }
           },
+          "400": {
+            "description": "The id does not name a group, or the session is not active"
+          },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
           },
@@ -5566,13 +5569,13 @@
             }
           },
           "400": {
-            "description": "Session not active, or neither url nor base64 supplied"
+            "description": "The id does not name a group, or the session is not active, or neither url nor base64 was supplied"
           },
           "403": {
             "description": "The engine refused the change — admin rights required"
           },
           "404": {
-            "description": "No such group — the id is unknown, or it addresses a 1:1 chat rather than a group."
+            "description": "No such group — the id is unknown."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
@@ -5619,11 +5622,14 @@
               }
             }
           },
+          "400": {
+            "description": "The id does not name a group, or the session is not active"
+          },
           "403": {
             "description": "The engine refused the change — admin rights required"
           },
           "404": {
-            "description": "No such group — the id is unknown, or it addresses a 1:1 chat rather than a group."
+            "description": "No such group — the id is unknown."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
@@ -12770,6 +12776,18 @@
         "required": [
           "message",
           "download"
+        ]
+      },
+      "ImportStorageDto": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Path to the tar.gz file to import (must be inside the data directory)"
+          }
+        },
+        "required": [
+          "filePath"
         ]
       },
       "StorageImportResponseDto": {

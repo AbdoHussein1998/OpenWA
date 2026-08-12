@@ -641,8 +641,10 @@ export interface ContactRecord {
   pushName?: string | null;
   isMyContact?: boolean;
   /**
-   * Whether the account has blocked this contact. Reported best-effort: the Baileys adapter does not
-   * track blocklist state and always reports `false`.
+   * Whether the account has blocked this contact. Reflects the account's real blocklist on both
+   * engines. When the blocklist query fails the field stays at its default rather than reporting
+   * "nobody is blocked", and the gateway logs a warning — so a `false` is not proof the contact is
+   * unblocked if the link is unhealthy.
    */
   isBlocked?: boolean;
   profilePicUrl?: string | null;

@@ -230,6 +230,12 @@ REDIS_USERNAME=optional
 REDIS_PASSWORD=optional
 ```
 
+> Setting `REDIS_BUILTIN` in `.env` **pins** it: the env value wins, so the dashboard's built-in
+> Redis toggle can no longer switch the container back on. That is the right trade for a deployment
+> whose configuration lives in `.env` — but if you manage datastores from the dashboard, leave the
+> key unset (as the shipped templates do) and set only the connection details above. The same holds
+> for `POSTGRES_BUILTIN` and `MINIO_BUILTIN`.
+
 | Scenario                  | Support | Notes                                      |
 | ------------------------- | ------- | ------------------------------------------ |
 | Built-in → External Redis | ✅      | Config change only                         |

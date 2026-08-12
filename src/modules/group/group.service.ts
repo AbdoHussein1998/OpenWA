@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, HttpException, HttpStatus, NotFoundExc
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { GroupMemberAddMode, IWhatsAppEngine, MediaInput } from '../../engine/interfaces/whatsapp-engine.interface';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from '../message/media-cap.util';
+import { chatKind } from '../../engine/identity/wa-id';
 import { isAddressableParticipant } from '../../engine/identity/wa-id';
 import { SetGroupPictureDto } from './dto/group.dto';
 import { paginate, ListOptions } from '../../common/utils/paginate';
@@ -153,12 +154,29 @@ export class GroupService {
     return this.getEngine(sessionId).joinGroupViaInviteCode(inviteCode);
   }
 
+  /**
+   * Refuse an id that does not name a group before it reaches an engine.
+   *
+   * These three routes reuse the ACCOUNT's profile-picture primitives, and Baileys omits the `target`
+   * attribute whenever the jid it is handed is the account's own — so a 1:1 id passed where a group id
+   * belongs replaced or permanently deleted the account's own avatar and answered 200, while
+   * whatsapp-web.js refused the same input through requireGroupChat. Guarded here rather than in either
+   * adapter so both engines agree, and so no engine ever sees the wrong kind of id.
+   */
+  private assertGroupId(groupId: string): void {
+    if (chatKind(groupId) !== 'group') {
+      throw new BadRequestException(`${groupId} is not a group id`);
+    }
+  }
+
   /** Read the group's picture URL, or null when it has none. Groups reuse the profile-picture read. */
   getGroupPicture(sessionId: string, groupId: string): Promise<string | null> {
+    this.assertGroupId(groupId);
     return this.getEngine(sessionId).getProfilePicture(groupId);
   }
 
   setGroupPicture(sessionId: string, groupId: string, dto: SetGroupPictureDto): Promise<void> {
+    this.assertGroupId(groupId);
     const base64 = stripBase64DataUri(dto.base64);
     if (!dto.url && !base64) {
       throw new BadRequestException('Either url or base64 must be provided');
@@ -176,6 +194,7 @@ export class GroupService {
   }
 
   deleteGroupPicture(sessionId: string, groupId: string): Promise<void> {
+    this.assertGroupId(groupId);
     return this.getEngine(sessionId).deleteGroupPicture(groupId);
   }
 

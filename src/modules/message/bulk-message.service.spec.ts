@@ -322,6 +322,133 @@ describe('BulkMessageService.processBatch', () => {
     }
   });
 
+  // `content.text` is @MaxLength(4096)-validated BEFORE substitution, and the single-send template
+  // path caps its FINAL render at template.renderMaxChars — the bulk path capped neither, so
+  // caller-supplied variables inflated each item without bound.
+  const batchWithVariables = (text: string, variables: Record<string, string>): MessageBatch => ({
+    ...makeBatch(1),
+    messages: [{ chatId: 'c0@c.us', type: 'text', content: { text }, variables }],
+  });
+
+  // The cap must bound the MESSAGE, not the payload. `variables` is a sibling of the media fields on
+  // the same DTO, so personalised media is a supported bulk request — and a 100 KB image is ~137,000
+  // base64 characters, twice the 64 KiB text cap. Capping every string in the content tree failed
+  // exactly the requests this endpoint exists for.
+  // The gate has TWO copies (see applySendingGate's doc); the envelope check landed on one of them.
+  // A handler returning a truthy object without `input` fed `undefined` into every send below.
+  it('fails an item when a message:sending handler returns a payload with no usable input', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    hookManager.execute.mockResolvedValue({ continue: true, data: { notInput: 1 } });
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).not.toHaveBeenCalled();
+    const finalPartial = (repo.update.mock.calls as Array<[unknown, { results: BatchMessageResult[] }]>).at(-1)![1];
+    expect(finalPartial.results[0].status).toBe(BatchMessageStatus.FAILED);
+    expect(finalPartial.results[0].error?.message).toMatch(/message:sending/);
+  });
+
+  /**
+   * The ONLY reason this second copy of the gate exists is that it must flag a plugin refusal apart
+   * from a delivery failure, so the per-item `message:failed` hook is skipped. Nothing bound that:
+   * deleting the flag on the envelope-refusal branch left the whole suite green, which means the
+   * refusal would have been reported to every plugin as a failed delivery with no test noticing.
+   */
+  it('does not report an unusable envelope to plugins as a delivery failure', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    hookManager.execute.mockResolvedValue({ continue: true, data: { notInput: 1 } });
+
+    await runProcessBatch();
+
+    expect(hookManager.execute).not.toHaveBeenCalledWith('message:failed', expect.anything(), expect.anything());
+  });
+
+  // Negative twin: a chain that returns nothing is the ordinary no-plugin path.
+  it('keeps the original content when the hook chain returns no data', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    hookManager.execute.mockResolvedValue({ continue: true });
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends a media item with variables even when its base64 exceeds the text cap', async () => {
+    const bigBase64 = 'A'.repeat(137_000);
+    repo.findOne.mockResolvedValue({
+      ...makeBatch(1),
+      messages: [
+        {
+          chatId: 'c0@c.us',
+          type: 'image',
+          content: { image: { base64: bigBase64, mimetype: 'image/jpeg' }, caption: 'Hi {{name}}' },
+          variables: { name: 'Alice' },
+        },
+      ],
+    });
+    engine.sendImageMessage = jest.fn().mockResolvedValue({ id: 'wa1', timestamp: 1 });
+
+    await runProcessBatch();
+
+    expect(engine.sendImageMessage).toHaveBeenCalledTimes(1);
+    const finalPartial = (repo.update.mock.calls as Array<[unknown, { results: BatchMessageResult[] }]>).at(-1)![1];
+    expect(finalPartial.results[0].status).not.toBe(BatchMessageStatus.FAILED);
+  });
+
+  it('fails an item whose rendered text exceeds the cap instead of sending it', async () => {
+    // Comfortably over the 64 KiB default the un-configured service falls back to.
+    const huge = 'x'.repeat(70 * 1024);
+    repo.findOne.mockResolvedValue(batchWithVariables('{{v}}', { v: huge }));
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).not.toHaveBeenCalled();
+    const finalPartial = (
+      repo.update.mock.calls as Array<[unknown, { status: BatchStatus; results: BatchMessageResult[] }]>
+    ).at(-1)![1];
+    expect(finalPartial.results[0].status).toBe(BatchMessageStatus.FAILED);
+    expect(finalPartial.results[0].error?.message).toMatch(/character limit/i);
+  });
+
+  /**
+   * The cap covers text AND caption — a caption is the other caller-supplied string a template can
+   * inflate without bound, and it lands in the same `messages.body` column. Only the text half was
+   * bound: narrowing the loop to `['text']` left the suite green, so the caption half was a claim
+   * with nothing behind it.
+   */
+  it('fails an item whose rendered CAPTION exceeds the cap', async () => {
+    const huge = 'x'.repeat(70 * 1024);
+    repo.findOne.mockResolvedValue({
+      ...makeBatch(1),
+      messages: [
+        {
+          chatId: 'c0@c.us',
+          type: 'image',
+          content: { image: { base64: 'AAAA', mimetype: 'image/jpeg' }, caption: '{{v}}' },
+          variables: { v: huge },
+        },
+      ],
+    });
+
+    await runProcessBatch();
+
+    const finalPartial = (
+      repo.update.mock.calls as Array<[unknown, { status: BatchStatus; results: BatchMessageResult[] }]>
+    ).at(-1)![1];
+    expect(finalPartial.results[0].status).toBe(BatchMessageStatus.FAILED);
+    expect(finalPartial.results[0].error?.message).toMatch(/caption/i);
+  });
+
+  it('still sends an item whose render stays under the cap', async () => {
+    repo.findOne.mockResolvedValue(batchWithVariables('hello {{v}}', { v: 'world' }));
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).toHaveBeenCalledTimes(1);
+    const sendArgs = engine.sendTextMessage.mock.calls[0] as [string, string];
+    expect(sendArgs[1]).toBe('hello world');
+  });
+
   it('releases the in-flight marker when the engine is missing (no processingBatches leak)', async () => {
     repo.findOne.mockResolvedValue(makeBatch(1));
     engines.delete('s1'); // engine-not-found → early-return path

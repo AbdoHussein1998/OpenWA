@@ -319,6 +319,22 @@ export class PluginCapabilityContext {
     } satisfies PluginStorage;
   }
 
+  /**
+   * Config of every ENABLED instance of a plugin, for the outbound-host allowlist. A disabled
+   * instance is not a tenant the operator is running, so its host is not admitted.
+   *
+   * Best-effort: a plugin may be loaded in a host that exposes no instance service (and the store
+   * can fail), and neither is a reason to refuse a fetch the base config already allows.
+   */
+  private async enabledInstanceConfigs(pluginId: string): Promise<Record<string, unknown>[]> {
+    try {
+      const rows = await this.hostServices.getPluginInstanceService().list(pluginId);
+      return rows.filter(row => row.enabled).map(row => row.config ?? {});
+    } catch {
+      return [];
+    }
+  }
+
   private buildNetCapability(plugin: PluginInstance): PluginNetCapability {
     return {
       fetch: async (url, init) => {
@@ -329,7 +345,16 @@ export class PluginCapabilityContext {
         // rather than resolving a single, possibly wrong (base-only), one. The SSRF guard inside
         // performPluginFetch still blocks internal IPs even when the host is allowlisted.
         this.assertPermission(plugin.manifest, PluginCapabilityPermission.NET_FETCH);
-        const netConfigs = [plugin.config ?? {}, ...Object.values(plugin.sessionConfig ?? {})];
+        const netConfigs = [
+          plugin.config ?? {},
+          ...Object.values(plugin.sessionConfig ?? {}),
+          // The instance rows, because the scope-keyed store above holds only the LAST instance
+          // projected onto a scope. Dispatch hands each instance its own config, so without this a
+          // second instance sharing that scope is told to call a host the allowlist never saw and
+          // its fetch is refused — a config that is correct and unusable. Same policy as the slice:
+          // an operator-provisioned tenant host, still gated by allowConfigHosts and the SSRF guard.
+          ...(await this.enabledInstanceConfigs(plugin.manifest.id)),
+        ];
         const allow = [
           ...new Set(
             netConfigs.flatMap(cfg =>

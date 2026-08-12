@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Body, ConflictException, HttpCode, HttpStatus, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Optional,
+  Post,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { InfraExportDataResponseDto, InfraImportDataResponseDto } from './dto/infra-response.dto';
 import { ImportDataDto } from './dto/import-data.dto';
@@ -482,7 +492,7 @@ export class InfraDataController {
   @ApiResponse({
     status: 400,
     description:
-      'Body rejected before the restore ran: `tables` absent or not an object, a flag spelled as anything but a boolean or exact `true`/`false`, or a property this route does not accept. Nothing was written. Field-level detail is suppressed in production unless VALIDATION_ERROR_DETAIL=true.',
+      'Body rejected before the restore ran: `tables` absent or not an object, a table whose value is not an array of rows, a row that is not an object (`null`, a bare string, a nested array), a flag spelled as anything but a boolean or exact `true`/`false`, or a property this route does not accept. Nothing was written. Field-level detail is suppressed in production unless VALIDATION_ERROR_DETAIL=true.',
   })
   @ApiResponse({
     status: 409,
@@ -556,6 +566,23 @@ export class InfraDataController {
     // engines writing into the freshly replaced tables for an unbounded time is the corruption this
     // gate exists to prevent, so the explicit-stop path closes that window instead of relying on the
     // operator to restart promptly.
+    // Every present table must be an array of rows before anything dereferences one. `.map()` on a
+    // string or a number is a TypeError — a 500 telling the operator the SERVER broke, when their
+    // archive is simply malformed. Checked for all tables, not just `sessions`: the rest are read
+    // inside the transaction, where the same mistake would fail mid-restore instead of before it.
+    for (const [table, rows] of Object.entries(data.tables ?? {})) {
+      if (rows === undefined) continue;
+      if (!Array.isArray(rows)) {
+        throw new BadRequestException(`tables.${table} must be an array of rows`);
+      }
+      // Array.isArray alone is not enough: `[null]` passes it and then dies on the first property
+      // read, which is the same 500 with a longer fuse. Every element must be a row object.
+      const badRow = rows.findIndex(row => typeof row !== 'object' || row === null || Array.isArray(row));
+      if (badRow !== -1) {
+        throw new BadRequestException(`tables.${table}[${badRow}] must be a row object`);
+      }
+    }
+
     const importedSessionIds = new Set((data.tables.sessions ?? []).map(s => s.id));
     const orphanedEngines = (this.sessionService?.getActiveSessionIds() ?? []).filter(
       id => !importedSessionIds.has(id),

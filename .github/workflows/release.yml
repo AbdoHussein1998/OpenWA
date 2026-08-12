@@ -38,6 +38,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+          # Both trees are installed in this job (the dashboard audit below), so both lockfiles
+          # belong in the cache key.
+          cache-dependency-path: |
+            package-lock.json
+            dashboard/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -61,6 +66,16 @@ jobs:
         # Matches ci.yml's threshold: high (not critical). The release gate must not be laxer than the
         # PR gate, or a HIGH advisory blocked on every PR would still sail through at tag time.
         run: npm audit --audit-level=high
+
+      # Second tree, same rule. The dashboard's runtime deps are bundled into dashboard/dist and the
+      # published image serves them to every operator's browser, so the tag path must scan them for
+      # the same reason ci.yml's audit job now does — otherwise this gate is laxer than the PR gate
+      # for exactly the dependencies that reach a user.
+      - name: Install dashboard dependencies
+        run: cd dashboard && npm ci
+
+      - name: Security audit (dashboard)
+        run: cd dashboard && npm audit --audit-level=high
 
       - name: Run ESLint
         run: npm run lint
@@ -472,6 +487,11 @@ jobs:
       packages: read
     needs: [docker]
     steps:
+      # Required by the non-root check below, which runs a script from the repo. Without it the
+      # step exits 127 and this job — the only gate between a root image and `latest` — fails on
+      # every tag instead of guarding anything.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
@@ -491,6 +511,15 @@ jobs:
         env:
           REPO: ${{ github.repository }}
         run: echo "ref=ghcr.io/${REPO,,}:smoke-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+
+      # The tag path is the one that promotes to `latest`, so it must not be laxer than the PR gate —
+      # the same rule this workflow's own audit step states. ci.yml verifies the root→openwa drop on
+      # the built image; without it here, a change leaving Node on uid 0 reaches `latest` through the
+      # only path that publishes it.
+      - name: Verify the image drops from root to the openwa user
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: OPENWA_SMOKE_IMAGE="$IMAGE" ./scripts/smoke-test-non-root.sh
 
       - name: Boot + liveness check on each architecture
         env:

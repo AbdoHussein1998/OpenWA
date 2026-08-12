@@ -50,6 +50,10 @@ describe('BaileysMessageStoreService', () => {
     ({
       key: { id, remoteJid: '1@s.whatsapp.net', fromMe: false },
       message: { conversation: id },
+      // A real WAMessage carries binary fields, and they are the only reason the BufferJSON round-trip
+      // exists. With a string-only fixture the assertions below held under any replacer/reviver pair,
+      // including identity — the test named the codec without exercising it.
+      mediaKey: Buffer.from([0x01, 0x02, 0x03, 0xff]),
     }) as unknown as Parameters<BaileysMessageStoreService['put']>[1];
 
   it('round-trips a WAMessage through BufferJSON', async () => {
@@ -58,6 +62,10 @@ describe('BaileysMessageStoreService', () => {
     const got = await service.getMessage('s1', 'M1');
     expect(got?.key?.id).toBe('M1');
     expect(got?.message?.conversation).toBe('M1');
+    // The assertion that makes this a round-trip test rather than a string-copy test.
+    const mediaKey = (got as unknown as { mediaKey?: unknown }).mediaKey;
+    expect(Buffer.isBuffer(mediaKey)).toBe(true);
+    expect(mediaKey).toEqual(Buffer.from([0x01, 0x02, 0x03, 0xff]));
   });
 
   it('returns null for an unknown id and is session-scoped', async () => {

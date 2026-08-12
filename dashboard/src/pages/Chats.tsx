@@ -900,6 +900,7 @@ export function Chats() {
 
                 {/* Messages body (list, media, reactions, scroll-to-bottom) — components/chats/ChatThread. */}
                 <ChatThread
+                  sessionId={selectedSessionId}
                   activeChat={activeChat}
                   messages={messages}
                   loadingMessages={loadingMessages}

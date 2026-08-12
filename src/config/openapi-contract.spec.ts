@@ -212,3 +212,38 @@ describe('both OpenAPI producers apply the same passes', () => {
     }
   });
 });
+
+/**
+ * A request body must publish a SCHEMA, not a primitive.
+ *
+ * `@ApiBody({ description })` with no `type:` publishes `{"type":"string"}` — the decorator has no
+ * way to infer the DTO — so the published contract told every generated client the body was a bare
+ * string while the handler took an object. `openapi:check` passes on it happily: the snapshot is
+ * self-consistent, just wrong. One of the document's application/json bodies was in that state.
+ */
+describe('every JSON request body publishes an object schema', () => {
+  const jsonBodies = (): Array<{ op: string; schema: Record<string, unknown> }> => {
+    const out: Array<{ op: string; schema: Record<string, unknown> }> = [];
+    for (const [path, item] of Object.entries(snapshot().paths as unknown as Record<string, Record<string, unknown>>)) {
+      for (const [method, op] of Object.entries(item)) {
+        const body = (op as { requestBody?: { content?: Record<string, { schema?: Record<string, unknown> }> } })
+          .requestBody;
+        const schema = body?.content?.['application/json']?.schema;
+        if (schema) out.push({ op: `${method.toUpperCase()} ${path}`, schema });
+      }
+    }
+    return out;
+  };
+
+  // Guards the assertion below: an extractor that found nothing would pass it vacuously.
+  it('finds the document’s JSON request bodies', () => {
+    expect(jsonBodies().length).toBeGreaterThan(50);
+  });
+
+  it('publishes none of them as a bare primitive', () => {
+    const primitives = jsonBodies()
+      .filter(({ schema }) => !schema.$ref && !schema.properties && schema.type !== 'object')
+      .map(({ op, schema }) => `${op} -> ${JSON.stringify(schema)}`);
+    expect(primitives).toEqual([]);
+  });
+});
