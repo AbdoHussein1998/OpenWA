@@ -981,7 +981,7 @@ curl -X DELETE "$BASE/api/sessions/$SESSION_ID/status/false_status@broadcast_3A1
 
 ### 07.10 Webhooks (management)
 
-All routes require an API key with OPERATOR role or higher. `secret` and `headers` are write-only (never returned). The per-session routes live under `/api/sessions/:sessionId/webhooks`; the cross-session list is `/api/webhooks`.
+All routes require an API key with OPERATOR role or higher. `secret` and `headers` are write-only (never returned by these routes; `GET /api/infra/export-data` does return them in cleartext). The per-session routes live under `/api/sessions/:sessionId/webhooks`; the cross-session list is `/api/webhooks`.
 
 #### GET /api/sessions/:sessionId/webhooks
 
