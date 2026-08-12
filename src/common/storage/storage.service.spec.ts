@@ -298,3 +298,28 @@ describe('StorageService local traversal (async + bounded)', () => {
     expect(seen.length).toBe(20); // complete where listFiles() above truncates at 5
   });
 });
+
+/**
+ * The export enumerated with listFiles(), which stops at STORAGE_LIST_MAX_FILES and returns without
+ * logging or throwing — so the documented local→S3 migration (export, repoint STORAGE_TYPE, import)
+ * silently left media behind, and the operator's own files/count pre-check was truncated by the same
+ * path. iterateFiles() exists for exactly this case: its own doc calls the cap "a per-call DoS guard,
+ * not a completeness contract" and tells callers needing the whole store to iterate instead.
+ */
+describe('StorageService.createExportStream enumerates the whole store', () => {
+  it('walks the uncapped iterator rather than the capped listing', async () => {
+    const { service } = makeLocalService();
+    const listFiles = jest.spyOn(service, 'listFiles');
+    const iterateFiles = jest.spyOn(service, 'iterateFiles').mockImplementation(async function* () {
+      yield await Promise.resolve('media/a.bin');
+    });
+    jest.spyOn(service, 'getFile').mockResolvedValue(Buffer.from('x'));
+
+    // The enumerator runs before the archive is constructed, so which one was used is settled even
+    // if archiving itself cannot run in this environment. That is the whole claim here.
+    await service.createExportStream().catch(() => undefined);
+
+    expect(iterateFiles).toHaveBeenCalled();
+    expect(listFiles).not.toHaveBeenCalled();
+  });
+});

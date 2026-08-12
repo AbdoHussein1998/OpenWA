@@ -368,11 +368,24 @@ export class StorageService implements OnModuleDestroy {
   // ============================================================================
 
   createExportStream(): Promise<PassThrough> {
+    // Enumerated with iterateFiles(), NOT listFiles(). listFiles() stops at STORAGE_LIST_MAX_FILES
+    // and returns without logging or throwing — a per-call DoS guard, as its own doc says, and not a
+    // completeness contract. Spending it here made the documented local→S3 migration (export,
+    // repoint STORAGE_TYPE, import) leave media behind on the old backend silently, and the
+    // operator's own files/count pre-check was truncated by the same path, so the consistency check
+    // could not reveal the gap. An export exists to be complete; that is what the uncapped walk is for.
     return createExportStream(
-      () => this.listFiles(),
+      () => this.listAllFiles(),
       filePath => this.getFile(filePath),
       this.logger,
     );
+  }
+
+  /** Every key in the store, uncapped — the completeness counterpart to the capped listFiles(). */
+  private async listAllFiles(): Promise<string[]> {
+    const files: string[] = [];
+    for await (const file of this.iterateFiles()) files.push(file);
+    return files;
   }
 
   // Best-effort, NOT atomic: see the implementation in storage-transfer.ts for the full contract.
