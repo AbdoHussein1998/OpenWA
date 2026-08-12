@@ -487,6 +487,11 @@ jobs:
       packages: read
     needs: [docker]
     steps:
+      # Required by the non-root check below, which runs a script from the repo. Without it the
+      # step exits 127 and this job — the only gate between a root image and `latest` — fails on
+      # every tag instead of guarding anything.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 

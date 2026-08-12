@@ -16,11 +16,26 @@ import * as yaml from 'js-yaml';
 
 const workflowDir = path.join(__dirname, '..', '..', '.github', 'workflows');
 
-type Workflow = { jobs?: Record<string, { steps?: Array<{ name?: string; run?: string; with?: unknown }> }> };
+type Step = { name?: string; run?: string; uses?: string; with?: unknown };
+type Workflow = { jobs?: Record<string, { steps?: Step[] }> };
+
+function workflowOf(file: string): Workflow {
+  return yaml.load(fs.readFileSync(path.join(workflowDir, file), 'utf8')) as Workflow;
+}
 
 function runCommandsOf(file: string): string[] {
-  const doc = yaml.load(fs.readFileSync(path.join(workflowDir, file), 'utf8')) as Workflow;
-  return Object.values(doc.jobs ?? {}).flatMap(job => (job.steps ?? []).map(step => step.run ?? ''));
+  return Object.values(workflowOf(file).jobs ?? {}).flatMap(job => (job.steps ?? []).map(step => step.run ?? ''));
+}
+
+/** Jobs that execute a repo-relative path, paired with whether the job ever checks the repo out. */
+function jobsRunningRepoScripts(file: string): Array<{ job: string; scripts: string[]; hasCheckout: boolean }> {
+  return Object.entries(workflowOf(file).jobs ?? {})
+    .map(([job, def]) => {
+      const steps = def.steps ?? [];
+      const scripts = steps.flatMap(step => [...(step.run ?? '').matchAll(/(?:^|\s)(\.\/[\w./-]+)/g)].map(m => m[1]));
+      return { job, scripts, hasCheckout: steps.some(step => (step.uses ?? '').startsWith('actions/checkout')) };
+    })
+    .filter(entry => entry.scripts.length > 0);
 }
 
 describe('the non-root drop is enforced, not merely documented', () => {
@@ -43,5 +58,34 @@ describe('the non-root drop is enforced, not merely documented', () => {
   it('keeps the entrypoint gosu drop the image depends on', () => {
     const entrypoint = fs.readFileSync(path.join(__dirname, '..', '..', 'docker-entrypoint.sh'), 'utf8');
     expect(entrypoint).toMatch(/exec\s+gosu\s+openwa/);
+  });
+});
+
+/**
+ * Invoking the script is not the same as being able to run it. `boot-smoke` in release.yml called
+ * `./scripts/smoke-test-non-root.sh` from a job that never checks the repo out — the file is simply
+ * absent from the workspace, so the step exits 127 and the ONLY path that publishes `latest` fails
+ * at every tag. Fail-closed, but the release path was broken rather than guarded.
+ *
+ * The gate above could not see it: it binds the text of `run:`, and the text was correct. This binds
+ * the precondition instead, for every job in every workflow — a repo-relative command needs the repo.
+ */
+describe('a job that runs a repo script checks the repo out', () => {
+  const workflows = fs.readdirSync(workflowDir).filter(f => f.endsWith('.yml') || f.endsWith('.yaml'));
+
+  // Non-vacuity control: the finder must actually see jobs, or every assertion below passes on an
+  // empty set. Anchor on a workflow known to run repo scripts.
+  it('finds jobs that run repo-relative scripts', () => {
+    expect(workflows.length).toBeGreaterThan(0);
+    const all = workflows.flatMap(f => jobsRunningRepoScripts(f));
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.some(e => e.scripts.some(s => s.includes('scripts/')))).toBe(true);
+  });
+
+  it.each(workflows)('%s: every job running ./… also runs actions/checkout', file => {
+    const offenders = jobsRunningRepoScripts(file)
+      .filter(entry => !entry.hasCheckout)
+      .map(entry => `${entry.job} runs ${entry.scripts.join(', ')} without actions/checkout`);
+    expect(offenders).toEqual([]);
   });
 });
