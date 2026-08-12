@@ -311,7 +311,8 @@ export class StorageService implements OnModuleDestroy {
         if (s3Keys.has(file)) continue;
         count += 1;
         try {
-          sizeBytes += fs.statSync(path.join(this.localPath, file)).size;
+          // Same reason as the local branch below: this walk is uncapped too, so the stat must yield.
+          sizeBytes += (await fs.promises.stat(path.join(this.localPath, file))).size;
         } catch (error) {
           this.logger.debug(`Failed to stat file: ${file}`, { error: String(error) });
         }
@@ -327,7 +328,10 @@ export class StorageService implements OnModuleDestroy {
     for (const file of files) {
       try {
         const fullPath = path.join(this.localPath, file);
-        const stats = fs.statSync(fullPath);
+        // Awaited, not statSync: uncapping the walk above also uncapped this loop, and a synchronous
+        // stat per file holds the event loop for the whole store — health checks, webhooks and every
+        // in-flight request wait behind a count. Measured at one event-loop tick for 2000 files.
+        const stats = await fs.promises.stat(fullPath);
         sizeBytes += stats.size;
       } catch (error) {
         this.logger.debug(`Failed to stat file: ${file}`, { error: String(error) });
