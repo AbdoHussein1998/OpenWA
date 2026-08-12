@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The addressbook write guard now checks the id, not just its domain. `parseWaId('NOT A USER@c.us').kind` is `'user'`, so free text, letters and an empty user-part cleared the guard, reached the engine and were reported to the caller as a saved contact — for an entry keyed by something that is not a phone number. It now applies `isIndividualWid`, the same predicate the group-participant, channel-admin and message-mention surfaces already use on these very shapes.
+
 - `POST /api/infra/import-data` now answers 400 for a malformed archive instead of 500. A table value that is not an array — a hand-edited or truncated backup — was dereferenced with `.map()` before anything checked it, so the operator was told the server had broken when their file was simply wrong. Checked for every table, not only `sessions`: the rest are read inside the transaction, where the same mistake would fail mid-restore rather than before it opens.
 
 - README no longer inverts the shipped MCP posture. It described `MCP_ENABLED=true` as exposing 51 tools including messaging, when the surface is read-only unless `MCP_READONLY=false` — a secure default the code chose deliberately — so an operator wired a client, saw no send or group tools, and had nothing in README pointing at the knob. It now states the 25 read-only tools mounted by default and names the opt-in for all 51. A gate derives both counts from the tool sources, so a tier change fails instead of making the prose wrong again.
