@@ -1,21 +1,31 @@
 import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { plainToInstance } from 'class-transformer';
-import { validate } from 'class-validator';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
+import { GLOBAL_VALIDATION_OPTIONS } from '../../../config/app-validation';
 import { ImportDataDto } from './import-data.dto';
 import { TABLE_IMPORTERS } from '../table-importers';
 
-// Mirrors the real pipe from src/config/app-validation.ts: whitelist + forbidNonWhitelisted, and the
-// enableImplicitConversion transform option. Both halves matter here — the whitelist is the reason
-// this DTO exists, and the implicit conversion is what makes a plain `boolean` property unsafe.
-const PIPE_TRANSFORM_OPTS = { enableImplicitConversion: true };
-const PIPE_VALIDATOR_OPTS = { whitelist: true, forbidNonWhitelisted: true };
+// The REAL pipe, built from the SAME options object production uses — not a restatement of them.
+// This spec exists because a regression reached main through a layer nothing exercised: the
+// round-trip specs call the handler directly and never touch validation at all. Reproducing the
+// pipe's options by hand would have repeated that mistake one level up, asserting against a mirror
+// that can drift from what the app actually installs.
+//
+// Two behaviours only the pipe has: `toEmptyIfNil` turns a null/undefined body into `{}` before
+// validation, and refusals arrive as a BadRequestException whose `message` is the string array a
+// client actually receives. Neither is visible through plainToInstance + validate.
+const pipe = new ValidationPipe(GLOBAL_VALIDATION_OPTIONS);
+const BODY = { type: 'body' as const, metatype: ImportDataDto };
 
-async function run(payload: unknown) {
-  const instance = plainToInstance(ImportDataDto, payload as object, PIPE_TRANSFORM_OPTS);
-  const errors = await validate(instance, PIPE_VALIDATOR_OPTS);
-  return { instance, errors };
+/** Push a payload through the pipe. `errors` holds the messages a client would receive. */
+async function run(payload: unknown): Promise<{ instance: ImportDataDto; errors: string[] }> {
+  try {
+    return { instance: (await pipe.transform(payload, BODY)) as ImportDataDto, errors: [] };
+  } catch (error) {
+    const body = (error as BadRequestException).getResponse() as { message?: string | string[] };
+    return { instance: {} as ImportDataDto, errors: [body.message ?? []].flat() };
+  }
 }
 
 /** A minimal but complete payload: every table the importer registry knows, each empty. */
@@ -48,12 +58,15 @@ describe('ImportDataDto', () => {
     const { errors } = await run({ force: true });
     // Before this DTO the inline `@Body()` type erased, so this body reached the restore and threw
     // from inside it — a 500 on the replace-all route, with nothing pointing at the missing field.
-    expect(errors.map(e => e.property)).toEqual(['tables']);
+    // Asserted on the field name the client is handed, not the sentence around it.
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('tables');
   });
 
   it('rejects an unknown key', async () => {
     const { errors } = await run({ tables: fullTables(), stopOrphan: true });
-    expect(errors.map(e => e.property)).toEqual(['stopOrphan']);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('stopOrphan');
   });
 
   it('accepts the export file posted back verbatim', async () => {
@@ -109,7 +122,20 @@ describe('ImportDataDto', () => {
 
   it.each(['force', 'stopOrphans'] as const)('rejects an ambiguous spelling on %s', async flag => {
     const { errors } = await run({ tables: fullTables(), [flag]: 'yes' });
-    expect(errors.map(e => e.property)).toEqual([flag]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(flag);
+  });
+
+  it('turns a null body into a refusal rather than a crash', async () => {
+    // Only the pipe does this: `toEmptyIfNil` replaces a null/undefined body with `{}` before
+    // validation, so the route answers 400 on the missing `tables` instead of dereferencing null
+    // somewhere downstream. A spec that mirrored the options instead of running the pipe could not
+    // see this path at all.
+    for (const body of [null, undefined]) {
+      const { errors } = await run(body);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain('tables');
+    }
   });
 
   it('leaves an omitted flag absent, so the default orphan refusal still applies', async () => {
