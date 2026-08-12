@@ -165,13 +165,41 @@ export class BaileysContacts {
   // eslint-disable-next-line @typescript-eslint/require-await
   async getContacts(): Promise<Contact[]> {
     this.host.ensureReady();
-    return this.host.listContacts();
+    return this.withBlockedState(this.host.listContacts());
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async getContactById(contactId: string): Promise<Contact | null> {
     this.host.ensureReady();
-    return this.host.findContact(contactId);
+    const contact = this.host.findContact(contactId);
+    if (!contact) return null;
+    return (await this.withBlockedState([contact]))[0];
+  }
+
+  /**
+   * Stamp the real blocklist state onto contacts the store mapped.
+   *
+   * The store has no socket, so its mapper defaulted `isBlocked` to a literal `false` for everyone —
+   * a claim about the account, not a reading of it, while THIS session's own blocklist query returns
+   * the real ids. Automation that skips blocked contacts before sending therefore messaged people the
+   * account had explicitly blocked.
+   *
+   * A failed blocklist query degrades rather than failing the read: contacts are still useful, and
+   * getBlockedContacts deliberately throws instead of returning an empty list precisely so a
+   * transport failure is not sold as "nobody is blocked". The default is kept and the gap is warned
+   * about, so the degradation is visible instead of silent.
+   */
+  private async withBlockedState(contacts: Contact[]): Promise<Contact[]> {
+    if (contacts.length === 0) return contacts;
+    let blocked: Set<string>;
+    try {
+      blocked = new Set(await this.getBlockedContacts());
+    } catch (error) {
+      this.host.logger.warn('Blocklist unavailable; contact isBlocked left at its default', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return contacts;
+    }
+    return contacts.map(contact => ({ ...contact, isBlocked: blocked.has(contact.id) }));
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
