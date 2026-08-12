@@ -2023,8 +2023,14 @@ describe('InfraDataController.importData rejects a malformed table value', () =>
     await expect(controller().importData({ tables: { messages: 'nope' } } as never)).rejects.toThrow(/messages/);
   });
 
-  // Negative twin: an absent table is legal (a partial archive), and must not be rejected.
-  it('accepts an archive that simply omits a table', async () => {
-    await expect(controller().importData({ tables: {} })).rejects.not.toThrow(/must be an array/);
+  // Negative twin. It guards OVER-rejection, not deletion: a "must not reject" assertion can never
+  // fail when the guard is removed — that is what the four cases above are for. What it does catch is
+  // the guard hardening into refusing shapes the endpoint supports: an absent table (a partial
+  // archive) and an empty one (a table that legitimately has no rows).
+  it.each([
+    ['omits a table', { sessions: [{ id: 's1' }] }],
+    ['carries an empty table', { sessions: [], messages: [] }],
+  ])('does not reject an archive that %s', async (_label, tables) => {
+    await expect(controller().importData({ tables } as never)).rejects.not.toThrow(/must be an array/);
   });
 });

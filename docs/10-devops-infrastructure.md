@@ -892,11 +892,14 @@ export class MetricsService {
     gauge('openwa_process_uptime_seconds', '...', Math.round(process.uptime()));
     gauge('openwa_process_resident_memory_bytes', '...', mem.rss);
     gauge('openwa_process_heap_used_bytes', '...', mem.heapUsed);
-    gauge('openwa_sessions_total', '...', overview.sessions.total);
-    gauge('openwa_sessions_active', '...', overview.sessions.active);
-    // openwa_sessions{status="..."} — one line per status
-    // openwa_messages_total{direction="outgoing"|"incoming"}
-    // openwa_messages_failed_total
+    gauge('openwa_stats_available', '...', overview ? 1 : 0);
+    if (overview) {
+      gauge('openwa_sessions_total', '...', overview.sessions.total);
+      gauge('openwa_sessions_active', '...', overview.sessions.active);
+      // openwa_sessions{status="..."} — one line per status
+      // openwa_messages_total{direction="outgoing"|"incoming"}
+      // openwa_messages_failed_total
+    }
     return lines.join('\n') + '\n';
   }
 }
@@ -904,17 +907,26 @@ export class MetricsService {
 
 **Exported metric names** (the complete set — nothing else is emitted):
 
-| Metric                                 | Type  | Labels                              | Meaning                              |
-| -------------------------------------- | ----- | ----------------------------------- | ------------------------------------ |
-| `openwa_up`                            | gauge | —                                   | Always `1` when scraped              |
-| `openwa_process_uptime_seconds`        | gauge | —                                   | Process uptime                       |
-| `openwa_process_resident_memory_bytes` | gauge | —                                   | RSS                                  |
-| `openwa_process_heap_used_bytes`       | gauge | —                                   | V8 heap used                         |
-| `openwa_sessions_total`                | gauge | —                                   | Configured sessions                  |
-| `openwa_sessions_active`               | gauge | —                                   | READY (active) sessions              |
-| `openwa_sessions`                      | gauge | `status`                            | Session count per status             |
-| `openwa_messages_total`                | gauge | `direction` (`incoming`/`outgoing`) | Current stored messages by direction |
-| `openwa_messages_failed_total`         | gauge | —                                   | Current messages in FAILED state     |
+| Metric                                 | Type  | Labels                              | Meaning                                                                                      |
+| -------------------------------------- | ----- | ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| `openwa_up`                            | gauge | —                                   | Always `1` when scraped                                                                      |
+| `openwa_process_uptime_seconds`        | gauge | —                                   | Process uptime                                                                               |
+| `openwa_process_resident_memory_bytes` | gauge | —                                   | RSS                                                                                          |
+| `openwa_process_heap_used_bytes`       | gauge | —                                   | V8 heap used                                                                                 |
+| `openwa_stats_available`               | gauge | —                                   | 1 when the database-derived series below could be read on this scrape, 0 when they could not |
+| `openwa_sessions_total`                | gauge | —                                   | Configured sessions                                                                          |
+| `openwa_sessions_active`               | gauge | —                                   | READY (active) sessions                                                                      |
+| `openwa_sessions`                      | gauge | `status`                            | Session count per status                                                                     |
+| `openwa_messages_total`                | gauge | `direction` (`incoming`/`outgoing`) | Current stored messages by direction                                                         |
+| `openwa_messages_failed_total`         | gauge | —                                   | Current messages in FAILED state                                                             |
+
+> **The database-derived series can be absent.** `openwa_sessions_*`, `openwa_messages_*` and the per-status
+> breakdown are read from the data database on each scrape. If that read fails — an outage, a statement
+> timeout, pool exhaustion, a `SQLITE_BUSY` under load — they are OMITTED rather than reported as zero, and
+> `openwa_stats_available` goes to 0. The process, HTTP and webhook series keep being served, so `up` stays 1
+> and still means "the process is alive". Alert on `openwa_stats_available == 0` for the degradation itself;
+> an alert written as `openwa_sessions_active == 0` would never fire for it, and one written with `absent()`
+> would.
 
 ### Grafana Dashboard Definition
 
