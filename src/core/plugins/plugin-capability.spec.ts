@@ -167,15 +167,29 @@ describe('PluginLoaderService capability facade — ctx.messages', () => {
   it('docs/19 quotes the same message the code throws', () => {
     // §19.9 reproduces assertPermission verbatim. A quoted string in prose is an UNGATED COPY of a
     // code string: it rots in silence, which is exactly the failure this repo has paid for more than
-    // once. The fragment is derived from the source rather than restated here, so the two cannot
-    // drift — restating it would just add a third copy to keep in step.
+    // once. The fragments are derived from the source rather than restated here, so the two cannot
+    // drift — restating them would just add a third copy to keep in step.
+    //
+    // EVERY literal in the throw, not just the one naming the fix. Binding the second half alone
+    // left the first — the sentence that names the FAULT, and the one an operator greps for — free
+    // to be reworded with docs/19 still asserting the old text, which is the exact rot this test
+    // exists to prevent. Deriving them from the function body catches a third sentence too, via the
+    // count assertion below.
     const norm = (s: string): string => s.replace(/\s+/g, ' ').trim();
     const source = readFileSync(join(__dirname, 'plugin-capability-context.ts'), 'utf8');
     const docs = readFileSync(join(__dirname, '..', '..', '..', 'docs', '19-plugin-architecture.md'), 'utf8');
 
-    const fragment = norm(source.match(/`Add "\$\{permission\}"[^`]*`/)?.[0] ?? '');
-    expect(fragment).not.toBe(''); // non-vacuous: a rename would otherwise make this pass on nothing
-    expect(norm(docs)).toContain(fragment);
+    // Start at the signature: the method's own docblock also backticks `permissions` and
+    // manifest.json, and must not be mistaken for part of the thrown string.
+    const body = source.match(/private assertPermission\([\s\S]*?\n {2}\}/)?.[0] ?? '';
+    expect(body).not.toBe(''); // non-vacuous: a rename would otherwise make this pass on nothing
+
+    const fragments = [...body.matchAll(/`[^`]*`/g)].map(m => norm(m[0]));
+    // Pins the count: a literal added to the throw has to be documented too, not silently skipped.
+    expect(fragments).toHaveLength(2);
+    for (const fragment of fragments) {
+      expect(norm(docs)).toContain(fragment);
+    }
   });
 
   it('denies reply when the plugin does not declare the messages:send permission', async () => {
