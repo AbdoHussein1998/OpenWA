@@ -13,8 +13,11 @@ if (storedTheme === 'light' || storedTheme === 'dark') {
 }
 
 // The active locale is fetched rather than bundled into the entry, so first paint waits for it —
-// otherwise the shell renders raw keys and swaps to real copy a tick later. Rendering on rejection
-// too: a locale that fails to load must degrade to untranslated text, never to a blank page.
+// otherwise the shell renders raw keys and swaps to real copy a tick later. A catalogue that fails
+// to arrive does not hold this up: i18next settles init either way, falling back to English or, if
+// nothing loads at all, to raw keys. The second handler is therefore belt and braces rather than the
+// live path — but it is what guarantees that no future change to that contract can leave the
+// dashboard blank, which is a worse failure than untranslated text.
 const render = () =>
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

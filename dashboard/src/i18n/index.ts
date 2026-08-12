@@ -75,8 +75,17 @@ const lazyLocaleBackend: BackendModule = {
   },
 };
 
-function applyDirection(lang: string) {
-  const resolved = resolveSupportedLanguage(lang);
+/**
+ * Keyed to `resolvedLanguage` — the language whose catalogue actually answered — rather than to the
+ * one that was requested, which is the expression `Layout` and `Login` already use to label the
+ * picker. The two could not disagree while every catalogue was bundled; now that they are fetched
+ * they can. A chunk that 404s (a tab left open across a redeploy is the realistic way) still sets
+ * `language`, still emits this event and still gets cached by the detector, while `t()` serves the
+ * English fallback — so following the request would dress English copy right-to-left and leave the
+ * picker reading EN against an `ar` document.
+ */
+function applyDirection() {
+  const resolved = resolveSupportedLanguage(i18n.resolvedLanguage || i18n.language);
   const dir = rtlLanguages.includes(resolved) ? 'rtl' : 'ltr';
   if (typeof document !== 'undefined') {
     document.documentElement.lang = resolved;
@@ -97,9 +106,6 @@ export const i18nReady = i18n
     fallbackLng: 'en',
     supportedLngs: supportedLanguages as unknown as string[],
     nonExplicitSupportedLngs: false,
-    // Fetch only the resolved language (plus the fallback). i18next's default would also request a
-    // bare 'zh' catalogue for a 'zh-CN' visitor, and no such file exists.
-    load: 'currentOnly',
     interpolation: { escapeValue: false },
     detection: {
       order: ['localStorage', 'navigator'],

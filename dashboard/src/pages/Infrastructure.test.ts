@@ -211,7 +211,10 @@ before(async () => {
   ({ installJsdomGlobals } = await import('../test-helpers/jsdom.ts'));
   await installJsdomGlobals();
   installFetchStub();
-  await import('../i18n/index.ts');
+  // Awaited, not just imported: catalogues are fetched now, so the import only starts the load and
+  // the English copy these tests query by name renders as a raw key until it arrives.
+  const { i18nReady } = await import('../i18n/index.ts');
+  await i18nReady;
   rtl = await import('@testing-library/react');
   ({ RoleProvider } = await import('../components/RoleProvider.tsx'));
   ({ ToastProvider } = await import('../components/Toast.tsx'));

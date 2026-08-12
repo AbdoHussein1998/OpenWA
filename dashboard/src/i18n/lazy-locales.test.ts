@@ -63,15 +63,40 @@ test('direction follows the language in both directions, for both RTL locales', 
   assert.equal(document.documentElement.lang, 'en');
 });
 
+// A catalogue that fails to arrive is the one state these runtime tests cannot reach: the loader
+// reads real files here, so it always succeeds. In a browser it can 404 — a tab left open across a
+// redeploy asks for a hashed chunk that no longer exists — and i18next answers by setting
+// `language` to the request, emitting `languageChanged`, and serving the English fallback from
+// `t()`. Direction therefore has to follow `resolvedLanguage`, which reports what actually answered,
+// or the document is dressed right-to-left around English copy. Asserted against the source for the
+// same reason the main.tsx gate below is: the wiring is what breaks, and it cannot be provoked here.
+test('direction follows the catalogue that answered, not the one that was asked for', () => {
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'index.ts'), 'utf8');
+  const body = source.slice(source.indexOf('function applyDirection'));
+  // Bound to the assignment rather than to the mere presence of the call, so a leftover reference to
+  // resolvedLanguage cannot satisfy this while the value actually used comes from somewhere else.
+  assert.match(
+    body.slice(0, body.indexOf('}')),
+    /const resolved = resolveSupportedLanguage\(\s*i18n\.resolvedLanguage\b/,
+    'applyDirection no longer derives the direction it applies from i18n.resolvedLanguage',
+  );
+});
+
 // The catalogue is fetched now instead of bundled, so first paint is only free of untranslated text
 // while the entry keeps rendering behind that promise. Nothing in a build or a type check notices
 // if the gate is dropped, and the flash it brings back is a tick long — easy to miss by hand.
 test('main.tsx renders behind i18nReady', () => {
   const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'main.tsx'), 'utf8');
-  assert.match(source, /i18nReady\.then\(/, 'main.tsx no longer defers the first render until the catalogue is loaded');
-  assert.doesNotMatch(
-    source,
-    /^createRoot\(/m,
-    'main.tsx calls createRoot at module scope again — the first paint no longer waits for the catalogue',
+  // Comments stripped first: this file explains the deferral at length, and a gate that reads prose
+  // fires on a description of the bug as readily as on the bug. Counting the calls is what closes
+  // the gap an anchored pattern leaves — an unguarded render put anywhere but column zero, or added
+  // alongside the deferred one, is a second createRoot rather than a differently-shaped first.
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  assert.match(code, /i18nReady\.then\(/, 'main.tsx no longer defers the first render until the catalogue is loaded');
+  assert.match(code, /const render = \(\) =>\s*createRoot\(/, 'the deferred render no longer owns the createRoot call');
+  assert.equal(
+    (code.match(/createRoot\(/g) ?? []).length,
+    1,
+    'main.tsx mounts more than once — a render that is not the deferred one does not wait for the catalogue',
   );
 });

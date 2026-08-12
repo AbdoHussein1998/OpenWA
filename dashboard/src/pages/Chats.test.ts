@@ -178,9 +178,13 @@ before(async () => {
   // RoleProvider initializes from localStorage; 'admin' makes canWrite true so the composer
   // controls render enabled.
   window.localStorage.setItem('openwa_user_role', 'admin');
-  // Side-effect import: initializes the real i18n instance with all locales (JSON modules are
-  // handled by the registered loader hooks).
-  await import('../i18n/index.ts');
+  // The real i18n instance, and then its readiness promise: catalogues are fetched rather than
+  // bundled, so importing the module only STARTS the load. Every `getByText` below is English copy
+  // out of en.json, which renders as a raw key until it lands. Awaiting is what makes that
+  // deterministic — without it the assertions race the load and win only because the module imports
+  // that follow take longer than reading one JSON file.
+  const { i18nReady } = await import('../i18n/index.ts');
+  await i18nReady;
   rtl = await import('@testing-library/react');
   ({ RoleProvider } = await import('../components/RoleProvider.tsx'));
   ({ ToastProvider } = await import('../components/Toast.tsx'));

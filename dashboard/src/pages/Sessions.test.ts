@@ -193,7 +193,10 @@ before(async () => {
   // Deliberately NOT setting sessionStorage['openwa_api_key']: useWebSocket.connect() reads it and
   // bails with a console.warn when it's absent. Setting it would make socket.io actually dial
   // http://localhost/events and hit ECONNREFUSED in this environment.
-  await import('../i18n/index.ts');
+  // Awaited, not just imported: catalogues are fetched now, so the import only starts the load and
+  // the English copy these tests query by name renders as a raw key until it arrives.
+  const { i18nReady } = await import('../i18n/index.ts');
+  await i18nReady;
   rtl = await import('@testing-library/react');
   ({ RoleProvider } = await import('../components/RoleProvider.tsx'));
   ({ ToastProvider } = await import('../components/Toast.tsx'));
