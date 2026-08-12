@@ -69,13 +69,13 @@ const ADAPTERS: ReadonlyArray<[AdapterKey, AdapterCtor]> = [
  * Bucketed by filename because that is what identifies the engine: `baileys*` is Baileys, the wwjs
  * adapter and its `wwebjs-*` delegates are wwjs.
  */
+const THROW_SITE_RE = /(?:new EngineNotSupportedError|this\.unsupported)\(\s*'([a-zA-Z][a-zA-Z0-9]*)'/;
+
 function readDelegateThrows(): Record<string, Set<string>> {
-  const dir = join(__dirname, 'adapters');
   const registry: Record<string, Set<string>> = { wwjs: new Set(), baileys: new Set() };
   for (const file of adapterFiles()) {
-    const src = readFileSync(join(dir, file), 'utf8');
-    for (const m of src.matchAll(/(?:new EngineNotSupportedError|this\.unsupported)\(\s*'([a-zA-Z][a-zA-Z0-9]*)'/g)) {
-      for (const engine of enginesForFile(file)) registry[engine].add(m[1]);
+    for (const method of throwsIn(file)) {
+      for (const engine of enginesForFile(file)) registry[engine].add(method);
     }
   }
   return registry;
@@ -94,28 +94,47 @@ function prefixEngine(file: string): AdapterKey | undefined {
 }
 
 /**
- * Adapter modules whose filename names no engine, mapped to the engines that actually import them.
- * Read off the import graph, not the name: safe-link-preview.ts is reached only from
- * baileys-messaging.ts, so the `else wwjs` default this replaces already credited it to the wrong
- * engine, and inbound-media-cap/message-mapper/vcard are reached from both.
+ * Adapter modules whose filename names no engine, read off the import graph rather than the name.
+ * `safe-link-preview.ts` is reached only from baileys-messaging.ts, so the `else wwjs` default this
+ * replaces already credited it to the wrong engine; `chromium-profile-hygiene.ts` is reached only
+ * from the wwjs adapter, so for that one the old default happened to be right.
  *
- * None of these files throws today, so the registry is byte-identical either way. The list exists
- * for the DIRECTION the old default failed in: a misattributed throw does not merely go unseen, it
- * makes `liveThrows` report false for the engine that really refuses, and the invariant below then
- * demands the matrix mark that cell `supported` to stay green. A file added here without an
- * engine — or added to `adapters/` under no prefix at all — is a red test naming itself instead.
+ * `'shared'` marks a module BOTH adapters import. It is not an attribution — it is the statement
+ * that no correct attribution exists. Crediting such a file to both engines would make the invariant
+ * demand `not-available` on the engine that never refuses; crediting it to neither would make the
+ * invariant demand `supported` on the engine that does. Both directions press a false cell into the
+ * matrix, which is the failure this whole scan exists to prevent, so a throw in a shared module is
+ * refused outright by `shared modules carry no unsupported-throw` below.
+ *
+ * None of these files throws today, so the registry is byte-identical to the prefix-only scan.
  */
-const UNPREFIXED_FILE_ENGINES: Record<string, readonly AdapterKey[]> = {
+const SHARED = 'shared' as const;
+const UNPREFIXED_FILE_ENGINES: Record<string, readonly AdapterKey[] | typeof SHARED> = {
   'chromium-profile-hygiene.ts': ['wwjs'],
-  'inbound-media-cap.ts': ['wwjs', 'baileys'],
-  'message-mapper.ts': ['wwjs', 'baileys'],
+  'inbound-media-cap.ts': SHARED,
+  'message-mapper.ts': SHARED,
   'safe-link-preview.ts': ['baileys'],
-  'vcard.ts': ['wwjs', 'baileys'],
+  'vcard.ts': SHARED,
 };
 
 function enginesForFile(file: string): readonly AdapterKey[] {
   const prefix = prefixEngine(file);
-  return prefix ? [prefix] : (UNPREFIXED_FILE_ENGINES[file] ?? []);
+  if (prefix) return [prefix];
+  const declared = UNPREFIXED_FILE_ENGINES[file];
+  return declared === undefined || declared === SHARED ? [] : declared;
+}
+
+/** Modules both adapters import, where a refusal cannot be attributed to one engine. */
+const SHARED_FILES = Object.entries(UNPREFIXED_FILE_ENGINES)
+  .filter(([, engines]) => engines === SHARED)
+  .map(([file]) => file);
+
+/** Method names an adapter file refuses by literal, in file order. */
+function throwsIn(file: string): string[] {
+  const src = readFileSync(join(__dirname, 'adapters', file), 'utf8');
+  // A fresh regex per call: THROW_SITE_RE carries /g, and a shared /g regex keeps lastIndex between
+  // calls, so reusing the instance would silently skip matches on every other file.
+  return [...src.matchAll(new RegExp(THROW_SITE_RE.source, 'g'))].map(m => m[1]);
 }
 
 const DELEGATE_THROWS = readDelegateThrows();
@@ -151,6 +170,20 @@ describe('engine capability matrix — drift invariants', () => {
   // behind by a rename or deletion is caught the same way from the other side.
   it('every adapter file is attributed to an engine', () => {
     expect([...UNPREFIXED_FILES].sort()).toEqual(Object.keys(UNPREFIXED_FILE_ENGINES).sort());
+  });
+
+  // The other half of the same problem. Attribution fixes files the prefix rule could not name; this
+  // fixes files that CANNOT be named, because both adapters import them. There is no safe default:
+  // credit a shared module's refusal to both engines and the invariant demands `not-available` from
+  // the engine that never refuses; credit it to neither and it demands `supported` from the engine
+  // that does. Either way a false cell gets pressed into the matrix — the exact outcome this scan
+  // exists to prevent — so the throw is refused where it stands, with the fix named.
+  it('shared modules carry no unsupported-throw', () => {
+    expect(SHARED_FILES.length).toBeGreaterThanOrEqual(3); // non-vacuous: the shared set was read
+    const offenders = SHARED_FILES.filter(file => throwsIn(file).length > 0);
+    // Fix: move the throw into that engine's own delegate (`baileys-*.ts` / `wwebjs-*.ts`) and call
+    // the shared helper from there, so the refusal carries an engine and this scan can see it.
+    expect(offenders).toEqual([]);
   });
 
   it('matrix keys exactly match the interface methods (no missing, no stale)', () => {
