@@ -23,8 +23,31 @@ function workflowOf(file: string): Workflow {
   return yaml.load(fs.readFileSync(path.join(workflowDir, file), 'utf8')) as Workflow;
 }
 
+/**
+ * A `run:` block with its shell comments removed.
+ *
+ * The gate below exists because the script's only appearance in ci.yml was once inside a comment,
+ * and a substring match cannot tell a command from a mention — so `# ./scripts/x.sh disabled` would
+ * have satisfied the very check written to catch that. Only executable lines count.
+ */
+export function executableLines(run: string): string {
+  return run
+    .split('\n')
+    .map(line => {
+      const hash = line.indexOf('#');
+      if (hash === -1) return line;
+      // A '#' inside quotes is data, not a comment — keep the line whole rather than truncating it.
+      const before = line.slice(0, hash);
+      const quotes = (before.match(/["']/g) ?? []).length;
+      return quotes % 2 === 1 ? line : before;
+    })
+    .join('\n');
+}
+
 function runCommandsOf(file: string): string[] {
-  return Object.values(workflowOf(file).jobs ?? {}).flatMap(job => (job.steps ?? []).map(step => step.run ?? ''));
+  return Object.values(workflowOf(file).jobs ?? {}).flatMap(job =>
+    (job.steps ?? []).map(step => executableLines(step.run ?? '')),
+  );
 }
 
 /**
@@ -50,6 +73,17 @@ describe('the non-root drop is enforced, not merely documented', () => {
   // pass. Anchor it on a script the workflows have always invoked.
   it('extracts run commands from the workflows', () => {
     expect(runCommandsOf('ci.yml').join('\n')).toContain('smoke-test-backup-restore.sh');
+  });
+
+  // The extractor's own defect, pinned: a mention is not an invocation. Disabling a step by commenting
+  // it out is the exact shape that let the script go unrun while this file reported it enforced.
+  it('does not count a commented-out invocation as running the script', () => {
+    expect(executableLines('# ./scripts/smoke-test-non-root.sh\necho skipped')).not.toContain('smoke-test-non-root.sh');
+    expect(executableLines('  OPENWA_SMOKE_IMAGE="$IMAGE" ./scripts/smoke-test-non-root.sh # run it')).toContain(
+      'smoke-test-non-root.sh',
+    );
+    // A '#' inside a quoted string is data; truncating there would drop a real command.
+    expect(executableLines('echo "tag #1" && ./scripts/smoke-test-non-root.sh')).toContain('smoke-test-non-root.sh');
   });
 
   // BOTH paths. The tag path is the one that promotes to `latest`, so a check present only on the PR
