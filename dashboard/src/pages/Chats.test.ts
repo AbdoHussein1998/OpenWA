@@ -84,10 +84,37 @@ const OMITTED_MEDIA_MESSAGE: ChatMessage = {
   metadata: { media: { mimetype: 'image/jpeg', filename: 'photo.jpg', omitted: true, sizeBytes: 9_000_000 } },
 };
 
+// A second one, so a test can have two downloads open at once and check they do not share state.
+const OMITTED_MEDIA_MESSAGE_2: ChatMessage = {
+  ...OMITTED_MEDIA_MESSAGE,
+  id: 'db-3',
+  waMessageId: 'wamid.3',
+  timestamp: 1_700_000_002,
+  createdAt: new Date(1_700_000_002_000).toISOString(),
+  metadata: { media: { mimetype: 'image/jpeg', filename: 'photo-2.jpg', omitted: true, sizeBytes: 9_000_000 } },
+};
+
 /** The per-message media route the omitted marker sends the viewer to. */
-const MEDIA_PATH = `/api/sessions/${SESSION.id}/messages/${encodeURIComponent(CHAT.id)}/${encodeURIComponent(
-  OMITTED_MEDIA_MESSAGE.waMessageId as string,
-)}/media`;
+const mediaPathFor = (waMessageId: string): string =>
+  `/api/sessions/${SESSION.id}/messages/${encodeURIComponent(CHAT.id)}/${encodeURIComponent(waMessageId)}/media`;
+const MEDIA_PATH = mediaPathFor(OMITTED_MEDIA_MESSAGE.waMessageId as string);
+const MEDIA_PATH_2 = mediaPathFor(OMITTED_MEDIA_MESSAGE_2.waMessageId as string);
+
+// A media response can be held open, so a test can have two downloads in flight and settle them out
+// of order — the shape in which one fetch's completion can clobber another's state.
+const mediaGates = new Map<string, Promise<void>>();
+
+/** Hold the media response for `path` until the returned release function is called. */
+function holdMedia(path: string): () => void {
+  let release!: () => void;
+  mediaGates.set(
+    path,
+    new Promise<void>(resolve => {
+      release = resolve;
+    }),
+  );
+  return release;
+}
 
 // Contact for the status-compose recipient picker (Baileys requires an explicit allow-list).
 const CONTACT = { id: '15550002222@c.us', name: 'Bob', number: '15550002222' };
@@ -159,11 +186,15 @@ function installFetchStub(): void {
       return Promise.resolve(jsonResponse([CONTACT]));
     }
     if (method === 'GET' && path.startsWith(`/api/sessions/${SESSION.id}/messages?`)) {
-      return Promise.resolve(jsonResponse({ messages: [DB_MESSAGE, OMITTED_MEDIA_MESSAGE], total: 2 }));
+      return Promise.resolve(
+        jsonResponse({ messages: [DB_MESSAGE, OMITTED_MEDIA_MESSAGE, OMITTED_MEDIA_MESSAGE_2], total: 3 }),
+      );
     }
     // The media route answers bytes, not JSON — Content-Disposition: attachment.
-    if (method === 'GET' && path === MEDIA_PATH) {
-      return Promise.resolve(new Response(new Blob(['jpeg-bytes']), { status: 200 }));
+    if (method === 'GET' && (path === MEDIA_PATH || path === MEDIA_PATH_2)) {
+      const bytes = () => new Response(new Blob(['jpeg-bytes']), { status: 200 });
+      const gate = mediaGates.get(path);
+      return gate ? gate.then(bytes) : Promise.resolve(bytes());
     }
     if (method === 'GET' && /\/messages\/[^/]+\/history/.test(path)) {
       return Promise.resolve(jsonResponse([]));
@@ -222,6 +253,8 @@ afterEach(() => {
   rtl.cleanup();
   queryClient?.clear();
   queryClient = undefined;
+  // A gate left held would stall the next test's media fetch forever.
+  mediaGates.clear();
 });
 
 function renderChats(): { container: HTMLElement } {
@@ -423,7 +456,8 @@ test('an omitted media bubble fetches the bytes from the per-message media route
   fireEvent.click(await screen.findByText('Alice'));
   const thread = container.querySelector('.room-messages') as HTMLElement;
 
-  const placeholder = (await within(thread).findByRole('button', { name: /Media/ })) as HTMLButtonElement;
+  // Two omitted rows render, so target the first by its message id rather than by role alone.
+  const placeholder = (await within(thread).findAllByRole('button', { name: /Media/ }))[0] as HTMLButtonElement;
   assert.equal(countFetchCalls('GET', MEDIA_PATH), 0, 'the media route must not be hit until asked');
 
   fireEvent.click(placeholder);
@@ -436,4 +470,59 @@ test('an omitted media bubble fetches the bytes from the per-message media route
   await waitFor(() => {
     assert.deepEqual(revokedUrls, createdUrls, 'every object URL created must be revoked');
   });
+});
+
+/**
+ * Two omitted bubbles can be downloading at once — nothing stops a viewer clicking one, then the
+ * next. Each must own its own lifecycle: with a single shared slot the second click overwrote the
+ * first, and then whichever settled first cleared the other's state, re-enabling a button whose
+ * download was still open and letting a later failure mark the wrong bubble.
+ */
+test('two media downloads in flight do not clobber each other', async () => {
+  const { screen, fireEvent, within, waitFor } = rtl;
+  resetFetchCalls();
+
+  const createdUrls: string[] = [];
+  URL.createObjectURL = (): string => {
+    const url = `blob:mock-${createdUrls.length}`;
+    createdUrls.push(url);
+    return url;
+  };
+  URL.revokeObjectURL = (): void => undefined;
+
+  // Hold BOTH responses so the two fetches overlap, then settle them out of order.
+  const releaseA = holdMedia(MEDIA_PATH);
+  holdMedia(MEDIA_PATH_2);
+
+  const { container } = renderChats();
+  fireEvent.click(await screen.findByText('Alice'));
+  const thread = container.querySelector('.room-messages') as HTMLElement;
+  await within(thread).findAllByRole('button', { name: /Media/ });
+
+  // Addressed by message id, not by position: the thread's ordering is not this test's subject.
+  const buttonFor = (waMessageId: string): HTMLButtonElement =>
+    thread.querySelector(`[data-wa-message-id="${waMessageId}"] .message-media-omitted`) as HTMLButtonElement;
+  const a = buttonFor(OMITTED_MEDIA_MESSAGE.waMessageId as string);
+  const b = buttonFor(OMITTED_MEDIA_MESSAGE_2.waMessageId as string);
+
+  fireEvent.click(a);
+  fireEvent.click(b);
+  await waitFor(() => {
+    assert.equal(countFetchCalls('GET', MEDIA_PATH), 1, 'A should have been requested');
+    assert.equal(countFetchCalls('GET', MEDIA_PATH_2), 1, 'B should have been requested');
+  });
+
+  // Settle A while B is still open.
+  releaseA();
+  await waitFor(() => {
+    assert.equal(createdUrls.length, 1, "A's blob should have been handed to the download link");
+  });
+
+  // B is still fetching, so its button must still be disabled. With a shared slot A's completion
+  // cleared it here and B became clickable again mid-download.
+  assert.equal(
+    buttonFor(OMITTED_MEDIA_MESSAGE_2.waMessageId as string).disabled,
+    true,
+    "B's download was still open — A settling must not re-enable it",
+  );
 });

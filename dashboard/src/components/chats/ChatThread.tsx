@@ -54,12 +54,16 @@ function ChatThread({
   // MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES — past that a row arrives as `{ omitted: true }`. Without
   // this fetch the placeholder is terminal: this thread requests the largest page size and caches it
   // with staleTime Infinity, so an older attachment in a media-heavy chat has no other route to it.
-  const [mediaFetch, setMediaFetch] = useState<{ id: string; state: 'loading' | 'failed' } | null>(null);
+  // Keyed by message id, not one shared slot: a viewer can click a second placeholder before the
+  // first resolves, and each download owns its own lifecycle. Sharing one slot let the second click
+  // overwrite the first, after which whichever settled first cleared the other's state — re-enabling
+  // a button whose fetch was still open, and landing a failure marker on the wrong bubble.
+  const [mediaFetch, setMediaFetch] = useState<Record<string, 'loading' | 'failed'>>({});
   const downloadMedia = useCallback(
     async (message: ChatMessageView) => {
       const messageId = message.waMessageId;
       if (!sessionId || !messageId) return;
-      setMediaFetch({ id: messageId, state: 'loading' });
+      setMediaFetch(prev => ({ ...prev, [messageId]: 'loading' }));
       let objectUrl: string | null = null;
       try {
         const blob = await sessionApi.getMessageMediaBlob(sessionId, activeChat.id, messageId);
@@ -70,11 +74,15 @@ function ChatThread({
         // downloads from the same thread apart.
         link.download = message.metadata?.media?.filename || messageId;
         link.click();
-        setMediaFetch(null);
+        setMediaFetch(prev => {
+          const next = { ...prev };
+          delete next[messageId];
+          return next;
+        });
       } catch {
         // 404 covers every "there are no bytes" case the route documents (URL-based send, media
         // download disabled, over the inbound cap). Say so on the bubble rather than failing mutely.
-        setMediaFetch({ id: messageId, state: 'failed' });
+        setMediaFetch(prev => ({ ...prev, [messageId]: 'failed' }));
       } finally {
         if (objectUrl) URL.revokeObjectURL(objectUrl);
       }
@@ -209,7 +217,7 @@ function ChatThread({
             if (mediaInfo.omitted) {
               // Not a plain label: the bytes exist behind the per-message media route, so this is the
               // only handle the viewer has on them.
-              const fetchState = mediaFetch && mediaFetch.id === msg.waMessageId ? mediaFetch.state : null;
+              const fetchState = msg.waMessageId ? mediaFetch[msg.waMessageId] : undefined;
               return (
                 <button
                   type="button"
