@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The dashboard bundled all thirteen locales into one 476 KB chunk the page preloaded, so every visitor downloaded twelve languages to read one; each is now fetched on demand.
+- Fifteen return and parameter annotations in the Python SDK named `list[...]` inside classes that define a `list` method, so each resolved to the method rather than the builtin. That package ships `py.typed`, so the wrong types were what a consumer's own type checker read. Its CI now runs mypy, which nothing did before.
 - A locale chunk that failed to load left the dashboard right-to-left around English copy, because text direction followed the requested language rather than the catalogue that answered; it now follows what actually rendered.
 - `check:sdk-routes` scanned the JavaScript client for backtick-delimited paths only, while its PHP and Python rules already accepted every quote style, so the nine routes that client writes as single-quoted strings were never compared to the contract — `/api/health/ready` among them, which is also the container healthcheck and Kubernetes readiness path. Renaming one of those server-side passed every gate and the JS suite, and the published client would have 404'd with CI green.
 - The JavaScript, Python, Go and Java SDKs omitted `contact`, `call` and `ephemeralDuration` from their chat-history message type, so a typed client had to cast to read three fields the endpoint returns; all four now mirror the engine payload.

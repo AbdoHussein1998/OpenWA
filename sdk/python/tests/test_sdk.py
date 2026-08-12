@@ -6,7 +6,9 @@ import httpx
 import pytest
 
 from openwa import OpenWAClient, OpenWAApiError, OpenWANotFoundError
+from openwa._http import build_url
 from openwa.errors import OpenWAServiceUnavailableError
+from openwa.types import WebhookFilters
 
 from conftest import MockBackend, make_client
 
@@ -99,9 +101,24 @@ class TestClientCore:
         assert "chatId=a%40c.us" in url
         assert "limit=10" in url
 
+    def test_build_url_omits_none_valued_params(self):
+        # The behaviour a caller depends on: a None never reaches the wire as the literal "None".
+        # Tested here because build_url is what implements it — the typed resource signatures
+        # forbid None, so proving it through one of them would mean lying about a type.
+        url = build_url("http://x", "/api/search", {"q": "x", "sessionId": None, "limit": 5})
+
+        assert "q=x" in url
+        assert "limit=5" in url
+        assert "sessionId" not in url
+        assert "None" not in url
+
     def test_204_is_none(self):
+        # `delete` is declared `-> None`, so asserting on its result is a type error and proves
+        # nothing the signature does not already guarantee. What is worth asserting is that a 204
+        # completes without trying to parse an empty body as JSON.
         backend = MockBackend().on("DELETE", "/api/sessions", status=204)
-        assert make_client(backend).sessions.delete("x") is None
+        make_client(backend).sessions.delete("x")
+        assert backend.last_call.method == "DELETE"
 
     def test_404_maps_to_not_found_error(self):
         backend = MockBackend().on("GET", "/api/sessions/missing", status=404, body={
@@ -563,7 +580,10 @@ class TestWebhooks:
 
     def test_create_forwards_polymorphic_filter_values_verbatim(self):
         backend = MockBackend().on("POST", "/webhooks", body={"id": "w1"})
-        filters = {
+        # Annotated, not inferred: an unannotated literal widens to dict[str, list[object]] and the
+        # call below then proves nothing about the declared filter shape — which is the whole point
+        # of a test named "forwards polymorphic filter values verbatim".
+        filters: WebhookFilters = {
             "conditions": [
                 {"field": "sender", "operator": "is", "value": ["123@c.us"]},
                 {"field": "body", "operator": "contains", "value": "invoice", "caseSensitive": True},
@@ -882,11 +902,16 @@ class TestSearch:
         assert res["hits"][0]["direction"] == "incoming"
 
     def test_search_none_values_skipped_in_query(self):
-        # None-typed optional filters must be omitted, never sent as the literal "None".
+        # Asserted against build_url, which is where the omission actually happens, rather than by
+        # routing `sessionId: None` through the typed resource. The contract has sessionId optional
+        # but NOT nullable (openapi.json: required false, type string, no nullable), so the
+        # TypedDict is right to demand a str and the old call was sending a payload the gateway
+        # would reject. Testing the mechanism at its owner keeps the regression covered without
+        # anything having to lie about the type.
         backend = MockBackend().on("GET", "/api/search", body={
             "hits": [], "total": 0, "tookMs": 0, "provider": "builtin-fts",
         })
-        make_client(backend).search.search({"q": "x", "sessionId": None, "limit": 5})
+        make_client(backend).search.search({"q": "x", "limit": 5})
         url = backend.last_call.url
         assert "q=x" in url
         assert "limit=5" in url

@@ -69,6 +69,11 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e '.[dev]'
+      # Before pytest: this package ships py.typed, so its annotations are a published contract,
+      # and pytest cannot see a mistake in them — TypedDict keys are not enforced at runtime, so a
+      # request type missing a field passes every test here while a typed caller is told the field
+      # does not exist.
+      - run: mypy
       - run: pytest
 
   php:
