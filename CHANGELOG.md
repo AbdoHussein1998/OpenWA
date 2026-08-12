@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The dashboard's dependency tree is now audited on both the PR and the tag path. It went unscanned by every job: `npm audit` ran against the root tree only, and the image scan sees OS packages and the built bundle rather than the npm graph behind it — so a HIGH advisory in a dependency that reaches an operator's browser could ride a release undetected. Two were present at this baseline: `socket.io-parser` (bundled into `dashboard/dist` via `socket.io-client`) and `brace-expansion` (dev-only, via ESLint), the latter pinned to a vulnerable version by an override that had not been bumped. Both are now overridden to patched releases.
+
 - `.env.example` shipped five keys the Infrastructure dashboard owns — `POSTGRES_BUILTIN`, `DATABASE_SSL`, `DATABASE_SSL_REJECT_UNAUTHORIZED`, `REDIS_BUILTIN` and `MINIO_BUILTIN` — uncommented, so an operator who followed the documented `cp .env.example .env` pinned them: the dashboard control still saved and reported success while the running value never changed, most consequentially leaving a Postgres connection unencrypted after the operator enabled SSL. The file's own header already promised a gate against this, but that gate only reached keys docker-compose forwards blank; it now covers every key the dashboard writes.
 
 - Two enabled instances of one integration plugin that share a session scope no longer collapse onto a single config, so an ingress delivery authenticated with one instance's secret is no longer handled with the credentials of whichever instance was provisioned last. Dispatch now layers the instance's own config over the base config and any per-session override.

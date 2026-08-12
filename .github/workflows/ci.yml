@@ -94,6 +94,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+          # Both trees are installed below, so both lockfiles belong in the cache key.
+          cache-dependency-path: |
+            package-lock.json
+            dashboard/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -101,9 +105,21 @@ jobs:
       - name: Security audit
         # high (not critical): the `overrides` in package.json clear the root tree's HIGH advisories
         # (brace-expansion CVE-2026-14257, js-yaml GHSA-pm4m-ph32-ghv5), so this threshold now fences
-        # HIGH regressions instead of only catching criticals. Scoped to the root tree; the dashboard
-        # carries its own `overrides` and its remaining HIGH pair (react-router) rides Dependabot.
+        # HIGH regressions instead of only catching criticals.
         run: npm audit --audit-level=high
+
+      # The dashboard is a SECOND dependency tree, and it is the one that reaches a browser: its
+      # runtime deps are bundled into dashboard/dist, which the production image copies and serves.
+      # It went unscanned by every job in both the PR and the tag path — the image scan sees OS
+      # packages and the bundled output, not the npm graph behind it — so a HIGH advisory in a
+      # runtime dep could ride a release undetected. Audited here rather than as a step in the
+      # `dashboard` job for the same reason this job exists at all: an advisory must not abort that
+      # job's lint, typecheck, i18n, build and unit tests before they run.
+      - name: Install dashboard dependencies
+        run: cd dashboard && npm ci
+
+      - name: Security audit (dashboard)
+        run: cd dashboard && npm audit --audit-level=high
 
   test:
     name: Test
