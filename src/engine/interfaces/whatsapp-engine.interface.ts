@@ -31,7 +31,23 @@ export interface MessageResult {
   timestamp: number;
 }
 
-export interface MediaInput {
+/**
+ * A send payload that can quote an earlier message, turning the send into a reply.
+ *
+ * Deliberately a PROPERTY on the payload rather than a parameter on the engine methods: the parity
+ * gate reads call-shaped members out of this file, so a new method would demand a capability-matrix
+ * row while a property demands nothing (see engine-parity.spec.ts MEMBER_RE).
+ *
+ * The id is engine-specific and the adapters do NOT harmonize it: whatsapp-web.js matches the
+ * serialized message id, Baileys looks the raw key id up in its local store and can only quote a
+ * message it has already persisted.
+ */
+export interface Quotable {
+  /** Quote this message id in the send. Omit for a plain, unquoted send. */
+  quotedMessageId?: string;
+}
+
+export interface MediaInput extends Quotable {
   mimetype: string;
   data: Buffer | string; // Buffer or base64 or URL
   /** Caller-supplied filename wins. Document sends fall back to 'file' when omitted (wwebjs first derives the URL basename); image/video/audio sends carry no filename. */
@@ -301,19 +317,19 @@ export interface CustomLinkPreview {
   description?: string;
 }
 
-export interface ContactCard {
+export interface ContactCard extends Quotable {
   name: string;
   number: string;
 }
 
-export interface LocationInput {
+export interface LocationInput extends Quotable {
   latitude: number;
   longitude: number;
   description?: string;
   address?: string;
 }
 
-export interface PollInput {
+export interface PollInput extends Quotable {
   /** Poll question / title. */
   name: string;
   /** Options to vote on (WhatsApp accepts between 2 and 12). */
@@ -842,7 +858,7 @@ export interface IWhatsAppEngine {
     chatId: string,
     text: string,
     mentions?: string[],
-    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
+    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview } & Quotable,
   ): Promise<MessageResult>;
   sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
   sendVideoMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
