@@ -18,22 +18,52 @@ describe('docs/10 metric table matches MetricsService', () => {
   const read = (...parts: string[]): string => readFileSync(join(__dirname, '..', '..', ...parts), 'utf8');
 
   /**
-   * Emitted series, read from the two forms the renderer uses:
-   *   - `gauge('openwa_x', …)` — the helper pushes HELP/TYPE/value, always a gauge.
-   *   - `# TYPE openwa_x counter|gauge` — the hand-written blocks.
-   * Both carry the type, so the doc's Type column is checked against the source rather than assumed.
+   * Files whose lines end up in one scrape. `render()` composes its output from helpers in other
+   * modules, so scanning the service alone missed the unprefixed HTTP RED series entirely — and a
+   * gate that cannot see a series cannot bind it.
+   */
+  const RENDER_SOURCES = [
+    ['src', 'modules', 'metrics', 'metrics.service.ts'],
+    ['src', 'common', 'metrics', 'request-metrics.ts'],
+  ];
+
+  /**
+   * Emitted series, read from the two forms the renderers use:
+   *   - `gauge('name', …)` — the helper pushes HELP/TYPE/value, always a gauge.
+   *   - `# TYPE name counter|gauge` — the hand-written blocks.
+   * Deliberately NOT restricted to the `openwa_` prefix: two series are conventionally unprefixed so
+   * generic RED dashboards match them, and a prefix filter is exactly how they escaped this gate.
    */
   const emitted = (): Map<string, string> => {
-    const source = read('src', 'modules', 'metrics', 'metrics.service.ts');
     const found = new Map<string, string>();
-    for (const [, name] of source.matchAll(/\bgauge\(\s*'(openwa_[a-z_]+)'/g)) {
-      found.set(name, 'gauge');
-    }
-    for (const [, name, type] of source.matchAll(/# TYPE (openwa_[a-z_]+) (gauge|counter)/g)) {
-      found.set(name, type);
+    for (const parts of RENDER_SOURCES) {
+      const source = read(...parts);
+      for (const [, name] of source.matchAll(/\bgauge\(\s*'([a-z][a-z0-9_]*)'/g)) {
+        found.set(name, 'gauge');
+      }
+      for (const [, name, type] of source.matchAll(/# TYPE ([a-z][a-z0-9_]*) (gauge|counter|histogram)/g)) {
+        found.set(name, type);
+      }
     }
     return found;
   };
+
+  /**
+   * The composition itself. RENDER_SOURCES is a hand-kept list, and a third helper spliced into
+   * `render()` would escape this gate the same way the HTTP series did — silently, because the
+   * comparison would still pass on the files it does know. Every `...renderX()` splice must resolve
+   * to a module this spec reads.
+   */
+  it('reads every module whose lines render() splices in', () => {
+    const service = read('src', 'modules', 'metrics', 'metrics.service.ts');
+    const splices = [...service.matchAll(/lines\.push\(\.\.\.(\w+)\(/g)].map(m => m[1]);
+    expect(splices.length).toBeGreaterThan(0); // control: the pattern must match something
+
+    const scanned = RENDER_SOURCES.map(parts => read(...parts)).join('\n');
+    for (const helper of splices) {
+      expect(scanned).toContain(`export function ${helper}`);
+    }
+  });
 
   /** The table rows: `| \`openwa_x\` | type | labels | meaning |`. */
   const documented = (): Map<string, string> => {
@@ -48,7 +78,7 @@ describe('docs/10 metric table matches MetricsService', () => {
         continue;
       }
       const cells = line.split('|').map(cell => cell.trim());
-      const name = cells[1]?.match(/^`(openwa_[a-z_]+)`$/)?.[1];
+      const name = cells[1]?.match(/^`([a-z][a-z0-9_]*)`$/)?.[1];
       if (name) rows.set(name, cells[2]);
     }
     return rows;
