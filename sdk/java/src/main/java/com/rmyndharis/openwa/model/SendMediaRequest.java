@@ -7,7 +7,8 @@ public record SendMediaRequest(
     String base64,
     String mimetype,
     String filename,
-    String caption) {
+    String caption,
+    String quotedMessageId) {
 
     public static Builder builder() {
         return new Builder();
@@ -20,6 +21,7 @@ public record SendMediaRequest(
         private String mimetype;
         private String filename;
         private String caption;
+        private String quotedMessageId;
 
         public Builder chatId(String v) {
             this.chatId = v;
@@ -55,8 +57,18 @@ public record SendMediaRequest(
             return this;
         }
 
+        /**
+         * Quote an earlier message, turning this send into a reply. Engine-specific:
+         * whatsapp-web.js matches the serialized message id, Baileys the raw key id of a message
+         * it has already stored.
+         */
+        public Builder quotedMessageId(String v) {
+            this.quotedMessageId = v;
+            return this;
+        }
+
         public SendMediaRequest build() {
-            return new SendMediaRequest(chatId, url, base64, mimetype, filename, caption);
+            return new SendMediaRequest(chatId, url, base64, mimetype, filename, caption, quotedMessageId);
         }
     }
 }

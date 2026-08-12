@@ -192,6 +192,36 @@ class TestMessages:
         assert res["total"] == 1
         assert len(res["messages"]) == 1
 
+    def test_quoted_message_id_reaches_the_body_on_every_send(self):
+        # Asserted on the BODY, not the URL: a URL assertion cannot see a dropped key, and dropping
+        # one is exactly how a client ends up 400ing while its four siblings work.
+        backend = MockBackend()
+        for route in ("send-text", "send-image", "send-location", "send-contact", "send-poll"):
+            backend.on("POST", f"/{route}", body={"messageId": "m", "timestamp": 1})
+        client = make_client(backend)
+
+        client.messages.send_text("s", {"chatId": "a@c.us", "text": "hi", "quotedMessageId": "q1"})
+        client.messages.send_image("s", {"chatId": "a@c.us", "url": "http://u", "quotedMessageId": "q1"})
+        client.messages.send_location(
+            "s", {"chatId": "a@c.us", "latitude": 1, "longitude": 2, "quotedMessageId": "q1"}
+        )
+        client.messages.send_contact(
+            "s", {"chatId": "a@c.us", "contactName": "A", "contactNumber": "628", "quotedMessageId": "q1"}
+        )
+        client.messages.send_poll(
+            "s", {"chatId": "a@c.us", "name": "Q", "options": ["a", "b"], "quotedMessageId": "q1"}
+        )
+
+        for call in backend.calls[-5:]:
+            assert call.body["quotedMessageId"] == "q1", call.url
+
+    def test_ordinary_send_carries_no_quote_key(self):
+        # Known-negative control: without it an implementation that always emitted the key — as null,
+        # which some clients drop and others send — would satisfy the assertion above.
+        backend = MockBackend().on("POST", "/send-image", body={"messageId": "m", "timestamp": 1})
+        make_client(backend).messages.send_image("s", {"chatId": "a@c.us", "url": "http://u"})
+        assert "quotedMessageId" not in backend.calls[-1].body
+
     def test_reply_forwardReactDelete(self):
         backend = MockBackend()
         backend.on("POST", "/reply", body={"messageId": "m", "timestamp": 1})
