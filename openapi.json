@@ -5569,13 +5569,13 @@
             }
           },
           "400": {
-            "description": "Session not active, or neither url nor base64 supplied"
+            "description": "The id does not name a group, or the session is not active, or neither url nor base64 was supplied"
           },
           "403": {
             "description": "The engine refused the change — admin rights required"
           },
           "404": {
-            "description": "No such group — the id is unknown, or it addresses a 1:1 chat rather than a group."
+            "description": "No such group — the id is unknown."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
@@ -5629,7 +5629,7 @@
             "description": "The engine refused the change — admin rights required"
           },
           "404": {
-            "description": "No such group — the id is unknown, or it addresses a 1:1 chat rather than a group."
+            "description": "No such group — the id is unknown."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."

@@ -74,8 +74,15 @@ export const CUSTOM_LINK_PREVIEW_501 =
   'A caller-supplied `customLinkPreview` is not supported by the whatsapp-web.js engine — only ' +
   'Baileys can attach one. The send itself is supported on both; omit the field, or use `linkPreview`.';
 
-/** `GroupNotFoundError` (404) — unknown id, or an id that addresses a 1:1 chat. */
-export const GROUP_NOT_FOUND_404 = 'No such group — the id is unknown, or it addresses a 1:1 chat rather than a group.';
+/**
+ * `GroupNotFoundError` (404) — the id names a group, but no such group is known.
+ *
+ * It does NOT cover an id that addresses a 1:1 chat: every route carrying this response guards the
+ * id shape first and answers 400, so advertising the 1:1 case here would contradict the 400 on the
+ * same route. Keep the two descriptions disjoint — a caller uses them to tell "wrong kind of id"
+ * (fix the request) apart from "right kind, no such group" (the group is gone or was never joined).
+ */
+export const GROUP_NOT_FOUND_404 = 'No such group — the id is unknown.';
 
 /** `LabelNotFoundError` (404) — never created, or the account is not a Business one. */
 export const LABEL_NOT_FOUND_404 =

@@ -464,7 +464,10 @@ export class GroupController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'groupId', description: 'Group ID' })
   @ApiResponse({ status: 200, description: 'Group picture updated', type: GroupAckResponseDto })
-  @ApiResponse({ status: 400, description: 'Session not active, or neither url nor base64 supplied' })
+  @ApiResponse({
+    status: 400,
+    description: 'The id does not name a group, or the session is not active, or neither url nor base64 was supplied',
+  })
   @ApiResponse({ status: 403, description: 'The engine refused the change — admin rights required' })
   @ApiResponse({
     status: 503,
