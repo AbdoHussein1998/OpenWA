@@ -73,7 +73,14 @@ export function spendInlineMediaBudget(messages: Message[], budgetBytes: number)
     if (!media || typeof media.data !== 'string' || MEDIA_URL_POINTER.test(media.data)) continue;
 
     const encoded = Buffer.byteLength(media.data, 'utf8');
-    if (spent + encoded <= budgetBytes) {
+    // The newest payload is always let through when inlining is enabled at all. Without this an
+    // item larger than the whole budget was omitted even as the ONLY media on the page, so a single
+    // large photo or video — well inside the bytes the gateway stores inline — could never be read
+    // back through this route: the dashboard thread has no other media source and caches with
+    // staleTime: Infinity, leaving a permanent placeholder for media WhatsApp displays.
+    // A budget of 0 means "do not inline", not "a very small budget", so it grants no allowance.
+    const allowanceApplies = spent === 0 && budgetBytes > 0;
+    if (spent + encoded <= budgetBytes || allowanceApplies) {
       spent += encoded;
       continue;
     }

@@ -2061,4 +2061,42 @@ describe('spendInlineMediaBudget', () => {
     spendInlineMediaBudget(rows, 0);
     expect(mediaOf(rows[0]).sizeBytes).toBe(4242);
   });
+
+  /**
+   * A payload bigger than the whole budget was omitted even as the only media on the page, so a
+   * single large photo or video — well inside the 50 MiB the gateway stores inline — could never be
+   * read back through this route. The dashboard's thread has no other media source and fetches with
+   * staleTime: Infinity, so the user saw a permanent 📎 placeholder for an image WhatsApp shows.
+   *
+   * The newest payload is therefore always let through when inlining is enabled at all. The budget
+   * still bounds everything after it, and a budget of 0 still means "no inline media", so an
+   * operator who switched inlining off does not get one payload back.
+   */
+  it('lets the newest payload through even when it alone exceeds the budget', () => {
+    const rows = [row('huge', 5000)];
+    spendInlineMediaBudget(rows, 1000);
+
+    expect(mediaOf(rows[0]).data).toHaveLength(5000);
+    expect(mediaOf(rows[0]).omitted).toBeUndefined();
+  });
+
+  // Negative twin: the allowance is for the FIRST payload only — it must not become a blanket pass.
+  it('still omits the rows after an oversized newest payload', () => {
+    const rows = [row('huge', 5000), row('next', 10), row('later', 10)];
+    spendInlineMediaBudget(rows, 1000);
+
+    expect(mediaOf(rows[0]).data).toHaveLength(5000);
+    expect(mediaOf(rows[1]).data).toBeUndefined();
+    expect(mediaOf(rows[1]).omitted).toBe(true);
+    expect(mediaOf(rows[2]).omitted).toBe(true);
+  });
+
+  // A budget of 0 is an explicit "do not inline", not a small budget — no allowance applies.
+  it('grants no allowance when inlining is switched off entirely', () => {
+    const rows = [row('huge', 5000)];
+    spendInlineMediaBudget(rows, 0);
+
+    expect(mediaOf(rows[0]).data).toBeUndefined();
+    expect(mediaOf(rows[0]).omitted).toBe(true);
+  });
 });
