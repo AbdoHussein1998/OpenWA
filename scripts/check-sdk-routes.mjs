@@ -52,7 +52,14 @@ const walk = (dir, exts, out = []) => {
 // Source directories only — test files assert against fixtures and may legitimately name paths the
 // package never builds.
 const SDKS = [
-  { name: 'javascript', dir: 'sdk/javascript/src', exts: ['.ts'], re: /`(\/api\/[^`]*)`/g },
+  // Any quote style, not just backticks. The JS client writes its parameterless routes as
+  // single-quoted strings — nine of them, including the `/api/health/ready` path Kubernetes and the
+  // container HEALTHCHECK probe — and a backtick-only scan never saw one. Renaming any of those on
+  // the server regenerated openapi.json, passed `openapi:check`, passed this gate (which never
+  // harvested the literal), and passed the JS suite (whose oracle is the URL the SDK itself built),
+  // so the published client would 404 with CI fully green. check-sdk-coverage.mjs already harvests
+  // every quote style; this brings the forward gate level with it.
+  { name: 'javascript', dir: 'sdk/javascript/src', exts: ['.ts'], re: /[`"'](\/api\/[^`"']*)[`"']/g },
   { name: 'php', dir: 'sdk/php/src', exts: ['.php'], re: /["'](\/api\/[^"']*)["']/g },
   { name: 'python', dir: 'sdk/python/openwa', exts: ['.py'], re: /["'](\/api\/[^"']*)["']/g },
 ];
