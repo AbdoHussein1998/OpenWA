@@ -14,6 +14,9 @@ import {
   SEND_AUDIO_BODY_EXAMPLES,
   SEND_DOCUMENT_BODY_EXAMPLES,
   SEND_STICKER_BODY_EXAMPLES,
+  SEND_LOCATION_BODY_EXAMPLES,
+  SEND_CONTACT_BODY_EXAMPLES,
+  SEND_POLL_BODY_EXAMPLES,
 } from './dto';
 import { SendTemplateMessageDto } from './dto/send-template.dto';
 import { SendBulkMessageDto, BulkMessageResponseDto } from './dto/bulk-message.dto';
@@ -226,6 +229,7 @@ export class MessageController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Send a location message' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiBody({ type: SendLocationDto, examples: SEND_LOCATION_BODY_EXAMPLES })
   @ApiResponse({
     status: 201,
     description: 'Location sent',
@@ -241,6 +245,7 @@ export class MessageController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Send a contact card message' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiBody({ type: SendContactDto, examples: SEND_CONTACT_BODY_EXAMPLES })
   @ApiResponse({
     status: 201,
     description: 'Contact sent',
@@ -276,6 +281,7 @@ export class MessageController {
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Send a native WhatsApp poll' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiBody({ type: SendPollDto, examples: SEND_POLL_BODY_EXAMPLES })
   @ApiResponse({
     status: 201,
     description: 'Poll sent',

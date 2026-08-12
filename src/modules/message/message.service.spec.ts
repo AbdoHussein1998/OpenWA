@@ -1148,6 +1148,92 @@ describe('MessageService', () => {
     });
   });
 
+  // ── quoted sends (issue #1271) ────────────────────────────────────
+
+  describe('quotedMessageId on the send endpoints', () => {
+    // One case per sender rather than the media funnel alone: location, contact and poll each build
+    // their own engine payload, so a thread that covered only buildMediaInput would leave three
+    // endpoints accepting the field and silently discarding it.
+    it('sendImage forwards quotedMessageId in the media payload', async () => {
+      await service.sendImage('sess-1', {
+        chatId: 'test@c.us',
+        url: 'https://example.com/a.png',
+        quotedMessageId: 'wa-quoted-9',
+      } as never);
+
+      expect(mockEngine.sendImageMessage).toHaveBeenCalledWith(
+        'test@c.us',
+        expect.objectContaining({ quotedMessageId: 'wa-quoted-9' }),
+      );
+    });
+
+    it('sendLocation forwards quotedMessageId', async () => {
+      await service.sendLocation('sess-1', {
+        chatId: 'test@c.us',
+        latitude: 1,
+        longitude: 2,
+        quotedMessageId: 'wa-quoted-9',
+      } as never);
+
+      expect(mockEngine.sendLocationMessage).toHaveBeenCalledWith(
+        'test@c.us',
+        expect.objectContaining({ quotedMessageId: 'wa-quoted-9' }),
+      );
+    });
+
+    it('sendContact forwards quotedMessageId', async () => {
+      await service.sendContact('sess-1', {
+        chatId: 'test@c.us',
+        contactName: 'Alice',
+        contactNumber: '628999',
+        quotedMessageId: 'wa-quoted-9',
+      } as never);
+
+      expect(mockEngine.sendContactMessage).toHaveBeenCalledWith(
+        'test@c.us',
+        expect.objectContaining({ quotedMessageId: 'wa-quoted-9' }),
+      );
+    });
+
+    it('sendPoll forwards quotedMessageId', async () => {
+      await service.sendPoll('sess-1', {
+        chatId: 'test@c.us',
+        name: 'Q',
+        options: ['a', 'b'],
+        quotedMessageId: 'wa-quoted-9',
+      } as never);
+
+      expect(mockEngine.sendPollMessage).toHaveBeenCalledWith(
+        'test@c.us',
+        expect.objectContaining({ quotedMessageId: 'wa-quoted-9' }),
+      );
+    });
+
+    it('sendText forwards quotedMessageId through the options bag', async () => {
+      await service.sendText('sess-1', {
+        chatId: 'test@c.us',
+        text: 'hi',
+        quotedMessageId: 'wa-quoted-9',
+      } as never);
+
+      expect(mockEngine.sendTextMessage).toHaveBeenCalledWith(
+        'test@c.us',
+        'hi',
+        undefined,
+        expect.objectContaining({ quotedMessageId: 'wa-quoted-9' }),
+      );
+    });
+
+    // Known-negative control: a plain text send must keep its narrow call shape. Without this an
+    // implementation that always passed an options object would satisfy the assertion above while
+    // rewriting every existing send.
+    it('leaves an unquoted text send on its existing two-argument call shape', async () => {
+      await service.sendText('sess-1', { chatId: 'test@c.us', text: 'hi' } as never);
+
+      expect(mockEngine.sendTextMessage).toHaveBeenCalledWith('test@c.us', 'hi');
+    });
+  });
+
   // ── reply / forward ───────────────────────────────────────────────
 
   describe('reply', () => {

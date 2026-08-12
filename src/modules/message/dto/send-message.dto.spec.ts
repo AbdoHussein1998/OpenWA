@@ -10,7 +10,11 @@ import {
   SEND_AUDIO_BODY_EXAMPLES,
   SEND_DOCUMENT_BODY_EXAMPLES,
   SEND_STICKER_BODY_EXAMPLES,
+  SEND_LOCATION_BODY_EXAMPLES,
+  SEND_CONTACT_BODY_EXAMPLES,
+  SEND_POLL_BODY_EXAMPLES,
 } from './send-message.dto';
+import { SendLocationDto, SendContactDto, SendPollDto } from './message-actions.dto';
 
 // Mirror the global ValidationPipe (main.ts): whitelist + forbidNonWhitelisted strip/reject unknown props.
 const validateDto = (cls: new () => object, obj: unknown) =>
@@ -123,6 +127,39 @@ describe('media route body examples', () => {
     for (const [name, example] of Object.entries(examples)) {
       const v = example.value as { url?: string; base64?: string };
       expect({ name, sources: [v.url, v.base64].filter(Boolean).length }).toEqual({ name, sources: 1 });
+    }
+  });
+});
+
+// send-location, send-contact and send-poll were sampler-driven until quotedMessageId gave them an
+// optional property whose sampled value the send path REFUSES (an unresolvable quote fails rather
+// than delivering unquoted), which would have made every unedited Execute an error. Same trap as
+// #1068, so the same contract: each example must validate, and must not carry a quotedMessageId.
+describe('location / contact / poll body examples', () => {
+  const suites: Array<[string, new () => object, Record<string, { value: unknown }>]> = [
+    ['send-location', SendLocationDto, SEND_LOCATION_BODY_EXAMPLES],
+    ['send-contact', SendContactDto, SEND_CONTACT_BODY_EXAMPLES],
+    ['send-poll', SendPollDto, SEND_POLL_BODY_EXAMPLES],
+  ];
+
+  it.each(suites)('%s declares at least one example', (_route, _cls, examples) => {
+    expect(Object.keys(examples).length).toBeGreaterThan(0);
+  });
+
+  it.each(suites)('%s examples all pass DTO validation', async (_route, cls, examples) => {
+    for (const [name, example] of Object.entries(examples)) {
+      const errors = await validateDto(cls, example.value);
+      expect({ name, errors: errors.map(e => e.property) }).toEqual({ name, errors: [] });
+    }
+  });
+
+  // The whole reason these examples exist: a pre-filled quoted id points at no real message.
+  it.each(suites)('%s examples carry no quotedMessageId', (_route, _cls, examples) => {
+    for (const [name, example] of Object.entries(examples)) {
+      expect({ name, quoted: (example.value as { quotedMessageId?: string }).quotedMessageId }).toEqual({
+        name,
+        quoted: undefined,
+      });
     }
   });
 });

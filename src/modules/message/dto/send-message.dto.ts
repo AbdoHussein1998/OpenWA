@@ -23,6 +23,18 @@ const MENTIONS_DESCRIPTION =
 // (src/core/agent-tools/tools/message.tools.ts) so MCP and REST enforce the same limit.
 export const MESSAGE_TEXT_MAX_LENGTH = 4096;
 
+/**
+ * Shared wording for the quoted-send field (issue #1271). One constant rather than five copies so
+ * the two engine caveats — different id dialects, and Baileys' store requirement — cannot drift
+ * apart between the endpoints that all accept the same field.
+ */
+export const QUOTED_MESSAGE_ID_DESCRIPTION =
+  'Quote an earlier message, turning this send into a reply. The id is engine-specific: ' +
+  'whatsapp-web.js matches the serialized message id, Baileys matches the raw message key id and ' +
+  'can only quote a message it has already stored. An id that cannot be resolved fails the send ' +
+  'rather than delivering it unquoted.';
+export const QUOTED_MESSAGE_ID_EXAMPLE = 'true_628123456789@c.us_3EB0ABCD';
+
 export class CustomLinkPreviewDto {
   @ApiProperty({
     description: 'The URL as it appears in the message text — WhatsApp anchors the preview to it.',
@@ -105,6 +117,15 @@ export class SendTextMessageDto {
   @ValidateNested()
   @Type(() => CustomLinkPreviewDto)
   customLinkPreview?: CustomLinkPreviewDto;
+
+  @ApiPropertyOptional({
+    description: QUOTED_MESSAGE_ID_DESCRIPTION,
+    example: QUOTED_MESSAGE_ID_EXAMPLE,
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  quotedMessageId?: string;
 }
 
 /**
@@ -196,6 +217,15 @@ export class SendMediaMessageDto {
   @MaxLength(64, { each: true })
   @Validate(IsMentionWidConstraint, { each: true })
   mentions?: string[];
+
+  @ApiPropertyOptional({
+    description: QUOTED_MESSAGE_ID_DESCRIPTION,
+    example: QUOTED_MESSAGE_ID_EXAMPLE,
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  quotedMessageId?: string;
 }
 
 /**
@@ -228,6 +258,35 @@ export const SEND_DOCUMENT_BODY_EXAMPLES = mediaBodyExample('https://example.com
   filename: 'report.pdf',
 });
 export const SEND_STICKER_BODY_EXAMPLES = mediaBodyExample('https://example.com/sticker.webp');
+
+/**
+ * Request-body examples for the location, contact and poll routes.
+ *
+ * These three had no `@ApiBody` and were left to the schema sampler, which was harmless while every
+ * optional property was self-contained. `quotedMessageId` is not: the sampler emits EVERY property,
+ * so a Try-it body would carry a made-up message id, and the send path refuses an id it cannot
+ * resolve rather than delivering the message unquoted — turning every unedited Execute on these
+ * three routes into an error. Same failure #1068 fixed for the text and media routes, arriving by a
+ * different door, so the same remedy applies: pin an example that is submittable as-is.
+ */
+export const SEND_LOCATION_BODY_EXAMPLES = {
+  minimal: {
+    summary: 'Share a location',
+    value: { chatId: '628123456789@c.us', latitude: -6.2088, longitude: 106.8456, description: 'Jakarta' },
+  },
+};
+export const SEND_CONTACT_BODY_EXAMPLES = {
+  minimal: {
+    summary: 'Share a contact card',
+    value: { chatId: '628123456789@c.us', contactName: 'Alice', contactNumber: '628999888777' },
+  },
+};
+export const SEND_POLL_BODY_EXAMPLES = {
+  minimal: {
+    summary: 'Ask a single-choice poll',
+    value: { chatId: '120363000000000000@g.us', name: 'Where should we meet?', options: ['Park', 'Beach'] },
+  },
+};
 
 export class SendAudioMessageDto extends SendMediaMessageDto {
   @ApiPropertyOptional({
