@@ -49,6 +49,48 @@ describe('SessionTakeoverService', () => {
     jest.useRealTimers();
   });
 
+  // onModuleDestroy only cleared the interval. A sweep already in flight was neither aborted nor
+  // awaited, and neither sweep() nor the start path consulted any shutting-down signal — so on a
+  // rolling restart an engine could be constructed and registered AFTER the shutdown path had torn
+  // the registry down, and ownership.claim() could pin a session to a process that was exiting,
+  // leaving it unclaimable by any peer until the lease lapsed.
+  describe('a sweep racing shutdown', () => {
+    it('adopts nothing once the module is being destroyed', async () => {
+      const { svc, start, reap } = build([lapsed({ name: 'a' }), lapsed({ name: 'b' })]);
+
+      svc.onModuleDestroy();
+      await svc.sweep();
+
+      expect(start).not.toHaveBeenCalled();
+      expect(reap).not.toHaveBeenCalled();
+    });
+
+    it('stops adopting the rest of the batch when shutdown begins mid-sweep', async () => {
+      const svcRef: { current?: { onModuleDestroy: () => void } } = {};
+      const startImpl = jest.fn().mockImplementation(() => {
+        svcRef.current?.onModuleDestroy(); // shutdown starts while the first adoption is in flight
+        return Promise.resolve({});
+      });
+      const { svc, start } = build([lapsed({ name: 'a' }), lapsed({ name: 'b' }), lapsed({ name: 'c' })], {
+        startImpl,
+      });
+      svcRef.current = svc;
+
+      await svc.sweep();
+
+      expect(start).toHaveBeenCalledTimes(1);
+    });
+
+    // Negative twin: an ordinary sweep must still adopt everything eligible.
+    it('still adopts the whole batch when no shutdown is in progress', async () => {
+      const { svc, start } = build([lapsed({ name: 'a' }), lapsed({ name: 'b' })]);
+
+      await svc.sweep();
+
+      expect(start).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('adopts a lapsed authenticated session and reconciles its stuck batches', async () => {
     const { svc, start, reap } = build([lapsed({ name: 'a' })]);
 

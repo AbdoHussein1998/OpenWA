@@ -43,6 +43,14 @@ export class SessionTakeoverService implements OnApplicationBootstrap, OnModuleD
   private readonly logger = createLogger('SessionTakeoverService');
   private sweepTimer?: ReturnType<typeof setInterval>;
   private sweepInFlight = false;
+  /**
+   * Set by onModuleDestroy. Clearing the interval stops the NEXT sweep; it does nothing about one
+   * already running, which is neither aborted nor awaited. Without this signal a sweep mid-flight
+   * during a rolling restart could construct and register an engine after the shutdown path had
+   * already emptied the registry — nothing would tear it down — and claim the ownership lease for a
+   * process about to exit, pinning the session to a dead node until the lease lapsed.
+   */
+  private shuttingDown = false;
 
   constructor(
     private readonly sessionService: SessionService,
@@ -76,6 +84,7 @@ export class SessionTakeoverService implements OnApplicationBootstrap, OnModuleD
   }
 
   onModuleDestroy(): void {
+    this.shuttingDown = true;
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = undefined;
@@ -84,12 +93,17 @@ export class SessionTakeoverService implements OnApplicationBootstrap, OnModuleD
 
   /** One pass: adopt every eligible lapsed session. Exposed for the spec; the timer drives it. */
   async sweep(): Promise<void> {
+    if (this.shuttingDown) return;
     const lapsed = await this.ownership.lapsedHeldByOthers();
     const eligible = lapsed.filter(session => this.isEligible(session));
     if (eligible.length === 0) return;
 
     for (let i = 0; i < eligible.length; i++) {
       const session = eligible[i];
+      // Re-checked per iteration, not just at entry: each adoption costs a browser launch plus a
+      // stagger, so the loop spans a large part of the sweep interval and shutdown can begin partway
+      // through. Everything already adopted is left to the normal teardown; nothing further starts.
+      if (this.shuttingDown) return;
       try {
         await this.sessionService.start(session.id);
         this.logger.log(`Adopted session ${session.name} from lapsed node ${session.nodeId ?? '?'}`, {
