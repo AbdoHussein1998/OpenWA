@@ -107,6 +107,14 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ WEBHOOK_MAX_PER_SESSION: '0', WEBHOOK_MEDIA_INLINE_MAX_BYTES: '0' })).not.toThrow();
   });
 
+  it('rejects a non-integer audit retention (0 is the documented retention-off switch)', () => {
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: 'ninety' })).toThrow(/AUDIT_RETENTION_DAYS/);
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '90.5' })).toThrow(/AUDIT_RETENTION_DAYS/);
+    // 0 disables pruning in audit.service.ts, so this knob must never become positive-only.
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '0' })).not.toThrow();
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '90' })).not.toThrow();
+  });
+
   it('rejects a non-positive / non-integer WEBHOOK_MAX_PAYLOAD_BYTES (0 would reject every dispatch)', () => {
     expect(() => validateEnv({ WEBHOOK_MAX_PAYLOAD_BYTES: '0' })).toThrow(/WEBHOOK_MAX_PAYLOAD_BYTES/);
     expect(() => validateEnv({ WEBHOOK_MAX_PAYLOAD_BYTES: 'abc' })).toThrow(/WEBHOOK_MAX_PAYLOAD_BYTES/);
