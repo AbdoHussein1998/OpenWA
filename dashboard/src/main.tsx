@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import './i18n';
+import { i18nReady } from './i18n';
 import './index.css';
 import App from './App.tsx';
 
@@ -12,8 +12,14 @@ if (storedTheme === 'light' || storedTheme === 'dark') {
   document.documentElement.setAttribute('data-theme', storedTheme);
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// The active locale is fetched rather than bundled into the entry, so first paint waits for it —
+// otherwise the shell renders raw keys and swaps to real copy a tick later. Rendering on rejection
+// too: a locale that fails to load must degrade to untranslated text, never to a blank page.
+const render = () =>
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+
+void i18nReady.then(render, render);

@@ -1,19 +1,7 @@
 import i18n from 'i18next';
+import type { BackendModule, ReadCallback, ResourceKey } from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
-import en from './locales/en.json';
-import de from './locales/de.json';
-import es from './locales/es.json';
-import tr from './locales/tr.json';
-import he from './locales/he.json';
-import zhCN from './locales/zh-CN.json';
-import zhHK from './locales/zh-HK.json';
-import ar from './locales/ar.json';
-import te from './locales/te.json';
-import fr from './locales/fr.json';
-import it from './locales/it.json';
-import ptBR from './locales/pt-BR.json';
-import ko from './locales/ko.json';
 
 export const supportedLanguages = [
   'en',
@@ -66,37 +54,26 @@ export function resolveSupportedLanguage(lang?: string): SupportedLanguage {
   return supportedLanguages.find(supported => supported === base) ?? 'en';
 }
 
-void i18n
-  .use(LanguageDetector)
-  .use(initReactI18next)
-  .init({
-    resources: {
-      en: { translation: en },
-      de: { translation: de },
-      tr: { translation: tr },
-      es: { translation: es },
-      he: { translation: he },
-      'zh-CN': { translation: zhCN },
-      'zh-HK': { translation: zhHK },
-      ar: { translation: ar },
-      te: { translation: te },
-      fr: { translation: fr },
-      it: { translation: it },
-      'pt-BR': { translation: ptBR },
-      ko: { translation: ko },
-    },
-    fallbackLng: 'en',
-    supportedLngs: supportedLanguages as unknown as string[],
-    nonExplicitSupportedLngs: false,
-    interpolation: { escapeValue: false },
-    detection: {
-      order: ['localStorage', 'navigator'],
-      lookupLocalStorage: 'openwa_language',
-      caches: ['localStorage'],
-      convertDetectedLanguage: (lang: string) => resolveSupportedLanguage(lang),
-    },
-    react: { useSuspense: false },
-  });
+/**
+ * i18next's own loading extension point. Using it rather than fetching by hand is what keeps a
+ * runtime language switch correct: i18next resolves `read` for the requested language before it
+ * emits `languageChanged`, so no component ever renders against a half-loaded catalogue and neither
+ * language picker has to sequence anything itself.
+ */
+const lazyLocaleBackend: BackendModule = {
+  type: 'backend',
+  init: () => {},
+  read: (language: string, _namespace: string, callback: ReadCallback) => {
+    // A dynamic import with a variable rather than `import.meta.glob`: Vite splits one chunk per
+    // matched file either way, but this stays a real runtime import under the bare node test runner
+    // that renders the components, where the Vite transform does not run and `import.meta.glob` is
+    // undefined. Keep the directory and the extension literal or the split stops happening.
+    void import(`./locales/${language}.json`).then(
+      (module: { default: ResourceKey }) => callback(null, module.default),
+      (error: Error) => callback(error, false),
+    );
+  },
+};
 
 function applyDirection(lang: string) {
   const resolved = resolveSupportedLanguage(lang);
@@ -107,7 +84,30 @@ function applyDirection(lang: string) {
   }
 }
 
-applyDirection(i18n.language);
+// Subscribed before init, which is also what sets the initial direction: init resolves the detected
+// language through `changeLanguage`, so the first event is the initial one. Registering afterwards
+// happens to work too, but only because init defers — this way the order cannot matter.
 i18n.on('languageChanged', applyDirection);
+
+export const i18nReady = i18n
+  .use(lazyLocaleBackend)
+  .use(LanguageDetector)
+  .use(initReactI18next)
+  .init({
+    fallbackLng: 'en',
+    supportedLngs: supportedLanguages as unknown as string[],
+    nonExplicitSupportedLngs: false,
+    // Fetch only the resolved language (plus the fallback). i18next's default would also request a
+    // bare 'zh' catalogue for a 'zh-CN' visitor, and no such file exists.
+    load: 'currentOnly',
+    interpolation: { escapeValue: false },
+    detection: {
+      order: ['localStorage', 'navigator'],
+      lookupLocalStorage: 'openwa_language',
+      caches: ['localStorage'],
+      convertDetectedLanguage: (lang: string) => resolveSupportedLanguage(lang),
+    },
+    react: { useSuspense: false },
+  });
 
 export default i18n;

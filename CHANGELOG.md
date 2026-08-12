@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The dashboard bundled all thirteen locales into one 476 KB chunk the page preloaded, so every visitor downloaded twelve languages to read one; each is now fetched on demand.
 - `check:sdk-routes` scanned the JavaScript client for backtick-delimited paths only, while its PHP and Python rules already accepted every quote style, so the nine routes that client writes as single-quoted strings were never compared to the contract — `/api/health/ready` among them, which is also the container healthcheck and Kubernetes readiness path. Renaming one of those server-side passed every gate and the JS suite, and the published client would have 404'd with CI green.
 - The JavaScript, Python, Go and Java SDKs omitted `contact`, `call` and `ephemeralDuration` from their chat-history message type, so a typed client had to cast to read three fields the endpoint returns; all four now mirror the engine payload.
 - `POST /api/infra/import-data` bound its body to an inline type, which erases at runtime, so on the replace-all restore the global ValidationPipe's `whitelist` and `forbidNonWhitelisted` never ran: a body carrying no `tables` failed as a 500 from inside the import, and a misspelled key was accepted in silence. It now takes a DTO — a missing `tables` answers 400 naming the field, an unknown key is refused, and `force`/`stopOrphans` accept only a real boolean or an exact `'true'`/`'false'`, so an ambiguous spelling cannot open the orphan-engine escape.
