@@ -480,6 +480,11 @@ export class InfraDataController {
   @ApiBody({ description: 'Exported data from export-data endpoint', type: ImportDataDto })
   @ApiResponse({ status: 200, description: 'Data imported successfully', type: InfraImportDataResponseDto })
   @ApiResponse({
+    status: 400,
+    description:
+      'Body rejected before the restore ran: `tables` absent or not an object, a flag spelled as anything but a boolean or exact `true`/`false`, or a property this route does not accept. Nothing was written. Field-level detail is suppressed in production unless VALIDATION_ERROR_DETAIL=true.',
+  })
+  @ApiResponse({
     status: 409,
     description:
       'Refused, with the reason in `code`. IMPORT_ALREADY_RUNNING: another import is running — wait for it. IMPORT_NESTED_TRANSACTION: another database transaction holds this connection, so a restore could not be made durable — retry with nothing else in flight. IMPORT_WOULD_ORPHAN_ENGINES: live engines exist for sessions the backup would remove — retry with stopOrphans=true to stop them in-request, or force=true to proceed and restart after. Only the last of these is retryable with stopOrphans; the others leave nothing to decide',
