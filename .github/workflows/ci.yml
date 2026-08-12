@@ -425,3 +425,21 @@ jobs:
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The image carries no USER directive by design: docker-entrypoint.sh starts as root to fix
+      # named-volume ownership, then drops with `exec gosu openwa`. Nothing verified that drop —
+      # smoke-test-non-root.sh existed but no job ran it, so a change leaving Node on uid 0 passed
+      # every gate above and reached `latest`. Loaded single-arch from the same gha cache the
+      # multi-arch build just populated, so this reuses those layers rather than building twice.
+      - name: Load a single-arch image for the runtime smoke test
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          load: true
+          tags: openwa-ci:non-root-smoke
+          cache-from: type=gha
+
+      - name: Verify the image drops from root to the openwa user
+        env:
+          OPENWA_SMOKE_IMAGE: openwa-ci:non-root-smoke
+        run: ./scripts/smoke-test-non-root.sh
