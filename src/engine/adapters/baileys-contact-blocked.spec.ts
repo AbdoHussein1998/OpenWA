@@ -208,6 +208,28 @@ describe('the blocklist memo holds under the conditions it exists for', () => {
   });
 
   /**
+   * Deriving isBlocked turned a contact read from an in-memory lookup into one that AWAITS a network
+   * query. Sharing the engine's 30s budget with `/contacts/blocked` meant an unanswered blocklist —
+   * the case `withQueryDeadline` exists for, since Baileys' own query() swallows its timeout — held
+   * `GET /contacts` for half a minute. The enrichment is not the payload: past a short deadline the
+   * contacts are returned with isBlocked at its default, which is the documented degradation.
+   */
+  it('returns the contacts rather than waiting out the engine budget on a hung blocklist', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetchBlocklist = jest.fn().mockImplementation(() => new Promise<string[]>(() => undefined));
+      const contacts = withQuery(fetchBlocklist);
+
+      const reading = contacts.getContacts();
+      await jest.advanceTimersByTimeAsync(6_000); // past the enrichment deadline, far short of 30s
+
+      await expect(reading).resolves.toEqual([expect.objectContaining({ id: '628111@c.us', isBlocked: false })]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  /**
    * The in-flight handle is a single field, so the query that clears it must be the one that owns
    * it. After an invalidation the field belongs to the query started AFTER the block — an earlier
    * query settling later cleared that newer handle, and the next reader opened a third query while

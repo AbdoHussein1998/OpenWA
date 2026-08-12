@@ -119,11 +119,11 @@ export class BaileysContacts {
    * a claim about the account sold in place of a transport failure. Wire items without a jid attr
    * are dropped rather than reported as "undefined".
    */
-  async getBlockedContacts(): Promise<string[]> {
+  async getBlockedContacts(budgetMs: number = this.queryBudgetMs): Promise<string[]> {
     this.host.ensureReady();
     const jids = await withQueryDeadline(
       this.sock().fetchBlocklist(),
-      this.queryBudgetMs,
+      budgetMs,
       'WhatsApp did not answer the blocklist query in time',
     );
     return (jids ?? []).filter((jid): jid is string => Boolean(jid)).map(jid => this.host.toNeutralJid(jid));
@@ -212,6 +212,15 @@ export class BaileysContacts {
   private static readonly BLOCKLIST_MEMO_MS = 5_000;
 
   /**
+   * Deadline for the blocklist query when it is ENRICHING a contact read, deliberately far below the
+   * engine-wide budget `/contacts/blocked` uses. There the blocklist is the answer and waiting is
+   * right; here it is one field on rows the caller already has, and a contact read used to be an
+   * in-memory lookup. Past this the read returns with isBlocked at its default and a warning —
+   * the same degradation a failed query already produces.
+   */
+  private static readonly BLOCKLIST_ENRICHMENT_BUDGET_MS = 5_000;
+
+  /**
    * The account's blocked ids, or null when the query failed.
    *
    * Memoised because a single contact read is not the only caller: a session seeding its status
@@ -240,7 +249,7 @@ export class BaileysContacts {
     const generation = this.blocklistGeneration;
     let ids: Set<string> | null;
     try {
-      ids = new Set(await this.getBlockedContacts());
+      ids = new Set(await this.getBlockedContacts(BaileysContacts.BLOCKLIST_ENRICHMENT_BUDGET_MS));
     } catch (error) {
       this.host.logger.warn('Blocklist unavailable; contact isBlocked left at its default', {
         error: error instanceof Error ? error.message : String(error),
