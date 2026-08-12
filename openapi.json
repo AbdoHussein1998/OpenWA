@@ -4055,7 +4055,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "string"
+                "$ref": "#/components/schemas/ImportStorageDto"
               }
             }
           }
@@ -12770,6 +12770,18 @@
         "required": [
           "message",
           "download"
+        ]
+      },
+      "ImportStorageDto": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Path to the tar.gz file to import (must be inside the data directory)"
+          }
+        },
+        "required": [
+          "filePath"
         ]
       },
       "StorageImportResponseDto": {

@@ -191,7 +191,10 @@ export class InfraStorageController implements OnApplicationBootstrap {
   @HttpCode(HttpStatus.OK)
   @RequireRole(ApiKeyRole.ADMIN)
   @ApiOperation({ summary: 'Import storage files from tar.gz' })
-  @ApiBody({ description: 'Path to tar.gz file to import' })
+  // `type:` is required, not decoration: a description-only @ApiBody has nothing to infer the DTO
+  // from and publishes `{"type":"string"}`, telling every generated client the body is a bare
+  // string while the handler takes an object.
+  @ApiBody({ type: ImportStorageDto, description: 'Path to tar.gz file to import' })
   @ApiResponse({ status: 200, description: 'Import result', type: StorageImportResponseDto })
   async importStorage(
     @Body() body: ImportStorageDto,
