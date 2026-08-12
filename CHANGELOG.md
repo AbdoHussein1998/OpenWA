@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional `quotedMessageId` on every `send-*` message endpoint and its MCP tool, so a reply can carry media, a location, a contact card or a poll instead of only text. An id the engine cannot resolve now fails the send rather than delivering the message unquoted. Thanks @nirizr for the report.
 - All five SDK clients expose `quotedMessageId` on their send request types, so a typed caller can reply with media, a location, a contact card or a poll without hand-building the body.
 
+### Changed
+
+- Plugins must declare a `storage:use` permission to reach `ctx.storage`, and an installed plugin that persists state needs that one manifest line added before it can store again. The four storage verbs dispatched with no permission check at all, so a plugin whose manifest declared nothing still wrote to the host disk and the operator reading that manifest could not see it. The per-plugin directory, key check and byte quota already bounded the access, so this puts a plugin's use of host storage in the manifest rather than closing an escape.
+- Seven official plugins declare it as of `chatwoot-adapter` 0.9.1, `chat-flow` 1.1.2, `group-translate` 1.3.1, `gsheets-logger` 0.3.3, `http-action` 0.2.2, `typebot-connector` 0.2.2 and `voice-transcription` 1.2.3; upgrade to at least these before upgrading the gateway, since a plugin below them is denied at its next storage call rather than at load. `after-hours`, `faq-bot` and `supabase-otp-hook` never touch `ctx.storage` and need no upgrade.
+
 ### Fixed
 
 - The dashboard bundled all thirteen locales into one 476 KB chunk the page preloaded, so every visitor downloaded twelve languages to read one; each is now fetched on demand.

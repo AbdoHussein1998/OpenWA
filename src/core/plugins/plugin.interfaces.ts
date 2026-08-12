@@ -166,6 +166,14 @@ export const PluginCapabilityPermission = {
   ENGINE_READ: 'engine:read',
   /** `ctx.net.fetch` — SSRF-guarded outbound HTTP, scoped to the manifest `net.allow` host list. */
   NET_FETCH: 'net:fetch',
+  /**
+   * `ctx.storage.*` — per-plugin key/value persistence on the host disk (get / set / delete / list).
+   * The per-plugin directory, the key-shape check and the byte quota already bound what a plugin can
+   * reach, so this is a DECLARATION boundary rather than a containment one: without it a manifest
+   * declaring no permissions at all still wrote to disk, and the operator reading that manifest had
+   * no way to see it.
+   */
+  STORAGE_USE: 'storage:use',
   /** `ctx.registerWebhook` — claim an inbound ingress route. Loader-enforced; cannot be widened by config. */
   WEBHOOK_INGRESS: 'webhook:ingress',
   /** `ctx.conversations.send` — normalized outbound send translated to MessageService. */
