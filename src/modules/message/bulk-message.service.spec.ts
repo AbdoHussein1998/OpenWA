@@ -322,6 +322,39 @@ describe('BulkMessageService.processBatch', () => {
     }
   });
 
+  // `content.text` is @MaxLength(4096)-validated BEFORE substitution, and the single-send template
+  // path caps its FINAL render at template.renderMaxChars — the bulk path capped neither, so
+  // caller-supplied variables inflated each item without bound.
+  const batchWithVariables = (text: string, variables: Record<string, string>): MessageBatch => ({
+    ...makeBatch(1),
+    messages: [{ chatId: 'c0@c.us', type: 'text', content: { text }, variables }],
+  });
+
+  it('fails an item whose rendered text exceeds the cap instead of sending it', async () => {
+    // Comfortably over the 64 KiB default the un-configured service falls back to.
+    const huge = 'x'.repeat(70 * 1024);
+    repo.findOne.mockResolvedValue(batchWithVariables('{{v}}', { v: huge }));
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).not.toHaveBeenCalled();
+    const finalPartial = (
+      repo.update.mock.calls as Array<[unknown, { status: BatchStatus; results: BatchMessageResult[] }]>
+    ).at(-1)![1];
+    expect(finalPartial.results[0].status).toBe(BatchMessageStatus.FAILED);
+    expect(finalPartial.results[0].error?.message).toMatch(/character limit/i);
+  });
+
+  it('still sends an item whose render stays under the cap', async () => {
+    repo.findOne.mockResolvedValue(batchWithVariables('hello {{v}}', { v: 'world' }));
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).toHaveBeenCalledTimes(1);
+    const sendArgs = engine.sendTextMessage.mock.calls[0] as [string, string];
+    expect(sendArgs[1]).toBe('hello world');
+  });
+
   it('releases the in-flight marker when the engine is missing (no processingBatches leak)', async () => {
     repo.findOne.mockResolvedValue(makeBatch(1));
     engines.delete('s1'); // engine-not-found → early-return path

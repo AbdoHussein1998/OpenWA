@@ -6,6 +6,7 @@ import {
   Optional,
   OnApplicationBootstrap,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Not, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { createHash, randomUUID } from 'crypto';
@@ -19,7 +20,7 @@ import {
 import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { MessageStatus } from './entities/message.entity';
 import { EngineRegistry } from '../../engine/engine-registry.service';
-import { MessageService } from './message.service';
+import { MessageService, DEFAULT_TEMPLATE_RENDER_MAX_CHARS } from './message.service';
 import {
   SendPacingService,
   isPacingLimitedError,
@@ -113,6 +114,10 @@ export class BulkMessageService implements OnApplicationBootstrap {
     // node's — which is exactly a single-process deployment.
     @Optional()
     private readonly ownership?: SessionOwnershipService,
+    // Same trailing-@Optional convention: supplies template.renderMaxChars for the substitution cap
+    // below. Absent in direct-construction unit tests, which then fall back to the shared default.
+    @Optional()
+    private readonly configService?: ConfigService,
   ) {}
 
   /**
@@ -643,10 +648,28 @@ export class BulkMessageService implements OnApplicationBootstrap {
   private applyVariables(content: BulkMessageContent, variables?: Record<string, string>): BulkMessageContent {
     if (!variables) return content;
 
+    // Cap the RENDERED result, mirroring the single-send template path. `content.text` is
+    // @MaxLength(4096)-validated on the way in, but that runs BEFORE substitution, so a caller-supplied
+    // variable inflates a small item without bound: the request body stays far under the in-flight body
+    // budget while each rendered item does not. Rejected (never truncated), which fails this item the
+    // way a pacing refusal does rather than handing the engine and the messages.body column a string
+    // of arbitrary size.
+    const maxChars =
+      this.configService?.get<number>('template.renderMaxChars', DEFAULT_TEMPLATE_RENDER_MAX_CHARS) ??
+      DEFAULT_TEMPLATE_RENDER_MAX_CHARS;
+
     // Delegate to the shared renderer so the gateway exposes one templating syntax (#69). It
     // substitutes canonical `{{name}}` placeholders and still honors the legacy single-brace
     // `{name}` this endpoint historically used (deprecated — prefer `{{name}}`).
-    const replaceVars = (str: string): string => renderTemplate(str, variables);
+    const replaceVars = (str: string): string => {
+      const rendered = renderTemplate(str, variables);
+      if (rendered.length > maxChars) {
+        throw new BadRequestException(
+          `Rendered content is ${rendered.length} characters, over the ${maxChars}-character limit`,
+        );
+      }
+      return rendered;
+    };
 
     const processValue = (value: unknown): unknown => {
       if (typeof value === 'string') {
