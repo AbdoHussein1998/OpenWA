@@ -104,11 +104,13 @@ export class BaileysContacts {
   async blockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
     await this.confirmed(this.sock().updateBlockStatus(contactId, 'block'), 'the block');
+    this.blocklistMemo = undefined;
   }
 
   async unblockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
     await this.confirmed(this.sock().updateBlockStatus(contactId, 'unblock'), 'the unblock');
+    this.blocklistMemo = undefined;
   }
 
   /**
@@ -189,16 +191,45 @@ export class BaileysContacts {
    */
   private async withBlockedState(contacts: Contact[]): Promise<Contact[]> {
     if (contacts.length === 0) return contacts;
-    let blocked: Set<string>;
+    const blocked = await this.blockedIds();
+    if (!blocked) return contacts;
+    return contacts.map(contact => ({ ...contact, isBlocked: blocked.has(contact.id) }));
+  }
+
+  /** Memoised blocklist. See {@link blockedIds} for why this is not queried per read. */
+  private blocklistMemo?: { at: number; ids: Set<string> | null };
+
+  /**
+   * How long one blocklist answer is reused. Short enough that a block made elsewhere shows up
+   * quickly, long enough that a burst of reads costs one query.
+   */
+  private static readonly BLOCKLIST_MEMO_MS = 5_000;
+
+  /**
+   * The account's blocked ids, or null when the query failed.
+   *
+   * Memoised because a single contact read is not the only caller: a session seeding its status
+   * history resolves each unique poster through getContactById purely to read a NAME
+   * (session-engine-leaf-events), so querying per read turned one connect into N network round-trips,
+   * each with its own deadline. The failure is memoised too — a broken blocklist must not cost N
+   * queries either — and block/unblock invalidate it so a just-changed state is not read stale.
+   */
+  private async blockedIds(): Promise<Set<string> | null> {
+    const now = Date.now();
+    if (this.blocklistMemo && now - this.blocklistMemo.at < BaileysContacts.BLOCKLIST_MEMO_MS) {
+      return this.blocklistMemo.ids;
+    }
+    let ids: Set<string> | null;
     try {
-      blocked = new Set(await this.getBlockedContacts());
+      ids = new Set(await this.getBlockedContacts());
     } catch (error) {
       this.host.logger.warn('Blocklist unavailable; contact isBlocked left at its default', {
         error: error instanceof Error ? error.message : String(error),
       });
-      return contacts;
+      ids = null;
     }
-    return contacts.map(contact => ({ ...contact, isBlocked: blocked.has(contact.id) }));
+    this.blocklistMemo = { at: now, ids };
+    return ids;
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await

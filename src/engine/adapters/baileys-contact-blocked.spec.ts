@@ -23,6 +23,7 @@ describe('Baileys contact reads report real blocklist state', () => {
   function make(opts: { blocklist?: string[]; blocklistError?: Error }): {
     contacts: BaileysContacts;
     warn: jest.Mock;
+    fetchBlocklist: jest.Mock;
   } {
     const warn = jest.fn();
     const fetchBlocklist = opts.blocklistError
@@ -36,7 +37,7 @@ describe('Baileys contact reads report real blocklist state', () => {
       findContact: (id: string) => contact(id),
       toNeutralJid: (jid: string) => jid,
     } as unknown as BaileysContactsHost;
-    return { contacts: new BaileysContacts(host), warn };
+    return { contacts: new BaileysContacts(host), warn, fetchBlocklist };
   }
 
   it('marks a contact on the blocklist as blocked', async () => {
@@ -57,6 +58,20 @@ describe('Baileys contact reads report real blocklist state', () => {
 
   // A blocklist query that fails is a transport fact, not a claim that nobody is blocked. The read
   // must not fail outright either — contacts are still useful — so it degrades loudly.
+  // Regression guard for a cost this fix introduced: getContactById is called once per unique poster
+  // when a session seeds its status history (session-engine-leaf-events resolvePoster), purely to
+  // read a NAME. Querying the blocklist on each of those turned one connect into N network
+  // round-trips, each with its own deadline. Memoised so a burst shares one query.
+  it('issues ONE blocklist query for a burst of reads', async () => {
+    const { contacts, fetchBlocklist } = make({ blocklist: [] });
+
+    await contacts.getContactById('628111@c.us');
+    await contacts.getContactById('628222@c.us');
+    await contacts.getContacts();
+
+    expect(fetchBlocklist).toHaveBeenCalledTimes(1);
+  });
+
   it('does not fail the contact read when the blocklist query does, and says so', async () => {
     const { contacts, warn } = make({
       blocklistError: new Error('WhatsApp did not answer the blocklist query in time'),
