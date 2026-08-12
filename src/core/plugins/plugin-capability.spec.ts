@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
 import { PluginLoaderService } from './plugin-loader.service';
@@ -143,6 +145,37 @@ describe('PluginLoaderService capability facade — ctx.messages', () => {
     await expect(ctx.messages.sendText('sess-1', '628@c.us', 'hi')).rejects.toBeInstanceOf(PluginCapabilityError);
     expect(moduleRef.get).not.toHaveBeenCalled();
     expect(messageService.sendText).not.toHaveBeenCalled();
+  });
+
+  it('the denial names the fix — the permission, the array and the manifest file', async () => {
+    // The whole value of this message is that it reaches the operator at the same time as the
+    // symptom: a capability is checked when the verb is CALLED, so a denial lands mid-run as a log
+    // line detached from the upgrade that caused it. Naming the fault without the fix leaves the
+    // operator with "why is this plugin broken"; one template serves all seven permissions, so a
+    // trim here silently degrades every one of them.
+    // Asserted on the three carriers of the information — which permission, which field, which file —
+    // rather than on the sentence. Pinning the whole string would redden on a punctuation edit
+    // without being any stricter about what the operator is actually told.
+    const ctx = contextFor(makePlugin(['*'], []));
+    const error = await ctx.messages.sendText('sess-1', '628@c.us', 'hi').catch((e: unknown) => e);
+    const message = (error as Error).message;
+    expect(message).toContain('messages:send'); // the permission that is missing
+    expect(message).toContain('permissions'); // the manifest field to add it to
+    expect(message).toContain('manifest.json'); // the file that field lives in
+  });
+
+  it('docs/19 quotes the same message the code throws', () => {
+    // §19.9 reproduces assertPermission verbatim. A quoted string in prose is an UNGATED COPY of a
+    // code string: it rots in silence, which is exactly the failure this repo has paid for more than
+    // once. The fragment is derived from the source rather than restated here, so the two cannot
+    // drift — restating it would just add a third copy to keep in step.
+    const norm = (s: string): string => s.replace(/\s+/g, ' ').trim();
+    const source = readFileSync(join(__dirname, 'plugin-capability-context.ts'), 'utf8');
+    const docs = readFileSync(join(__dirname, '..', '..', '..', 'docs', '19-plugin-architecture.md'), 'utf8');
+
+    const fragment = norm(source.match(/`Add "\$\{permission\}"[^`]*`/)?.[0] ?? '');
+    expect(fragment).not.toBe(''); // non-vacuous: a rename would otherwise make this pass on nothing
+    expect(norm(docs)).toContain(fragment);
   });
 
   it('denies reply when the plugin does not declare the messages:send permission', async () => {
@@ -419,6 +452,19 @@ describe('PluginLoaderService capability facade — ctx.storage', () => {
     const ctx = contextFor(makePlugin(['*'], ['storage:use']));
     await expect(call(ctx)).resolves.not.toThrow();
     expect(backing[verb as keyof typeof backing]).toHaveBeenCalled();
+  });
+
+  it('the storage denial names the fix too, from the same template', async () => {
+    // `storage:use` is the newest permission and the reason this message matters most right now: an
+    // operator who upgrades the gateway without upgrading a plugin meets THIS refusal, mid-run. One
+    // template with `${permission}` interpolated serves all seven, so this should hold for free —
+    // which is exactly why it is asserted rather than assumed.
+    const ctx = contextFor(makePlugin(['*'], []));
+    const error = await ctx.storage.get('k').catch((e: unknown) => e);
+    const message = (error as Error).message;
+    expect(message).toContain('storage:use');
+    expect(message).toContain('permissions');
+    expect(message).toContain('manifest.json');
   });
 
   it('passes the caller arguments through untouched', async () => {

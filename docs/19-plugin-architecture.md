@@ -681,7 +681,8 @@ declare the matching permission (or declares none) is rejected with a `PluginCap
 private assertPermission(manifest: PluginManifest, permission: PluginCapabilityPermission): void {
   if (!(manifest.permissions ?? []).includes(permission)) {
     throw new PluginCapabilityError(
-      `Plugin ${manifest.id} is missing the '${permission}' permission required for this capability`,
+      `Plugin ${manifest.id} is missing the '${permission}' permission required for this capability. ` +
+        `Add "${permission}" to the "permissions" array in the plugin's manifest.json, then reload the plugin.`,
     );
   }
 }

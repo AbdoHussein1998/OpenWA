@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A plugin denied a capability was told which permission it lacked but not where to declare it. Both refusals — the capability denial, which fires when a verb is called and so reaches the operator detached from whatever upgrade caused it, and the load-time ingress check — now name the `permissions` array and the plugin's `manifest.json`. A spec binds the quotation in `docs/19` to the string the code throws, so the two cannot drift apart again.
 - The dashboard bundled all thirteen locales into one 476 KB chunk the page preloaded, so every visitor downloaded twelve languages to read one; each is now fetched on demand.
 - Fifteen return and parameter annotations in the Python SDK named `list[...]` inside classes that define a `list` method, so each resolved to the method rather than the builtin. That package ships `py.typed`, so the wrong types were what a consumer's own type checker read. Its CI now runs mypy, which nothing did before.
 - A locale chunk that failed to load left the dashboard right-to-left around English copy, because text direction followed the requested language rather than the catalogue that answered; it now follows what actually rendered.

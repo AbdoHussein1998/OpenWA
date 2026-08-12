@@ -325,7 +325,10 @@ export function validateIngressManifest(manifest: PluginManifest, allowUnsignedI
   }
   const perms = manifest.permissions ?? [];
   if (!perms.includes(PluginCapabilityPermission.WEBHOOK_INGRESS)) {
-    throw new Error(`Plugin ${manifest.id}: declares ingress routes but is missing the 'webhook:ingress' permission`);
+    throw new Error(
+      `Plugin ${manifest.id}: declares ingress routes but is missing the 'webhook:ingress' permission. ` +
+        `Add "webhook:ingress" to the "permissions" array in the plugin's manifest.json.`,
+    );
   }
   const seen = new Set<string>();
   for (const r of manifest.ingress) {

@@ -89,11 +89,18 @@ export class PluginCapabilityContext {
    * use a capability whose permission string it declares in `manifest.permissions`; anything else
    * (including a manifest with no permissions) is denied. Runs first in each capability verb so a
    * missing grant fails fast and uniformly as a PluginCapabilityError.
+   *
+   * The message names the fix, not just the fault. A denial surfaces mid-run — the capability is
+   * checked when the verb is called, not at load — so it reaches the operator as a log line detached
+   * from whatever upgrade caused it, and it is the only text about the problem that arrives at the
+   * same time as the symptom. Naming `permissions` in the plugin's manifest.json turns "why is this
+   * plugin broken" into a one-line edit.
    */
   private assertPermission(manifest: PluginManifest, permission: PluginCapabilityPermission): void {
     if (!(manifest.permissions ?? []).includes(permission)) {
       throw new PluginCapabilityError(
-        `Plugin ${manifest.id} is missing the '${permission}' permission required for this capability`,
+        `Plugin ${manifest.id} is missing the '${permission}' permission required for this capability. ` +
+          `Add "${permission}" to the "permissions" array in the plugin's manifest.json, then reload the plugin.`,
       );
     }
   }
