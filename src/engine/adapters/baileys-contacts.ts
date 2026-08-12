@@ -104,13 +104,13 @@ export class BaileysContacts {
   async blockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
     await this.confirmed(this.sock().updateBlockStatus(contactId, 'block'), 'the block');
-    this.blocklistMemo = undefined;
+    this.invalidateBlocklist();
   }
 
   async unblockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
     await this.confirmed(this.sock().updateBlockStatus(contactId, 'unblock'), 'the unblock');
-    this.blocklistMemo = undefined;
+    this.invalidateBlocklist();
   }
 
   /**
@@ -199,6 +199,12 @@ export class BaileysContacts {
   /** Memoised blocklist. See {@link blockedIds} for why this is not queried per read. */
   private blocklistMemo?: { at: number; ids: Set<string> | null };
 
+  /** The open query, shared by every caller that arrives while it is in flight. */
+  private blocklistInFlight?: Promise<Set<string> | null>;
+
+  /** Incremented on every block/unblock so a query started earlier cannot write a stale memo. */
+  private blocklistGeneration = 0;
+
   /**
    * How long one blocklist answer is reused. Short enough that a block made elsewhere shows up
    * quickly, long enough that a burst of reads costs one query.
@@ -215,10 +221,21 @@ export class BaileysContacts {
    * queries either — and block/unblock invalidate it so a just-changed state is not read stale.
    */
   private async blockedIds(): Promise<Set<string> | null> {
-    const now = Date.now();
-    if (this.blocklistMemo && now - this.blocklistMemo.at < BaileysContacts.BLOCKLIST_MEMO_MS) {
+    if (this.blocklistMemo && Date.now() - this.blocklistMemo.at < BaileysContacts.BLOCKLIST_MEMO_MS) {
       return this.blocklistMemo.ids;
     }
+    // Share one query with every caller that arrives while it is open. Without this the burst the
+    // memo exists for — a status seed resolving each poster through getContactById — opened one
+    // query per read, because the memo is only written once an answer is back.
+    this.blocklistInFlight ??= this.queryBlockedIds();
+    return this.blocklistInFlight;
+  }
+
+  private async queryBlockedIds(): Promise<Set<string> | null> {
+    // Read before the query so an invalidation that lands DURING it can be detected: block/unblock
+    // clears the memo, and a pre-change answer arriving afterwards would re-memoise the state the
+    // caller just changed, for the whole window.
+    const generation = this.blocklistGeneration;
     let ids: Set<string> | null;
     try {
       ids = new Set(await this.getBlockedContacts());
@@ -227,9 +244,23 @@ export class BaileysContacts {
         error: error instanceof Error ? error.message : String(error),
       });
       ids = null;
+    } finally {
+      this.blocklistInFlight = undefined;
     }
-    this.blocklistMemo = { at: now, ids };
+    // Stamped with the time the ANSWER arrived, not the time the query started. Stamping the start
+    // wrote an already-expired memo for any query slower than the window — so the memo absorbed
+    // only the fast queries and collapsed on exactly the slow ones it was added for.
+    if (generation === this.blocklistGeneration) {
+      this.blocklistMemo = { at: Date.now(), ids };
+    }
     return ids;
+  }
+
+  /** Bumped by block/unblock so an in-flight query cannot memoise pre-change state afterwards. */
+  private invalidateBlocklist(): void {
+    this.blocklistMemo = undefined;
+    this.blocklistInFlight = undefined;
+    this.blocklistGeneration += 1;
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
