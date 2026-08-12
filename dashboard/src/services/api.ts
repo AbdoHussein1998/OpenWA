@@ -332,6 +332,8 @@ export interface SendMediaPayload {
   mimetype?: string;
   filename?: string;
   caption?: string;
+  /** Quote an earlier message, making the media send a reply. Omit for an ordinary send. */
+  quotedMessageId?: string;
 }
 
 // Payloads below mirror the backend DTOs in src/modules/message/dto (raw bodies, no envelope).
