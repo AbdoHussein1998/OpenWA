@@ -173,9 +173,31 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'AUTOMATION_MAX_PER_SESSION', // 0 = unlimited
     'WEBHOOK_MEDIA_INLINE_MAX_BYTES', // 0 = never inline media
     'EXPORT_INLINE_MEDIA_BUDGET_BYTES', // 0 = a data export carries no inline media at all
-    'AUDIT_RETENTION_DAYS', // 0 = retention disabled, so this cannot be positive-only
   ]) {
     checkNonNegativeInt(key);
+  }
+
+  // Retention knobs whose read site documents `<= 0` as the switch that disables pruning, so a
+  // negative value is a supported spelling of "off" rather than a typo — `audit.service.ts` clamps
+  // with Math.max(0, parsed) and `docs/05-database-design.md` advertises `≤ 0 disables`. The point of
+  // validating them is to reject `30d` / `ninety`, which parse to NaN and silently become the
+  // default; rejecting `-1` would instead refuse to boot a configuration this repo documents.
+  const SIGNED_DECIMAL_INTEGER = /^-?\d+$/;
+  const checkInt = (key: string): void => {
+    const raw = str(key);
+    if (raw === undefined) return;
+    const n = SIGNED_DECIMAL_INTEGER.test(raw) ? Number(raw) : NaN;
+    if (!Number.isInteger(n)) {
+      errors.push(`${key} must be an integer (got "${raw}")`);
+    }
+  };
+  // Keep this an ARRAY LITERAL even at one entry: docs-env-example.spec.ts derives the keys it
+  // requires `.env.example` to list by scanning `'KEY',` array elements in this file. Collapsing it
+  // into a bare checkInt('AUDIT_RETENTION_DAYS') call would silently drop the knob out of that gate.
+  for (const key of [
+    'AUDIT_RETENTION_DAYS', // <= 0 disables retention
+  ]) {
+    checkInt(key);
   }
 
   // Some knobs are nonsensical at 0 and contradict the "non-negative" intent: a rate-limit LIMIT of 0
