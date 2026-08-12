@@ -371,3 +371,70 @@ describe('PluginLoaderService capability facade — ctx.conversations', () => {
     expect(messageService.sendText).toHaveBeenCalledWith('sess-1', { chatId: '628@c.us', text: 'hi' });
   });
 });
+
+describe('PluginLoaderService capability facade — ctx.storage', () => {
+  let loader: PluginLoaderService;
+  let backing: { get: jest.Mock; set: jest.Mock; delete: jest.Mock; list: jest.Mock };
+
+  beforeEach(() => {
+    backing = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+      list: jest.fn().mockResolvedValue([]),
+    };
+    const pluginStorage = {
+      createPluginStorage: jest.fn().mockReturnValue(backing),
+    } as unknown as PluginStorageService;
+    loader = new PluginLoaderService(
+      { get: jest.fn().mockReturnValue(undefined) } as unknown as ConfigService,
+      new HookManager(),
+      pluginStorage,
+      { get: jest.fn() } as unknown as ModuleRef,
+    );
+  });
+
+  function contextFor(plugin: PluginInstance): PluginContext {
+    return (
+      loader as unknown as { capabilities: { createPluginContext: (p: PluginInstance) => PluginContext } }
+    ).capabilities.createPluginContext(plugin);
+  }
+
+  // Every verb, not just the write ones: `list` alone enumerates whatever a previous version of the
+  // plugin persisted, and `get` reads it back.
+  const VERBS: Array<[string, (ctx: PluginContext) => Promise<unknown>]> = [
+    ['get', ctx => ctx.storage.get('k')],
+    ['set', ctx => ctx.storage.set('k', { v: 1 })],
+    ['delete', ctx => ctx.storage.delete('k')],
+    ['list', ctx => ctx.storage.list('prefix')],
+  ];
+
+  it.each(VERBS)('denies storage.%s when the plugin does not declare storage:use', async (verb, call) => {
+    const ctx = contextFor(makePlugin(['*'], [])); // no permissions at all
+    await expect(call(ctx)).rejects.toBeInstanceOf(PluginCapabilityError);
+    expect(backing[verb as keyof typeof backing]).not.toHaveBeenCalled();
+  });
+
+  it.each(VERBS)('allows storage.%s once the manifest declares storage:use', async (verb, call) => {
+    const ctx = contextFor(makePlugin(['*'], ['storage:use']));
+    await expect(call(ctx)).resolves.not.toThrow();
+    expect(backing[verb as keyof typeof backing]).toHaveBeenCalled();
+  });
+
+  it('passes the caller arguments through untouched', async () => {
+    const ctx = contextFor(makePlugin(['*'], ['storage:use']));
+    await ctx.storage.set('group:sess-1:12345@g.us', { seen: 2 });
+    await ctx.storage.list('group:');
+    expect(backing.set).toHaveBeenCalledWith('group:sess-1:12345@g.us', { seen: 2 });
+    expect(backing.list).toHaveBeenCalledWith('group:');
+  });
+
+  it('is not gated by session scope — storage is keyed by plugin, not by session', async () => {
+    // A plugin the operator activated for one session only still owns one storage namespace, so the
+    // permission is the whole gate here. Asserting it keeps a later "add assertSessionActive for
+    // symmetry" change from quietly bricking every stored key outside the active session.
+    const ctx = contextFor(makePlugin(['sess-1'], ['storage:use'], ['sess-1']));
+    await expect(ctx.storage.get('anything')).resolves.toBeNull();
+    expect(backing.get).toHaveBeenCalledWith('anything');
+  });
+});

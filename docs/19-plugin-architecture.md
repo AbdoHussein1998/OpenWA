@@ -274,7 +274,7 @@ export interface PluginContext {
 
   hookManager: HookManager;
   logger: PluginLogger; // log / debug / warn / error
-  storage: PluginStorage; // get / set / delete / list — scoped to this plugin
+  storage: PluginStorage; // get / set / delete / list — requires 'storage:use', scoped to this plugin
 
   // Register a hook handler (optionally with a priority; lower runs first).
   registerHook: (event: HookEvent, handler: HookHandler, priority?: number) => void;
@@ -539,11 +539,12 @@ data dir (built-ins are protected and cannot be uninstalled). The unload path di
 for a sandboxed plugin it runs in the worker between `onDisable` and terminate (a plain disable does
 NOT fire `onUnload` — disable is reversible and its cleanup hook is `onDisable`).
 
-**Context.** `createPluginContext` builds the `PluginContext` (§19.4): a per-plugin logger, plugin-scoped
-storage, `registerHook` (wrapped with the per-session activation gate), `registerWebhook`, the live
-`config` getter, and the permission-checked `messages` / `engine` / `net` / `conversations` / `handover` /
-`mappings` capabilities. The capability methods call `assertPermission` before doing any work, and — for
-everything but `net` — `assertSessionActive` → `assertSessionAllowed` on the session they act on, so a
+**Context.** `createPluginContext` builds the `PluginContext` (§19.4): a per-plugin logger,
+`registerHook` (wrapped with the per-session activation gate), `registerWebhook`, the live
+`config` getter, and the permission-checked `messages` / `engine` / `net` / `storage` / `conversations` /
+`handover` / `mappings` capabilities. The capability methods call `assertPermission` before doing any
+work, and — for everything but `net` and `storage`, which are not keyed to a session —
+`assertSessionActive` → `assertSessionAllowed` on the session they act on, so a
 missing grant or out-of-scope session fails with a `PluginCapabilityError`.
 
 > ⚠️ **`ctx.storage` is plugin-scoped, not per-session — unlike `ctx.config`.** `ctx.config` is merged
@@ -569,7 +570,8 @@ are not sandboxed. There is no `auto-reply` / `translation` plugin bundled in th
 ### Example: a hook-based message plugin
 
 A disk-installed extension implements `IPlugin`, registers hooks in `onLoad`, and uses the capability
-facade. This auto-reply sketch needs only `messages:send` in its manifest `permissions`:
+facade. This auto-reply sketch needs `messages:send` and `storage:use` in its manifest `permissions` —
+the latter because it records a counter through `ctx.storage`:
 
 ```typescript
 // plugins/auto-reply/index.ts
@@ -641,7 +643,7 @@ URL / catalog), not an npm/github source descriptor.
 
 ### Permission model
 
-There are exactly **six** capability permissions, declared in the manifest `permissions` array — four
+There are exactly **seven** capability permissions, declared in the manifest `permissions` array — five
 enforced at the capability boundary, plus two on the worker-declaration bridges: `webhook:ingress` at
 load and at route subscription, and `search:provide` when the provider declaration reaches the host:
 
@@ -655,6 +657,9 @@ export const PluginCapabilityPermission = {
   ENGINE_READ: 'engine:read',
   /** ctx.net.fetch — SSRF-guarded outbound HTTP, scoped to the manifest net.allow host list. */
   NET_FETCH: 'net:fetch',
+  /** ctx.storage.* — per-plugin key/value persistence on the host disk (get / set / delete / list).
+   *  A declaration boundary: the per-plugin directory, key check and quota already bound the access. */
+  STORAGE_USE: 'storage:use',
   /** ctx.registerWebhook — claim an inbound ingress route declared in the manifest. */
   WEBHOOK_INGRESS: 'webhook:ingress',
   /** ctx.conversations.send plus ctx.handover.* and ctx.mappings.* — the normalized outbound surface. */
@@ -665,7 +670,7 @@ export const PluginCapabilityPermission = {
 } as const;
 ```
 
-There is no `PermissionChecker` class and no `PermissionDeniedError`. Enforcement of the four
+There is no `PermissionChecker` class and no `PermissionDeniedError`. Enforcement of the five
 capability-facade permissions lives in the loader: each capability method calls
 `assertPermission(manifest, permission)` before doing any work, and a plugin whose manifest does not
 declare the matching permission (or declares none) is rejected with a `PluginCapabilityError`:

@@ -97,8 +97,10 @@ in-process plugin that calls it fails loud rather than silently never firing —
    `messages:send` for `ctx.messages`, `engine:read` for `ctx.engine`, `net:fetch` for `ctx.net.fetch`
    (plus a `net.allow` host list), `conversation:send` for `ctx.conversations` / `ctx.handover` /
    `ctx.mappings`, `webhook:ingress` for `ctx.registerWebhook` (enforced at load and again at route
-   subscription), and `search:provide` for `ctx.registerSearchProvider` (enforced when the declaration
-   reaches the host). `ctx.storage` needs no permission — it is already per-plugin scoped. See
+   subscription), `search:provide` for `ctx.registerSearchProvider` (enforced when the declaration
+   reaches the host), and `storage:use` for `ctx.storage`. Storage was already confined to a
+   per-plugin directory with a byte quota, so its permission is what makes the persistence visible in
+   the manifest rather than what confines it. See
    [19 — Plugin Architecture](./19-plugin-architecture.md).
 
 Sandboxing was a **breaking change for third-party plugin authoring** when it shipped in v0.6.0.
