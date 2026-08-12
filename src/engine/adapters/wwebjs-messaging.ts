@@ -9,6 +9,7 @@ import {
   MessageReaction,
   MessageResult,
   PollInput,
+  Quotable,
 } from '../interfaces/whatsapp-engine.interface';
 import { MessageWithReactions, SerializedWid } from '../types/whatsapp-web-js.types';
 import { BadRequestException } from '@nestjs/common';
@@ -247,6 +248,22 @@ export class WwebjsMessaging {
    * Error carries no status and no recipient, so letting it through produced an opaque 500 for what
    * is really a caller-visible fact the gateway already established: `getNumberId` returned null.
    */
+  /**
+   * The send options that attach a quote, or nothing at all when the caller asked for none.
+   *
+   * `ignoreQuoteErrors` defaults to TRUE in the library (documented at Client.js:1383, applied at
+   * :1480): with it left alone an id whatsapp-web.js cannot resolve sends the message ANYWAY,
+   * unquoted, and reports success. A caller who asked for a reply and received a loose message has
+   * no signal that anything went wrong, so this opts out and lets the failure surface.
+   *
+   * A second, narrower drop is NOT covered by that flag: if the message resolves but `canReplyMsg`
+   * is false, `quotedMsgOptions` stays empty and the send proceeds unquoted (Injected/Utils.js:
+   * 187-195). That one is upstream behaviour we cannot switch off from here.
+   */
+  private quoteOptions(quotedMessageId?: string): { quotedMessageId?: string; ignoreQuoteErrors?: boolean } {
+    return quotedMessageId ? { quotedMessageId, ignoreQuoteErrors: false } : {};
+  }
+
   private async sendResolved<T>(chatId: string, send: (to: string) => Promise<T>): Promise<T> {
     const to = await this.resolveSendId(chatId);
     try {
@@ -287,7 +304,7 @@ export class WwebjsMessaging {
     chatId: string,
     text: string,
     mentions?: string[],
-    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview },
+    options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview } & Quotable,
   ): Promise<MessageResult> {
     this.host.ensureReady();
     // wwebjs accepts neutral `<phone>@c.us` WIDs directly as mentionedJidList, so no de-normalization
@@ -303,7 +320,12 @@ export class WwebjsMessaging {
     if (options?.customPreview) {
       throw new EngineNotSupportedError('sendTextMessage(customPreview)');
     }
-    const sendOptions: { mentions?: string[]; linkPreview?: boolean } = {};
+    const sendOptions: {
+      mentions?: string[];
+      linkPreview?: boolean;
+      quotedMessageId?: string;
+      ignoreQuoteErrors?: boolean;
+    } = this.quoteOptions(options?.quotedMessageId);
     if (mentions?.length) sendOptions.mentions = mentions;
     if (options?.linkPreview === false) sendOptions.linkPreview = false;
 
@@ -367,6 +389,7 @@ export class WwebjsMessaging {
         // sendAudioAsVoice only for audio, sendMediaAsDocument only for documents;
         // {...undefined} contributes no keys.
         ...extraOptions,
+        ...this.quoteOptions(media.quotedMessageId),
       }),
     );
 
@@ -383,7 +406,9 @@ export class WwebjsMessaging {
       name: location.description || '',
       address: location.address || '',
     });
-    const msg = await this.sendResolved(chatId, to => this.client().sendMessage(to, loc));
+    const msg = await this.sendResolved(chatId, to =>
+      this.client().sendMessage(to, loc, this.quoteOptions(location.quotedMessageId)),
+    );
     return toMessageResult(msg);
   }
 
@@ -396,6 +421,7 @@ export class WwebjsMessaging {
     const msg = await this.sendResolved(chatId, to =>
       this.client().sendMessage(to, vcard, {
         parseVCards: true,
+        ...this.quoteOptions(contact.quotedMessageId),
       }),
     );
     return toMessageResult(msg);
@@ -414,6 +440,7 @@ export class WwebjsMessaging {
     const msg = await this.sendResolved(chatId, to =>
       this.client().sendMessage(to, messageMedia, {
         sendMediaAsSticker: true,
+        ...this.quoteOptions(media.quotedMessageId),
       }),
     );
     return toMessageResult(msg);
@@ -433,7 +460,11 @@ export class WwebjsMessaging {
     type PollSendOptions = ConstructorParameters<typeof Poll>[2];
     const pollOptions = { allowMultipleAnswers: poll.allowMultipleAnswers === true } as PollSendOptions;
     const msg = await this.sendResolved(chatId, to =>
-      this.client().sendMessage(to, new Poll(poll.name, poll.options, pollOptions)),
+      this.client().sendMessage(
+        to,
+        new Poll(poll.name, poll.options, pollOptions),
+        this.quoteOptions(poll.quotedMessageId),
+      ),
     );
     return toMessageResult(msg);
   }
