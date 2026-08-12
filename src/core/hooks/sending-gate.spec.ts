@@ -26,6 +26,10 @@ describe('applySendingGate', () => {
     await expect(gate({ continue: true, data: { input: rewritten } })).resolves.toEqual(rewritten);
   });
 
+  // A stub manager, deliberately: HookManager itself always answers with an envelope (runHandlers
+  // returns the data it was given when no handler is registered), so this branch is defensive rather
+  // than a path production reaches. Pinned anyway — it is what stops a manager that answers with
+  // nothing from being read as a veto.
   it('returns the original input when the chain replies with no data at all', async () => {
     await expect(gate({ continue: true })).resolves.toEqual(dto);
   });

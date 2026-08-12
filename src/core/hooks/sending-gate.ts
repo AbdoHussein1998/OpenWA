@@ -44,9 +44,12 @@ export async function applySendingGate<T extends object>(
   if (!shouldContinue) {
     throw new BadRequestException('Message sending blocked by plugin');
   }
-  // No data at all means nothing in the chain rewrote the input, so keep the caller's own. This
-  // covers both the ordinary no-plugin path and a handler that deliberately returned nothing;
-  // neither is a malformed reply.
+  // Defensive, and unreachable through HookManager: `runHandlers` returns `{ continue: true, data }`
+  // with the envelope it was given when no handler is registered, and only replaces it when a
+  // handler returns `data !== undefined` — so neither the no-plugin path nor a handler that returns
+  // nothing produces `undefined` here. It stays because "the manager returned no data" is not
+  // evidence a plugin wanted this send stopped, so the safe reading is the caller's own input; the
+  // fail-CLOSED rule below applies to a reply that IS present and cannot be read.
   if (hookData === undefined) {
     return input;
   }
