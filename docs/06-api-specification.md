@@ -1439,6 +1439,7 @@ Send a plain text message.
 | mentions          | string[] | No       | array of WIDs                  | WIDs to @mention (e.g. `["62811@c.us"]`). See **Mentions** below                             |
 | linkPreview       | boolean  | No       | —                              | `false` suppresses it; on Baileys `true` is required to get one. See **Link previews** below |
 | customLinkPreview | object   | No       | `{ url, title, description? }` | Attach a preview you supply. **Baileys only.** See **Link previews** below                   |
+| quotedMessageId   | string   | No       | non-empty                      | Quote an earlier message, making this a reply. See [Quoted sends](#quoted-sends) below       |
 
 ```json
 { "chatId": "628123456789@c.us", "text": "Hello from OpenWA!" }
@@ -1493,6 +1494,40 @@ rejected with `400` rather than guessing which half was meant.
 
 **Errors:** `400` unknown body field, validation failure, or session not active / blocked by a plugin hook · `401` missing/invalid API key · `403` key role below OPERATOR · `404` session not found · `500` engine error
 
+##### Quoted sends
+
+Every `send-*` route above accepts an optional `quotedMessageId`. Supplying it turns that send into a
+reply, so a reply can carry media, a location, a contact card or a poll — not only text.
+`POST .../messages/reply` is unchanged and remains the text shorthand.
+
+```json
+{
+  "chatId": "628123456789@c.us",
+  "contactName": "Alice",
+  "contactNumber": "628999888777",
+  "quotedMessageId": "true_628123456789@c.us_3EB0ABCD"
+}
+```
+
+**The id is engine-specific and is deliberately not harmonised.**
+
+|                      | whatsapp-web.js                                  | Baileys                           |
+| -------------------- | ------------------------------------------------ | --------------------------------- |
+| id to supply         | the serialized message id (`true_<chat>_<hash>`) | the raw message key id            |
+| where it is resolved | in the WhatsApp Web page                         | the gateway's local message store |
+| message not found    | `404` — the send is refused                      | `404` — the send is refused       |
+
+An id the engine cannot resolve **fails the send** rather than delivering the message unquoted. On
+whatsapp-web.js that is a deliberate choice: the library's default is to send anyway and report
+success, which would hand back `201` for a message that is not a reply.
+
+One upstream gap remains on whatsapp-web.js and cannot be switched off from here: if the quoted
+message resolves but the page decides it is not replyable, the message is sent without the quote and
+the call still succeeds.
+
+Quoting a message from a **different chat** is not validated on either engine; the id is passed
+through as given.
+
 #### POST /api/sessions/:sessionId/messages/send-template
 
 Render a stored text template (header/body/footer joined by blank lines, `{{vars}}` substituted) and send it as text.
@@ -1546,14 +1581,15 @@ Send an image (by URL or base64) with an optional caption.
 
 **Request body** — `SendMediaMessageDto`
 
-| Field    | Type   | Required    | Constraints                           | Description                                                               |
-| -------- | ------ | ----------- | ------------------------------------- | ------------------------------------------------------------------------- |
-| chatId   | string | Yes         | non-empty                             | Target chat                                                               |
-| url      | string | Conditional | URL; required when `base64` is absent | http/https media URL (SSRF-guarded; a blocked internal URL maps to `400`) |
-| base64   | string | Conditional | string; required when `url` is absent | Base64 media data (capped to the media byte limit)                        |
-| mimetype | string | Conditional | string; required when using `base64`  | MIME type of the media                                                    |
-| filename | string | No          | max 255                               | File name                                                                 |
-| caption  | string | No          | max 1024                              | Caption text                                                              |
+| Field           | Type   | Required    | Constraints                           | Description                                                                       |
+| --------------- | ------ | ----------- | ------------------------------------- | --------------------------------------------------------------------------------- |
+| chatId          | string | Yes         | non-empty                             | Target chat                                                                       |
+| url             | string | Conditional | URL; required when `base64` is absent | http/https media URL (SSRF-guarded; a blocked internal URL maps to `400`)         |
+| base64          | string | Conditional | string; required when `url` is absent | Base64 media data (capped to the media byte limit)                                |
+| mimetype        | string | Conditional | string; required when using `base64`  | MIME type of the media                                                            |
+| filename        | string | No          | max 255                               | File name                                                                         |
+| caption         | string | No          | max 1024                              | Caption text                                                                      |
+| quotedMessageId | string | No          | non-empty                             | Quote an earlier message, making this a reply — see [Quoted sends](#quoted-sends) |
 
 ```json
 { "chatId": "628123456789@c.us", "url": "https://example.com/image.jpg", "caption": "Check out this image!" }
@@ -1579,7 +1615,7 @@ Send a video (by URL or base64) with an optional caption. Uses the same `SendMed
 | --------- | ------ | ----------- |
 | sessionId | string | Session ID  |
 
-**Request body** — `SendMediaMessageDto` (fields `chatId`, `url`, `base64`, `mimetype`, `filename`, `caption` — see `send-image`)
+**Request body** — `SendMediaMessageDto` (fields `chatId`, `url`, `base64`, `mimetype`, `filename`, `caption`, `quotedMessageId` — see `send-image`)
 
 ```json
 { "chatId": "628123456789@c.us", "url": "https://example.com/clip.mp4", "caption": "video" }
@@ -1631,7 +1667,7 @@ Send a document/file (by URL or base64). Uses `SendMediaMessageDto`; `filename` 
 | --------- | ------ | ----------- |
 | sessionId | string | Session ID  |
 
-**Request body** — `SendMediaMessageDto` (fields `chatId`, `url`, `base64`, `mimetype`, `filename`, `caption` — see `send-image`)
+**Request body** — `SendMediaMessageDto` (fields `chatId`, `url`, `base64`, `mimetype`, `filename`, `caption`, `quotedMessageId` — see `send-image`)
 
 ```json
 {
@@ -1666,13 +1702,14 @@ Send a location pin.
 
 **Request body** — `SendLocationDto`
 
-| Field       | Type   | Required | Constraints     | Description                      |
-| ----------- | ------ | -------- | --------------- | -------------------------------- |
-| chatId      | string | Yes      | non-empty       | Target chat                      |
-| latitude    | number | Yes      | valid latitude  | Latitude (out-of-range → `400`)  |
-| longitude   | number | Yes      | valid longitude | Longitude (out-of-range → `400`) |
-| description | string | No       | string          | Pin description                  |
-| address     | string | No       | string          | Pin address                      |
+| Field           | Type   | Required | Constraints     | Description                                                                       |
+| --------------- | ------ | -------- | --------------- | --------------------------------------------------------------------------------- |
+| chatId          | string | Yes      | non-empty       | Target chat                                                                       |
+| latitude        | number | Yes      | valid latitude  | Latitude (out-of-range → `400`)                                                   |
+| longitude       | number | Yes      | valid longitude | Longitude (out-of-range → `400`)                                                  |
+| description     | string | No       | string          | Pin description                                                                   |
+| address         | string | No       | string          | Pin address                                                                       |
+| quotedMessageId | string | No       | non-empty       | Quote an earlier message, making this a reply — see [Quoted sends](#quoted-sends) |
 
 ```json
 {
@@ -1706,11 +1743,12 @@ Send a contact card (vCard).
 
 **Request body** — `SendContactDto`
 
-| Field         | Type   | Required | Constraints | Description                       |
-| ------------- | ------ | -------- | ----------- | --------------------------------- |
-| chatId        | string | Yes      | non-empty   | Target chat                       |
-| contactName   | string | Yes      | non-empty   | Display name for the contact card |
-| contactNumber | string | Yes      | non-empty   | Contact phone number              |
+| Field           | Type   | Required | Constraints | Description                                                                       |
+| --------------- | ------ | -------- | ----------- | --------------------------------------------------------------------------------- |
+| chatId          | string | Yes      | non-empty   | Target chat                                                                       |
+| contactName     | string | Yes      | non-empty   | Display name for the contact card                                                 |
+| contactNumber   | string | Yes      | non-empty   | Contact phone number                                                              |
+| quotedMessageId | string | No       | non-empty   | Quote an earlier message, making this a reply — see [Quoted sends](#quoted-sends) |
 
 ```json
 { "chatId": "628123456789@c.us", "contactName": "John Doe", "contactNumber": "628987654321" }
@@ -1736,7 +1774,7 @@ Send a sticker (by URL or base64; typically webp). Reuses `SendMediaMessageDto`.
 | --------- | ------ | ----------- |
 | sessionId | string | Session ID  |
 
-**Request body** — `SendMediaMessageDto` (fields `chatId`, `url`, `base64`, `mimetype`, `filename`, `caption` — see `send-image`)
+**Request body** — `SendMediaMessageDto` (fields `chatId`, `url`, `base64`, `mimetype`, `filename`, `caption`, `quotedMessageId` — see `send-image`)
 
 ```json
 { "chatId": "628123456789@c.us", "url": "https://example.com/sticker.webp", "mimetype": "image/webp" }
@@ -1764,12 +1802,13 @@ Send a native WhatsApp poll.
 
 **Request body** — `SendPollDto`
 
-| Field                | Type     | Required | Constraints                               | Description                                           |
-| -------------------- | -------- | -------- | ----------------------------------------- | ----------------------------------------------------- |
-| chatId               | string   | Yes      | non-empty                                 | Target chat                                           |
-| name                 | string   | Yes      | max 255                                   | Poll question / title                                 |
-| options              | string[] | Yes      | 2–12 items, each non-empty, max 100 chars | Options to vote on                                    |
-| allowMultipleAnswers | boolean  | No       | —                                         | Allow picking several options (default single choice) |
+| Field                | Type     | Required | Constraints                               | Description                                                  |
+| -------------------- | -------- | -------- | ----------------------------------------- | ------------------------------------------------------------ |
+| chatId               | string   | Yes      | non-empty                                 | Target chat                                                  |
+| name                 | string   | Yes      | max 255                                   | Poll question / title                                        |
+| options              | string[] | Yes      | 2–12 items, each non-empty, max 100 chars | Options to vote on                                           |
+| allowMultipleAnswers | boolean  | No       | —                                         | Allow picking several options (default single choice)        |
+| quotedMessageId      | string   | No       | non-empty                                 | Quote an earlier message — see [Quoted sends](#quoted-sends) |
 
 ```json
 {

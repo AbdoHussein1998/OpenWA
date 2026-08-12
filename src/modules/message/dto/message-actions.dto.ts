@@ -13,7 +13,7 @@ import {
   IsIn,
 } from 'class-validator';
 import { ToStrictBoolean, ToStrictNumber } from '../../../common/utils/strict-boolean';
-import { MESSAGE_TEXT_MAX_LENGTH } from './send-message.dto';
+import { MESSAGE_TEXT_MAX_LENGTH, QUOTED_MESSAGE_ID_DESCRIPTION, QUOTED_MESSAGE_ID_EXAMPLE } from './send-message.dto';
 
 /**
  * Validated DTOs for the message action endpoints. These replaced inline
@@ -55,6 +55,12 @@ export class SendLocationDto {
   @IsString()
   @MaxLength(LOCATION_TEXT_MAX_LENGTH)
   address?: string;
+
+  @ApiPropertyOptional({ description: QUOTED_MESSAGE_ID_DESCRIPTION, example: QUOTED_MESSAGE_ID_EXAMPLE })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  quotedMessageId?: string;
 }
 
 export class SendContactDto {
@@ -74,6 +80,12 @@ export class SendContactDto {
   @IsNotEmpty()
   @MaxLength(CONTACT_NUMBER_MAX_LENGTH)
   contactNumber!: string;
+
+  @ApiPropertyOptional({ description: QUOTED_MESSAGE_ID_DESCRIPTION, example: QUOTED_MESSAGE_ID_EXAMPLE })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  quotedMessageId?: string;
 }
 
 export class SendPollDto {
@@ -111,6 +123,12 @@ export class SendPollDto {
   @IsOptional()
   @IsBoolean()
   allowMultipleAnswers?: boolean;
+
+  @ApiPropertyOptional({ description: QUOTED_MESSAGE_ID_DESCRIPTION, example: QUOTED_MESSAGE_ID_EXAMPLE })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  quotedMessageId?: string;
 }
 
 export class ReplyMessageDto {

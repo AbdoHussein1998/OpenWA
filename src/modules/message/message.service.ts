@@ -118,6 +118,7 @@ export class MessageService {
       chatId: finalDto.chatId,
       body: finalDto.text,
       type: 'text',
+      quotedMessageId: finalDto.quotedMessageId,
     });
 
     // Opt-in humanising "typing…" pause before the actual send (anti-automation signal).
@@ -129,11 +130,12 @@ export class MessageService {
       // nor a preview choice keeps its two-argument shape, and one with mentions alone keeps its
       // three — trailing `undefined`s would be harmless to the engines but would rewrite the call
       // shape of every existing send for no behavioural gain.
-      const { linkPreview, customLinkPreview } = finalDto;
-      if (linkPreview !== undefined || customLinkPreview) {
+      const { linkPreview, customLinkPreview, quotedMessageId } = finalDto;
+      if (linkPreview !== undefined || customLinkPreview || quotedMessageId) {
         result = await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions, {
           ...(linkPreview === undefined ? {} : { linkPreview }),
           ...(customLinkPreview ? { customPreview: customLinkPreview } : {}),
+          ...(quotedMessageId ? { quotedMessageId } : {}),
         });
       } else if (finalDto.mentions?.length) {
         result = await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions);
@@ -261,6 +263,7 @@ export class MessageService {
       chatId: finalDto.chatId,
       body: finalDto.caption || '',
       type: 'image',
+      quotedMessageId: finalDto.quotedMessageId,
       metadata: {
         media: { mimetype: finalDto.mimetype, filename: finalDto.filename, data: media.data },
       },
@@ -285,6 +288,7 @@ export class MessageService {
       chatId: finalDto.chatId,
       body: finalDto.caption || '',
       type: 'video',
+      quotedMessageId: finalDto.quotedMessageId,
       metadata: {
         media: { mimetype: finalDto.mimetype, filename: finalDto.filename, data: media.data },
       },
@@ -321,6 +325,7 @@ export class MessageService {
       metadata: {
         media: { mimetype: audioDto.mimetype, filename: finalDto.filename, data: media.data },
       },
+      quotedMessageId: finalDto.quotedMessageId,
     });
 
     let result: MessageResult;
@@ -342,6 +347,7 @@ export class MessageService {
       chatId: finalDto.chatId,
       body: finalDto.caption || finalDto.filename || '',
       type: 'document',
+      quotedMessageId: finalDto.quotedMessageId,
       metadata: {
         media: { mimetype: finalDto.mimetype, filename: finalDto.filename, data: media.data },
       },
@@ -445,7 +451,14 @@ export class MessageService {
 
   async sendLocation(
     sessionId: string,
-    dto: { chatId: string; latitude: number; longitude: number; description?: string; address?: string },
+    dto: {
+      chatId: string;
+      latitude: number;
+      longitude: number;
+      description?: string;
+      address?: string;
+      quotedMessageId?: string;
+    },
   ): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'location', dto);
     const engine = this.getEngine(sessionId);
@@ -455,6 +468,7 @@ export class MessageService {
       chatId: finalDto.chatId,
       body: `📍 ${finalDto.description || 'Location'}`,
       type: 'location',
+      quotedMessageId: finalDto.quotedMessageId,
     });
 
     let result: MessageResult;
@@ -464,6 +478,7 @@ export class MessageService {
         longitude: finalDto.longitude,
         description: finalDto.description,
         address: finalDto.address,
+        quotedMessageId: finalDto.quotedMessageId,
       });
     } catch (error) {
       return this.failSend(sessionId, 'location', message, finalDto, error);
@@ -473,7 +488,7 @@ export class MessageService {
 
   async sendContact(
     sessionId: string,
-    dto: { chatId: string; contactName: string; contactNumber: string },
+    dto: { chatId: string; contactName: string; contactNumber: string; quotedMessageId?: string },
   ): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'contact', dto);
     const engine = this.getEngine(sessionId);
@@ -483,6 +498,7 @@ export class MessageService {
       chatId: finalDto.chatId,
       body: `📇 ${finalDto.contactName}`,
       type: 'contact',
+      quotedMessageId: finalDto.quotedMessageId,
     });
 
     let result: MessageResult;
@@ -490,6 +506,7 @@ export class MessageService {
       result = await engine.sendContactMessage(finalDto.chatId, {
         name: finalDto.contactName,
         number: finalDto.contactNumber,
+        quotedMessageId: finalDto.quotedMessageId,
       });
     } catch (error) {
       return this.failSend(sessionId, 'contact', message, finalDto, error);
@@ -499,7 +516,7 @@ export class MessageService {
 
   async sendPoll(
     sessionId: string,
-    dto: { chatId: string; name: string; options: string[]; allowMultipleAnswers?: boolean },
+    dto: { chatId: string; name: string; options: string[]; allowMultipleAnswers?: boolean; quotedMessageId?: string },
   ): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'poll', dto);
     const engine = this.getEngine(sessionId);
@@ -510,6 +527,7 @@ export class MessageService {
       chatId: finalDto.chatId,
       body: `📊 ${finalDto.name}`,
       type: 'poll',
+      quotedMessageId: finalDto.quotedMessageId,
     });
 
     let result: MessageResult;
@@ -518,6 +536,7 @@ export class MessageService {
         name: finalDto.name,
         options: finalDto.options,
         allowMultipleAnswers: finalDto.allowMultipleAnswers === true,
+        quotedMessageId: finalDto.quotedMessageId,
       });
     } catch (error) {
       return this.failSend(sessionId, 'poll', message, finalDto, error);
@@ -534,6 +553,7 @@ export class MessageService {
     const message = await this.saveOutgoingMessage(sessionId, {
       chatId: finalDto.chatId,
       type: 'sticker',
+      quotedMessageId: finalDto.quotedMessageId,
       metadata: {
         media: { mimetype: finalDto.mimetype, filename: finalDto.filename, data: media.data },
       },
@@ -643,6 +663,14 @@ export class MessageService {
       timestamp?: number;
       status?: MessageStatus;
       metadata?: Record<string, unknown>;
+      /**
+       * Quoted id for a send that is a reply. Folded into `metadata.quotedMessage` here rather than
+       * by each sender so the nine send paths and `reply()` persist one shape — a row that quoted a
+       * message but records nothing is simply wrong history, and the dashboard reads this key to
+       * render the reply preview. The body is left empty: unlike `reply()`, the send paths do not
+       * look the quoted message up, and '' is already reply()'s own value when that lookup fails.
+       */
+      quotedMessageId?: string;
     },
   ): Promise<Message> {
     const session = await this.sessionService.findOne(sessionId);
@@ -663,7 +691,9 @@ export class MessageService {
       direction: MessageDirection.OUTGOING,
       timestamp: data.timestamp,
       status: data.status ?? MessageStatus.PENDING,
-      metadata: data.metadata,
+      metadata: data.quotedMessageId
+        ? { ...data.metadata, quotedMessage: { id: data.quotedMessageId, body: '' } }
+        : data.metadata,
     });
     const saved = await this.messageRepository.save(message).catch(async (err: unknown) => {
       const waMessageId = message.waMessageId;
@@ -1046,6 +1076,7 @@ export class MessageService {
       filename: dto.filename,
       caption: dto.caption,
       mentions: dto.mentions,
+      quotedMessageId: dto.quotedMessageId,
     };
   }
 }
