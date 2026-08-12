@@ -107,11 +107,14 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ WEBHOOK_MAX_PER_SESSION: '0', WEBHOOK_MEDIA_INLINE_MAX_BYTES: '0' })).not.toThrow();
   });
 
-  it('rejects a non-integer audit retention (0 is the documented retention-off switch)', () => {
+  it('rejects a non-integer audit retention but accepts every value documented as "disable"', () => {
     expect(() => validateEnv({ AUDIT_RETENTION_DAYS: 'ninety' })).toThrow(/AUDIT_RETENTION_DAYS/);
     expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '90.5' })).toThrow(/AUDIT_RETENTION_DAYS/);
-    // 0 disables pruning in audit.service.ts, so this knob must never become positive-only.
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '30d' })).toThrow(/AUDIT_RETENTION_DAYS/);
+    // audit.service.ts and docs/05 both document `<= 0` as the off switch, so BOTH spellings must
+    // boot. Requiring non-negative here would refuse to start on a configuration the docs advertise.
     expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '0' })).not.toThrow();
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '-1' })).not.toThrow();
     expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '90' })).not.toThrow();
   });
 
