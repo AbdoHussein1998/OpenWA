@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, ConflictException, HttpCode, HttpStatus, Optional } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { InfraExportDataResponseDto, InfraImportDataResponseDto } from './dto/infra-response.dto';
+import { ImportDataDto } from './dto/import-data.dto';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, QueryRunner } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -474,66 +475,16 @@ export class InfraDataController {
   @HttpCode(HttpStatus.OK)
   @RequireRole(ApiKeyRole.ADMIN)
   @ApiOperation({ summary: 'Import data to Data DB (replaces existing data)' })
-  @ApiBody({
-    description: 'Exported data from export-data endpoint',
-    schema: {
-      type: 'object',
-      properties: {
-        force: {
-          type: 'boolean',
-          description:
-            'Allow the replace to proceed even while engines are running for sessions the backup does not contain (they keep running until restart; see restartRequired). Prefer stopOrphans, which closes that window inside this request instead.',
-        },
-        stopOrphans: {
-          type: 'boolean',
-          description:
-            'Stop the running engines for sessions the backup does not contain, inside this request and before the replace runs. Supersedes force for the orphan case: with stopOrphans the engines no longer need a process restart to reconcile, so restartRequired stays false on the success path.',
-        },
-        tables: {
-          type: 'object',
-          description:
-            'Every one of the 14 migration tables is emptied before the restore runs, so a key omitted here is restored EMPTY rather than left untouched. Post the whole GET /api/infra/export-data payload, not a hand-built subset.',
-          properties: {
-            sessions: { type: 'array' },
-            webhooks: { type: 'array' },
-            messages: { type: 'array' },
-            messageBatches: { type: 'array' },
-            templates: { type: 'array' },
-            baileysStoredMessages: { type: 'array' },
-            lidMappings: { type: 'array' },
-            pluginInstances: { type: 'array' },
-            conversationMappings: { type: 'array' },
-            ingressEvents: { type: 'array' },
-            webhookDeliveryFailures: { type: 'array' },
-            integrationDeliveryFailures: { type: 'array' },
-            statusUpdates: { type: 'array' },
-            automationRules: { type: 'array' },
-          },
-        },
-      },
-    },
-  })
+  // `type` is explicit: an @ApiBody carrying only a description does NOT fall back to the handler's
+  // parameter type — it publishes `{"type": "string"}` for the whole body.
+  @ApiBody({ description: 'Exported data from export-data endpoint', type: ImportDataDto })
   @ApiResponse({ status: 200, description: 'Data imported successfully', type: InfraImportDataResponseDto })
   @ApiResponse({
     status: 409,
     description:
       'Refused, with the reason in `code`. IMPORT_ALREADY_RUNNING: another import is running — wait for it. IMPORT_NESTED_TRANSACTION: another database transaction holds this connection, so a restore could not be made durable — retry with nothing else in flight. IMPORT_WOULD_ORPHAN_ENGINES: live engines exist for sessions the backup would remove — retry with stopOrphans=true to stop them in-request, or force=true to proceed and restart after. Only the last of these is retryable with stopOrphans; the others leave nothing to decide',
   })
-  async importData(
-    @Body()
-    data: {
-      tables: Partial<MigrationTables>;
-      force?: boolean;
-      /**
-       * Stop the running engines for sessions the backup does not contain, inside this request and
-       * before the replace runs (best-effort, time-bounded per engine). Supersedes force=true for the
-       * orphan case: with stopOrphans the engines no longer need a process restart to reconcile, so
-       * restartRequired stays false on the success path. Without it the pre-existing behavior holds —
-       * refuse with 409, or proceed with force=true and leave the engines running until restart.
-       */
-      stopOrphans?: boolean;
-    },
-  ): Promise<{
+  async importData(@Body() data: ImportDataDto): Promise<{
     imported: boolean;
     counts: TableCounts;
     warnings: string[];
