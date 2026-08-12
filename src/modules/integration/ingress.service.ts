@@ -117,11 +117,20 @@ export class IngressService {
     // The fallback is the process-wide body limit, which is what such a route was already bounded by
     // in practice, so no delivery that is accepted today starts failing. What changes is that the
     // check can no longer be vacuous, and the gap is now stated in the log instead of being silent.
-    const declaredCap = route.maxBodyBytes;
-    const effectiveCap =
-      typeof declaredCap === 'number' && Number.isFinite(declaredCap) && declaredCap > 0
+    // A manifest is third-party JSON with no runtime validation, so the field is only a `number` by
+    // declaration. The `>` this replaced COERCED, which means a quoted number ("1024") enforced a real
+    // cap — rejecting it as "unusable" would swap that for the far larger process-wide fallback. And
+    // 0 is a cap, not a missing value: it admits the empty body a verification callback sends and
+    // nothing else. Only a value that cannot express a limit at all falls back.
+    const declaredCap: unknown = route.maxBodyBytes;
+    const parsedCap =
+      typeof declaredCap === 'number'
         ? declaredCap
-        : this.fallbackMaxBodyBytes(req.pluginId, route.route);
+        : typeof declaredCap === 'string' && declaredCap.trim() !== ''
+          ? Number(declaredCap)
+          : Number.NaN;
+    const effectiveCap =
+      Number.isFinite(parsedCap) && parsedCap >= 0 ? parsedCap : this.fallbackMaxBodyBytes(req.pluginId, route.route);
     if (Buffer.byteLength(req.rawBody, 'utf8') > effectiveCap) return { status: 413, body: 'payload too large' };
 
     const verdict = verifyIngressSignature(route.signature, {
