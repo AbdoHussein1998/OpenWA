@@ -4,6 +4,7 @@ import { createLogger } from '../../common/services/logger.service';
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { Session, SessionStatus } from '../session/entities/session.entity';
 import { SessionOwnershipService } from '../session/session-ownership.service';
+import { ShutdownService } from '../../common/services/shutdown.service';
 import { SessionService } from '../session/session.service';
 import { BulkMessageService } from '../message/bulk-message.service';
 
@@ -58,7 +59,18 @@ export class SessionTakeoverService implements OnApplicationBootstrap, OnModuleD
     private readonly bulkMessages: BulkMessageService,
     @Optional()
     private readonly configService?: ConfigService,
+    // The drain signal, not module destruction. `onModuleDestroy` runs at app.close(), AFTER the
+    // bounded shutdown delay — throughout that window the timer is still armed, so without this a
+    // tick could launch an engine and claim an ownership lease for a process about to exit. Same
+    // source session-engine-lifecycle and the liveness watchdog already consult.
+    @Optional()
+    private readonly shutdownService?: ShutdownService,
   ) {}
+
+  /** True once EITHER the drain has begun or Nest has torn this module down. */
+  private get stopping(): boolean {
+    return this.shuttingDown || this.shutdownService?.isShuttingDown() === true;
+  }
 
   onApplicationBootstrap(): void {
     // The same flag that governs boot auto-start: a deployment that opted out of automatic engine
@@ -93,7 +105,7 @@ export class SessionTakeoverService implements OnApplicationBootstrap, OnModuleD
 
   /** One pass: adopt every eligible lapsed session. Exposed for the spec; the timer drives it. */
   async sweep(): Promise<void> {
-    if (this.shuttingDown) return;
+    if (this.stopping) return;
     const lapsed = await this.ownership.lapsedHeldByOthers();
     const eligible = lapsed.filter(session => this.isEligible(session));
     if (eligible.length === 0) return;
@@ -103,7 +115,7 @@ export class SessionTakeoverService implements OnApplicationBootstrap, OnModuleD
       // Re-checked per iteration, not just at entry: each adoption costs a browser launch plus a
       // stagger, so the loop spans a large part of the sweep interval and shutdown can begin partway
       // through. Everything already adopted is left to the normal teardown; nothing further starts.
-      if (this.shuttingDown) return;
+      if (this.stopping) return;
       try {
         await this.sessionService.start(session.id);
         this.logger.log(`Adopted session ${session.name} from lapsed node ${session.nodeId ?? '?'}`, {

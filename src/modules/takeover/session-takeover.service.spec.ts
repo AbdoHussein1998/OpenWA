@@ -5,6 +5,7 @@ import type { SessionService } from '../session/session.service';
 import type { SessionOwnershipService } from '../session/session-ownership.service';
 import type { BulkMessageService } from '../message/bulk-message.service';
 import type { ConfigService } from '@nestjs/config';
+import type { ShutdownService } from '../../common/services/shutdown.service';
 
 /**
  * The sweep is the retry that boot auto-start never had: both live incidents (a container recreate
@@ -198,6 +199,37 @@ describe('SessionTakeoverService', () => {
    * that never queries proves the entry guard fired. That also matters on its own — a sweep entered
    * during shutdown otherwise still hits the database on every remaining tick.
    */
+  /**
+   * `onModuleDestroy` runs at `app.close()` — AFTER the bounded drain. On SIGTERM main.ts flips
+   * readiness to 503 and waits SHUTDOWN_DELAY_MS first, and throughout that window the sweep timer is
+   * still armed while the local flag is still false: a tick can launch Chromium and claim an
+   * ownership lease for a process that is about to exit, which is the rolling-restart case this
+   * guard exists for. Two siblings in this repo already consult ShutdownService for exactly that —
+   * session-engine-lifecycle and the liveness watchdog.
+   */
+  it('does not adopt during the drain window, before onModuleDestroy runs', async () => {
+    const ownershipCalls = jest.fn().mockResolvedValue([lapsed({ name: 'any' })]);
+    const start = jest.fn().mockResolvedValue(undefined);
+    const config = {
+      get: (key: string, def?: unknown) =>
+        ({ features: { autoStartSessions: true }, 'session.takeoverSweepMs': 1000 })[key as 'features'] ?? def,
+    } as unknown as ConfigService;
+    const svc = new SessionTakeoverService(
+      { start } as unknown as SessionService,
+      { lapsedHeldByOthers: ownershipCalls } as unknown as SessionOwnershipService,
+      { reapProcessingBatches: jest.fn().mockResolvedValue(0) } as unknown as BulkMessageService,
+      config,
+      { isShuttingDown: () => true } as unknown as ShutdownService,
+    );
+
+    // Deliberately NOT calling onModuleDestroy: this is the drain window, where the signal has
+    // arrived but Nest has not torn the module down yet.
+    await svc.sweep();
+
+    expect(ownershipCalls).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it('a sweep entered during shutdown does not even query ownership', async () => {
     const ownershipCalls = jest.fn().mockResolvedValue([lapsed({ name: 'any' })]);
     const config = {
