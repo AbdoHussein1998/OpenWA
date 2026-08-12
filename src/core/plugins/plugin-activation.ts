@@ -41,6 +41,22 @@ function deepMerge(base: Record<string, unknown>, override: Record<string, unkno
  * didn't touch. A global plugin and a non-session-attributed event (no sessionId) get the base
  * unchanged. Returns a fresh object on merge; never mutates the inputs.
  */
+/**
+ * Layer one integration instance's own config over whatever the session-scoped resolution produced.
+ *
+ * Provisioning projects each instance's config into the scope-keyed store, so two enabled instances
+ * sharing a session scope collapse onto one key and the later write wins. The scope therefore cannot
+ * say WHOSE credentials a delivery must run with; only the instance row can. Applied last so it beats
+ * both the base config and an operator's per-session override, and deep-merged so a sparse instance
+ * config still inherits schema defaults and any key it did not set.
+ */
+export function resolveInstanceConfig(
+  resolved: Record<string, unknown>,
+  instanceConfig: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  return instanceConfig ? deepMerge(resolved, instanceConfig) : resolved;
+}
+
 export function resolvePluginConfig(
   base: Record<string, unknown>,
   sessionConfig: Record<string, Record<string, unknown>> | undefined,

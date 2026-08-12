@@ -6,7 +6,7 @@ import { PluginCapabilityPermission, PluginContext, PluginInstance, PluginStatus
 import { PluginStorageService } from './plugin-storage.service';
 import { PluginHostServices } from './plugin-host-services';
 import { PluginCapabilityContext } from './plugin-capability-context';
-import { isPluginActiveForSession, resolvePluginConfig } from './plugin-activation';
+import { isPluginActiveForSession, resolveInstanceConfig, resolvePluginConfig } from './plugin-activation';
 import { PluginWorkerHost } from './sandbox/plugin-worker-host';
 import { dispatchCapabilityVerb } from './sandbox/capability-router';
 import { PluginLogLevel } from './sandbox/protocol';
@@ -185,12 +185,21 @@ export class PluginSandboxBridge {
     // Missing/hot-swapped route metadata fails closed.
     const verified = route ? route.signature.scheme !== 'none' : false;
     const instance = await this.hostServices.getPluginInstanceService().resolve(d.pluginId, d.instanceId);
+    // Three layers, most specific last: the base ('*') config, then the operator's per-session
+    // override from PUT /plugins/:id/sessions/:sessionId/config, then THIS instance's own config.
+    // The instance layer is what keeps two instances sharing one session scope apart — provisioning
+    // projects both onto the same scope key, so the scope-keyed store alone would hand a delivery
+    // whichever instance was provisioned last. It applies even for a non-session-scoped plugin,
+    // whose instances are otherwise indistinguishable here.
     const config = plugin
-      ? resolvePluginConfig(
-          plugin.config,
-          plugin.sessionConfig,
-          instance?.sessionScope ?? undefined,
-          plugin.manifest.sessionScoped !== false,
+      ? resolveInstanceConfig(
+          resolvePluginConfig(
+            plugin.config,
+            plugin.sessionConfig,
+            instance?.sessionScope ?? undefined,
+            plugin.manifest.sessionScoped !== false,
+          ),
+          instance?.config,
         )
       : undefined;
     const result = await host.dispatchWebhook({

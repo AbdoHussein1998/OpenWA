@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Two enabled instances of one integration plugin that share a session scope no longer collapse onto a single config, so an ingress delivery authenticated with one instance's secret is no longer handled with the credentials of whichever instance was provisioned last. Dispatch now layers the instance's own config over the base config and any per-session override.
+
 ## [0.17.0] - 2026-08-12
 
 ### Added
