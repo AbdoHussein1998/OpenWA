@@ -27,12 +27,19 @@ function runCommandsOf(file: string): string[] {
   return Object.values(workflowOf(file).jobs ?? {}).flatMap(job => (job.steps ?? []).map(step => step.run ?? ''));
 }
 
-/** Jobs that execute a repo-relative path, paired with whether the job ever checks the repo out. */
+/**
+ * Jobs that execute a repo-relative path, paired with whether the job ever checks the repo out.
+ *
+ * Both spellings count: `./scripts/x.sh` and the bare `scripts/x.sh` an interpreter is handed
+ * (`bash scripts/x.sh`). Matching only the dotted form would leave the gate blind to the other way
+ * of writing the very call it exists to protect.
+ */
 function jobsRunningRepoScripts(file: string): Array<{ job: string; scripts: string[]; hasCheckout: boolean }> {
+  const REPO_PATH = /(?:^|[\s'"])(\.\/[\w./-]+|(?:scripts|bin|tools)\/[\w./-]+)/g;
   return Object.entries(workflowOf(file).jobs ?? {})
     .map(([job, def]) => {
       const steps = def.steps ?? [];
-      const scripts = steps.flatMap(step => [...(step.run ?? '').matchAll(/(?:^|\s)(\.\/[\w./-]+)/g)].map(m => m[1]));
+      const scripts = steps.flatMap(step => [...(step.run ?? '').matchAll(REPO_PATH)].map(m => m[1]));
       return { job, scripts, hasCheckout: steps.some(step => (step.uses ?? '').startsWith('actions/checkout')) };
     })
     .filter(entry => entry.scripts.length > 0);
