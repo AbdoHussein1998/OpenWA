@@ -162,7 +162,6 @@ export class BaileysContacts {
     await this.confirmed(this.sock().removeProfilePicture(selfJid), 'the profile picture removal');
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async getContacts(): Promise<Contact[]> {
     this.host.ensureReady();
     return this.withBlockedState(this.host.listContacts());
