@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `check:sdk-routes` scanned the JavaScript client for backtick-delimited paths only, while its PHP and Python rules already accepted every quote style, so the nine routes that client writes as single-quoted strings were never compared to the contract — `/api/health/ready` among them, which is also the container healthcheck and Kubernetes readiness path. Renaming one of those server-side passed every gate and the JS suite, and the published client would have 404'd with CI green.
+
 ### Added
 
 - Turkish (`tr`) dashboard translation. Thanks @codedByCan.
