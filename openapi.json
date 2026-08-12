@@ -2501,6 +2501,17 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendLocationDto"
+              },
+              "examples": {
+                "minimal": {
+                  "summary": "Share a location",
+                  "value": {
+                    "chatId": "628123456789@c.us",
+                    "latitude": -6.2088,
+                    "longitude": 106.8456,
+                    "description": "Jakarta"
+                  }
+                }
               }
             }
           }
@@ -2549,6 +2560,16 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendContactDto"
+              },
+              "examples": {
+                "minimal": {
+                  "summary": "Share a contact card",
+                  "value": {
+                    "chatId": "628123456789@c.us",
+                    "contactName": "Alice",
+                    "contactNumber": "628999888777"
+                  }
+                }
               }
             }
           }
@@ -2657,6 +2678,19 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendPollDto"
+              },
+              "examples": {
+                "minimal": {
+                  "summary": "Ask a single-choice poll",
+                  "value": {
+                    "chatId": "120363000000000000@g.us",
+                    "name": "Where should we meet?",
+                    "options": [
+                      "Park",
+                      "Beach"
+                    ]
+                  }
+                }
               }
             }
           }
@@ -10570,6 +10604,11 @@
                 "$ref": "#/components/schemas/CustomLinkPreviewDto"
               }
             ]
+          },
+          "quotedMessageId": {
+            "type": "string",
+            "description": "Quote an earlier message, turning this send into a reply. The id is engine-specific: whatsapp-web.js matches the serialized message id, Baileys matches the raw message key id and can only quote a message it has already stored. An id that cannot be resolved fails the send rather than delivering it unquoted.",
+            "example": "true_628123456789@c.us_3EB0ABCD"
           }
         },
         "required": [
@@ -10669,6 +10708,11 @@
             "items": {
               "type": "string"
             }
+          },
+          "quotedMessageId": {
+            "type": "string",
+            "description": "Quote an earlier message, turning this send into a reply. The id is engine-specific: whatsapp-web.js matches the serialized message id, Baileys matches the raw message key id and can only quote a message it has already stored. An id that cannot be resolved fails the send rather than delivering it unquoted.",
+            "example": "true_628123456789@c.us_3EB0ABCD"
           }
         },
         "required": [
@@ -10718,6 +10762,11 @@
               "type": "string"
             }
           },
+          "quotedMessageId": {
+            "type": "string",
+            "description": "Quote an earlier message, turning this send into a reply. The id is engine-specific: whatsapp-web.js matches the serialized message id, Baileys matches the raw message key id and can only quote a message it has already stored. An id that cannot be resolved fails the send rather than delivering it unquoted.",
+            "example": "true_628123456789@c.us_3EB0ABCD"
+          },
           "ptt": {
             "type": "boolean",
             "description": "Send as a WhatsApp voice note (PTT — mic bubble + waveform). Provide audio/ogg; codecs=opus bytes for reliable playback; when the mimetype is omitted it defaults to that for voice notes. Expects a JSON boolean. Default false = plain audio file. Only valid on send-audio."
@@ -10749,6 +10798,11 @@
           "address": {
             "type": "string",
             "maxLength": 1024
+          },
+          "quotedMessageId": {
+            "type": "string",
+            "description": "Quote an earlier message, turning this send into a reply. The id is engine-specific: whatsapp-web.js matches the serialized message id, Baileys matches the raw message key id and can only quote a message it has already stored. An id that cannot be resolved fails the send rather than delivering it unquoted.",
+            "example": "true_628123456789@c.us_3EB0ABCD"
           }
         },
         "required": [
@@ -10770,6 +10824,11 @@
           "contactNumber": {
             "type": "string",
             "maxLength": 30
+          },
+          "quotedMessageId": {
+            "type": "string",
+            "description": "Quote an earlier message, turning this send into a reply. The id is engine-specific: whatsapp-web.js matches the serialized message id, Baileys matches the raw message key id and can only quote a message it has already stored. An id that cannot be resolved fails the send rather than delivering it unquoted.",
+            "example": "true_628123456789@c.us_3EB0ABCD"
           }
         },
         "required": [
@@ -10806,6 +10865,11 @@
           "allowMultipleAnswers": {
             "type": "boolean",
             "description": "Allow voters to pick several options (default single choice)"
+          },
+          "quotedMessageId": {
+            "type": "string",
+            "description": "Quote an earlier message, turning this send into a reply. The id is engine-specific: whatsapp-web.js matches the serialized message id, Baileys matches the raw message key id and can only quote a message it has already stored. An id that cannot be resolved fails the send rather than delivering it unquoted.",
+            "example": "true_628123456789@c.us_3EB0ABCD"
           }
         },
         "required": [

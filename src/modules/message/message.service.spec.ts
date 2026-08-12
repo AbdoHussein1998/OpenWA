@@ -1159,7 +1159,7 @@ describe('MessageService', () => {
         chatId: 'test@c.us',
         url: 'https://example.com/a.png',
         quotedMessageId: 'wa-quoted-9',
-      } as never);
+      });
 
       expect(mockEngine.sendImageMessage).toHaveBeenCalledWith(
         'test@c.us',
@@ -1173,7 +1173,7 @@ describe('MessageService', () => {
         latitude: 1,
         longitude: 2,
         quotedMessageId: 'wa-quoted-9',
-      } as never);
+      });
 
       expect(mockEngine.sendLocationMessage).toHaveBeenCalledWith(
         'test@c.us',
@@ -1187,7 +1187,7 @@ describe('MessageService', () => {
         contactName: 'Alice',
         contactNumber: '628999',
         quotedMessageId: 'wa-quoted-9',
-      } as never);
+      });
 
       expect(mockEngine.sendContactMessage).toHaveBeenCalledWith(
         'test@c.us',
@@ -1201,7 +1201,7 @@ describe('MessageService', () => {
         name: 'Q',
         options: ['a', 'b'],
         quotedMessageId: 'wa-quoted-9',
-      } as never);
+      });
 
       expect(mockEngine.sendPollMessage).toHaveBeenCalledWith(
         'test@c.us',
@@ -1214,7 +1214,7 @@ describe('MessageService', () => {
         chatId: 'test@c.us',
         text: 'hi',
         quotedMessageId: 'wa-quoted-9',
-      } as never);
+      });
 
       expect(mockEngine.sendTextMessage).toHaveBeenCalledWith(
         'test@c.us',
@@ -1228,7 +1228,7 @@ describe('MessageService', () => {
     // implementation that always passed an options object would satisfy the assertion above while
     // rewriting every existing send.
     it('leaves an unquoted text send on its existing two-argument call shape', async () => {
-      await service.sendText('sess-1', { chatId: 'test@c.us', text: 'hi' } as never);
+      await service.sendText('sess-1', { chatId: 'test@c.us', text: 'hi' });
 
       expect(mockEngine.sendTextMessage).toHaveBeenCalledWith('test@c.us', 'hi');
     });
