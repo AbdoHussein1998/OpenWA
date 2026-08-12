@@ -1496,9 +1496,14 @@ rejected with `400` rather than guessing which half was meant.
 
 ##### Quoted sends
 
-Every `send-*` route above accepts an optional `quotedMessageId`. Supplying it turns that send into a
-reply, so a reply can carry media, a location, a contact card or a poll — not only text.
-`POST .../messages/reply` is unchanged and remains the text shorthand.
+Nine `send-*` routes accept an optional `quotedMessageId`: `send-text` above, and `send-image`,
+`send-video`, `send-audio`, `send-document`, `send-sticker`, `send-location`, `send-contact` and
+`send-poll` below. Supplying it turns that send into a reply, so a reply can carry media, a location,
+a contact card or a poll — not only text. `POST .../messages/reply` is unchanged and remains the text
+shorthand.
+
+`send-template`, `send-bulk`, `send-product` and `send-catalog` do NOT accept the field, and reject it
+as an unknown property.
 
 ```json
 {
