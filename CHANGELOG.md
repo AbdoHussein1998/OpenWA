@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A `message:sending` plugin handler that returns a payload without a usable `input` no longer turns every outbound send on that session into a 500. The gate read `.input` off the hook chain's reply unchecked, so a malformed envelope handed `undefined` to each caller — or threw inside the gate for a `null` — with nothing in the error naming a plugin. The send is now refused with a message that names the hook, and refused rather than sent: this is a moderation chokepoint, and a handler whose reply cannot be read may have been redacting something. A chain that replies with nothing at all is unchanged and keeps the caller's own input.
+
 - The `openwa_sessions_restricted` gauge now follows a restriction that lapses on its own. It was republished only when a restriction was recorded or cleared, and an expiry is neither — so after a reachout timelock passed its stated end, the gauge kept reporting the pre-expiry count while every read path already reported the session as unrestricted, leaving an alert on `> 0` firing indefinitely and disagreeing with `GET /api/sessions`.
 
 - Both compose files now forward the inbound-media knobs — `MEDIA_DOWNLOAD_ENABLED`, `MEDIA_DOWNLOAD_MAX_BYTES`, `MEDIA_DOWNLOAD_TIMEOUT_MS` and `INBOUND_MEDIA_CONCURRENCY`. None of the four reached the container, so an operator running the bundled stack who set `MEDIA_DOWNLOAD_ENABLED=false` in `.env` got no error and no log line while the gateway kept decrypting every inbound media blob and base64-inlining it into every message row at up to 50 MiB apiece. The cap and the timeout were equally unreachable. A gate now binds all four, in both files.

@@ -41,6 +41,30 @@ export async function applySendingGate<T extends object>(
   if (!shouldContinue) {
     throw new BadRequestException('Message sending blocked by plugin');
   }
+  // A chain that replies with nothing changed nothing: keep the caller's own input. This is the
+  // ordinary no-plugin path and must not be treated as a malformed reply.
+  if (hookData === undefined) {
+    return input;
+  }
+  // Anything else must still be an envelope. Reading `.input` off it unchecked handed `undefined`
+  // (or threw, for a null) to every caller, so one plugin authoring mistake turned every outbound
+  // send on the session into an unhandled TypeError and a 500 that named no plugin.
+  //
+  // Fails CLOSED, deliberately: this is a moderation chokepoint, and a handler whose reply cannot be
+  // read may have been redacting something — proceeding with the original input would turn a plugin
+  // bug into a moderation bypass. Same status as a veto, because to the caller the outcome is the
+  // same (a plugin stopped this send); the message names the hook so the operator can find it.
+  const envelope = hookData as { input?: unknown } | null;
+  if (
+    typeof envelope !== 'object' ||
+    envelope === null ||
+    typeof envelope.input !== 'object' ||
+    envelope.input === null
+  ) {
+    throw new BadRequestException(
+      'A message:sending handler returned a payload without a usable `input`; the send was refused rather than sent unmoderated',
+    );
+  }
   // Use the potentially plugin-modified input.
-  return (hookData as { input: T }).input;
+  return envelope.input as T;
 }
