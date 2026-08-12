@@ -44,6 +44,12 @@ export const DEFAULT_TEMPLATE_RENDER_MAX_CHARS = 64 * 1024;
  * holds the whole base64 payload, so a hundred media rows serialise to hundreds of megabytes — past
  * V8's string ceiling the read fails outright, and the dashboard requests the maximum page size with
  * no way to ask for less. Mirrors the export path's budget rather than inventing a second policy.
+ *
+ * NOT a hard ceiling on the response. The newest payload is let through whatever its size (see
+ * spendInlineMediaBudget), so the real bound is `max(budget, one payload)` — and one payload is
+ * bounded upstream by `capInboundMedia` at MEDIA_DOWNLOAD_MAX_BYTES (50 MiB by default, ~68 MiB once
+ * base64-encoded). That is well inside V8's string ceiling and is the point: the alternative is a
+ * large photo no client can ever read back. Raising MEDIA_DOWNLOAD_MAX_BYTES raises this too.
  */
 export const DEFAULT_MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES = 8 * 1024 * 1024;
 
