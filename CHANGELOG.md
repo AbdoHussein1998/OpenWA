@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-12
+
 ### Added
 
 - Turkish (`tr`) dashboard translation. Thanks @codedByCan.
-- `AUDIT_RETENTION_DAYS` is checked at boot, so a typo fails startup with a named error instead of silently reverting to the 90-day default. It is validated as an integer of any sign rather than a positive one, because both `0` and any negative value are documented switches that disable audit-log pruning entirely.
+- ⚠️ **Breaking (config).** `AUDIT_RETENTION_DAYS` is checked at boot, so a typo fails startup with a named error instead of silently reverting to the 90-day default. It is validated as an integer of any sign rather than a positive one, because both `0` and any negative value are documented switches that disable audit-log pruning entirely. Action required: a value that is not a plain integer now refuses to boot where it previously started. `30d` and `90.5` were accepted before and quietly became 30 and 90; `+90` became 90. Set a plain integer — `90` — or leave the knob unset.
 - `message.controller.spec.ts` holds the two headers the stored-media download sends, `X-Content-Type-Options: nosniff` and `Content-Disposition: attachment`; deleting either had passed every suite in the repo.
 - That same spec now also holds the passthrough declaration and the returned bytes, so a media response carrying both security headers and no body at all no longer passes it.
 - Optional `quotedMessageId` on the nine `send-*` message endpoints that carry a single message — text, image, video, audio, document, sticker, location, contact and poll — and on their MCP tools, so a reply can carry media, a location, a contact card or a poll instead of only text. `send-template`, `send-bulk`, `send-product` and `send-catalog` do not accept it. An id the engine cannot resolve now fails the send rather than delivering the message unquoted. Thanks @nirizr for the report.
@@ -18,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Plugins must declare a `storage:use` permission to reach `ctx.storage`, and an installed plugin that persists state needs that one manifest line added before it can store again. The four storage verbs dispatched with no permission check at all, so a plugin whose manifest declared nothing still wrote to the host disk and the operator reading that manifest could not see it. The per-plugin directory, key check and byte quota already bounded the access, so this puts a plugin's use of host storage in the manifest rather than closing an escape.
+- ⚠️ **Breaking (plugins).** Plugins must declare a `storage:use` permission to reach `ctx.storage`, and an installed plugin that persists state needs that one manifest line added before it can store again. Action required: upgrade the official plugins to the versions listed below BEFORE upgrading the gateway, or add the permission to any first-party plugin's `manifest.json`. The four storage verbs dispatched with no permission check at all, so a plugin whose manifest declared nothing still wrote to the host disk and the operator reading that manifest could not see it. The per-plugin directory, key check and byte quota already bounded the access, so this puts a plugin's use of host storage in the manifest rather than closing an escape.
 - Seven official plugins declare it as of `chatwoot-adapter` 0.9.1, `chat-flow` 1.1.2, `group-translate` 1.3.1, `gsheets-logger` 0.3.3, `http-action` 0.2.2, `typebot-connector` 0.2.2 and `voice-transcription` 1.2.3; upgrade to at least these before upgrading the gateway, since a plugin below them is denied at its next storage call rather than at load — and one that stores during `onEnable` is left in `ERROR` by that denial, not merely refused the write. `after-hours`, `faq-bot` and `supabase-otp-hook` never touch `ctx.storage` and need no upgrade.
 
 ### Fixed
