@@ -467,7 +467,26 @@ export class BulkMessageService implements OnApplicationBootstrap {
         blockedByPlugin = true;
         throw new BadRequestException('Message sending blocked by plugin');
       }
-      content = (gate.data as { input: BulkMessageContent }).input;
+      // Same envelope check as applySendingGate, which this is the second copy of (see its doc).
+      // Reading `.input` unchecked handed `undefined` to every send below, or threw on a null — one
+      // plugin authoring mistake turning a whole batch into an opaque failure. Fails CLOSED: a
+      // moderation handler whose reply cannot be read may have been redacting something.
+      const envelope = gate.data as { input?: unknown } | null | undefined;
+      if (envelope === undefined) {
+        // Nothing changed: keep the content we already had.
+      } else if (
+        typeof envelope !== 'object' ||
+        envelope === null ||
+        typeof envelope.input !== 'object' ||
+        envelope.input === null
+      ) {
+        blockedByPlugin = true;
+        throw new BadRequestException(
+          'A message:sending handler returned a payload without a usable `input`; the send was refused rather than sent unmoderated',
+        );
+      } else {
+        content = envelope.input;
+      }
 
       // Re-validate the ACTUAL outbound payload against the media cap: template variables and a
       // gate rewrite can grow base64 media past the limit createBatch verified on the raw input.
@@ -661,15 +680,7 @@ export class BulkMessageService implements OnApplicationBootstrap {
     // Delegate to the shared renderer so the gateway exposes one templating syntax (#69). It
     // substitutes canonical `{{name}}` placeholders and still honors the legacy single-brace
     // `{name}` this endpoint historically used (deprecated — prefer `{{name}}`).
-    const replaceVars = (str: string): string => {
-      const rendered = renderTemplate(str, variables);
-      if (rendered.length > maxChars) {
-        throw new BadRequestException(
-          `Rendered content is ${rendered.length} characters, over the ${maxChars}-character limit`,
-        );
-      }
-      return rendered;
-    };
+    const replaceVars = (str: string): string => renderTemplate(str, variables);
 
     const processValue = (value: unknown): unknown => {
       if (typeof value === 'string') {
@@ -688,7 +699,23 @@ export class BulkMessageService implements OnApplicationBootstrap {
       return value;
     };
 
-    return processValue(content) as BulkMessageContent;
+    const rendered = processValue(content) as BulkMessageContent;
+
+    // Cap the MESSAGE, not the payload. Substitution runs over the whole content tree (a URL or a
+    // filename may carry a placeholder too), but only the text-bearing fields are bounded: `base64`
+    // holds media, which `assertBase64WithinMediaCap` governs at up to MEDIA_DOWNLOAD_MAX_BYTES —
+    // three orders of magnitude above this cap. Capping every string rejected the most natural bulk
+    // request there is, a personalised media send, because a 100 KB image is ~137,000 base64
+    // characters.
+    for (const field of ['text', 'caption'] as const) {
+      const value = rendered[field];
+      if (typeof value === 'string' && value.length > maxChars) {
+        throw new BadRequestException(
+          `Rendered ${field} is ${value.length} characters, over the ${maxChars}-character limit`,
+        );
+      }
+    }
+    return rendered;
   }
 
   /**

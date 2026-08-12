@@ -191,6 +191,14 @@ export class PluginSandboxBridge {
     // projects both onto the same scope key, so the scope-keyed store alone would hand a delivery
     // whichever instance was provisioned last. It applies even for a non-session-scoped plugin,
     // whose instances are otherwise indistinguishable here.
+    //
+    // PRECEDENCE NOTE: this puts the instance row above the operator's per-session override from
+    // PUT /plugins/:id/sessions/:sessionId/config, for the keys the instance itself defines. That is
+    // deliberate and cannot be otherwise: provisioning PROJECTS each instance's config into the
+    // scope-keyed store, so for two instances sharing a scope that slice holds whichever was written
+    // last — applying it on top would hand a delivery the other tenant's credentials again. The
+    // override still decides every key the instance does not define, and still decides everything on
+    // the hook path. To change an instance's own config, use the instance route.
     const config = plugin
       ? resolveInstanceConfig(
           resolvePluginConfig(

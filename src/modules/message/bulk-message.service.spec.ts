@@ -330,6 +330,56 @@ describe('BulkMessageService.processBatch', () => {
     messages: [{ chatId: 'c0@c.us', type: 'text', content: { text }, variables }],
   });
 
+  // The cap must bound the MESSAGE, not the payload. `variables` is a sibling of the media fields on
+  // the same DTO, so personalised media is a supported bulk request — and a 100 KB image is ~137,000
+  // base64 characters, twice the 64 KiB text cap. Capping every string in the content tree failed
+  // exactly the requests this endpoint exists for.
+  // The gate has TWO copies (see applySendingGate's doc); the envelope check landed on one of them.
+  // A handler returning a truthy object without `input` fed `undefined` into every send below.
+  it('fails an item when a message:sending handler returns a payload with no usable input', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    hookManager.execute.mockResolvedValue({ continue: true, data: { notInput: 1 } });
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).not.toHaveBeenCalled();
+    const finalPartial = (repo.update.mock.calls as Array<[unknown, { results: BatchMessageResult[] }]>).at(-1)![1];
+    expect(finalPartial.results[0].status).toBe(BatchMessageStatus.FAILED);
+    expect(finalPartial.results[0].error?.message).toMatch(/message:sending/);
+  });
+
+  // Negative twin: a chain that returns nothing is the ordinary no-plugin path.
+  it('keeps the original content when the hook chain returns no data', async () => {
+    repo.findOne.mockResolvedValue(makeBatch(1));
+    hookManager.execute.mockResolvedValue({ continue: true });
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends a media item with variables even when its base64 exceeds the text cap', async () => {
+    const bigBase64 = 'A'.repeat(137_000);
+    repo.findOne.mockResolvedValue({
+      ...makeBatch(1),
+      messages: [
+        {
+          chatId: 'c0@c.us',
+          type: 'image',
+          content: { image: { base64: bigBase64, mimetype: 'image/jpeg' }, caption: 'Hi {{name}}' },
+          variables: { name: 'Alice' },
+        },
+      ],
+    });
+    engine.sendImageMessage = jest.fn().mockResolvedValue({ id: 'wa1', timestamp: 1 });
+
+    await runProcessBatch();
+
+    expect(engine.sendImageMessage).toHaveBeenCalledTimes(1);
+    const finalPartial = (repo.update.mock.calls as Array<[unknown, { results: BatchMessageResult[] }]>).at(-1)![1];
+    expect(finalPartial.results[0].status).not.toBe(BatchMessageStatus.FAILED);
+  });
+
   it('fails an item whose rendered text exceeds the cap instead of sending it', async () => {
     // Comfortably over the 64 KiB default the un-configured service falls back to.
     const huge = 'x'.repeat(70 * 1024);

@@ -24,6 +24,15 @@ export async function createExportStream(
   logger: LoggerService,
 ): Promise<PassThrough> {
   const files = await listFiles();
+  // The importer aborts a whole archive past STORAGE_IMPORT_MAX_ENTRIES. Now that the export is
+  // uncapped, a large store can produce one this gateway refuses to restore — and the operator would
+  // only find out at restore time, after decommissioning the source. Say it at EXPORT time instead.
+  if (files.length > DEFAULT_IMPORT_MAX_ENTRIES) {
+    logger.warn(
+      `Export contains ${files.length} files, above the import default of ${DEFAULT_IMPORT_MAX_ENTRIES}. ` +
+        'Raise STORAGE_IMPORT_MAX_ENTRIES on the destination before restoring this archive.',
+    );
+  }
   const output = new PassThrough();
 
   const archive = new TarArchive({
