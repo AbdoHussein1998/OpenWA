@@ -4865,6 +4865,11 @@ Prometheus exposition scrape of OpenWA process + session + message metrics; gate
 
 Content-Type `text/plain; version=0.0.4; charset=utf-8`, `Cache-Control: no-store`. Raw text (no JSON envelope):
 
+When the data database cannot be read the database-derived series (`openwa_sessions*`,
+`openwa_messages*`) are OMITTED rather than reported as zero — a zero would fire an alert
+claiming every session had dropped. `openwa_stats_available` is what tells the two cases apart,
+so alert on it rather than reading a missing series as zero. `docs/10` lists every series.
+
 ```
 # HELP openwa_up 1 if the OpenWA process is running
 # TYPE openwa_up gauge
@@ -4875,6 +4880,8 @@ openwa_process_uptime_seconds 3600
 openwa_process_resident_memory_bytes 187432960
 # TYPE openwa_process_heap_used_bytes gauge
 openwa_process_heap_used_bytes 64512000
+# TYPE openwa_stats_available gauge
+openwa_stats_available 1
 # TYPE openwa_sessions_total gauge
 openwa_sessions_total 3
 # TYPE openwa_sessions_active gauge
