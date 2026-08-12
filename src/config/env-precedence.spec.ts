@@ -299,3 +299,34 @@ describe('every key the dashboard writes is commented out in .env.example', () =
     expect(uncommented.filter(key => dashboardOwned().includes(key))).toEqual([]);
   });
 });
+
+/**
+ * The inbound-media knobs must reach the container.
+ *
+ * `MEDIA_DOWNLOAD_ENABLED` turns off what env.validation.ts itself calls "the most expensive
+ * behaviour the gateway has" — decrypting every inbound media blob and base64-inlining it into every
+ * message row at up to 50 MiB apiece. Neither compose file forwarded it, nor the cap, the timeout or
+ * the concurrency, so an operator running the bundled stack set the value in `.env`, saw no error and
+ * no log line, and kept paying for the behaviour. The only remaining path was hand-editing
+ * `data/.env.generated` inside the mounted volume, which `.env.example` does not mention for these
+ * keys. The sibling MEDIA_CONVERSION_* family was forwarded all along.
+ */
+describe.each(['docker-compose.yml', 'docker-compose.dev.yml'])('%s forwards the inbound-media knobs', file => {
+  const compose = (): string => fs.readFileSync(path.join(__dirname, '../..', file), 'utf8');
+
+  const forwards = (key: string): boolean => new RegExp(`^\\s*-\\s*${key}=`, 'm').test(compose());
+
+  // Guards the assertions below: a matcher that can never fire would pass them vacuously.
+  it('detects a key that IS forwarded', () => {
+    expect(forwards('MEDIA_CONVERSION_ENABLED')).toBe(true);
+  });
+
+  it.each([
+    'MEDIA_DOWNLOAD_ENABLED',
+    'MEDIA_DOWNLOAD_MAX_BYTES',
+    'MEDIA_DOWNLOAD_TIMEOUT_MS',
+    'INBOUND_MEDIA_CONCURRENCY',
+  ])('forwards %s', key => {
+    expect(forwards(key)).toBe(true);
+  });
+});

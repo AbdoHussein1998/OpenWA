@@ -23,6 +23,13 @@
  */
 export const BLANK_SHADOWED_ENV_KEYS: string[] = [
   'ENGINE_TYPE',
+  // Inbound-media knobs. Not dashboard-managed, but every blank compose forward must be cleared or
+  // the empty value shadows .env / data/.env.generated — which is why the gate above requires an
+  // entry for each one.
+  'MEDIA_DOWNLOAD_ENABLED',
+  'MEDIA_DOWNLOAD_MAX_BYTES',
+  'MEDIA_DOWNLOAD_TIMEOUT_MS',
+  'INBOUND_MEDIA_CONCURRENCY',
   // Database selection + connection details (#488)
   'DATABASE_TYPE',
   'DATABASE_HOST',
