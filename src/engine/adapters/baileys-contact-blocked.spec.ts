@@ -207,6 +207,37 @@ describe('the blocklist memo holds under the conditions it exists for', () => {
     expect(fetchBlocklist).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * The in-flight handle is a single field, so the query that clears it must be the one that owns
+   * it. After an invalidation the field belongs to the query started AFTER the block — an earlier
+   * query settling later cleared that newer handle, and the next reader opened a third query while
+   * the second was still open. The leak is precisely in the window the in-flight sharing created.
+   */
+  it('an overtaken query does not clear the handle of the one that replaced it', async () => {
+    const gates: Array<() => void> = [];
+    const openGate = (): Promise<string[]> =>
+      new Promise<string[]>(resolve => {
+        gates.push(() => resolve([]));
+      });
+    const fetchBlocklist = jest.fn().mockImplementation(openGate);
+    const contacts = withQuery(fetchBlocklist);
+
+    const first = contacts.getContactById('628111@c.us'); // Q1 owns the handle
+    await contacts.blockContact('628111@c.us'); // invalidates: handle cleared, generation bumped
+    const second = contacts.getContactById('628111@c.us'); // Q2 takes the handle
+    expect(fetchBlocklist).toHaveBeenCalledTimes(2);
+
+    gates[0](); // Q1 settles late — it must not touch Q2's handle
+    await first;
+
+    // Q2 is still open, so this reader has to JOIN it rather than open a third query.
+    const third = contacts.getContactById('628111@c.us');
+    expect(fetchBlocklist).toHaveBeenCalledTimes(2);
+
+    gates[1]();
+    await Promise.all([second, third]);
+  });
+
   it('collapses a burst of concurrent reads onto one query', async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>(resolve => {

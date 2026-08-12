@@ -245,7 +245,12 @@ export class BaileysContacts {
       });
       ids = null;
     } finally {
-      this.blocklistInFlight = undefined;
+      // Only if the handle is still this query's. After an invalidation the field belongs to a query
+      // started later, and clearing it there would send the next reader into a third query while the
+      // second was still open — defeating the sharing exactly inside the window it introduced.
+      if (generation === this.blocklistGeneration) {
+        this.blocklistInFlight = undefined;
+      }
     }
     // Stamped with the time the ANSWER arrived, not the time the query started. Stamping the start
     // wrote an already-expired memo for any query slower than the window — so the memo absorbed
