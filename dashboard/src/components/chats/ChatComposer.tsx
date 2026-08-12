@@ -5,6 +5,7 @@ import { Loader2, Paperclip, Send, Smile, X } from 'lucide-react';
 import { messageApi, type Chat, type MessageType } from '../../services/api';
 import { mergeOrAppend, type ChatMessageView } from '../../utils/chatMessages';
 import { promoteChatWithSnippet } from '../../utils/chatList';
+import { buildMediaSendPayload, buildOptimisticMetadata, quotedIdOf } from '../../utils/composerSend';
 import { messagesQueryKey, useChatMessagesActions } from '../../hooks/useChatMessages';
 import { useRole } from '../../hooks/useRole';
 import { useToast } from '../../hooks/useToast';
@@ -175,22 +176,7 @@ function ChatComposer({
       direction: 'outgoing',
       status: 'pending',
       createdAt: new Date().toISOString(),
-      metadata: attachment
-        ? {
-            media: {
-              mimetype: attachment.mimetype,
-              filename: attachment.filename,
-              data: attachment.base64,
-            },
-          }
-        : replyingTo
-          ? {
-              quotedMessage: {
-                id: replyingTo.waMessageId || replyingTo.id,
-                body: replyingTo.type !== 'text' ? `[${replyingTo.type}]` : replyingTo.body,
-              },
-            }
-          : undefined,
+      metadata: buildOptimisticMetadata(attachment, replyingTo),
     };
 
     appendMessage(selectedSessionId, activeChat.id, tempMessage);
@@ -211,16 +197,18 @@ function ChatComposer({
         else if (mime.startsWith('video/')) mediaType = 'video';
         else if (mime.startsWith('audio/')) mediaType = 'audio';
 
-        result = await messageApi.sendMedia(selectedSessionId, activeChat.id, mediaType, {
-          base64: currentAttachment.base64,
-          mimetype: currentAttachment.mimetype,
-          filename: currentAttachment.filename,
-          caption: mediaType !== 'audio' ? textToSend : undefined,
-        });
+        // A reply that carries an attachment takes this branch, so the quote has to travel with the
+        // media — the `else if` below never sees it.
+        result = await messageApi.sendMedia(
+          selectedSessionId,
+          activeChat.id,
+          mediaType,
+          buildMediaSendPayload(currentAttachment, mediaType !== 'audio' ? textToSend : undefined, currentReplyingTo),
+        );
       } else if (currentReplyingTo) {
         result = await messageApi.reply(selectedSessionId, {
           chatId: activeChat.id,
-          quotedMessageId: currentReplyingTo.waMessageId || currentReplyingTo.id,
+          quotedMessageId: quotedIdOf(currentReplyingTo)!,
           text: textToSend,
         });
       } else {
