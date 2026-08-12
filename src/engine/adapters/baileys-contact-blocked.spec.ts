@@ -31,7 +31,8 @@ describe('Baileys contact reads report real blocklist state', () => {
       : jest.fn().mockResolvedValue(opts.blocklist ?? []);
     const host = {
       ensureReady: jest.fn(),
-      getSocket: () => ({ fetchBlocklist }) as unknown as WASocket,
+      getSocket: () =>
+        ({ fetchBlocklist, updateBlockStatus: jest.fn().mockResolvedValue(undefined) }) as unknown as WASocket,
       logger: { ...logger, warn },
       listContacts: () => [contact('628111@c.us'), contact('628222@c.us')],
       findContact: (id: string) => contact(id),
@@ -70,6 +71,28 @@ describe('Baileys contact reads report real blocklist state', () => {
     await contacts.getContacts();
 
     expect(fetchBlocklist).toHaveBeenCalledTimes(1);
+  });
+
+  // The memo must not outlive a change made through this same API: block() and unblock() clear it,
+  // and without that a contact just blocked still reads isBlocked=false for the memo window.
+  it('re-queries after a block, so a just-changed state is not read stale', async () => {
+    const { contacts, fetchBlocklist } = make({ blocklist: [] });
+    await contacts.getContactById('628111@c.us');
+    expect(fetchBlocklist).toHaveBeenCalledTimes(1);
+
+    await contacts.blockContact('628111@c.us');
+    await contacts.getContactById('628111@c.us');
+
+    expect(fetchBlocklist).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-queries after an unblock for the same reason', async () => {
+    const { contacts, fetchBlocklist } = make({ blocklist: ['628111@c.us'] });
+    await contacts.getContactById('628111@c.us');
+    await contacts.unblockContact('628111@c.us');
+    await contacts.getContactById('628111@c.us');
+
+    expect(fetchBlocklist).toHaveBeenCalledTimes(2);
   });
 
   it('does not fail the contact read when the blocklist query does, and says so', async () => {

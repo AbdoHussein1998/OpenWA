@@ -30,8 +30,10 @@ describe('the non-root drop is enforced, not merely documented', () => {
     expect(runCommandsOf('ci.yml').join('\n')).toContain('smoke-test-backup-restore.sh');
   });
 
-  it('invokes the non-root smoke test from ci.yml', () => {
-    const invocations = runCommandsOf('ci.yml').filter(run => run.includes('smoke-test-non-root.sh'));
+  // BOTH paths. The tag path is the one that promotes to `latest`, so a check present only on the PR
+  // path leaves the publishing route unguarded — the asymmetry this workflow's own audit step forbids.
+  it.each(['ci.yml', 'release.yml'])('invokes the non-root smoke test from %s', file => {
+    const invocations = runCommandsOf(file).filter(run => run.includes('smoke-test-non-root.sh'));
     expect(invocations.length).toBeGreaterThan(0);
   });
 

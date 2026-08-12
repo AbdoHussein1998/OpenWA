@@ -319,7 +319,10 @@ export class StorageService implements OnModuleDestroy {
       return { count, sizeBytes };
     }
 
-    const files = await this.listFiles();
+    // The uncapped walk, for the same reason createExportStream uses it: this is the pre-check an
+    // operator runs BEFORE the export/import migration, so a count truncated at STORAGE_LIST_MAX_FILES
+    // would hide exactly the gap they are checking for.
+    const files = await this.listAllFiles();
     let sizeBytes = 0;
     for (const file of files) {
       try {

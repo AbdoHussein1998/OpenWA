@@ -507,6 +507,15 @@ jobs:
           REPO: ${{ github.repository }}
         run: echo "ref=ghcr.io/${REPO,,}:smoke-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
 
+      # The tag path is the one that promotes to `latest`, so it must not be laxer than the PR gate —
+      # the same rule this workflow's own audit step states. ci.yml verifies the root→openwa drop on
+      # the built image; without it here, a change leaving Node on uid 0 reaches `latest` through the
+      # only path that publishes it.
+      - name: Verify the image drops from root to the openwa user
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: OPENWA_SMOKE_IMAGE="$IMAGE" ./scripts/smoke-test-non-root.sh
+
       - name: Boot + liveness check on each architecture
         env:
           IMAGE: ${{ steps.image.outputs.ref }}

@@ -2019,6 +2019,17 @@ describe('InfraDataController.importData rejects a malformed table value', () =>
     );
   });
 
+  // Array.isArray alone let `[null]` through, and the RED comment above claimed this case was
+  // covered when it was not — the row then died on its first property read, the same 500 with a
+  // longer fuse.
+  it.each([
+    ['a null row', [null]],
+    ['a string row', ['nope']],
+    ['a nested array', [[]]],
+  ])('answers 400 for %s rather than dying on the first property read', async (_label, rows) => {
+    await expect(controller().importData({ tables: { sessions: rows } } as never)).rejects.toThrow(BadRequestException);
+  });
+
   it('names the offending table so the operator can fix the file', async () => {
     await expect(controller().importData({ tables: { messages: 'nope' } } as never)).rejects.toThrow(/messages/);
   });

@@ -571,8 +571,15 @@ export class InfraDataController {
     // archive is simply malformed. Checked for all tables, not just `sessions`: the rest are read
     // inside the transaction, where the same mistake would fail mid-restore instead of before it.
     for (const [table, rows] of Object.entries(data.tables ?? {})) {
-      if (rows !== undefined && !Array.isArray(rows)) {
+      if (rows === undefined) continue;
+      if (!Array.isArray(rows)) {
         throw new BadRequestException(`tables.${table} must be an array of rows`);
+      }
+      // Array.isArray alone is not enough: `[null]` passes it and then dies on the first property
+      // read, which is the same 500 with a longer fuse. Every element must be a row object.
+      const badRow = rows.findIndex(row => typeof row !== 'object' || row === null || Array.isArray(row));
+      if (badRow !== -1) {
+        throw new BadRequestException(`tables.${table}[${badRow}] must be a row object`);
       }
     }
 

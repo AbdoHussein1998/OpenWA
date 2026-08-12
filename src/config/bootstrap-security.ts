@@ -173,9 +173,13 @@ export function assertNoDefaultSecretsInProduction(env: SecretCheckEnv): void {
   // been through boot validation yet and is still an arbitrary string here. Recognising only
   // 'production' meant every unrecognised value — a `prod` typo, a `staging` deployment — skipped the
   // guard silently, including the ALLOW_DEV_API_KEY rejection below. Only the two values that are
-  // deliberately not production (and an unset variable, the standard Node default for local runs)
-  // skip it; everything else is treated as production. Mirrors shutdown.service.ts's drain window,
-  // which already fails toward the production behaviour the same way.
+  // deliberately not production (and an unset or blank variable, the standard Node default for local
+  // runs) skip it; everything else is treated as production.
+  //
+  // NOTE: unset skips the guard. That is the pre-existing behaviour and is deliberate — a plain
+  // `docker run` sets no NODE_ENV, and refusing to start there would break local use — but it does
+  // mean a production deployment must set it. shutdown.service.ts makes the OPPOSITE choice for the
+  // same variable (unset keeps the production drain window), so this is not a mirror of it.
   // A blank value means the same here as it does to boot validation, which treats '' as unset:
   // otherwise `NODE_ENV=` boots clean and then gets production-grade secret enforcement, and the
   // two halves of this guard disagree about the same string.

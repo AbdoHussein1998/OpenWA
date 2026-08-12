@@ -289,14 +289,33 @@ describe('every key the dashboard writes is commented out in .env.example', () =
     expect(viaSecretHelper()).toContain('REDIS_PASSWORD');
   });
 
-  it('ships none of them uncommented', () => {
-    const example = fs.readFileSync(path.join(__dirname, '../../.env.example'), 'utf8');
-    const uncommented = example
+  const uncommentedKeys = (file: string): string[] =>
+    fs
+      .readFileSync(path.join(__dirname, '../..', file), 'utf8')
       .split('\n')
       .map(line => /^([A-Z0-9_]+)=/.exec(line)?.[1])
       .filter((key): key is string => key !== undefined);
+
+  it('ships none of them uncommented in .env.example', () => {
+    const uncommented = uncommentedKeys('.env.example');
     expect(uncommented).toContain('NODE_ENV'); // the file really does ship some keys uncommented
     expect(uncommented.filter(key => dashboardOwned().includes(key))).toEqual([]);
+  });
+
+  /**
+   * `.env.minimal` is also copied to `.env` by the docs (docs/README.md), but its rule is NARROWER on
+   * purpose: it describes itself as a development/personal config and deliberately pins the choices an
+   * operator makes by hand there — DATABASE_TYPE, ENGINE_TYPE, the puppeteer flags. Those pins are the
+   * file's reason to exist.
+   *
+   * The built-in datastore toggles are different: they are pure Dashboard > Infrastructure switches, so
+   * pinning them makes the UI control move, save, report success and change nothing — the same trap the
+   * .env.example rule exists for.
+   */
+  it('ships the built-in datastore toggles commented out in .env.minimal', () => {
+    const toggles = ['POSTGRES_BUILTIN', 'REDIS_BUILTIN', 'MINIO_BUILTIN'];
+    expect(toggles.every(t => dashboardOwned().includes(t))).toBe(true); // control: they ARE dashboard-owned
+    expect(uncommentedKeys('.env.minimal').filter(key => toggles.includes(key))).toEqual([]);
   });
 });
 
