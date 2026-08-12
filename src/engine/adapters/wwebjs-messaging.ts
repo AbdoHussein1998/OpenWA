@@ -101,6 +101,16 @@ export function isNoLidForUserError(err: unknown): boolean {
 }
 
 /**
+ * True when a send error is the page's "I could not resolve the quoted id" failure, raised only
+ * because {@link WwebjsMessaging.quoteOptions} opts out of `ignoreQuoteErrors` (Injected/Utils.js:
+ * 197-198). Matched on the text like {@link isNoLidForUserError} — there is no structured code, and
+ * puppeteer prefixes its own `Evaluation failed:`, so this is a substring test rather than equality.
+ */
+export function isQuoteUnresolvedError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('Could not get the quoted message');
+}
+
+/**
  * Build a MessageMedia from a MediaInput (URL → fetched, base64/Buffer → wrapped).
  *
  * `trustDeclaredType: false` keeps the fetched response's content-type for a remote URL. Use it
@@ -238,17 +248,6 @@ export class WwebjsMessaging {
   }
 
   /**
-   * Resolve `chatId` and run `send` against the resolved id. If the send fails with `No LID for user`
-   * — the signature of a contact whose cached/resolved id is stale (typically a `@c.us` for a contact
-   * that has since migrated to `@lid`) — drop the mapping, re-resolve once, and retry only if the
-   * fresh id differs, so a genuinely unreachable recipient surfaces its error instead of looping.
-   *
-   * When re-resolution cannot help, the recipient is unreachable rather than stale, and the raw
-   * `No LID for user` is replaced with {@link RecipientUnreachableError} (400). The bare page-side
-   * Error carries no status and no recipient, so letting it through produced an opaque 500 for what
-   * is really a caller-visible fact the gateway already established: `getNumberId` returned null.
-   */
-  /**
    * The send options that attach a quote, or nothing at all when the caller asked for none.
    *
    * `ignoreQuoteErrors` defaults to TRUE in the library (documented at Client.js:1383, applied at
@@ -264,7 +263,31 @@ export class WwebjsMessaging {
     return quotedMessageId ? { quotedMessageId, ignoreQuoteErrors: false } : {};
   }
 
-  private async sendResolved<T>(chatId: string, send: (to: string) => Promise<T>): Promise<T> {
+  /**
+   * Resolve `chatId` and run `send` against the resolved id. If the send fails with `No LID for user`
+   * — the signature of a contact whose cached/resolved id is stale (typically a `@c.us` for a contact
+   * that has since migrated to `@lid`) — drop the mapping, re-resolve once, and retry only if the
+   * fresh id differs, so a genuinely unreachable recipient surfaces its error instead of looping.
+   *
+   * When re-resolution cannot help, the recipient is unreachable rather than stale, and the raw
+   * `No LID for user` is replaced with {@link RecipientUnreachableError} (400). The bare page-side
+   * Error carries no status and no recipient, so letting it through produced an opaque 500 for what
+   * is really a caller-visible fact the gateway already established: `getNumberId` returned null.
+   *
+   * `quotedMessageId` gets the same treatment for the same reason. Opting out of `ignoreQuoteErrors`
+   * makes an id the page cannot resolve throw, but it throws a bare Error, and two things follow from
+   * that: the caller receives a 500 for an id THEY supplied, where the Baileys adapter answers 404
+   * (`requireStored`) for the identical request; and `countsTowardSendBreaker` classifies anything
+   * that is not an HttpException as an account-standing failure, so a caller retrying a stale id
+   * would trip the send breaker on a fault that is purely their own. Mapping it to
+   * {@link MessageNotFoundError} (404) settles both — the status matches Baileys and the published
+   * `docs/06` table, and the breaker exempts it as a 4xx.
+   */
+  private async sendResolved<T>(
+    chatId: string,
+    send: (to: string) => Promise<T>,
+    quotedMessageId?: string,
+  ): Promise<T> {
     const to = await this.resolveSendId(chatId);
     try {
       return await send(to);
@@ -272,6 +295,11 @@ export class WwebjsMessaging {
       // A transport-level failure means the page/browser is gone — report it as a death signal.
       // No-op for ordinary send errors; the retry/throw behavior below is unchanged.
       this.host.reportIfPageTransportError(err, 'sendMessage');
+      // Before the LID branch: an unresolvable quote is neither stale-id nor transport, and
+      // re-resolving the recipient would not make the quoted message appear.
+      if (quotedMessageId && isQuoteUnresolvedError(err)) {
+        throw new MessageNotFoundError(quotedMessageId);
+      }
       if (!chatId.endsWith('@c.us') || !isNoLidForUserError(err)) {
         throw err;
       }
@@ -290,6 +318,13 @@ export class WwebjsMessaging {
       try {
         return await send(fresh);
       } catch (retryErr) {
+        // Same remap as the first attempt. Re-resolving the RECIPIENT says nothing about the quoted
+        // message, so a send that reaches the page on the fresh id and only then fails on the quote
+        // is the same caller fault — without this it would be a 500 on the retry where the identical
+        // failure on the first attempt was a 404.
+        if (quotedMessageId && isQuoteUnresolvedError(retryErr)) {
+          throw new MessageNotFoundError(quotedMessageId);
+        }
         // The re-resolved id is no better than the stale one — same unreachable recipient, and the
         // raw error would 500 exactly as the first one did.
         if (isNoLidForUserError(retryErr)) {
@@ -329,10 +364,13 @@ export class WwebjsMessaging {
     if (mentions?.length) sendOptions.mentions = mentions;
     if (options?.linkPreview === false) sendOptions.linkPreview = false;
 
-    const msg = await this.sendResolved(chatId, to =>
-      Object.keys(sendOptions).length
-        ? this.client().sendMessage(to, text, sendOptions)
-        : this.client().sendMessage(to, text),
+    const msg = await this.sendResolved(
+      chatId,
+      to =>
+        Object.keys(sendOptions).length
+          ? this.client().sendMessage(to, text, sendOptions)
+          : this.client().sendMessage(to, text),
+      options?.quotedMessageId,
     );
     return toMessageResult(msg);
   }
@@ -382,15 +420,18 @@ export class WwebjsMessaging {
     if (extraOptions?.sendMediaAsDocument && !messageMedia.filename) {
       messageMedia.filename = 'file';
     }
-    const msg = await this.sendResolved(chatId, to =>
-      this.client().sendMessage(to, messageMedia, {
-        caption: media.caption,
-        ...(media.mentions?.length ? { mentions: media.mentions } : {}),
-        // sendAudioAsVoice only for audio, sendMediaAsDocument only for documents;
-        // {...undefined} contributes no keys.
-        ...extraOptions,
-        ...this.quoteOptions(media.quotedMessageId),
-      }),
+    const msg = await this.sendResolved(
+      chatId,
+      to =>
+        this.client().sendMessage(to, messageMedia, {
+          caption: media.caption,
+          ...(media.mentions?.length ? { mentions: media.mentions } : {}),
+          // sendAudioAsVoice only for audio, sendMediaAsDocument only for documents;
+          // {...undefined} contributes no keys.
+          ...extraOptions,
+          ...this.quoteOptions(media.quotedMessageId),
+        }),
+      media.quotedMessageId,
     );
 
     return toMessageResult(msg);
@@ -406,8 +447,10 @@ export class WwebjsMessaging {
       name: location.description || '',
       address: location.address || '',
     });
-    const msg = await this.sendResolved(chatId, to =>
-      this.client().sendMessage(to, loc, this.quoteOptions(location.quotedMessageId)),
+    const msg = await this.sendResolved(
+      chatId,
+      to => this.client().sendMessage(to, loc, this.quoteOptions(location.quotedMessageId)),
+      location.quotedMessageId,
     );
     return toMessageResult(msg);
   }
@@ -418,11 +461,14 @@ export class WwebjsMessaging {
     // can't inject extra vCard fields — the previous inline build interpolated raw values.
     const vcard = buildVCard(contact);
 
-    const msg = await this.sendResolved(chatId, to =>
-      this.client().sendMessage(to, vcard, {
-        parseVCards: true,
-        ...this.quoteOptions(contact.quotedMessageId),
-      }),
+    const msg = await this.sendResolved(
+      chatId,
+      to =>
+        this.client().sendMessage(to, vcard, {
+          parseVCards: true,
+          ...this.quoteOptions(contact.quotedMessageId),
+        }),
+      contact.quotedMessageId,
     );
     return toMessageResult(msg);
   }
@@ -437,11 +483,14 @@ export class WwebjsMessaging {
     // whatsapp-web.js returns the media unconverted once it reads as webp (Util.formatImageToWebpSticker).
     const messageMedia = await toMessageMedia(media, { trustDeclaredType: false });
 
-    const msg = await this.sendResolved(chatId, to =>
-      this.client().sendMessage(to, messageMedia, {
-        sendMediaAsSticker: true,
-        ...this.quoteOptions(media.quotedMessageId),
-      }),
+    const msg = await this.sendResolved(
+      chatId,
+      to =>
+        this.client().sendMessage(to, messageMedia, {
+          sendMediaAsSticker: true,
+          ...this.quoteOptions(media.quotedMessageId),
+        }),
+      media.quotedMessageId,
     );
     return toMessageResult(msg);
   }
@@ -459,12 +508,15 @@ export class WwebjsMessaging {
     // allowMultipleAnswers.
     type PollSendOptions = ConstructorParameters<typeof Poll>[2];
     const pollOptions = { allowMultipleAnswers: poll.allowMultipleAnswers === true } as PollSendOptions;
-    const msg = await this.sendResolved(chatId, to =>
-      this.client().sendMessage(
-        to,
-        new Poll(poll.name, poll.options, pollOptions),
-        this.quoteOptions(poll.quotedMessageId),
-      ),
+    const msg = await this.sendResolved(
+      chatId,
+      to =>
+        this.client().sendMessage(
+          to,
+          new Poll(poll.name, poll.options, pollOptions),
+          this.quoteOptions(poll.quotedMessageId),
+        ),
+      poll.quotedMessageId,
     );
     return toMessageResult(msg);
   }
