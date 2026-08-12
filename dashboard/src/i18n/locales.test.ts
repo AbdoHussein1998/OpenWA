@@ -234,11 +234,27 @@ test('the locale loader imports the whole locales directory by variable', () => 
 // Every catalogue used to be imported statically, which put all of them in one chunk the page
 // preloaded to read a single language. A reinstated import would restore that quietly: the build
 // stays green, the parity gates stay green, and only the byte count moves.
-test('no locale catalogue is imported statically', () => {
-  const staticImports = [...I18N_INDEX_SOURCE.matchAll(/^import\s[^\n]*from\s*['"]\.\/locales\/[^\n]*$/gm)].map(
-    m => m[0],
-  );
-  assert.deepEqual(staticImports, [], 'a static locale import is back — every language is on the critical path again');
+//
+// Scanned across the whole source tree rather than index.ts alone, because the bundler does not care
+// which module reaches a catalogue eagerly — one static import anywhere on a path the entry can
+// follow pulls that JSON back into a preloaded chunk. Matching `from '…'` covers default, named,
+// namespace and re-export forms including the ones Prettier wraps onto a second line, and bare
+// `import '…'` covers the side-effect form. Requiring whitespace after the keyword is what excludes
+// the loader's own `import(` — that one is a call, with a template literal rather than a quote.
+// Test files are exempt: they are outside the app build, so a catalogue they import eagerly costs
+// the bundle nothing.
+const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
+const STATIC_LOCALE_IMPORT = /(?:^|[\s{,])(?:from|import)\s+['"][^'"]*locales\/[^'"]*\.json['"]/;
+
+test('no locale catalogue is imported statically, anywhere in the dashboard source', () => {
+  const offenders = readdirSync(SRC_DIR, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile() && /\.tsx?$/.test(entry.name) && !entry.name.endsWith('.test.ts'))
+    .map(entry => join(entry.parentPath, entry.name))
+    .filter(file => STATIC_LOCALE_IMPORT.test(readFileSync(file, 'utf8')))
+    .map(file => file.slice(SRC_DIR.length + 1))
+    .sort();
+
+  assert.deepEqual(offenders, [], 'a static locale import is back — those languages are on the critical path again');
 });
 
 // rtlLanguages is deliberately a SUBSET (only he/ar today), so it is checked for validity, not parity:
