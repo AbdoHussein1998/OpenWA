@@ -1,0 +1,68 @@
+import 'reflect-metadata';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { ImportDataDto } from './import-data.dto';
+import { TABLE_IMPORTERS } from '../table-importers';
+
+// Mirrors the real pipe from src/config/app-validation.ts: whitelist + forbidNonWhitelisted, and the
+// enableImplicitConversion transform option. Both halves matter here — the whitelist is the reason
+// this DTO exists, and the implicit conversion is what makes a plain `boolean` property unsafe.
+const PIPE_TRANSFORM_OPTS = { enableImplicitConversion: true };
+const PIPE_VALIDATOR_OPTS = { whitelist: true, forbidNonWhitelisted: true };
+
+async function run(payload: unknown) {
+  const instance = plainToInstance(ImportDataDto, payload as object, PIPE_TRANSFORM_OPTS);
+  const errors = await validate(instance, PIPE_VALIDATOR_OPTS);
+  return { instance, errors };
+}
+
+/** A minimal but complete payload: every table the importer registry knows, each empty. */
+function fullTables(): Record<string, unknown[]> {
+  return Object.fromEntries(TABLE_IMPORTERS.map(importer => [importer.key, []]));
+}
+
+describe('ImportDataDto', () => {
+  it('rejects a body with no tables, naming the field', async () => {
+    const { errors } = await run({ force: true });
+    // Before this DTO the inline `@Body()` type erased, so this body reached the restore and threw
+    // from inside it — a 500 on the replace-all route, with nothing pointing at the missing field.
+    expect(errors.map(e => e.property)).toEqual(['tables']);
+  });
+
+  it('rejects an unknown key', async () => {
+    const { errors } = await run({ tables: fullTables(), stopOrphan: true });
+    expect(errors.map(e => e.property)).toEqual(['stopOrphan']);
+  });
+
+  it('accepts a valid body and leaves every table array intact', async () => {
+    // Load-bearing: whitelist strips undecorated properties from the object it validates, and every
+    // table key omitted from a restore is written EMPTY. If validation reached inside `tables`, a
+    // restore would silently blank the database instead of restoring it.
+    const tables = { ...fullTables(), sessions: [{ id: 's1', name: 'main' }], messages: [{ id: 'm1' }] };
+    const { instance, errors } = await run({ tables, force: false, stopOrphans: false });
+    expect(errors).toEqual([]);
+    expect(instance.tables).toEqual(tables);
+    expect(Object.keys(instance.tables as object)).toHaveLength(TABLE_IMPORTERS.length);
+  });
+
+  it.each(['force', 'stopOrphans'] as const)("maps a form-encoded 'false' on %s to a real false", async flag => {
+    // Both flags only ever OPEN the escape from the orphan-engine refusal. Under implicit conversion
+    // a plain boolean property casts 'false' to true, which would open that escape for a caller who
+    // spelled the opposite — the one direction this change must not introduce.
+    const { instance, errors } = await run({ tables: fullTables(), [flag]: 'false' });
+    expect(errors).toEqual([]);
+    expect(instance[flag]).toBe(false);
+  });
+
+  it.each(['force', 'stopOrphans'] as const)('rejects an ambiguous spelling on %s', async flag => {
+    const { errors } = await run({ tables: fullTables(), [flag]: 'yes' });
+    expect(errors.map(e => e.property)).toEqual([flag]);
+  });
+
+  it('leaves an omitted flag absent, so the default orphan refusal still applies', async () => {
+    const { instance, errors } = await run({ tables: fullTables() });
+    expect(errors).toEqual([]);
+    expect(instance.force).toBeUndefined();
+    expect(instance.stopOrphans).toBeUndefined();
+  });
+});

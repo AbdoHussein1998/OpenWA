@@ -3938,65 +3938,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "force": {
-                    "type": "boolean",
-                    "description": "Allow the replace to proceed even while engines are running for sessions the backup does not contain (they keep running until restart; see restartRequired). Prefer stopOrphans, which closes that window inside this request instead."
-                  },
-                  "stopOrphans": {
-                    "type": "boolean",
-                    "description": "Stop the running engines for sessions the backup does not contain, inside this request and before the replace runs. Supersedes force for the orphan case: with stopOrphans the engines no longer need a process restart to reconcile, so restartRequired stays false on the success path."
-                  },
-                  "tables": {
-                    "type": "object",
-                    "description": "Every one of the 14 migration tables is emptied before the restore runs, so a key omitted here is restored EMPTY rather than left untouched. Post the whole GET /api/infra/export-data payload, not a hand-built subset.",
-                    "properties": {
-                      "sessions": {
-                        "type": "array"
-                      },
-                      "webhooks": {
-                        "type": "array"
-                      },
-                      "messages": {
-                        "type": "array"
-                      },
-                      "messageBatches": {
-                        "type": "array"
-                      },
-                      "templates": {
-                        "type": "array"
-                      },
-                      "baileysStoredMessages": {
-                        "type": "array"
-                      },
-                      "lidMappings": {
-                        "type": "array"
-                      },
-                      "pluginInstances": {
-                        "type": "array"
-                      },
-                      "conversationMappings": {
-                        "type": "array"
-                      },
-                      "ingressEvents": {
-                        "type": "array"
-                      },
-                      "webhookDeliveryFailures": {
-                        "type": "array"
-                      },
-                      "integrationDeliveryFailures": {
-                        "type": "array"
-                      },
-                      "statusUpdates": {
-                        "type": "array"
-                      },
-                      "automationRules": {
-                        "type": "array"
-                      }
-                    }
-                  }
-                }
+                "$ref": "#/components/schemas/ImportDataDto"
               }
             }
           }
@@ -12544,6 +12486,70 @@
           "counts",
           "skippedTables",
           "omittedInlineMedia"
+        ]
+      },
+      "ImportDataDto": {
+        "type": "object",
+        "properties": {
+          "tables": {
+            "type": "object",
+            "description": "Every one of the 14 migration tables is emptied before the restore runs, so a key omitted here is restored EMPTY rather than left untouched. Post the whole GET /api/infra/export-data payload, not a hand-built subset.",
+            "properties": {
+              "sessions": {
+                "type": "array"
+              },
+              "webhooks": {
+                "type": "array"
+              },
+              "messages": {
+                "type": "array"
+              },
+              "messageBatches": {
+                "type": "array"
+              },
+              "templates": {
+                "type": "array"
+              },
+              "baileysStoredMessages": {
+                "type": "array"
+              },
+              "lidMappings": {
+                "type": "array"
+              },
+              "pluginInstances": {
+                "type": "array"
+              },
+              "conversationMappings": {
+                "type": "array"
+              },
+              "ingressEvents": {
+                "type": "array"
+              },
+              "webhookDeliveryFailures": {
+                "type": "array"
+              },
+              "integrationDeliveryFailures": {
+                "type": "array"
+              },
+              "statusUpdates": {
+                "type": "array"
+              },
+              "automationRules": {
+                "type": "array"
+              }
+            }
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Allow the replace to proceed even while engines are running for sessions the backup does not contain (they keep running until restart; see restartRequired). Prefer stopOrphans, which closes that window inside this request instead."
+          },
+          "stopOrphans": {
+            "type": "boolean",
+            "description": "Stop the running engines for sessions the backup does not contain, inside this request and before the replace runs. Supersedes force for the orphan case: with stopOrphans the engines no longer need a process restart to reconcile, so restartRequired stays false on the success path."
+          }
+        },
+        "required": [
+          "tables"
         ]
       },
       "InfraImportDataResponseDto": {
