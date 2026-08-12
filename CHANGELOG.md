@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Baileys message-store round-trip test now exercises the serialization it names. Its fixture carried no binary field, so the assertions held under any replacer/reviver pair — including identity — and a regression in the BufferJSON round-trip could not fail CI, on rows that reply, forward, react and delete-by-id resolve against. The fixture now carries bytes, a new spec pins the encoded wire form, and both are checked against an identity codec so neither can go vacuous again.
+
 - The Go SDK can now clear a webhook's `secret`, `headers` and `filters`, and a template's `header` and `footer`. Every field carried `omitempty` over a value type, so the values the server reads as "remove this" marshalled away to nothing: the request body came out `{}` and the stored values survived while the call reported success. Secret, headers, header and footer are now pointers, and a new `ClearFilters` flag emits the explicit `null` the server reads — which no struct tag can express for a nil pointer, and which dropping `omitempty` would have sent on every update instead.
 
 - The addressbook write guard now checks the id, not just its domain. `parseWaId('NOT A USER@c.us').kind` is `'user'`, so free text, letters and an empty user-part cleared the guard, reached the engine and were reported to the caller as a saved contact — for an entry keyed by something that is not a phone number. It now applies `isIndividualWid`, the same predicate the group-participant, channel-admin and message-mention surfaces already use on these very shapes.
