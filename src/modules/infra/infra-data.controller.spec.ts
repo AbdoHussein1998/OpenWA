@@ -38,6 +38,7 @@ import { IntegrationDeliveryFailure } from '../integration/entities/integration-
 import { StatusUpdate } from '../status-store/entities/status-update.entity';
 import { AutomationRule } from '../automation/entities/automation-rule.entity';
 import { AuditAction } from '../audit/entities/audit-log.entity';
+import { BadRequestException } from '@nestjs/common';
 
 describe('InfraDataController.importData round-trips export-data (no silent message/batch loss)', () => {
   let ds: DataSource;
@@ -1995,5 +1996,35 @@ describe('restoreSessionOwnership', () => {
     expect((asDate as Date).toISOString()).toBe('2026-08-06T10:02:30.000Z');
     expect(typeof (await bindLease('2026-08-06T10:00:30.000Z', readAt, commitAt))).toBe('string');
     expect(await bindLease(null, readAt, commitAt)).toBeNull();
+  });
+});
+
+/**
+ * `data.tables.sessions` was dereferenced with `.map()` before anything checked it was an array, so a
+ * hand-edited or truncated archive whose table value is a string (or an array of nulls) produced a
+ * TypeError — a 500 that tells the operator the server broke, when what actually happened is that
+ * their file is malformed. It fires before the transaction opens, so nothing was written; only the
+ * answer was wrong.
+ */
+describe('InfraDataController.importData rejects a malformed table value', () => {
+  const controller = () => new InfraDataController({ get: () => undefined } as never, {} as never);
+
+  it.each([
+    ['a string', 'not-an-array'],
+    ['a number', 7],
+    ['an object', { id: 'x' }],
+  ])('answers 400 when tables.sessions is %s', async (_label, value) => {
+    await expect(controller().importData({ tables: { sessions: value } } as never)).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('names the offending table so the operator can fix the file', async () => {
+    await expect(controller().importData({ tables: { messages: 'nope' } } as never)).rejects.toThrow(/messages/);
+  });
+
+  // Negative twin: an absent table is legal (a partial archive), and must not be rejected.
+  it('accepts an archive that simply omits a table', async () => {
+    await expect(controller().importData({ tables: {} })).rejects.not.toThrow(/must be an array/);
   });
 });

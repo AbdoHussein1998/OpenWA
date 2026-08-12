@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Body, ConflictException, HttpCode, HttpStatus, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Optional,
+  Post,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { InfraExportDataResponseDto, InfraImportDataResponseDto } from './dto/infra-response.dto';
 import { ImportDataDto } from './dto/import-data.dto';
@@ -556,6 +566,16 @@ export class InfraDataController {
     // engines writing into the freshly replaced tables for an unbounded time is the corruption this
     // gate exists to prevent, so the explicit-stop path closes that window instead of relying on the
     // operator to restart promptly.
+    // Every present table must be an array of rows before anything dereferences one. `.map()` on a
+    // string or a number is a TypeError — a 500 telling the operator the SERVER broke, when their
+    // archive is simply malformed. Checked for all tables, not just `sessions`: the rest are read
+    // inside the transaction, where the same mistake would fail mid-restore instead of before it.
+    for (const [table, rows] of Object.entries(data.tables ?? {})) {
+      if (rows !== undefined && !Array.isArray(rows)) {
+        throw new BadRequestException(`tables.${table} must be an array of rows`);
+      }
+    }
+
     const importedSessionIds = new Set((data.tables.sessions ?? []).map(s => s.id));
     const orphanedEngines = (this.sessionService?.getActiveSessionIds() ?? []).filter(
       id => !importedSessionIds.has(id),
