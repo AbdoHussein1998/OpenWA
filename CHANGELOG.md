@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-13
+
 ### Added
 
 - ⚠️ **Breaking (config).** `NODE_ENV` is checked at boot, so a value outside `production`, `development` and `test` fails startup with a named error instead of silently selecting the permissive branch of every production hardening — CORS, Swagger, DTO error detail, the default-secret guard and the `ALLOW_DEV_API_KEY` rejection that stops the public `dev-admin-key` being seeded as an ADMIN credential. The value is compared verbatim, so one padded with surrounding whitespace is rejected too rather than accepted and then treated as non-production: the hardening readers compare the raw variable. (The default-secret guard is the exception, and in the safe direction — it runs before boot validation and trims, so a padded `production` is enforced as production there and then refused by the check below either way.) Action required: a deployment running `NODE_ENV=staging` (or any other value) now refuses to boot where it previously started with development-grade security. Set `production`, or leave the variable unset. Unset remains legal and unchanged. A blank `NODE_ENV=` counts as unset for the default-secret guard too, so both halves of the rule agree about the same string.
