@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Go SDK can now clear a webhook's `secret`, `headers` and `filters`, and a template's `header` and `footer`. Every field carried `omitempty` over a value type, so the values the server reads as "remove this" marshalled away to nothing: the request body came out `{}` and the stored values survived while the call reported success. Secret, headers, header and footer are now pointers, and a new `ClearFilters` flag emits the explicit `null` the server reads — which no struct tag can express for a nil pointer, and which dropping `omitempty` would have sent on every update instead.
+
 - The addressbook write guard now checks the id, not just its domain. `parseWaId('NOT A USER@c.us').kind` is `'user'`, so free text, letters and an empty user-part cleared the guard, reached the engine and were reported to the caller as a saved contact — for an entry keyed by something that is not a phone number. It now applies `isIndividualWid`, the same predicate the group-participant, channel-admin and message-mention surfaces already use on these very shapes.
 
 - `POST /api/infra/import-data` now answers 400 for a malformed archive instead of 500. A table value that is not an array — a hand-edited or truncated backup — was dereferenced with `.map()` before anything checked it, so the operator was told the server had broken when their file was simply wrong. Checked for every table, not only `sessions`: the rest are read inside the transaction, where the same mistake would fail mid-restore rather than before it opens.
