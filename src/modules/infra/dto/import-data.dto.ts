@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsObject, IsOptional } from 'class-validator';
+import { Allow, IsBoolean, IsObject, IsOptional } from 'class-validator';
 import { ToStrictBoolean } from '../../../common/utils/strict-boolean';
 import type { MigrationTables } from '../migration-tables.types';
 import { TABLE_IMPORTERS } from '../table-importers';
@@ -30,6 +30,14 @@ const TABLE_PROPERTIES: Record<string, { type: 'array' }> = Object.fromEntries(
  * a caller who spelled the opposite. @ToStrictBoolean accepts only a real boolean or an exact
  * 'true'/'false' and leaves anything else to be refused. An absent flag stays absent, so the default
  * path is still the visible 409 IMPORT_WOULD_ORPHAN_ENGINES.
+ *
+ * The body IS the export file: `docs/14` tells the operator to post it whole, and the export wraps
+ * `tables` in five metadata fields. They are declared with @Allow — accepted, never read — because
+ * `forbidNonWhitelisted` rejects any property the class does not name, and rejecting the product's
+ * own backup would break the restore this route exists for. They carry no constraints on purpose: a
+ * restore must not fail over the shape of a field it ignores, including one written by an older
+ * release. `import-data.dto.spec.ts` binds this list to the export contract, so a field added to the
+ * export cannot silently start failing the import again.
  */
 export class ImportDataDto {
   @ApiProperty({
@@ -58,4 +66,43 @@ export class ImportDataDto {
   @IsOptional()
   @IsBoolean()
   stopOrphans?: boolean;
+
+  // ---- Export-envelope metadata: accepted so the backup posts back verbatim, never read. ----
+
+  // Each carries an explicit published `type` matching what the export sends. The declared TS type is
+  // `unknown` because the restore never reads them, but an untyped @ApiPropertyOptional over `unknown`
+  // publishes `type: object`, which for `exportedAt` breaks the contract invariant that a timestamp
+  // property is never a bare object (`openapi-contract.spec.ts`).
+
+  @ApiPropertyOptional({ type: 'string', description: 'Ignored. Present so the export file posts back unmodified.' })
+  @Allow()
+  exportedAt?: unknown;
+
+  @ApiPropertyOptional({ type: 'string', description: 'Ignored. Present so the export file posts back unmodified.' })
+  @Allow()
+  dataDbType?: unknown;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'number' },
+    description: 'Ignored. Present so the export file posts back unmodified.',
+  })
+  @Allow()
+  counts?: unknown;
+
+  @ApiPropertyOptional({
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Ignored. Present so the export file posts back unmodified.',
+  })
+  @Allow()
+  skippedTables?: unknown;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'number' },
+    description: 'Ignored. Present so the export file posts back unmodified.',
+  })
+  @Allow()
+  omittedInlineMedia?: unknown;
 }

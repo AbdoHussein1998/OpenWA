@@ -1,4 +1,6 @@
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ImportDataDto } from './import-data.dto';
@@ -21,6 +23,26 @@ function fullTables(): Record<string, unknown[]> {
   return Object.fromEntries(TABLE_IMPORTERS.map(importer => [importer.key, []]));
 }
 
+/** Top-level property names of a published schema, read from the committed contract. */
+function publishedProperties(schema: string): string[] {
+  const snapshot = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', '..', 'openapi.json'), 'utf8')) as {
+    components: { schemas: Record<string, { properties?: Record<string, unknown> }> };
+  };
+  return Object.keys(snapshot.components.schemas[schema]?.properties ?? {});
+}
+
+/** The export file exactly as GET /api/infra/export-data returns it, tables filled in. */
+function exportEnvelope(): Record<string, unknown> {
+  return {
+    exportedAt: '2026-08-12T00:00:00.000Z',
+    dataDbType: 'sqlite',
+    tables: { ...fullTables(), sessions: [{ id: 's1', name: 'main' }] },
+    counts: { sessions: 1 },
+    skippedTables: [],
+    omittedInlineMedia: { messages: 0, messageBatches: 0 },
+  };
+}
+
 describe('ImportDataDto', () => {
   it('rejects a body with no tables, naming the field', async () => {
     const { errors } = await run({ force: true });
@@ -32,6 +54,37 @@ describe('ImportDataDto', () => {
   it('rejects an unknown key', async () => {
     const { errors } = await run({ tables: fullTables(), stopOrphan: true });
     expect(errors.map(e => e.property)).toEqual(['stopOrphan']);
+  });
+
+  it('accepts the export file posted back verbatim', async () => {
+    // docs/14 tells the operator to post the whole backup (`-d @data-backup.json`), and the export
+    // wraps `tables` in five metadata fields. When this DTO named only `tables`, forbidNonWhitelisted
+    // rejected all five and the documented restore answered 400 — a bare "Bad Request" in production,
+    // where field-level detail is suppressed. Nothing caught it: the round-trip specs call
+    // controller.importData({ tables }) directly and never reach the pipe.
+    const { instance, errors } = await run(exportEnvelope());
+    expect(errors).toEqual([]);
+    expect(Object.keys(instance.tables as object)).toHaveLength(TABLE_IMPORTERS.length);
+  });
+
+  it('accepts every top-level field the export publishes', async () => {
+    // The real gate: bind the accepted set to the export contract instead of trusting that whoever
+    // adds a field to the export remembers this file. A new export field fails here, naming itself,
+    // rather than 400ing an operator's restore.
+    //
+    // It probes ACCEPTANCE, one field at a time, rather than comparing the two published schemas.
+    // Publication and acceptance are different mechanisms — @ApiPropertyOptional puts a field in the
+    // contract, @Allow is what makes forbidNonWhitelisted admit it — so a field carrying only the
+    // former would pass a schema-to-schema comparison while still 400ing the restore.
+    const exported = publishedProperties('InfraExportDataResponseDto');
+    expect(exported.length).toBeGreaterThanOrEqual(6); // non-vacuous: the contract was really read
+    const rejected: string[] = [];
+    for (const field of exported) {
+      if (field === 'tables') continue; // carries its own constraints, covered above
+      const { errors } = await run({ tables: fullTables(), [field]: exportEnvelope()[field] });
+      if (errors.length) rejected.push(field);
+    }
+    expect(rejected).toEqual([]);
   });
 
   it('accepts a valid body and leaves every table array intact', async () => {
