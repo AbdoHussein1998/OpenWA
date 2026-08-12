@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Turkish (`tr`) dashboard translation. Thanks @codedByCan.
+- `AUDIT_RETENTION_DAYS` is checked at boot, so a typo fails startup with a named error instead of silently reverting to the 90-day default. It is validated as non-negative rather than positive, because `0` is the documented switch that disables audit-log pruning entirely.
 
 ### Fixed
 
