@@ -172,6 +172,62 @@ class MessagesResourceTest {
         assertTrue(tx.lastRequest().body().contains("welcome-tpl"));
     }
 
+    // Asserted on the body rather than the path: Gson omits a null component, so a record that
+    // forgot the field would still compile and still route correctly while sending nothing.
+    @Test
+    void quotedMessageIdReachesTheBodyOnEverySend() {
+        tx.respond(200, MSG);
+        client.messages.sendText(
+            "s", SendTextRequest.builder().chatId("628@c.us").text("hi").quotedMessageId("q-text").build());
+        assertTrue(tx.lastRequest().body().contains("q-text"));
+
+        tx.respond(200, MSG);
+        client.messages.sendImage(
+            "s", SendMediaRequest.builder().chatId("628@c.us").url("http://u").quotedMessageId("q-media").build());
+        assertTrue(tx.lastRequest().body().contains("q-media"));
+
+        tx.respond(200, MSG);
+        client.messages.sendLocation(
+            "s",
+            SendLocationRequest.builder()
+                .chatId("628@c.us")
+                .latitude(1.0)
+                .longitude(2.0)
+                .quotedMessageId("q-loc")
+                .build());
+        assertTrue(tx.lastRequest().body().contains("q-loc"));
+
+        tx.respond(200, MSG);
+        client.messages.sendContact(
+            "s",
+            SendContactRequest.builder()
+                .chatId("628@c.us")
+                .contactName("A")
+                .contactNumber("628")
+                .quotedMessageId("q-contact")
+                .build());
+        assertTrue(tx.lastRequest().body().contains("q-contact"));
+
+        tx.respond(200, MSG);
+        client.messages.sendPoll(
+            "s",
+            SendPollRequest.builder()
+                .chatId("628@c.us")
+                .name("Q")
+                .options(java.util.List.of("a", "b"))
+                .quotedMessageId("q-poll")
+                .build());
+        assertTrue(tx.lastRequest().body().contains("q-poll"));
+    }
+
+    // Known-negative control: an ordinary send must not carry the key at all.
+    @Test
+    void ordinarySendOmitsTheQuoteKey() {
+        tx.respond(200, MSG);
+        client.messages.sendImage("s", SendMediaRequest.builder().chatId("628@c.us").url("http://u").build());
+        assertTrue(!tx.lastRequest().body().contains("quotedMessageId"));
+    }
+
     @Test
     void replyHitsReplyPath() {
         tx.respond(200, MSG);

@@ -240,6 +240,12 @@ export interface SendTextRequest {
    * boolean and answers 501. Cannot be combined with `linkPreview: false`.
    */
   customLinkPreview?: { url: string; title: string; description?: string };
+  /**
+   * Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+   * matches the serialized message id, Baileys the raw message key id of a message it has already
+   * stored. An id the engine cannot resolve fails the send rather than delivering it unquoted.
+   */
+  quotedMessageId?: string;
 }
 
 export interface SendMediaRequest {
@@ -253,6 +259,12 @@ export interface SendMediaRequest {
   filename?: string;
   /** Max 1024 chars. */
   caption?: string;
+  /**
+   * Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+   * matches the serialized message id, Baileys the raw message key id of a message it has already
+   * stored. An id the engine cannot resolve fails the send rather than delivering it unquoted.
+   */
+  quotedMessageId?: string;
 }
 
 export interface SendAudioRequest extends SendMediaRequest {
@@ -276,12 +288,24 @@ export interface SendLocationRequest {
   longitude: number;
   description?: string;
   address?: string;
+  /**
+   * Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+   * matches the serialized message id, Baileys the raw message key id of a message it has already
+   * stored. An id the engine cannot resolve fails the send rather than delivering it unquoted.
+   */
+  quotedMessageId?: string;
 }
 
 export interface SendContactRequest {
   chatId: Jid;
   contactName: string;
   contactNumber: string;
+  /**
+   * Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+   * matches the serialized message id, Baileys the raw message key id of a message it has already
+   * stored. An id the engine cannot resolve fails the send rather than delivering it unquoted.
+   */
+  quotedMessageId?: string;
 }
 
 export interface ReplyMessageRequest {
@@ -408,6 +432,12 @@ export interface SendPollRequest {
   options: string[];
   /** Allow voters to pick several options (default single choice). */
   allowMultipleAnswers?: boolean;
+  /**
+   * Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+   * matches the serialized message id, Baileys the raw message key id of a message it has already
+   * stored. An id the engine cannot resolve fails the send rather than delivering it unquoted.
+   */
+  quotedMessageId?: string;
 }
 
 export interface ListMessagesQuery {

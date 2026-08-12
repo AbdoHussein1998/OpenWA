@@ -297,6 +297,9 @@ class SendTextRequest(TypedDict, total=False):
     # so this works even for a URL the gateway cannot reach. Baileys only -- whatsapp-web.js takes a
     # boolean and answers 501. Cannot be combined with linkPreview=False.
     customLinkPreview: CustomLinkPreview
+    # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+    # matches the serialized message id, Baileys the raw key id of a message it has already stored.
+    quotedMessageId: str
 
 
 class SendMediaRequest(TypedDict, total=False):
@@ -306,6 +309,9 @@ class SendMediaRequest(TypedDict, total=False):
     mimetype: str
     filename: str
     caption: str
+    # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+    # matches the serialized message id, Baileys the raw key id of a message it has already stored.
+    quotedMessageId: str
 
 
 class SendAudioRequest(SendMediaRequest, total=False):
@@ -329,12 +335,23 @@ class SendLocationRequest(TypedDict, total=False):
     longitude: float
     description: str
     address: str
+    # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+    # matches the serialized message id, Baileys the raw key id of a message it has already stored.
+    quotedMessageId: str
 
 
-class SendContactRequest(TypedDict):
+class _SendContactRequired(TypedDict):
     chatId: Jid
     contactName: str
     contactNumber: str
+
+
+# Split so the optional key can be added without loosening the three required ones — the same
+# inheritance shape SendAudioRequest already uses.
+class SendContactRequest(_SendContactRequired, total=False):
+    # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+    # matches the serialized message id, Baileys the raw key id of a message it has already stored.
+    quotedMessageId: str
 
 
 class ReplyMessageRequest(TypedDict):
@@ -386,6 +403,9 @@ class SendPollRequest(TypedDict, total=False):
     # Options to vote on (WhatsApp allows between 2 and 12).
     options: list[str]
     allowMultipleAnswers: bool
+    # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
+    # matches the serialized message id, Baileys the raw key id of a message it has already stored.
+    quotedMessageId: str
 
 
 # ``from`` is a Python keyword, so use the functional TypedDict form.

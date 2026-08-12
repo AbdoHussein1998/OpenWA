@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AUDIT_RETENTION_DAYS` is checked at boot, so a typo fails startup with a named error instead of silently reverting to the 90-day default. It is validated as an integer of any sign rather than a positive one, because both `0` and any negative value are documented switches that disable audit-log pruning entirely.
 - `message.controller.spec.ts` holds the two headers the stored-media download sends, `X-Content-Type-Options: nosniff` and `Content-Disposition: attachment`; deleting either had passed every suite in the repo.
 - Optional `quotedMessageId` on every `send-*` message endpoint and its MCP tool, so a reply can carry media, a location, a contact card or a poll instead of only text. An id the engine cannot resolve now fails the send rather than delivering the message unquoted. Thanks @nirizr for the report.
+- All five SDK clients expose `quotedMessageId` on their send request types, so a typed caller can reply with media, a location, a contact card or a poll without hand-building the body.
 
 ### Fixed
 
