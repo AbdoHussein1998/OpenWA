@@ -167,8 +167,23 @@ export class ScopeBindingService implements OnApplicationBootstrap {
       // instance being torn down.
       const siblings = await this.instances.list(pluginId);
       if (!activate && siblings.some(i => i.enabled && i.sessionScope === scope)) {
-        // A sibling still binds this scope: leave the session active and its sessionConfig intact —
-        // stripping either would silence the sibling until the next boot-time reconciliation.
+        // A sibling still binds this scope, so the SESSION stays active: dropping it would silence
+        // that sibling until the next boot-time reconciliation.
+        //
+        // The config slice does NOT survive with it. It is keyed by scope, so it holds whichever
+        // instance was projected last — usually the one being retired here — and once this teardown
+        // leaves a single enabled instance on the scope, dispatch re-declares the slice attributable
+        // to that survivor (PluginSandboxBridge.scopeHasAtMostOneInstance) and merges it beneath the
+        // survivor's own row. A survivor relying on a plugin default for a key it does not define
+        // was handed the retired tenant's endpoint and credentials for it — the cross-tenant collapse
+        // per-instance resolution exists to prevent, reachable by disabling or deleting one of two
+        // instances. Clearing costs the survivor nothing it owns: resolveInstanceConfig layers its
+        // own row on top either way, and boot reconciliation re-projects it.
+        //
+        // An operator's per-session override (PUT /plugins/:id/config/:sessionId) shares this slice
+        // and is cleared with it. That is the safe direction — provisioning already overwrites such
+        // an override, and a missing default beats another tenant's credential.
+        this.loader.setPluginSessionConfig(pluginId, scope, {});
         return;
       }
       this.loader.setPluginSessionConfig(pluginId, scope, activate ? config : {});
