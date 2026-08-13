@@ -5732,15 +5732,20 @@ describe('SessionService', () => {
         { id: 'a', name: 'A' },
         { id: 'b', name: 'B' },
       ]);
-      jest.spyOn(service as unknown as { delay: () => Promise<void> }, 'delay').mockResolvedValue(undefined);
       const startSpy = jest.spyOn(service, 'start').mockResolvedValue(undefined as never);
 
-      service.onApplicationBootstrap();
-      await autoStartRun();
+      jest.useFakeTimers();
+      try {
+        service.onApplicationBootstrap();
+        await jest.advanceTimersByTimeAsync(2_000); // the inter-launch throttle
+        await autoStartRun();
 
-      expect(startSpy).toHaveBeenCalledTimes(2);
-      expect(startSpy).toHaveBeenCalledWith('a');
-      expect(startSpy).toHaveBeenCalledWith('b');
+        expect(startSpy).toHaveBeenCalledTimes(2);
+        expect(startSpy).toHaveBeenCalledWith('a');
+        expect(startSpy).toHaveBeenCalledWith('b');
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('keeps starting the remaining sessions when one fails', async () => {
@@ -5749,16 +5754,21 @@ describe('SessionService', () => {
         { id: 'a', name: 'A' },
         { id: 'b', name: 'B' },
       ]);
-      jest.spyOn(service as unknown as { delay: () => Promise<void> }, 'delay').mockResolvedValue(undefined);
       const startSpy = jest
         .spyOn(service, 'start')
         .mockRejectedValueOnce(new Error('boom'))
         .mockResolvedValueOnce(undefined as never);
 
-      service.onApplicationBootstrap();
-      await autoStartRun();
+      jest.useFakeTimers();
+      try {
+        service.onApplicationBootstrap();
+        await jest.advanceTimersByTimeAsync(2_000); // the inter-launch throttle
+        await autoStartRun();
 
-      expect(startSpy).toHaveBeenCalledTimes(2);
+        expect(startSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     // Nest binds the HTTP listener only after every bootstrap hook settles, and a launch is a
@@ -5790,16 +5800,21 @@ describe('SessionService', () => {
         { id: 'b', name: 'B' },
         { id: 'c', name: 'C' },
       ]);
-      jest.spyOn(service as unknown as { delay: () => Promise<void> }, 'delay').mockResolvedValue(undefined);
       const startSpy = jest.spyOn(service, 'start').mockImplementation(() => {
         (service as unknown as { shuttingDown: boolean }).shuttingDown = true;
         return Promise.resolve(undefined as never);
       });
 
-      service.onApplicationBootstrap();
-      await autoStartRun();
+      jest.useFakeTimers();
+      try {
+        service.onApplicationBootstrap();
+        await jest.advanceTimersByTimeAsync(2_000); // the inter-launch throttle
+        await autoStartRun();
 
-      expect(startSpy).toHaveBeenCalledTimes(1);
+        expect(startSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     // The other half of detaching it: a SIGTERM during boot must not leave a browser being launched

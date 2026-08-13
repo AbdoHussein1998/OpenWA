@@ -4,7 +4,6 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { createLogger } from '../../common/services/logger.service';
-import { userPart } from '../../engine/identity/wa-id';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { evaluateFilters } from '../webhook/filters/filter-evaluator';
 import type { MessageService } from '../message/message.service';
@@ -143,7 +142,7 @@ export class AutomationRulesService {
 
     // Same lid->phone resolution the webhook filter match uses, so a phone-valued sender condition
     // matches a lid-addressed sender identically in both places.
-    const resolveLid = (jid: string): string | null => this.lidMappingStore?.getCached(userPart(jid)) ?? null;
+    const resolveLid = (jid: string): string | null => this.lidMappingStore?.resolveLid(jid) ?? null;
 
     // First match wins: one inbound message never produces more than one automated reply, and rule
     // order (creation order) is the tiebreak the operator can reason about.

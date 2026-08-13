@@ -266,7 +266,7 @@ export class StatusStoreService implements OnModuleInit, OnModuleDestroy {
    */
   private canonicalContactJid(jid: string): string {
     if (!jid.endsWith('@lid')) return jid;
-    const phone = this.lidMappingStore?.getCached(userPart(jid));
+    const phone = this.lidMappingStore?.resolveLid(jid);
     return phone ? `${phone}@c.us` : jid;
   }
 

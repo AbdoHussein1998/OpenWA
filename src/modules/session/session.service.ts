@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, Not, IsNull, DataSource, FindManyOptions } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
+import { setTimeout } from 'node:timers/promises';
 import { Session, SessionStatus } from './entities/session.entity';
 import { CreateSessionDto, SessionConfigResponseDto, UpdateSessionConfigDto } from './dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
@@ -191,7 +192,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       }
       // Throttle between sequential Chromium launches; no need to wait after the last one.
       if (i < sessions.length - 1) {
-        await this.delay(2000);
+        await setTimeout(2000);
       }
     }
   }
@@ -777,9 +778,5 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     sessionIds: string[],
   ): Promise<{ stopped: string[]; notRunning: string[]; failed: string[] }> {
     return this.engineLifecycle.stopOrphanEngines(sessionIds);
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

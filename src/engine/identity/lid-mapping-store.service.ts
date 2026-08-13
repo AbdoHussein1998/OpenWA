@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { LidMapping } from './lid-mapping.entity';
+import { userPart } from './wa-id';
 import { createLogger } from '../../common/services/logger.service';
 import { resolveNonNegativeIntEnv } from '../../config/configuration';
 
@@ -22,6 +23,12 @@ export interface LidMappingStore {
    * seen. A miss is warmed from the persisted table in the background, so a later read can hit.
    */
   getCached(lid: string): string | null | undefined;
+  /**
+   * Resolve any WA JID through the mirror: the phone digits for its user part, `null` when the lid
+   * is known-unresolved or never seen. The webhook filter match, automation-rule match, plugin
+   * engine reads, and status contact grouping all resolve through this one method so they agree.
+   */
+  resolveLid(jid: string): string | null;
   /** Sync reverse lookup: the lids currently mapped to this phone (used by the message from-filter). */
   lidsForPhone(phone: string): string[];
   /** Write-through, last-write-wins: update the cache + persist. A `null` phone records a negative result. */
@@ -104,6 +111,10 @@ export class LidMappingStoreService implements LidMappingStore, OnModuleInit {
     }
     this.warmFromTable(lid);
     return undefined;
+  }
+
+  resolveLid(jid: string): string | null {
+    return this.getCached(userPart(jid)) ?? null;
   }
 
   lidsForPhone(phone: string): string[] {

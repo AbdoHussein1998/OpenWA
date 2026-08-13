@@ -204,7 +204,7 @@ export class BaileysLifecycle {
     }
 
     // An internal reconnect (transient drop) overwrites this.sock WITHOUT going through
-    // disconnect/logout/destroy, so the previous socket's WebSocket and the 13 ev listeners we
+    // disconnect/logout/destroy, so the previous socket's WebSocket and the 15 ev listeners we
     // register below would leak on every reconnect. Tear the prior socket down first. Detach OUR
     // connection.update listener BEFORE end(): Baileys' own end() synchronously emits a synthetic
     // connection.update {connection:'close'}, which — if still wired — would re-enter
@@ -224,6 +224,7 @@ export class BaileysLifecycle {
         previous.ev.removeAllListeners('lid-mapping.update');
         previous.ev.removeAllListeners('group-participants.update');
         previous.ev.removeAllListeners('groups.update');
+        previous.ev.removeAllListeners('group.join-request');
         previous.ev.removeAllListeners('call');
         previous.ev.removeAllListeners('presence.update');
         void previous.end(undefined);
@@ -271,7 +272,16 @@ export class BaileysLifecycle {
     });
     this.sock = sock;
 
-    sock.ev.on('creds.update', () => void saveCreds());
+    sock.ev.on(
+      'creds.update',
+      () =>
+        void saveCreds().catch(err => {
+          this.host.logger.warn('Baileys creds.update save failed', {
+            sessionId: this.host.config.sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }),
+    );
     sock.ev.on('connection.update', update => this.handleConnectionUpdate(update));
     sock.ev.on('messages.upsert', event => this.host.handleMessagesUpsert(event));
     sock.ev.on('messages.update', updates => this.host.handleMessagesUpdate(updates));

@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import type { HookManager, HookEvent } from '../hooks';
 import type { LidMappingStore } from '../../engine/identity/lid-mapping-store.service';
 import type { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
-import { toNeutralJid, userPart } from '../../engine/identity/wa-id';
+import { toNeutralJid } from '../../engine/identity/wa-id';
 import { ConversationMappingConflict } from '../../modules/integration/conversation-mapping.service';
 import { createLogger } from '../../common/services/logger.service';
 import type { MessageService } from '../../modules/message/message.service';
@@ -277,7 +277,7 @@ export class PluginCapabilityContext {
         // itself is a synchronous host lid->phone lookup, not an engine call, mirroring the webhook
         // from-filter. Not `async` (nothing to await) — a resolved promise satisfies the signature.
         this.resolveEngineRead(plugin, sessionId);
-        return Promise.resolve(toNeutralJid(chatId, jid => this.lidMappingStore?.getCached(userPart(jid)) ?? null));
+        return Promise.resolve(toNeutralJid(chatId, jid => this.lidMappingStore?.resolveLid(jid) ?? null));
       },
     } satisfies PluginEngineReadCapability;
   }

@@ -23,6 +23,7 @@ import { Webhook } from './entities/webhook.entity';
 import { WebhookDeliveryFailure } from './entities/webhook-delivery-failure.entity';
 import { WebhookFilters } from './filters/filter-types';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
+import { userPart } from '../../engine/identity/wa-id';
 import { HookManager } from '../../core/hooks';
 import { QUEUE_NAMES } from '../queue/queue-names';
 import { Session } from '../session/entities/session.entity';
@@ -55,7 +56,7 @@ describe('WebhookService', () => {
   let configService: jest.Mocked<Partial<ConfigService>>;
   let hookManager: jest.Mocked<Partial<HookManager>>;
   let webhookQueue: jest.Mocked<Record<string, jest.Mock>>;
-  let lidStore: { getCached: jest.Mock };
+  let lidStore: { getCached: jest.Mock; resolveLid: jest.Mock };
 
   beforeEach(async () => {
     repository = {
@@ -97,7 +98,11 @@ describe('WebhookService', () => {
       add: jest.fn().mockResolvedValue(undefined),
     };
 
-    lidStore = { getCached: jest.fn().mockReturnValue(null) };
+    lidStore = {
+      getCached: jest.fn().mockReturnValue(null),
+      // Mirrors the real implementation so tests keep driving resolution through getCached mocks.
+      resolveLid: jest.fn((jid: string) => (lidStore.getCached(userPart(jid)) as string | null | undefined) ?? null),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

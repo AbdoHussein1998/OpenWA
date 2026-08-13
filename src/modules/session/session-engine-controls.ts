@@ -6,7 +6,7 @@ import { Message } from '../message/entities/message.entity';
 import { MessageBatch } from '../message/entities/message-batch.entity';
 import { Webhook } from '../webhook/entities/webhook.entity';
 import { Template } from '../template/entities/template.entity';
-import { BaileysStoredMessage } from '../../engine/adapters/baileys-stored-message.entity';
+import { BaileysStoredMessage } from '../../engine';
 import { EngineFactory } from '../../engine/engine.factory';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SessionErrorStore } from './session-error-store.service';

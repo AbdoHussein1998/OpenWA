@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Not, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { createHash, randomUUID } from 'crypto';
+import { setTimeout } from 'node:timers/promises';
 import {
   MessageBatch,
   BatchStatus,
@@ -578,7 +579,7 @@ export class BulkMessageService implements OnApplicationBootstrap {
     // Delay before next message (except for last)
     if (i < batch.messages.length - 1 && this.processingBatches.get(batch.id)) {
       const delay = this.calculateDelay(batch.options);
-      await this.sleep(delay);
+      await setTimeout(delay);
     }
     return true;
   }
@@ -803,9 +804,5 @@ export class BulkMessageService implements OnApplicationBootstrap {
       delay += Math.random() * 2000; // Add 0-2 seconds random
     }
     return delay;
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import * as crypto from 'crypto';
+import { setTimeout } from 'node:timers/promises';
 import { Webhook } from './entities/webhook.entity';
 import { WebhookDeliveryFailure } from './entities/webhook-delivery-failure.entity';
 import { recordWebhookDeliveryFailure, statusCodeFromError } from './utils/record-delivery-failure';
@@ -24,7 +25,6 @@ import { QUEUE_NAMES } from '../queue/queue-names';
 import { generateIdempotencyKey, generateDeliveryId } from './utils/idempotency.util';
 import { evaluateFilters } from './filters/filter-evaluator';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
-import { userPart } from '../../engine/identity/wa-id';
 import {
   assertSafeFetchUrl,
   withSafeFetch,
@@ -204,7 +204,7 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
     while (this.dispatchLimiter.activeCount > 0 || this.pendingBookkeeping.size > 0) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
-      await this.delay(Math.min(50, remaining));
+      await setTimeout(Math.min(50, remaining));
     }
     for (const lost of this.inFlightDeliveries.values()) {
       this.logger.error('Webhook delivery abandoned during shutdown', undefined, {
@@ -447,7 +447,7 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
   private filterMatchingWebhooks(webhooks: Webhook[], event: string, data: Record<string, unknown>): Webhook[] {
     // Resolve a lid actor to its phone through the persistent table so a phone filter matches a
     // lid-addressed sender (e.g. an unresolved @lid group participant). Absent store -> no resolution.
-    const resolveLid = (jid: string): string | null => this.lidMappingStore?.getCached(userPart(jid)) ?? null;
+    const resolveLid = (jid: string): string | null => this.lidMappingStore?.resolveLid(jid) ?? null;
     const subscribed = webhooks.filter(w => w.events.includes(event) || w.events.includes('*'));
     const matching = subscribed.filter(w => evaluateFilters(w.filters, event, data, resolveLid));
     // A subscribed webhook that a filter drops leaves no trace otherwise: dispatch() awaits an empty
@@ -924,7 +924,7 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
 
       if (attempt < webhook.retryCount) {
         const delay = this.configService.get<number>('webhook.retryDelay', 5000);
-        await this.delay(delay * attempt);
+        await setTimeout(delay * attempt);
         return this.deliverWebhook(webhook, payload, headers, body, attempt + 1);
       }
       // All direct-path retries exhausted — persist a durable failure record before giving up, mirroring
@@ -993,9 +993,5 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
     const hmac = crypto.createHmac('sha256', secret);
     hmac.update(payload);
     return `sha256=${hmac.digest('hex')}`;
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
