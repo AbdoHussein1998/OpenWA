@@ -29,6 +29,9 @@ import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces
 import { createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
 
+/** Pause between sequential auto-start launches so a burst of Chromium boots does not spike the host. */
+export const AUTOSTART_THROTTLE_MS = 2_000;
+
 /**
  * The session-record API: CRUD over the sessions table, aggregate stats, and the thin engine query
  * proxies (QR/pairing/chats/groups/chat-state) behind the controller routes. Every engine LIFECYCLE
@@ -192,7 +195,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       }
       // Throttle between sequential Chromium launches; no need to wait after the last one.
       if (i < sessions.length - 1) {
-        await setTimeout(2000);
+        await setTimeout(AUTOSTART_THROTTLE_MS);
       }
     }
   }

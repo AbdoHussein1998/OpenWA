@@ -13,7 +13,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SessionService } from './session.service';
+import { SessionService, AUTOSTART_THROTTLE_MS } from './session.service';
 import { ACK_RECONCILE_DELAY_MS } from './message-projector.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { Session, SessionStatus } from './entities/session.entity';
@@ -5737,7 +5737,7 @@ describe('SessionService', () => {
       jest.useFakeTimers();
       try {
         service.onApplicationBootstrap();
-        await jest.advanceTimersByTimeAsync(2_000); // the inter-launch throttle
+        await jest.advanceTimersByTimeAsync(AUTOSTART_THROTTLE_MS); // the inter-launch throttle
         await autoStartRun();
 
         expect(startSpy).toHaveBeenCalledTimes(2);
@@ -5762,7 +5762,7 @@ describe('SessionService', () => {
       jest.useFakeTimers();
       try {
         service.onApplicationBootstrap();
-        await jest.advanceTimersByTimeAsync(2_000); // the inter-launch throttle
+        await jest.advanceTimersByTimeAsync(AUTOSTART_THROTTLE_MS); // the inter-launch throttle
         await autoStartRun();
 
         expect(startSpy).toHaveBeenCalledTimes(2);
@@ -5808,7 +5808,7 @@ describe('SessionService', () => {
       jest.useFakeTimers();
       try {
         service.onApplicationBootstrap();
-        await jest.advanceTimersByTimeAsync(2_000); // the inter-launch throttle
+        await jest.advanceTimersByTimeAsync(AUTOSTART_THROTTLE_MS); // the inter-launch throttle
         await autoStartRun();
 
         expect(startSpy).toHaveBeenCalledTimes(1);

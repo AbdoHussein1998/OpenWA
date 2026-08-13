@@ -6,7 +6,7 @@ import { userPart } from './wa-id';
 import { createLogger } from '../../common/services/logger.service';
 import { resolveNonNegativeIntEnv } from '../../config/configuration';
 
-// Default cap on the in-memory lid->phone mirror. Every other long-lived map in the audited surface is
+// Default cap on the in-memory lid->phone mirror. Every other long-lived map in the engine surface is
 // bounded (the per-session lidPhoneCache is 5000); the LID mirror was the lone exception. A miss falls
 // back to engine re-resolution, so the cap trades a re-resolution for bounded memory, never data loss.
 export const LID_MAPPING_CACHE_DEFAULT = 5000;
