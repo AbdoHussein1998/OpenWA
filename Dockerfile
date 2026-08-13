@@ -9,7 +9,10 @@
 # minifier) optional dependency fails to install ("Cannot find module lightningcss.linux-arm64-gnu.node").
 # The per-arch runtime deps are installed natively in the target-platform production stage below.
 # NOTE: $BUILDPLATFORM requires BuildKit (CI uses buildx; modern `docker build`/compose default to it).
-FROM --platform=$BUILDPLATFORM docker.io/node:22-slim AS builder
+# The digest pins the multi-arch node:22-slim index, so every build starts from the same immutable
+# base; dependabot's docker ecosystem proposes the new digest when the tag moves. Update tag and
+# digest together.
+FROM --platform=$BUILDPLATFORM docker.io/node:22-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS builder
 
 WORKDIR /app
 
@@ -52,7 +55,8 @@ COPY . .
 RUN npm run build && npm run dashboard:ci -- --include=dev && npm run dashboard:build && rm -f dist/*.tsbuildinfo
 
 # ===== Stage 2: Production =====
-FROM docker.io/node:22-slim AS production
+# Same digest-pinned node:22-slim base as the builder stage.
+FROM docker.io/node:22-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS production
 
 # Chrome for Testing has no linux-arm64 build, and Puppeteer's chromium snapshot
 # is x86_64-only on Linux too. So: amd64 uses Chrome for Testing (downloaded below)
@@ -143,8 +147,9 @@ RUN npm ci --omit=dev \
 # what the release image scan reports. node:22-slim currently ships npm 10.9.8, whose bundle
 # carries a critical node-tar advisory plus sigstore/picomatch ones; npm 12 fixes all three.
 # Deliberately AFTER `npm ci`, so the application tree is still resolved by the npm the lockfile
-# was generated with and only the global CLI is swapped.
-RUN npm install -g npm@12 && npm cache clean --force
+# was generated with and only the global CLI is swapped. Pinned to the exact patch release —
+# a floating npm@12 would make the image's bundled npm tree depend on when the build happened.
+RUN npm install -g npm@12.0.2 && npm cache clean --force
 
 # amd64: download Chrome for Testing via Puppeteer and symlink it.
 # arm64: use Debian's chromium installed above (CfT has no linux-arm64 build).
@@ -186,6 +191,13 @@ RUN mkdir -p ./data/sessions ./data/media ./data/plugins && \
 ENV HOME=/app/data
 ENV XDG_CONFIG_HOME=/tmp/.config
 ENV XDG_CACHE_HOME=/tmp/.cache
+
+# Operator backup/restore scripts. docs/11-operational-runbooks.md drives them in-container
+# (`docker exec` against the named-volume mount at /app/data), and the sqlite3 CLI installed above
+# is there for backup.sh's online-consistent snapshots — but the scripts themselves were never
+# copied into the image. lib-env.sh is sourced by both, never executed. backup.sh/restore.sh carry
+# the exec bit in the repo and COPY preserves it, so no chmod is needed.
+COPY scripts/backup.sh scripts/restore.sh scripts/lib-env.sh ./scripts/
 
 # Copy entrypoint: runs as root to fix named-volume ownership, then drops to openwa via gosu
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
