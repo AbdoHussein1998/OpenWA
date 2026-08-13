@@ -75,11 +75,11 @@ export function validateEnv(config: EnvConfig): EnvConfig {
   // error detail, the default-secret guard and the ALLOW_DEV_API_KEY rejection that stops the public
   // `dev-admin-key` being seeded as ADMIN.
   //
-  // Unset stays legal because it is the standard Node default AND the published image does not set
-  // it: the Dockerfile carries no runtime `ENV NODE_ENV`, so refusing an unset value would stop a
-  // plain `docker run` of the image from booting. Note what that means in practice — both compose
-  // files set it (`${NODE_ENV:-production}` and a hardcoded `development`), but running the image
-  // directly without passing it takes the permissive branch of every hardening listed above.
+  // Unset stays legal because it is the standard Node default for a plain `node dist/main` outside
+  // any packaged runtime — refusing it would break local runs. The packaged runtimes all set it (the
+  // runtime image carries `ENV NODE_ENV=production`, the chart sets it, and both compose files set it
+  // via `${NODE_ENV:-production}` and a hardcoded `development`); only a hand-rolled deployment that
+  // strips it still takes the permissive branch of every hardening listed above.
   //
   // Checked RAW rather than through `str()`: the readers compare `process.env.NODE_ENV` verbatim, so
   // a padded ' production ' that only matches after trimming would validate clean here and still take

@@ -186,9 +186,10 @@ export function assertNoDefaultSecretsInProduction(env: SecretCheckEnv): void {
   // deliberately not production (and an unset or blank variable, the standard Node default for local
   // runs) skip it; everything else is treated as production.
   //
-  // NOTE: unset skips the guard. That is the pre-existing behaviour and is deliberate — a plain
-  // `docker run` sets no NODE_ENV, and refusing to start there would break local use — but it does
-  // mean a production deployment must set it. shutdown.service.ts makes the OPPOSITE choice for the
+  // NOTE: unset skips the guard. That is the pre-existing behaviour and is deliberate — a local
+  // `node dist/main` outside the packaged runtimes sets no NODE_ENV, and refusing to start there
+  // would break local use — but it does mean a production deployment must set it (the runtime image
+  // and the chart do so themselves). shutdown.service.ts makes the OPPOSITE choice for the
   // same variable (unset keeps the production drain window), so this is not a mirror of it.
   // A blank value means the same here as it does to boot validation, which treats '' as unset:
   // otherwise `NODE_ENV=` boots clean and then gets production-grade secret enforcement, and the

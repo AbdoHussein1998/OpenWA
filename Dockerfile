@@ -58,6 +58,13 @@ RUN npm run build && npm run dashboard:ci -- --include=dev && npm run dashboard:
 # Same digest-pinned node:22-slim base as the builder stage.
 FROM docker.io/node:22-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS production
 
+# Run the app with production defaults from the first boot: an unset NODE_ENV selects the
+# development branch of the CORS/Swagger/DTO-error-detail/default-secret hardening (main.ts
+# warns about exactly this case). Both compose files and the Helm chart already set it; a plain
+# `docker run` of this image did not. The npm installs below pin --omit=dev explicitly, so this
+# changes nothing about which dependencies land in the image.
+ENV NODE_ENV=production
+
 # Chrome for Testing has no linux-arm64 build, and Puppeteer's chromium snapshot
 # is x86_64-only on Linux too. So: amd64 uses Chrome for Testing (downloaded below)
 # to avoid the Debian chromium package's K8s SIGTRAP under strict non-root/seccomp;
