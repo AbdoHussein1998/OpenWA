@@ -55,7 +55,7 @@ export class LidMappingStoreService implements LidMappingStore, OnModuleInit {
   private readonly phoneToLids = new Map<string, Set<string>>();
   /** Repository fallbacks in flight, one per lid, so a hot miss path can't stack duplicate queries. */
   private readonly pendingLookups = new Set<string>();
-  // 0 = unbounded (legacy behaviour). Every other long-lived map in the audited surface is bounded, so
+  // 0 = unbounded (legacy behaviour). Every other long-lived map in the engine surface is bounded, so
   // the default is finite; the env override exists for operators who explicitly want the old behaviour.
   private readonly maxCachedLids: number;
 
