@@ -157,7 +157,8 @@
       "markRead": "Failed to mark chat as read",
       "send": "Failed to send message",
       "react": "Failed to react to message",
-      "delete": "Failed to delete message"
+      "delete": "Failed to delete message",
+      "fileTooLarge": "File is too large (max 18 MB)"
     },
     "loadMessagesError": "Couldn't load messages. Check the server logs."
   },

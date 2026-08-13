@@ -157,7 +157,8 @@
       "markRead": "將聊天標記為已讀失敗",
       "send": "傳送訊息失敗",
       "react": "回應訊息失敗",
-      "delete": "刪除訊息失敗"
+      "delete": "刪除訊息失敗",
+      "fileTooLarge": "檔案過大（最大 18 MB）"
     },
     "loadMessagesError": "無法載入訊息。請檢查伺服器日誌。"
   },

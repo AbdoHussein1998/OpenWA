@@ -592,6 +592,39 @@ export interface SearchResults {
 // API Client
 // =============================================================================
 
+// Shared failure handling for every response shape (json/text/blob). On 401 the stored API key is
+// invalid/expired/revoked — clear it and return to login so the user isn't stuck on a dashboard that
+// 401s every request; the never-settling promise halts this request's chain so callers neither flash
+// a generic error toast nor receive an undefined payload while the page navigates away. Otherwise
+// throw an Error carrying the HTTP status and, when the gateway supplied one, its machine code.
+async function handleErrorResponse<T>(response: Response): Promise<T> {
+  if (response.status === 401) {
+    sessionStorage.removeItem('openwa_api_key');
+    if (typeof window !== 'undefined') {
+      window.location.assign('/');
+      return new Promise<T>(() => {});
+    }
+  }
+
+  // On a non-JSON body (e.g. a reverse-proxy 502/503 HTML page) fall through to `HTTP <status>`
+  // rather than statusText: the status code is what the toast connection-lost de-dup matches on,
+  // and statusText is empty over HTTP/2 anyway.
+  const error = await response.json().catch(() => ({}));
+  // Carry the HTTP status on the Error (message unchanged, so the toast de-dup still matches) so
+  // callers can tell apart a permission 403 from a real server 5xx instead of guessing from text.
+  // Carry the machine `code` too: the gateway's stable codes (SESSION_LOGOUT_INCOMPLETE,
+  // SESSION_NAME_TEARDOWN_PENDING, …) drive specific recovery UI, and a reverse-proxy 502 that
+  // never reached the gateway carries no code at all — that distinction is exactly what the unlink
+  // classifier keys on instead of fragile message heuristics.
+  const err = new Error(error.message || `HTTP ${response.status}`) as Error & {
+    status?: number;
+    code?: string;
+  };
+  err.status = response.status;
+  if (typeof error.code === 'string') err.code = error.code;
+  throw err;
+}
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
@@ -608,36 +641,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   const response = await fetch(url, { ...options, headers });
 
-  if (response.status === 401) {
-    // The stored API key is invalid/expired/revoked — clear it and return to login
-    // so the user isn't stuck on a dashboard that 401s every request.
-    sessionStorage.removeItem('openwa_api_key');
-    if (typeof window !== 'undefined') {
-      window.location.assign('/');
-      // The page is navigating away — halt this request's promise chain so callers neither
-      // throw the generic error below (flashing a toast) nor receive an undefined payload.
-      return new Promise<T>(() => {});
-    }
-  }
-
   if (!response.ok) {
-    // On a non-JSON body (e.g. a reverse-proxy 502/503 HTML page) fall through to `HTTP <status>`
-    // rather than statusText: the status code is what the toast connection-lost de-dup matches on,
-    // and statusText is empty over HTTP/2 anyway.
-    const error = await response.json().catch(() => ({}));
-    // Carry the HTTP status on the Error (message unchanged, so the toast de-dup still matches) so
-    // callers can tell apart a permission 403 from a real server 5xx instead of guessing from text.
-    // Carry the machine `code` too: the gateway's stable codes (SESSION_LOGOUT_INCOMPLETE,
-    // SESSION_NAME_TEARDOWN_PENDING, …) drive specific recovery UI, and a reverse-proxy 502 that
-    // never reached the gateway carries no code at all — that distinction is exactly what the unlink
-    // classifier keys on instead of fragile message heuristics.
-    const err = new Error(error.message || `HTTP ${response.status}`) as Error & {
-      status?: number;
-      code?: string;
-    };
-    err.status = response.status;
-    if (typeof error.code === 'string') err.code = error.code;
-    throw err;
+    return handleErrorResponse<T>(response);
   }
 
   if (response.status === 204) {
@@ -654,17 +659,8 @@ async function requestText(endpoint: string): Promise<string> {
     headers: { ...(apiKey ? { 'X-API-Key': apiKey } : {}) },
   });
 
-  if (response.status === 401) {
-    sessionStorage.removeItem('openwa_api_key');
-    if (typeof window !== 'undefined') {
-      window.location.assign('/');
-      return new Promise<string>(() => {});
-    }
-  }
-
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    return handleErrorResponse<string>(response);
   }
 
   return response.text();
@@ -683,21 +679,8 @@ async function requestBlob(endpoint: string): Promise<Blob> {
 
   const response = await fetch(url, { headers });
 
-  if (response.status === 401) {
-    // The stored API key is invalid/expired/revoked — clear it and return to login
-    sessionStorage.removeItem('openwa_api_key');
-    if (typeof window !== 'undefined') {
-      window.location.assign('/');
-      // Halt this request's promise chain so callers neither throw nor receive an undefined payload.
-      return new Promise<Blob>(() => {});
-    }
-  }
-
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    const err = new Error(error.message || `HTTP ${response.status}`) as Error & { status?: number };
-    err.status = response.status;
-    throw err;
+    return handleErrorResponse<Blob>(response);
   }
 
   return response.blob();

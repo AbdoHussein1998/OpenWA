@@ -157,7 +157,8 @@
       "markRead": "Error al marcar el chat como leído",
       "send": "Error al enviar el mensaje",
       "react": "Error al reaccionar al mensaje",
-      "delete": "Error al eliminar el mensaje"
+      "delete": "Error al eliminar el mensaje",
+      "fileTooLarge": "El archivo es demasiado grande (máx. 18 MB)"
     },
     "loadMessagesError": "No se pudieron cargar los mensajes. Revisa los registros del servidor."
   },

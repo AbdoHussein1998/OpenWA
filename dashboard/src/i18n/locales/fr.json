@@ -157,7 +157,8 @@
       "markRead": "Échec du marquage de la discussion comme lue",
       "send": "Échec de l'envoi du message",
       "react": "Échec de la réaction au message",
-      "delete": "Échec de la suppression du message"
+      "delete": "Échec de la suppression du message",
+      "fileTooLarge": "Le fichier est trop volumineux (max 18 Mo)"
     },
     "loadMessagesError": "Impossible de charger les messages. Vérifiez les journaux du serveur."
   },

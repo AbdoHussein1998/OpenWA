@@ -157,7 +157,8 @@
       "markRead": "Sohbet okundu olarak işaretlenemedi",
       "send": "Mesaj gönderilemedi",
       "react": "Mesaja tepki verilemedi",
-      "delete": "Mesaj silinemedi"
+      "delete": "Mesaj silinemedi",
+      "fileTooLarge": "Dosya çok büyük (maks 18 MB)"
     },
     "loadMessagesError": "Mesajlar yüklenemedi. Sunucu kayıtlarını kontrol edin."
   },

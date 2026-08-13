@@ -20,6 +20,11 @@ const messageTypeFromMime = (mimetype: string): MessageType => {
   return 'document';
 };
 
+// Client pre-check before base64-encoding an upload, same cap as the message tester: base64
+// inflates ~1.33x, so ~18 MiB raw stays under the backend's default 25 MiB body limit and the
+// pick fails here with a toast instead of OOMing the tab on the FileReader.
+const MEDIA_UPLOAD_MAX_BYTES = 18 * 1024 * 1024;
+
 /** A picked-but-unsent file, staged until send, removal, or a move to another chat. */
 export interface StagedAttachment {
   file: File;
@@ -112,7 +117,15 @@ function ChatComposer({
   // 5. Handle file selection & base64 conversion
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file after a rejection or removal
     if (!file) return;
+
+    // Reject before base64-encoding: an oversized pick would inflate ~1.33x into the backend body
+    // cap, and the 413 only applies after the whole body is uploaded — surface the toast now.
+    if (file.size > MEDIA_UPLOAD_MAX_BYTES) {
+      showErrorToast(t('chats.errors.fileTooLarge'));
+      return;
+    }
 
     if (file.type.startsWith('image/')) {
       setPreviewUrl(URL.createObjectURL(file));
