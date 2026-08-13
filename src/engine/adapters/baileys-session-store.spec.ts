@@ -1,5 +1,6 @@
 import { BaileysSessionStore } from './baileys-session-store';
 import type { LidMappingStore } from '../identity/lid-mapping-store.service';
+import { userPart } from '../identity/wa-id';
 
 describe('BaileysSessionStore', () => {
   let store: BaileysSessionStore;
@@ -317,9 +318,12 @@ describe('BaileysSessionStore', () => {
   describe('persistent lid->phone table', () => {
     const makeFakeLidStore = () => {
       const map = new Map<string, string | null>();
+      const getCached = jest.fn((lid: string) => map.get(lid));
       return {
         map,
-        getCached: jest.fn((lid: string) => map.get(lid)),
+        getCached,
+        // Mirrors the real implementation: userPart of the JID through getCached, null on a miss.
+        resolveLid: jest.fn((jid: string) => getCached(userPart(jid)) ?? null),
         lidsForPhone: jest.fn(() => [] as string[]),
         remember: jest.fn((lid: string, phone: string | null) => {
           map.set(lid, phone);
@@ -426,8 +430,10 @@ describe('BaileysSessionStore', () => {
 
     it('bounds lidToPn: an evicted mapping still resolves via the write-through persistent table', () => {
       const map = new Map<string, string | null>();
+      const getCached = jest.fn((lid: string) => map.get(lid));
       const lidStore = {
-        getCached: jest.fn((lid: string) => map.get(lid)),
+        getCached,
+        resolveLid: jest.fn((jid: string) => getCached(userPart(jid)) ?? null),
         lidsForPhone: jest.fn(() => [] as string[]),
         remember: jest.fn((lid: string, phone: string | null) => {
           map.set(lid, phone);
