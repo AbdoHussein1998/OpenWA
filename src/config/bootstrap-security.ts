@@ -128,6 +128,16 @@ export function isApiKeyPepperMissingInProduction(nodeEnv?: string, apiKeyPepper
   return nodeEnv === 'production' && !apiKeyPepper?.trim();
 }
 
+/**
+ * Whether NODE_ENV is unset or blank. That is the deliberate local-dev default, but it silently
+ * degrades four controls to their dev posture: the default-secret assert is skipped, a wildcard
+ * CORS origin is allowed, Swagger UI is served, and validation error detail is exposed. Boot warns
+ * (without changing any default) so a production deployment that merely forgot the variable can tell.
+ */
+export function isNodeEnvUnset(nodeEnv?: string): boolean {
+  return !nodeEnv?.trim();
+}
+
 /** A built-in S3 endpoint is the bundled MinIO (host `minio`). An unset endpoint means the standard
  * AWS regional endpoint, so it is external and its credentials must never be exempted. */
 function isInternalS3Endpoint(endpoint?: string): boolean {

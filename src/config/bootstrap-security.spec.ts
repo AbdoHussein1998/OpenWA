@@ -7,6 +7,7 @@ import {
   resolveBodyLimit,
   assertNoDefaultSecretsInProduction,
   isApiKeyPepperMissingInProduction,
+  isNodeEnvUnset,
 } from './bootstrap-security';
 
 describe('resolveCorsPolicy', () => {
@@ -396,5 +397,19 @@ describe('isApiKeyPepperMissingInProduction', () => {
   it('is false outside production regardless of pepper (no dev warning noise)', () => {
     expect(isApiKeyPepperMissingInProduction('development', undefined)).toBe(false);
     expect(isApiKeyPepperMissingInProduction(undefined, undefined)).toBe(false);
+  });
+});
+
+describe('isNodeEnvUnset', () => {
+  it('is true when NODE_ENV is unset or blank (incl. whitespace-only)', () => {
+    expect(isNodeEnvUnset(undefined)).toBe(true);
+    expect(isNodeEnvUnset('')).toBe(true);
+    expect(isNodeEnvUnset('   ')).toBe(true);
+  });
+
+  it('is false for any set value, including an unrecognised one (no warning noise)', () => {
+    expect(isNodeEnvUnset('development')).toBe(false);
+    expect(isNodeEnvUnset('production')).toBe(false);
+    expect(isNodeEnvUnset('staging')).toBe(false);
   });
 });
