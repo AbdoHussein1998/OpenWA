@@ -45,7 +45,7 @@ describe('Message send endpoints (e2e)', () => {
     sendPollMessage: jest.fn().mockResolvedValue(result),
   };
 
-  const post = (verb: string, body: unknown, session: string = sessionId) =>
+  const post = (verb: string, body: object, session: string = sessionId) =>
     request(app.getHttpServer())
       .post(`/api/sessions/${session}/messages/${verb}`)
       .set('X-API-Key', operatorKey)

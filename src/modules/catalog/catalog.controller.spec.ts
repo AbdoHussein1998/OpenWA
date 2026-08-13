@@ -29,7 +29,7 @@ describe('CatalogController', () => {
   });
 
   it('getProducts forwards the parsed page window, not the query object', async () => {
-    const page = { products: [] } as PaginatedProducts;
+    const page: PaginatedProducts = { products: [], pagination: { page: 2, limit: 10, total: 0, totalPages: 0 } };
     service.getProducts.mockResolvedValue(page);
 
     await expect(controller.getProducts('s1', { page: 2, limit: 10 })).resolves.toBe(page);
