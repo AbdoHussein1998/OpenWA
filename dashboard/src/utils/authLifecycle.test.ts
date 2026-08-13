@@ -90,7 +90,10 @@ function installFetchStub(): void {
     let body: unknown = [];
     if (method === 'POST' && path === '/api/auth/validate') body = validateBody;
     else if (path === '/api/stats/overview')
-      body = { sessions: { active: 0, total: 0, byStatus: {} }, messages: { sent: 0, received: 0, failed: 0, today: { sent: 0, received: 0 } } };
+      body = {
+        sessions: { active: 0, total: 0, byStatus: {} },
+        messages: { sent: 0, received: 0, failed: 0, today: { sent: 0, received: 0 } },
+      };
     else if (path.startsWith('/api/stats/messages')) body = { timeSeries: [], byType: {}, bySession: [], topChats: [] };
     return Promise.resolve(
       new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }),
