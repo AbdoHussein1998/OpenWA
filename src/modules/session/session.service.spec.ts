@@ -13,13 +13,8 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  SessionService,
-  ACK_RECONCILE_DELAY_MS,
-  SESSION_WATCHDOG_INTERVAL_MS,
-  SESSION_WATCHDOG_MAX_FAILURES,
-  SESSION_WATCHDOG_PROBE_TIMEOUT_MS,
-} from './session.service';
+import { SessionService } from './session.service';
+import { ACK_RECONCILE_DELAY_MS } from './message-projector.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { Session, SessionStatus } from './entities/session.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
@@ -31,7 +26,12 @@ import { EngineFactory } from '../../engine/engine.factory';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import type { KeyedMutationQueue } from '../../common/utils/keyed-mutation-queue';
 import { SessionLidResolver } from './session-lid-resolver.service';
-import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
+import {
+  SessionLivenessWatchdog,
+  SESSION_WATCHDOG_INTERVAL_MS,
+  SESSION_WATCHDOG_MAX_FAILURES,
+  SESSION_WATCHDOG_PROBE_TIMEOUT_MS,
+} from './session-liveness-watchdog.service';
 import { MessageProjector } from './message-projector.service';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { EventsGateway } from '../events/events.gateway';

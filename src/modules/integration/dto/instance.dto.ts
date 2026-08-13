@@ -139,5 +139,3 @@ export class InstanceView {
   })
   ingressUrls!: IngressUrl[];
 }
-
-export type MintedInstance = InstanceView; // identical shape; `secret` carries the plaintext once

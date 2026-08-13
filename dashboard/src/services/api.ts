@@ -547,12 +547,6 @@ export interface SaveConfigPayload {
   };
 }
 
-export interface Settings {
-  general: { apiBaseUrl: string; autoReconnect: boolean; debugMode: boolean };
-  api: { rateLimit: number; rateLimitWindow: number; enableDocs: boolean };
-  notifications: { emailEnabled: boolean; notificationEmail: string; webhookAlerts: boolean };
-}
-
 // Global message search (mirrors the backend GET /search contract from #664).
 // `timestamp` is epoch-seconds (the messages column is seconds, not ms); `dateFrom`/`dateTo`
 // are epoch-ms on the wire — see `dateFrom`/`dateTo` JSDoc below.
@@ -748,11 +742,6 @@ export const sessionApi = {
       method: 'POST',
       body: JSON.stringify({ chatId }),
     }),
-  markChatUnread: (id: string, chatId: string) =>
-    request<{ success: boolean }>(`/sessions/${id}/chats/unread`, {
-      method: 'POST',
-      body: JSON.stringify({ chatId }),
-    }),
   getChatMessages: (id: string, chatId: string, limit = 100) =>
     request<{ messages: ChatMessage[]; total: number }>(
       `/sessions/${id}/messages?chatId=${encodeURIComponent(chatId)}&limit=${limit}`,
@@ -808,7 +797,6 @@ export const sessionApi = {
 export const webhookApi = {
   listBySession: (sessionId: string) => request<Webhook[]>(`/sessions/${sessionId}/webhooks`),
   listAll: () => request<Webhook[]>('/webhooks'),
-  get: (sessionId: string, id: string) => request<Webhook>(`/sessions/${sessionId}/webhooks/${id}`),
   create: (sessionId: string, data: { url: string; events: string[]; filters?: WebhookFilters | null }) =>
     request<Webhook>(`/sessions/${sessionId}/webhooks`, {
       method: 'POST',
@@ -833,7 +821,6 @@ export const webhookApi = {
 
 export const templateApi = {
   list: (sessionId: string) => request<MessageTemplate[]>(`/sessions/${sessionId}/templates`),
-  get: (sessionId: string, id: string) => request<MessageTemplate>(`/sessions/${sessionId}/templates/${id}`),
   create: (sessionId: string, data: TemplatePayload) =>
     request<MessageTemplate>(`/sessions/${sessionId}/templates`, {
       method: 'POST',
@@ -897,7 +884,6 @@ export const contactApi = {
 
 export const apiKeyApi = {
   list: () => request<ApiKey[]>('/auth/api-keys'),
-  get: (id: string) => request<ApiKey>(`/auth/api-keys/${id}`),
   create: (data: {
     name: string;
     role: string;
@@ -907,11 +893,6 @@ export const apiKeyApi = {
   }) =>
     request<ApiKey>('/auth/api-keys', {
       method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  update: (id: string, data: Partial<ApiKey>) =>
-    request<ApiKey>(`/auth/api-keys/${id}`, {
-      method: 'PUT',
       body: JSON.stringify(data),
     }),
   delete: (id: string) => request<void>(`/auth/api-keys/${id}`, { method: 'DELETE' }),
@@ -943,26 +924,6 @@ export const messageApi = {
     request<MessageResponse>(`/sessions/${sessionId}/messages/send-text`, {
       method: 'POST',
       body: JSON.stringify({ chatId, text }),
-    }),
-  sendImage: (sessionId: string, chatId: string, url: string, caption?: string) =>
-    request<MessageResponse>(`/sessions/${sessionId}/messages/send-image`, {
-      method: 'POST',
-      body: JSON.stringify({ chatId, url, caption }),
-    }),
-  sendVideo: (sessionId: string, chatId: string, url: string, caption?: string) =>
-    request<MessageResponse>(`/sessions/${sessionId}/messages/send-video`, {
-      method: 'POST',
-      body: JSON.stringify({ chatId, url, caption }),
-    }),
-  sendAudio: (sessionId: string, chatId: string, url: string) =>
-    request<MessageResponse>(`/sessions/${sessionId}/messages/send-audio`, {
-      method: 'POST',
-      body: JSON.stringify({ chatId, url }),
-    }),
-  sendDocument: (sessionId: string, chatId: string, url: string, filename?: string) =>
-    request<MessageResponse>(`/sessions/${sessionId}/messages/send-document`, {
-      method: 'POST',
-      body: JSON.stringify({ chatId, url, filename }),
     }),
   sendMedia: (
     sessionId: string,
@@ -1022,14 +983,6 @@ export const messageApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  sendTemplate: (
-    sessionId: string,
-    data: { chatId: string; templateId?: string; templateName?: string; variables?: Record<string, string> },
-  ) =>
-    request<MessageResponse>(`/sessions/${sessionId}/messages/send-template`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
   delete: (sessionId: string, data: { chatId: string; messageId: string; forEveryone?: boolean }) =>
     request<void>(`/sessions/${sessionId}/messages/delete`, {
       method: 'POST',
@@ -1057,17 +1010,11 @@ export const searchApi = {
 
 export const healthApi = {
   check: () => request<HealthStatus>('/health'),
-  ready: () => request<HealthStatus>('/health/ready'),
 };
 
 export const infraApi = {
   getStatus: () => request<InfraStatus>('/infra/status'),
   getConfig: () => request<SavedConfig>('/infra/config'),
-  updateConfig: (config: Partial<InfraStatus>) =>
-    request<InfraStatus>('/infra/config', {
-      method: 'PUT',
-      body: JSON.stringify(config),
-    }),
   saveConfig: (config: SaveConfigPayload) =>
     request<{ message: string; saved: boolean; envPath: string; profiles: string[] }>('/infra/config', {
       method: 'PUT',

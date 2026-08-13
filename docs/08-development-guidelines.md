@@ -411,7 +411,7 @@ test/
 
 ```typescript
 // src/modules/session/reconnect-config.spec.ts
-import { resolveReconnectConfig } from './session.service';
+import { resolveReconnectConfig } from './session-engine-lifecycle.service';
 
 describe('resolveReconnectConfig', () => {
   it('keeps reconnect settings finite and bounded', () => {

@@ -28,20 +28,6 @@ import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces
 import { createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
 
-// Re-exported so the existing spec import paths keep working after these moved out.
-export { clampReconnectDelay } from './reconnect-policy';
-export { ACK_RECONCILE_DELAY_MS } from './message-projector.service';
-export {
-  SESSION_WATCHDOG_INTERVAL_MS,
-  SESSION_WATCHDOG_PROBE_TIMEOUT_MS,
-  SESSION_WATCHDOG_MAX_FAILURES,
-} from './session-liveness-watchdog.service';
-export {
-  resolveReconnectConfig,
-  resolveMaxConcurrentSessions,
-  EngineInitTimeoutError,
-} from './session-engine-lifecycle.service';
-
 /**
  * The session-record API: CRUD over the sessions table, aggregate stats, and the thin engine query
  * proxies (QR/pairing/chats/groups/chat-state) behind the controller routes. Every engine LIFECYCLE

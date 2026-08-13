@@ -61,8 +61,6 @@ export const WEBHOOK_EVENTS = [
   ...WEBHOOK_RESERVED_EVENTS,
 ] as const;
 
-export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number];
-
 export class CreateWebhookDto {
   @ApiProperty({
     description: 'Webhook URL to receive events',
