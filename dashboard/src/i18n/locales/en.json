@@ -827,6 +827,7 @@
     "installModal": {
       "title": "Install a plugin",
       "hint": "Upload a plugin packaged as a .zip (with a manifest.json). It runs sandboxed once enabled.",
+      "trustWarning": "Plugins run with the gateway's full process privileges — the sandbox contains crashes, not malicious code. Install only plugins you trust.",
       "choose": "Choose a .zip file…",
       "tooLarge": "The file exceeds the 5 MB limit.",
       "catalogHint": "Install directly from the OpenWA plugin catalog. The .zip is fetched server-side through the SSRF guard, then validated and sandboxed.",

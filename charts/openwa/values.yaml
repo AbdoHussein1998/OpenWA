@@ -18,6 +18,9 @@ imagePullSecrets: []
 # NOTE: the container port is fixed at 2785 (containerPort, probes and the Service
 # targetPort are all pinned to it). Setting PORT here breaks the pod — use
 # service.port to change the Service port instead.
+# PII warning: never leave DATABASE_LOGGING=true here outside a debug session — TypeORM
+# then logs every query WITH its parameters (message bodies, phone numbers) into pod
+# logs, which a wider RBAC audience can usually read than the database itself.
 env:
   NODE_ENV: production
   LOG_LEVEL: info

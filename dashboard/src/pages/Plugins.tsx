@@ -984,6 +984,15 @@ export default function Plugins() {
             )
           }
         >
+          {/* Trusted-code warning sits ABOVE the tab conditional: upload and catalog land the
+              same payload in the same process, so it must show on both. */}
+          <p className="install-hint install-hint-warning">
+            <AlertCircle size={15} />
+            {t(
+              'plugins.installModal.trustWarning',
+              "Plugins run with the gateway's full process privileges — the sandbox contains crashes, not malicious code. Install only plugins you trust.",
+            )}
+          </p>
           {installMode === 'upload' ? (
             <>
               <p className="install-hint">

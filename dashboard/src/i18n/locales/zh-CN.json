@@ -827,6 +827,7 @@
     "installModal": {
       "title": "安装插件",
       "hint": "上传打包为 .zip 的插件（包含 manifest.json）。启用后将在沙箱中运行。",
+      "trustWarning": "插件以网关进程的完整权限运行——沙箱只能隔离崩溃，无法防御恶意代码。请只安装你信任的插件。",
       "choose": "选择 .zip 文件…",
       "tooLarge": "文件超过 5 MB 限制。",
       "catalogHint": "直接从 OpenWA 插件目录安装。.zip 文件由服务器通过 SSRF 防护获取，然后经过验证并在沙箱中运行。",

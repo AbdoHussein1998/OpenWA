@@ -827,6 +827,7 @@
     "installModal": {
       "title": "安裝外掛",
       "hint": "上載打包成 .zip 的外掛（內含 manifest.json）。啟用後會以沙盒方式執行。",
+      "trustWarning": "外掛會以閘道處理程序的完整權限執行——沙盒只能隔離當機，不能阻擋惡意程式碼。請只安裝你信任的外掛。",
       "choose": "選擇 .zip 檔案…",
       "tooLarge": "檔案超出 5 MB 上限。",
       "catalogHint": "直接從 OpenWA 外掛目錄安裝。.zip 檔案由伺服器透過 SSRF 防護取得，然後經過驗證並在沙箱中執行。",

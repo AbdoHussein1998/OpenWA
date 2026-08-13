@@ -271,6 +271,64 @@ Get a single session by ID.
 
 **Errors:** `401` missing/invalid key, or key not scoped to this session · `404` session not found
 
+#### GET /api/sessions/:id/config
+
+Get the effective tunable configuration for a session. Only the three recognised keys are reported,
+resolved through the same clamps the engine applies — the opaque stored `config` column is never
+echoed back (it is stripped from `SessionResponseDto` alongside `proxyUrl`, and anything else placed
+in it is stored but ignored).
+
+**Auth:** API key · **Scope:** session-scoped (key's `allowedSessions` enforced against `:id`)
+
+**Path parameters**
+
+| Name | Type   | Description  |
+| ---- | ------ | ------------ |
+| `id` | string | Session UUID |
+
+**Response** `200`
+
+```json
+{ "autoRejectCalls": false, "maxReconnectAttempts": null, "reconnectBaseDelay": 5000 }
+```
+
+`maxReconnectAttempts: null` means unlimited (the default); `reconnectBaseDelay` is milliseconds.
+See §5 (Database Design) for what each key does and the moment it is read.
+
+**Errors:** `401` · `403` key not scoped to this session · `404` session not found
+
+#### PATCH /api/sessions/:id/config
+
+Merge a patch into the session's tunable configuration. No restart is required or performed:
+omitted keys keep their stored value, and an explicit `null` clears a key back to its default (the
+only way back to unlimited reconnect attempts once a cap is set). `autoRejectCalls` is re-read on
+every incoming call, so it applies immediately; the two reconnect settings are read once per start
+and therefore apply on the next start, leaving a reconnect sequence already in flight alone.
+
+**Auth:** API key (OPERATOR) · **Scope:** session-scoped
+
+**Path parameters**
+
+| Name | Type   | Description  |
+| ---- | ------ | ------------ |
+| `id` | string | Session UUID |
+
+**Request body** — `UpdateSessionConfigDto` (any subset; each key also accepts `null`)
+
+| Field                  | Type    | Constraints               | Description                                                        |
+| ---------------------- | ------- | ------------------------- | ------------------------------------------------------------------ |
+| `autoRejectCalls`      | boolean | —                         | Auto-reject every incoming call as soon as it rings                |
+| `maxReconnectAttempts` | number  | integer, 0–20             | Reconnect attempt cap (`0` disables reconnect; `null` = unlimited) |
+| `reconnectBaseDelay`   | number  | integer, 1000–300000 (ms) | Base delay of the reconnect backoff                                |
+
+```json
+{ "maxReconnectAttempts": 5 }
+```
+
+**Response** `200` — the resulting `SessionConfigResponseDto` (same shape as the GET above).
+
+**Errors:** `400` a supplied value is outside its accepted range · `401` · `403` key lacks OPERATOR role or is not scoped to this session · `404` session not found
+
 #### GET /api/sessions/:id/qr
 
 Get the QR code (PNG data URL) for session authentication.
@@ -6394,6 +6452,166 @@ Partial update (any subset of the create fields). **Auth:** API key (OPERATOR) �
 #### DELETE /api/sessions/:sessionId/automation-rules/:ruleId
 
 Delete a rule. **Auth:** API key (OPERATOR) · **Response** `204`.
+
+### 6.4.17 Integration fabric (ingress & instances)
+
+The operator surface of the Integration Fabric — **doc 25** holds the design (DLQ, ordering,
+per-instance fairness); this section is the route reference. An ADMIN key provisions per-plugin
+instances — one bound provider account, e.g. one Chatwoot inbox — and each instance gets one
+ingress URL per route the plugin declares. Only a plugin that declares an ingress route AND the
+`webhook:ingress` permission can have instances; any other plugin is rejected before persistence.
+
+An instance's ingress `secret` and `verifyToken` are revealed **once** — in the create and
+regenerate-secret responses — and masked (`***`) on every later read. `config` fields flagged
+`secret` in the plugin's config schema stay masked even in those one-shot reveal responses.
+
+Every instance route is session-scope aware: a key restricted to `allowedSessions` only sees
+instances bound to one of its own sessions, and an out-of-scope instance answers `404` (identical
+to a missing one), so the routes cannot probe which instances exist on other sessions. The DLQ
+redrive route is documented with the administration routes in §6.4.11.
+
+#### POST /api/integration/plugins/:pluginId/instances
+
+Create an instance of an ingress-capable plugin.
+
+**Auth:** API key (ADMIN)
+
+**Path parameters**
+
+| Name       | Type   | Description                                                      |
+| ---------- | ------ | ---------------------------------------------------------------- |
+| `pluginId` | string | Plugin to instantiate (must declare ingress + `webhook:ingress`) |
+
+**Request body** — `CreateInstanceDto`
+
+| Field          | Type   | Required | Constraints                                 | Description                                                                                |
+| -------------- | ------ | -------- | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `instanceId`   | string | Yes      | `^[a-zA-Z0-9_-]{1,64}$`                     | Operator-chosen id, unique within the plugin; namespaces the ingress URL and the secret    |
+| `sessionScope` | string | No       | non-empty when present, ≤ 256 chars         | Session id the instance is bound to. Omit for all sessions                                 |
+| `verifyToken`  | string | No       | ≤ 512 chars                                 | Token echoed in the provider's verification handshake. Auto-generated when omitted         |
+| `secret`       | string | No       | 16–512 chars                                | Ingress HMAC secret shared with the provider. Omit to auto-generate a random 64-hex secret |
+| `config`       | object | No       | shape defined by the plugin's config schema | Per-instance config slice passed to the adapter                                            |
+
+```json
+{ "instanceId": "chatwoot-prod-1", "sessionScope": "8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a" }
+```
+
+**Response** `201` — the `InstanceView`, with the plaintext `secret` and `verifyToken` revealed
+**in this response only** — store them immediately.
+
+```json
+{
+  "id": "0e2f…",
+  "pluginId": "chatwoot",
+  "instanceId": "chatwoot-prod-1",
+  "sessionScope": "8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a",
+  "secret": "9f2c…64-hex…",
+  "verifyToken": "a1b2c3d4e5f6",
+  "config": { "inboxId": 42 },
+  "enabled": true,
+  "createdAt": "2026-08-01T10:00:00.000Z",
+  "updatedAt": "2026-08-01T10:00:00.000Z",
+  "ingressUrls": [
+    { "route": "events/message", "url": "https://wa.example.com/api/ingress/chatwoot/chatwoot-prod-1/events/message" }
+  ]
+}
+```
+
+`ingressUrls[].url` is absolute when `BASE_URL` is set, otherwise a relative path to prepend with
+the deployment's own host.
+
+**Errors:** `400` validation, or the plugin is not ingress-capable · `401` · `403` key role < ADMIN, or `sessionScope` outside the key's `allowedSessions` · `404` unknown plugin · `409` instance id already exists
+
+#### GET /api/integration/plugins/:pluginId/instances
+
+List the plugin's instances visible to the calling key (secrets masked).
+
+**Auth:** API key (ADMIN)
+
+**Response** `200` — bare array of `InstanceView`. An instance whose `sessionScope` is outside the
+key's `allowedSessions` is filtered out of the list.
+
+**Errors:** `401` · `403`
+
+#### GET /api/integration/plugins/:pluginId/instances/:instanceId
+
+Get one instance (secret masked).
+
+**Auth:** API key (ADMIN)
+
+**Path parameters**
+
+| Name         | Type   | Description |
+| ------------ | ------ | ----------- |
+| `pluginId`   | string | Plugin id   |
+| `instanceId` | string | Instance id |
+
+**Response** `200` — the `InstanceView`.
+
+**Errors:** `401` · `403` · `404` unknown instance, or one outside the key's `allowedSessions`
+
+#### PATCH /api/integration/plugins/:pluginId/instances/:instanceId
+
+Update an instance (secret masked in the response). Any subset of:
+
+| Field          | Type    | Description                                                                                                         |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `enabled`      | boolean | Whether ingress is accepted and dispatch is active                                                                  |
+| `sessionScope` | string  | Re-bind to another session (must be inside the key's `allowedSessions`; the old scope's binding is torn down first) |
+| `config`       | object  | Replace the per-instance config slice                                                                               |
+
+**Auth:** API key (ADMIN)
+
+**Response** `200` — the updated `InstanceView`.
+
+**Errors:** `400` validation · `401` · `403` key role < ADMIN, or the new `sessionScope` outside the key's `allowedSessions` · `404` unknown instance, or one outside the key's scope
+
+#### DELETE /api/integration/plugins/:pluginId/instances/:instanceId
+
+Delete the instance and tear down its session-scope binding.
+
+**Auth:** API key (ADMIN)
+
+**Response** `204`
+
+**Errors:** `401` · `403` · `404` unknown instance, or one outside the key's scope
+
+#### POST /api/integration/plugins/:pluginId/instances/:instanceId/regenerate-secret
+
+Rotate the instance's ingress HMAC secret.
+
+**Auth:** API key (ADMIN)
+
+**Response** `200` — the `InstanceView` with the **new** plaintext `secret` revealed in this
+response only; the `verifyToken` is also shown (unchanged).
+
+**Errors:** `401` · `403` · `404` unknown instance, or one outside the key's scope
+
+#### GET /api/ingress/:pluginId/:instanceId/:path
+
+#### POST /api/ingress/:pluginId/:instanceId/:path
+
+#### PUT /api/ingress/:pluginId/:instanceId/:path
+
+#### PATCH /api/ingress/:pluginId/:instanceId/:path
+
+#### DELETE /api/ingress/:pluginId/:instanceId/:path
+
+One route, any HTTP method: the inbound webhook endpoint an external provider delivers to. The
+trailing `:path` segment is the plugin-declared route (it may contain slashes, e.g.
+`events/message`); a delivery to a route the plugin did not claim is a `404`.
+
+**Auth:** **none** — `@Public` by design, because a provider cannot present an API key. What
+authenticates a delivery is the per-instance HMAC signature over the exact raw body bytes (the body
+is read raw, never DTO-bound, so the signed bytes reach the verifier unchanged). A `GET` here is
+the provider's verification handshake and answers only when its `verifyToken` matches.
+
+**Response** — the primary success path is `202`: the delivery is persisted and queued for async
+plugin processing. `200` means the `GET` verification-challenge echo, or a duplicate delivery
+already persisted (idempotent re-delivery). A route may shape the synchronous status/body/headers
+the provider sees via its declarative `ack` config (doc 25); the plugin itself always runs async.
+
+**Errors:** `401` signature verification failed (missing, stale, or wrong secret) · `403` `GET` verification challenge failed (`verifyToken` mismatch) · `404` unknown pluginId/instanceId, or no such claimed route · `413` body over the route's `maxBodyBytes` · `429` per-instance rate limit (`INGRESS_INSTANCE_LIMIT` per `INGRESS_INSTANCE_TTL`, on top of the global per-IP throttle)
 
 ## 6.5 Real-time API (WebSocket)
 

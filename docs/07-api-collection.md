@@ -26,7 +26,7 @@ Responses are the **raw payload** — no `{ success, data }` envelope. A resourc
 
 ### Sections
 
-Sessions · Messages · Webhooks · Groups · Contacts · Chats · Labels · Channels · Catalog · Templates · Plugins · Settings · Auth (API Keys) · Health · Infrastructure · Stats · Metrics · Events (WebSocket).
+Sessions · Messages · Webhooks · Groups · Contacts · Chats · Labels · Channels · Catalog · Templates · Plugins · Settings · Auth (API Keys) · Health · Infrastructure · Stats · Audit · Metrics · Profile · Search · Media conversion · Events (WebSocket).
 
 ## 07.2 Endpoints
 
@@ -169,6 +169,41 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/pairing-co
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "phoneNumber": "628123456789" }'
+```
+
+#### POST /api/sessions/:id/presence/subscribe
+
+Subscribe to presence updates (online/typing) for a chat (OPERATOR). Baileys only — whatsapp-web.js
+answers `501`. The subscription belongs to the connection: re-issue it after a restart or reconnect.
+Updates arrive as the `presence.update` webhook/socket event.
+
+```bash
+curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/presence/subscribe" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "chatId": "1234567890@c.us" }'
+```
+
+#### GET /api/sessions/:id/presence/:chatId
+
+Read the last presence report received for a chat (any role). Returns `200` with a `null` body when
+nothing has been reported yet — presence is held in memory, never persisted.
+
+```bash
+curl "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/presence/1234567890@c.us" \
+  -H "X-API-Key: $API_KEY"
+```
+
+#### PUT /api/sessions/:id/presence
+
+Set the account's OWN global presence — appear online or offline (OPERATOR, both engines). The
+setting does not survive a restart or reconnect; re-issue it after `session.status` reports one.
+
+```bash
+curl -X PUT "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/presence" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "available": false }'
 ```
 
 #### POST /api/sessions/:id/chats/read
@@ -506,6 +541,17 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/delete" \
   -d '{ "chatId": "628123456789@c.us", "messageId": "true_628123456789@c.us_3EB0ABCD", "forEveryone": true }'
 ```
 
+#### POST /api/sessions/:sessionId/messages/edit
+
+Edit the text of a message sent by this account (OPERATOR); the edited message keeps its original id.
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/edit" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "chatId": "628123456789@c.us", "messageId": "true_628123456789@c.us_3EB0ABCD", "body": "Corrected text" }'
+```
+
 #### POST /api/sessions/:sessionId/messages/send-bulk
 
 Send to multiple recipients as an async batch (max 100 messages; exact duplicate entries — same `chatId`, `type`, `content` and `variables` — are collapsed, first occurrence wins).
@@ -742,6 +788,62 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/groups/120363021234567890@g.us/invi
   -H "X-API-Key: $API_KEY"
 ```
 
+#### GET /api/sessions/:sessionId/groups/join-info
+
+Preview a group from its invite code WITHOUT joining (both engines). Read-only, so it is safe to
+call on a code from an untrusted source. There is no participant list — only `participantCount`,
+and only when WhatsApp discloses one.
+
+```bash
+curl "$BASE/api/sessions/$SESSION_ID/groups/join-info?code=XyZ987654321" \
+  -H "X-API-Key: $API_KEY"
+```
+
+#### POST /api/sessions/:sessionId/groups/join
+
+Join a group via an invite code — the part after `https://chat.whatsapp.com/` (OPERATOR).
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/groups/join" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "inviteCode": "XyZ987654321" }'
+```
+
+#### GET /api/sessions/:sessionId/groups/:groupId/membership-requests
+
+List a group's pending join requests (the queue the `group.join_request` event announces). The
+account must be a group admin — WhatsApp refuses the read otherwise (`403`).
+
+```bash
+curl "$BASE/api/sessions/$SESSION_ID/groups/120363021234567890@g.us/membership-requests" \
+  -H "X-API-Key: $API_KEY"
+```
+
+#### POST /api/sessions/:sessionId/groups/:groupId/membership-requests/approve
+
+Approve pending join requests (OPERATOR) — the named requesters, or EVERY pending request when the
+body names none. The response carries a per-requester `results` list; a partial refusal does not
+fail the batch.
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/groups/120363021234567890@g.us/membership-requests/approve" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "participants": ["628123456789@c.us"] }'
+```
+
+#### POST /api/sessions/:sessionId/groups/:groupId/membership-requests/reject
+
+Reject pending join requests (OPERATOR). Same body, response shape and batch contract as `approve`.
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/groups/120363021234567890@g.us/membership-requests/reject" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "participants": ["628123456789@c.us"] }'
+```
+
 ### 07.7 Message Templates
 
 All template routes are nested under a session and require an OPERATOR-level key.
@@ -974,6 +1076,16 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/status/send-video" \
 ```
 
 ```bash
+# Post a voice-note status (OPERATOR). WhatsApp only plays Ogg/Opus — neither engine
+# transcodes, so convert first via media/convert/voice and post the base64 it returns.
+# `recipients` (the viewer allow-list) is honored on Baileys only. There is no `caption`.
+curl -X POST "$BASE/api/sessions/$SESSION_ID/status/send-voice" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "audio": { "base64": "T2dnUwACAAAA..." }, "recipients": ["6281234567890@c.us"] }'
+```
+
+```bash
 # Delete one of the session's own posted statuses (OPERATOR)
 curl -X DELETE "$BASE/api/sessions/$SESSION_ID/status/false_status@broadcast_3A1F" \
   -H "X-API-Key: $API_KEY"
@@ -1007,6 +1119,17 @@ List webhooks visible to the calling key (scoped to its allowed sessions). Add `
 
 ```bash
 curl -X GET "$BASE/api/webhooks?limit=100&offset=0" \
+  -H "X-API-Key: $API_KEY"
+```
+
+#### GET /api/webhooks/delivery-failures
+
+List webhook deliveries that exhausted every retry, most recent first (ADMIN; results stay confined
+to the key's allowed sessions). `lastStatusCode` is `null` when the failure was a
+network/timeout/SSRF error rather than a non-2xx response.
+
+```bash
+curl -X GET "$BASE/api/webhooks/delivery-failures?limit=100&offset=0" \
   -H "X-API-Key: $API_KEY"
 ```
 
@@ -1149,7 +1272,7 @@ curl -X POST "$BASE/api/auth/validate" \
   -H "X-API-Key: $API_KEY"
 ```
 
-### 07.12 System (Health, Metrics, Stats, Settings)
+### 07.12 System (Health, Metrics, Stats, Settings, Audit)
 
 #### GET /api/health
 
@@ -1226,6 +1349,18 @@ Always returns `501` — settings are read-only at runtime. ADMIN key required (
 
 ```bash
 curl -X PUT "$BASE/api/settings" \
+  -H "X-API-Key: $API_KEY"
+```
+
+#### GET /api/audit
+
+List audit-log entries, newest first (ADMIN; rows stay confined to the key's allowed sessions).
+Unlike the other list routes the body is `{ "data", "total" }` — the page plus the unpaginated
+match count. Filters: `action`, `severity` (`info` | `warn` | `error`), `sessionId`, `apiKeyId`,
+plus `limit` (default 50, max 200) and `offset`.
+
+```bash
+curl -X GET "$BASE/api/audit?action=session_started&limit=50" \
   -H "X-API-Key: $API_KEY"
 ```
 
@@ -1523,7 +1658,116 @@ curl -X POST "$BASE/mcp" \
   -d '{ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "MessageSendText", "arguments": { "sessionId": "'"$SESSION_ID"'", "chatId": "6281234567890@c.us", "text": "Hello from MCP" } } }'
 ```
 
-### 07.14 Real-time (WebSocket)
+### 07.14 Profile (own account)
+
+Manage the linked account's own profile. All routes are nested under a session and require an
+OPERATOR key.
+
+#### PUT /api/sessions/:sessionId/profile/name
+
+Set the account display name (max 25 chars).
+
+```bash
+curl -X PUT "$BASE/api/sessions/$SESSION_ID/profile/name" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "ACME Support" }'
+```
+
+#### PUT /api/sessions/:sessionId/profile/status
+
+Set the account about/status text (max 139 chars; empty string clears it).
+
+```bash
+curl -X PUT "$BASE/api/sessions/$SESSION_ID/profile/status" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "status": "We reply within one business day" }'
+```
+
+#### PUT /api/sessions/:sessionId/profile/picture
+
+Set the account profile picture from a URL or base64 image (same media DTO conventions as message
+sends).
+
+```bash
+curl -X PUT "$BASE/api/sessions/$SESSION_ID/profile/picture" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://example.com/avatar.png" }'
+```
+
+#### DELETE /api/sessions/:sessionId/profile/picture
+
+Remove the account profile picture (WhatsApp's default avatar takes over). Removing a picture that
+is already absent is a no-op and also answers `200`.
+
+```bash
+curl -X DELETE "$BASE/api/sessions/$SESSION_ID/profile/picture" \
+  -H "X-API-Key: $API_KEY"
+```
+
+### 07.15 Search
+
+Cross-session full-text message search (OPERATOR or higher). On by default; `SEARCH_ENABLED=false`
+removes the route and module entirely. A scoped key's `allowedSessions` is applied server-side and
+cannot be widened via the query. See doc 26 for the provider contract.
+
+#### GET /api/search
+
+Search messages across sessions. `q` is required (non-empty after trim); optional filters are
+`sessionId`, `chatId`, `direction` (`incoming` | `outgoing`), `type`, `from`, `dateFrom`/`dateTo`
+(epoch ms), plus `limit` (default 50, clamped to `SEARCH_LIMIT_MAX` = 100) and `offset`. Hit
+`snippet` fields carry `<mark>` highlight markers — render them as text, never as HTML.
+
+```bash
+curl -X GET "$BASE/api/search?q=invoice&direction=incoming&limit=20" \
+  -H "X-API-Key: $API_KEY"
+```
+
+### 07.16 Media conversion (opt-in)
+
+Server-side transcoding into the shapes WhatsApp clients actually play. Disabled by default; set
+`MEDIA_CONVERSION_ENABLED=true`, and `ffmpeg` must be runnable (the official Docker image ships it)
+or the routes answer `503`. Nothing is converted implicitly — run media through here first, then
+post the result.
+
+#### GET /api/sessions/:sessionId/media/convert
+
+Report whether conversion is switched on and runnable here (`{ "available": true }`). Any role.
+
+```bash
+curl "$BASE/api/sessions/$SESSION_ID/media/convert" \
+  -H "X-API-Key: $API_KEY"
+```
+
+#### POST /api/sessions/:sessionId/media/convert/voice
+
+Convert audio (or a video's audio track) into a WhatsApp voice note — Ogg/Opus, mono, 48 kHz
+(OPERATOR). Exactly one of `url` / `base64`. Post the returned `base64` to `messages/send-audio`
+with `ptt: true` (or to `status/send-voice`).
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/media/convert/voice" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://example.com/voice-memo.mp3" }'
+```
+
+#### POST /api/sessions/:sessionId/media/convert/video
+
+Convert video into a baseline H.264/AAC MP4 every WhatsApp client accepts (OPERATOR); same request
+body and errors as the voice endpoint. Both responses are bounded by
+`MEDIA_CONVERSION_MAX_OUTPUT_BYTES` (default 50 MiB).
+
+```bash
+curl -X POST "$BASE/api/sessions/$SESSION_ID/media/convert/video" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://example.com/clip.mov" }'
+```
+
+### 07.17 Real-time (WebSocket)
 
 Events are delivered over **Socket.IO** on the `/events` namespace (not a raw WebSocket). Use the `socket.io-client` package. Set `BASE_WS` (e.g. `ws://localhost:2785`) and `API_KEY`.
 

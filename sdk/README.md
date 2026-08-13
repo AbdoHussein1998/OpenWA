@@ -52,6 +52,14 @@ All five SDKs expose the same fluent resource surface:
 > Everything else the gateway publishes is exposed. That sentence used to be an
 > unqualified "all user-facing resources are", which was false for the session
 > config routes and the two cross-session webhook reads until they were added.
+>
+> One entry in the list above is special: `mcp` is absent from the generated
+> `openapi.json` itself, not just from the SDKs — `POST /mcp` is mounted directly
+> on the Express adapter, outside the Nest `/api` routing the Swagger scanner
+> sees, so the exporter cannot emit it. Do not hand-add it to `openapi.json`
+> (`npm run openapi:check` regenerates the file and the diff fails); the route is
+> documented by hand in `docs/06-api-specification.md`, and the docs-contract
+> gate names `POST /mcp` as the one heading allowed outside the contract.
 
 ## JavaScript / TypeScript
 

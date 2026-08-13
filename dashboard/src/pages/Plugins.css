@@ -703,6 +703,20 @@
   color: var(--text-muted);
 }
 
+/* Trusted-code warning at the top of the install modal — the warning colour and the icon mark it
+   as a caution, not a hint (mirrors .migration-warning on the infrastructure page). */
+.plugins-page .install-hint-warning {
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+  color: var(--warning);
+}
+
+.plugins-page .install-hint-warning svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
 /* Inline "Catalog" link inside the sub-hint — looks like a link, not a button, so it doesn't compete
    with the tab strip above or the footer actions. */
 .plugins-page .install-inline-link {
