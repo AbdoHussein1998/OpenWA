@@ -167,10 +167,10 @@
     "coverageDirectory": "../coverage",
     "coverageThreshold": {
       "global": {
-        "branches": 58,
-        "functions": 63,
-        "lines": 66,
-        "statements": 65
+        "branches": 61,
+        "functions": 68,
+        "lines": 69,
+        "statements": 69
       },
       "./src/common/cache/": {
         "branches": 34,

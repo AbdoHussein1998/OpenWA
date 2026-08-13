@@ -177,7 +177,7 @@ authoritative gate. Current policy:
 
 | Scope                       | Branches | Functions | Lines | Statements |
 | --------------------------- | -------- | --------- | ----- | ---------- |
-| Global                      | 58%      | 63%       | 66%   | 65%        |
+| Global                      | 61%      | 68%       | 69%   | 69%        |
 | `src/common/cache/`         | 34%      | 33%       | 42%   | 42%        |
 | `src/common/security/`      | 85%      | 95%       | 93%   | 92%        |
 | `src/common/services/`      | 74%      | 91%       | 87%   | 84%        |

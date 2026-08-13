@@ -172,7 +172,14 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
       runner.query = (async (...args: unknown[]): Promise<unknown> => {
         if (!stalled && typeof args[0] === 'string' && args[0].startsWith('DELETE FROM sessions')) {
           stalled = true;
-          await new Promise(resolve => setTimeout(resolve, remainingMs * 1.5));
+          // Wait until the original lease has genuinely expired, polling the clock instead of
+          // sleeping a fixed multiple of the TTL: the property under test is "the transaction
+          // outlived the remaining time", so wait for exactly that — no shorter (the lease would
+          // still be live) and no longer (extra sleep only eats the assertion margin below).
+          const expiredAt = readAt + remainingMs;
+          while (Date.now() < expiredAt) {
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
         }
         return realQuery(...args);
       }) as typeof runner.query;

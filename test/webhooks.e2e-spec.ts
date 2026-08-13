@@ -291,9 +291,11 @@ describe('Webhooks (e2e)', () => {
         filters: { conditions: [{ field: 'sender', operator: 'is', value: ['boss@c.us'] }] },
       });
 
+      // dispatch() awaits every per-webhook delivery attempt end-to-end in this queue-off suite
+      // (Promise.allSettled over the direct deliveries, each awaiting the receiver's response), and
+      // the receiver records a hit BEFORE it answers — so a wrongly-attempted delivery would already
+      // be in `received` here. A fixed sleep would only slow the assertion, not strengthen it.
       await webhookService.dispatch(session, 'message.received', { from: 'spammer@c.us', body: 'spam' });
-      // No way to await a non-event; give dispatch a real chance to (not) deliver, then assert silence.
-      await new Promise(r => setTimeout(r, 100));
       expect(received).toHaveLength(0);
     });
 
@@ -317,8 +319,9 @@ describe('Webhooks (e2e)', () => {
         .send({ active: false })
         .expect(200);
 
+      // Same settled-dispatch reasoning as the filter-mismatch case above: the awaited dispatch()
+      // resolves only after every attempted delivery completed, so no wait is needed before asserting.
       await webhookService.dispatch(session, 'message.received', { from: 'a@c.us' });
-      await new Promise(r => setTimeout(r, 100));
       expect(received).toHaveLength(0);
     });
 
