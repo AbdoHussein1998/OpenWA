@@ -15,7 +15,15 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { PluginsService } from './plugins.service';
-import { PluginDto, PluginConfigDto, PluginSessionsDto, InstallFromUrlDto } from './dto/plugin.dto';
+import {
+  PluginDto,
+  PluginConfigDto,
+  PluginSessionsDto,
+  InstallFromUrlDto,
+  PluginActionResponseDto,
+  PluginHealthResponseDto,
+  PluginCatalogEntryDto,
+} from './dto/plugin.dto';
 import type { CatalogPlugin } from './catalog';
 import { RequireRole, RequireUnscopedKey } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
@@ -82,7 +90,7 @@ export class PluginsController {
   @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'List the remote plugin catalog, annotated with install state' })
-  @ApiResponse({ status: 200, description: 'Catalog entries' })
+  @ApiResponse({ status: 200, description: 'Catalog entries', type: [PluginCatalogEntryDto] })
   @ApiResponse({ status: 400, description: 'Catalog could not be fetched or parsed' })
   async catalog(): Promise<CatalogPlugin[]> {
     return await this.pluginsService.getCatalog();
@@ -103,7 +111,7 @@ export class PluginsController {
   @RequireUnscopedKey()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Enable a plugin' })
-  @ApiResponse({ status: 200, description: 'Plugin enabled successfully' })
+  @ApiResponse({ status: 200, description: 'Plugin enabled successfully', type: PluginActionResponseDto })
   async enable(@Param('id') id: string): Promise<{ success: boolean; message: string }> {
     return await this.pluginsService.enable(id);
   }
@@ -113,7 +121,7 @@ export class PluginsController {
   @RequireUnscopedKey()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Disable a plugin' })
-  @ApiResponse({ status: 200, description: 'Plugin disabled successfully' })
+  @ApiResponse({ status: 200, description: 'Plugin disabled successfully', type: PluginActionResponseDto })
   async disable(@Param('id') id: string): Promise<{ success: boolean; message: string }> {
     return await this.pluginsService.disable(id);
   }
@@ -122,7 +130,7 @@ export class PluginsController {
   @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Update plugin configuration' })
-  @ApiResponse({ status: 200, description: 'Plugin configuration updated' })
+  @ApiResponse({ status: 200, description: 'Plugin configuration updated', type: PluginActionResponseDto })
   updateConfig(@Param('id') id: string, @Body() configDto: PluginConfigDto): { success: boolean; message: string } {
     return this.pluginsService.updateConfig(id, configDto.config);
   }
@@ -152,7 +160,7 @@ export class PluginsController {
   @Put(':id/config/:sessionId')
   @RequireRole(ApiKeyRole.ADMIN)
   @ApiOperation({ summary: 'Set a plugin config override for a specific session (empty = clear it)' })
-  @ApiResponse({ status: 200, description: 'Per-session plugin configuration updated' })
+  @ApiResponse({ status: 200, description: 'Per-session plugin configuration updated', type: PluginActionResponseDto })
   @ApiResponse({ status: 400, description: 'Plugin is global (not session-scoped)' })
   @ApiResponse({ status: 404, description: 'Plugin not found' })
   updateSessionConfig(
@@ -197,7 +205,7 @@ export class PluginsController {
   @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Uninstall a plugin (removes its files; built-ins are protected)' })
-  @ApiResponse({ status: 200, description: 'Plugin uninstalled' })
+  @ApiResponse({ status: 200, description: 'Plugin uninstalled', type: PluginActionResponseDto })
   @ApiResponse({ status: 400, description: 'Cannot uninstall (e.g. built-in)' })
   @ApiResponse({ status: 404, description: 'Plugin not found' })
   async uninstall(@Param('id') id: string): Promise<{ success: boolean; message: string }> {
@@ -208,7 +216,7 @@ export class PluginsController {
   @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Check plugin health' })
-  @ApiResponse({ status: 200, description: 'Plugin health status' })
+  @ApiResponse({ status: 200, description: 'Plugin health status', type: PluginHealthResponseDto })
   async healthCheck(@Param('id') id: string): Promise<{ healthy: boolean; message?: string }> {
     return await this.pluginsService.healthCheck(id);
   }

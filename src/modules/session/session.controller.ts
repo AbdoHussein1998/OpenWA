@@ -32,6 +32,9 @@ import {
   RequestPairingCodeDto,
   PairingCodeResponseDto,
   ChatSummaryDto,
+  SessionActionResponseDto,
+  SessionGroupSummaryDto,
+  SessionsOverviewResponseDto,
 } from './dto';
 import { Session } from './entities/session.entity';
 import { ChatSummary } from '../../engine/interfaces/whatsapp-engine.interface';
@@ -379,6 +382,7 @@ export class SessionController {
   @ApiResponse({
     status: 200,
     description: 'List of groups the session is a member of',
+    type: [SessionGroupSummaryDto],
   })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
@@ -434,7 +438,7 @@ export class SessionController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark a chat as read/seen' })
   @ApiParam({ name: 'id', description: 'Session ID' })
-  @ApiResponse({ status: 200, description: 'Chat marked as read successfully' })
+  @ApiResponse({ status: 200, description: 'Chat marked as read successfully', type: SessionActionResponseDto })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({
@@ -468,7 +472,11 @@ export class SessionController {
       'event) and answers `501`.',
   })
   @ApiParam({ name: 'id', description: 'Session ID' })
-  @ApiResponse({ status: 200, description: 'Subscribed; updates now arrive as presence.update events' })
+  @ApiResponse({
+    status: 200,
+    description: 'Subscribed; updates now arrive as presence.update events',
+    type: SessionActionResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'Session not started' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 501, description: 'The active engine cannot observe presence (whatsapp-web.js)' })
@@ -494,7 +502,7 @@ export class SessionController {
       'per its connect-time behaviour). Supported on both engines.',
   })
   @ApiParam({ name: 'id', description: 'Session ID' })
-  @ApiResponse({ status: 200, description: 'Presence published' })
+  @ApiResponse({ status: 200, description: 'Presence published', type: SessionActionResponseDto })
   @ApiResponse({ status: 400, description: 'Session not started, or validation failed' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
@@ -535,7 +543,7 @@ export class SessionController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark a chat as unread' })
   @ApiParam({ name: 'id', description: 'Session ID' })
-  @ApiResponse({ status: 200, description: 'Chat marked as unread successfully' })
+  @ApiResponse({ status: 200, description: 'Chat marked as unread successfully', type: SessionActionResponseDto })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({
@@ -564,6 +572,7 @@ export class SessionController {
     description:
       'Returns `{ success }`. `false` means the engine declined to act — an unknown chat, or on the ' +
       'Baileys engine a chat with no known history, since the change is keyed to its last message.',
+    type: SessionActionResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
@@ -592,6 +601,7 @@ export class SessionController {
     description:
       'Returns `{ success }`. `false` means the engine declined to act — on the Baileys engine a ' +
       'chat with no known history cannot be archived, since the change is keyed to its last message.',
+    type: SessionActionResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
@@ -621,6 +631,7 @@ export class SessionController {
       'Returns `{ success: true }`. Unlike the archive route there is no declined outcome: the mute ' +
       "change is not keyed to the chat's last message on either engine, so a chat with no known " +
       'history mutes like any other.',
+    type: SessionActionResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Session not ready, or an invalid chatId / muteUntil' })
   @ApiResponse({ status: 404, description: 'Session not found' })
@@ -647,6 +658,7 @@ export class SessionController {
       'Returns `{ success }`. `false` means the engine declined, and only a pin can: WhatsApp allows ' +
       'at most three pinned chats and the whatsapp-web.js engine reports the refusal. Unpinning always ' +
       'succeeds, and the Baileys engine always reports success because it cannot observe the cap.',
+    type: SessionActionResponseDto,
   })
   @ApiResponse({
     status: 400,
@@ -674,7 +686,7 @@ export class SessionController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a chat from the chat list (e.g. a group you have left)' })
   @ApiParam({ name: 'id', description: 'Session ID' })
-  @ApiResponse({ status: 200, description: 'Chat deleted successfully' })
+  @ApiResponse({ status: 200, description: 'Chat deleted successfully', type: SessionActionResponseDto })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({
@@ -694,7 +706,7 @@ export class SessionController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Send a typing/recording presence indicator to a chat (or clear it with 'paused')" })
   @ApiParam({ name: 'id', description: 'Session ID' })
-  @ApiResponse({ status: 200, description: 'Presence sent' })
+  @ApiResponse({ status: 200, description: 'Presence sent', type: SessionActionResponseDto })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendChatState(
@@ -712,6 +724,7 @@ export class SessionController {
   @ApiResponse({
     status: 200,
     description: 'Session statistics including counts and memory usage',
+    type: SessionsOverviewResponseDto,
   })
   async getStats(@CurrentApiKey() apiKey?: ApiKey): Promise<{
     total: number;

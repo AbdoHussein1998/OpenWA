@@ -250,3 +250,60 @@ export class WebhookResponseDto {
     return entities.map(entity => WebhookResponseDto.fromEntity(entity));
   }
 }
+
+/** A webhook delivery that exhausted every retry — the shape `GET /webhooks/delivery-failures` serves. */
+export class WebhookDeliveryFailureDto {
+  @ApiProperty({ example: '0a941dac-a965-45e7-b318-74ae8be134f0' })
+  id!: string;
+
+  @ApiProperty({ example: '0a941dac-a965-45e7-b318-74ae8be134f0' })
+  webhookId!: string;
+
+  @ApiProperty({ example: '0a941dac-a965-45e7-b318-74ae8be134f0' })
+  sessionId!: string;
+
+  @ApiProperty({ example: 'message.received' })
+  event!: string;
+
+  @ApiProperty({ example: 'https://receiver.example.com/hook' })
+  url!: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'The idempotency key the receiver would have deduped on.',
+  })
+  idempotencyKey?: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  deliveryId?: string | null;
+
+  @ApiProperty({ description: 'Total attempts made before giving up.', example: 5 })
+  attempts!: number;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    description: 'Last HTTP status when the failure was a non-2xx response; null for a network/timeout error.',
+    example: null,
+  })
+  lastStatusCode?: number | null;
+
+  @ApiProperty({ example: 'connect ECONNREFUSED 10.0.0.1:443' })
+  lastError!: string;
+
+  @ApiProperty({ type: String, format: 'date-time', description: 'When the delivery was finally abandoned.' })
+  createdAt!: Date;
+}
+
+/** Outcome of `POST /sessions/:sessionId/webhooks/:id/test`. */
+export class WebhookTestResponseDto {
+  @ApiProperty({ description: 'True when the receiver answered 2xx.', example: true })
+  success!: boolean;
+
+  @ApiPropertyOptional({ description: 'The HTTP status the receiver answered, when it answered.', example: 200 })
+  statusCode?: number;
+
+  @ApiPropertyOptional({ description: 'The delivery error, when the attempt failed.', example: 'timeout' })
+  error?: string;
+}

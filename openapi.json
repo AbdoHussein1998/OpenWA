@@ -320,7 +320,14 @@
         ],
         "responses": {
           "200": {
-            "description": "API key is valid"
+            "description": "API key is valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateApiKeyResponseDto"
+                }
+              }
+            }
           },
           "401": {
             "description": "Invalid or missing API key"
@@ -854,7 +861,17 @@
         ],
         "responses": {
           "200": {
-            "description": "List of groups the session is a member of"
+            "description": "List of groups the session is a member of",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionGroupSummaryDto"
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready"
@@ -1018,7 +1035,14 @@
         },
         "responses": {
           "200": {
-            "description": "Chat marked as read successfully"
+            "description": "Chat marked as read successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready"
@@ -1066,7 +1090,14 @@
         },
         "responses": {
           "200": {
-            "description": "Subscribed; updates now arrive as presence.update events"
+            "description": "Subscribed; updates now arrive as presence.update events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not started"
@@ -1114,7 +1145,14 @@
         },
         "responses": {
           "200": {
-            "description": "Presence published"
+            "description": "Presence published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not started, or validation failed"
@@ -1203,7 +1241,14 @@
         },
         "responses": {
           "200": {
-            "description": "Chat marked as unread successfully"
+            "description": "Chat marked as unread successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready"
@@ -1249,7 +1294,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Returns `{ success }`. `false` means the engine declined to act — an unknown chat, or on the Baileys engine a chat with no known history, since the change is keyed to its last message."
+            "description": "Returns `{ success }`. `false` means the engine declined to act — an unknown chat, or on the Baileys engine a chat with no known history, since the change is keyed to its last message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready"
@@ -1296,7 +1348,14 @@
         },
         "responses": {
           "200": {
-            "description": "Returns `{ success }`. `false` means the engine declined to act — on the Baileys engine a chat with no known history cannot be archived, since the change is keyed to its last message."
+            "description": "Returns `{ success }`. `false` means the engine declined to act — on the Baileys engine a chat with no known history cannot be archived, since the change is keyed to its last message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready"
@@ -1343,7 +1402,14 @@
         },
         "responses": {
           "200": {
-            "description": "Returns `{ success: true }`. Unlike the archive route there is no declined outcome: the mute change is not keyed to the chat's last message on either engine, so a chat with no known history mutes like any other."
+            "description": "Returns `{ success: true }`. Unlike the archive route there is no declined outcome: the mute change is not keyed to the chat's last message on either engine, so a chat with no known history mutes like any other.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready, or an invalid chatId / muteUntil"
@@ -1390,7 +1456,14 @@
         },
         "responses": {
           "200": {
-            "description": "Returns `{ success }`. `false` means the engine declined, and only a pin can: WhatsApp allows at most three pinned chats and the whatsapp-web.js engine reports the refusal. Unpinning always succeeds, and the Baileys engine always reports success because it cannot observe the cap."
+            "description": "Returns `{ success }`. `false` means the engine declined, and only a pin can: WhatsApp allows at most three pinned chats and the whatsapp-web.js engine reports the refusal. Unpinning always succeeds, and the Baileys engine always reports success because it cannot observe the cap.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready, or a chatId the session cannot resolve. An unknown chat is reported here rather than as `success: false`, which on this route means only that the three-pin cap refused a real chat. The Baileys engine cannot resolve chats ahead of the write and answers `success: true` for an unknown chat."
@@ -1437,7 +1510,14 @@
         },
         "responses": {
           "200": {
-            "description": "Chat deleted successfully"
+            "description": "Chat deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not ready"
@@ -1484,7 +1564,14 @@
         },
         "responses": {
           "200": {
-            "description": "Presence sent"
+            "description": "Presence sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponseDto"
+                }
+              }
+            }
           },
           "404": {
             "description": "Session not found"
@@ -1505,7 +1592,14 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Session statistics including counts and memory usage"
+            "description": "Session statistics including counts and memory usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionsOverviewResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Get session statistics for multi-session monitoring",
@@ -1745,7 +1839,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Test result"
+            "description": "Test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookTestResponseDto"
+                }
+              }
+            }
           },
           "404": {
             "description": "Webhook not found"
@@ -1791,7 +1892,17 @@
         ],
         "responses": {
           "200": {
-            "description": "Permanently-failed webhook deliveries, most recent first"
+            "description": "Permanently-failed webhook deliveries, most recent first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WebhookDeliveryFailureDto"
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "List recently-failed webhook deliveries (all retries exhausted)",
@@ -2105,7 +2216,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Message history"
+            "description": "Message history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageListResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Get message history for a session",
@@ -2847,7 +2965,14 @@
         },
         "responses": {
           "200": {
-            "description": "Reaction added or removed. Send empty emoji to remove reaction."
+            "description": "Reaction added or removed. Send empty emoji to remove reaction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not active or message not found"
@@ -2918,7 +3043,17 @@
         ],
         "responses": {
           "200": {
-            "description": "Chat history (most recent messages)"
+            "description": "Chat history (most recent messages)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChatHistoryMessageDto"
+                  }
+                }
+              }
+            }
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
@@ -2967,7 +3102,17 @@
         ],
         "responses": {
           "200": {
-            "description": "List of reactions with senders"
+            "description": "List of reactions with senders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MessageReactionDto"
+                  }
+                }
+              }
+            }
           },
           "404": {
             "description": "No such message — the id is outside the engine's lookup window (roughly the last hundred messages of the chat, or absent from the Baileys store) or the message was revoked."
@@ -3065,7 +3210,14 @@
         },
         "responses": {
           "200": {
-            "description": "Message deleted"
+            "description": "Message deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not active or message not found"
@@ -3112,7 +3264,14 @@
         },
         "responses": {
           "200": {
-            "description": "Vote cast"
+            "description": "Vote cast",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not active, or the target message is not a poll"
@@ -3159,7 +3318,14 @@
         },
         "responses": {
           "200": {
-            "description": "Message pinned"
+            "description": "Message pinned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not active, or durationSeconds is not one of 86400 / 604800 / 2592000"
@@ -3206,7 +3372,14 @@
         },
         "responses": {
           "200": {
-            "description": "Message unpinned"
+            "description": "Message unpinned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not active"
@@ -3253,7 +3426,14 @@
         },
         "responses": {
           "200": {
-            "description": "Instruction delivered. On whatsapp-web.js the engine silently ignores a message it will not star, so this does not guarantee the star is set."
+            "description": "Instruction delivered. On whatsapp-web.js the engine silently ignores a message it will not star, so this does not guarantee the star is set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Session not active"
@@ -3398,7 +3578,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Batch status and progress"
+            "description": "Batch status and progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchStatusResponseDto"
+                }
+              }
+            }
           },
           "404": {
             "description": "Batch not found"
@@ -3435,7 +3622,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Batch cancelled"
+            "description": "Batch cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchCancelResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Batch already completed, cancelled, or failed (terminal statuses are exclusive)"
@@ -8072,7 +8266,17 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Catalog entries"
+            "description": "Catalog entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PluginCatalogEntryDto"
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Catalog could not be fetched or parsed"
@@ -8131,7 +8335,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Plugin uninstalled"
+            "description": "Plugin uninstalled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Cannot uninstall (e.g. built-in)"
@@ -8161,7 +8372,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Plugin enabled successfully"
+            "description": "Plugin enabled successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Enable a plugin",
@@ -8185,7 +8403,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Plugin disabled successfully"
+            "description": "Plugin disabled successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Disable a plugin",
@@ -8219,7 +8444,14 @@
         },
         "responses": {
           "200": {
-            "description": "Plugin configuration updated"
+            "description": "Plugin configuration updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Update plugin configuration",
@@ -8295,7 +8527,14 @@
         },
         "responses": {
           "200": {
-            "description": "Per-session plugin configuration updated"
+            "description": "Per-session plugin configuration updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Plugin is global (not session-scoped)"
@@ -8422,7 +8661,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Plugin health status"
+            "description": "Plugin health status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginHealthResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Check plugin health",
@@ -8862,7 +9108,14 @@
         ],
         "responses": {
           "201": {
-            "description": "One bounded batch of dead-lettered ingress deliveries re-dispatched, with remaining depth."
+            "description": "One bounded batch of dead-lettered ingress deliveries re-dispatched, with remaining depth.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedriveResultDto"
+                }
+              }
+            }
           }
         },
         "tags": [
@@ -9678,6 +9931,28 @@
           }
         }
       },
+      "ValidateApiKeyResponseDto": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "description": "Whether the presented API key is valid.",
+            "example": true
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "operator",
+              "viewer"
+            ],
+            "description": "The key's role; present only when valid."
+          }
+        },
+        "required": [
+          "valid"
+        ]
+      },
       "CreateSessionDto": {
         "type": "object",
         "properties": {
@@ -9949,6 +10224,31 @@
           "status"
         ]
       },
+      "SessionGroupSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Group id.",
+            "example": "120363000000000000@g.us"
+          },
+          "name": {
+            "type": "string",
+            "description": "Group subject.",
+            "example": "Engineering"
+          },
+          "linkedParentJID": {
+            "type": "string",
+            "nullable": true,
+            "description": "JID of the parent community, or null when the group is standalone.",
+            "example": null
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
       "ChatSummaryDto": {
         "type": "object",
         "properties": {
@@ -10012,6 +10312,19 @@
         },
         "required": [
           "chatId"
+        ]
+      },
+      "SessionActionResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the engine applied the change. Routes where the engine can decline spell out what `false` means in their own description; on the rest it is always `true`.",
+            "example": true
+          }
+        },
+        "required": [
+          "success"
         ]
       },
       "SubscribePresenceDto": {
@@ -10193,6 +10506,83 @@
         "required": [
           "chatId",
           "state"
+        ]
+      },
+      "SessionMemoryUsageDto": {
+        "type": "object",
+        "properties": {
+          "heapUsed": {
+            "type": "number",
+            "description": "V8 heap in use, in MiB.",
+            "example": 128
+          },
+          "heapTotal": {
+            "type": "number",
+            "description": "V8 heap reserved, in MiB.",
+            "example": 256
+          },
+          "rss": {
+            "type": "number",
+            "description": "Resident set size, in MiB.",
+            "example": 512
+          }
+        },
+        "required": [
+          "heapUsed",
+          "heapTotal",
+          "rss"
+        ]
+      },
+      "SessionsOverviewResponseDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "description": "Sessions on record, connected or not.",
+            "example": 5
+          },
+          "active": {
+            "type": "number",
+            "description": "Sessions with a live engine in this process.",
+            "example": 2
+          },
+          "ready": {
+            "type": "number",
+            "description": "Sessions whose status is 'ready'.",
+            "example": 2
+          },
+          "disconnected": {
+            "type": "number",
+            "description": "Sessions whose status is 'disconnected'.",
+            "example": 3
+          },
+          "byStatus": {
+            "type": "object",
+            "description": "Session count per status value.",
+            "example": {
+              "ready": 2,
+              "disconnected": 3
+            },
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "memoryUsage": {
+            "description": "Process memory usage of this gateway.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionMemoryUsageDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "total",
+          "active",
+          "ready",
+          "disconnected",
+          "byStatus",
+          "memoryUsage"
         ]
       },
       "CreateWebhookDto": {
@@ -10439,6 +10829,93 @@
           }
         }
       },
+      "WebhookTestResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "True when the receiver answered 2xx.",
+            "example": true
+          },
+          "statusCode": {
+            "type": "number",
+            "description": "The HTTP status the receiver answered, when it answered.",
+            "example": 200
+          },
+          "error": {
+            "type": "string",
+            "description": "The delivery error, when the attempt failed.",
+            "example": "timeout"
+          }
+        },
+        "required": [
+          "success"
+        ]
+      },
+      "WebhookDeliveryFailureDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "0a941dac-a965-45e7-b318-74ae8be134f0"
+          },
+          "webhookId": {
+            "type": "string",
+            "example": "0a941dac-a965-45e7-b318-74ae8be134f0"
+          },
+          "sessionId": {
+            "type": "string",
+            "example": "0a941dac-a965-45e7-b318-74ae8be134f0"
+          },
+          "event": {
+            "type": "string",
+            "example": "message.received"
+          },
+          "url": {
+            "type": "string",
+            "example": "https://receiver.example.com/hook"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "nullable": true,
+            "description": "The idempotency key the receiver would have deduped on."
+          },
+          "deliveryId": {
+            "type": "string",
+            "nullable": true
+          },
+          "attempts": {
+            "type": "number",
+            "description": "Total attempts made before giving up.",
+            "example": 5
+          },
+          "lastStatusCode": {
+            "type": "number",
+            "nullable": true,
+            "description": "Last HTTP status when the failure was a non-2xx response; null for a network/timeout error.",
+            "example": null
+          },
+          "lastError": {
+            "type": "string",
+            "example": "connect ECONNREFUSED 10.0.0.1:443"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the delivery was finally abandoned."
+          }
+        },
+        "required": [
+          "id",
+          "webhookId",
+          "sessionId",
+          "event",
+          "url",
+          "attempts",
+          "lastError",
+          "createdAt"
+        ]
+      },
       "CreateAutomationRuleDto": {
         "type": "object",
         "properties": {
@@ -10550,6 +11027,138 @@
             "description": "Whether the rule is active"
           }
         }
+      },
+      "MessageListItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "0a941dac-a965-45e7-b318-74ae8be134f0"
+          },
+          "sessionId": {
+            "type": "string",
+            "example": "0a941dac-a965-45e7-b318-74ae8be134f0"
+          },
+          "waMessageId": {
+            "type": "string",
+            "nullable": true,
+            "description": "WhatsApp message id, once the engine has assigned one.",
+            "example": "true_628123456789@c.us_3EB0123456789"
+          },
+          "chatId": {
+            "type": "string",
+            "example": "628123456789@c.us"
+          },
+          "chatName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Human-readable chat name when known (contact pushName, group subject).",
+            "example": "Alice"
+          },
+          "author": {
+            "type": "string",
+            "nullable": true,
+            "description": "Group participant who posted the message (`from` is the group JID there).",
+            "example": "628123456789@c.us"
+          },
+          "from": {
+            "type": "string",
+            "example": "628123456789@c.us"
+          },
+          "to": {
+            "type": "string",
+            "example": "628987654321@c.us"
+          },
+          "body": {
+            "type": "string",
+            "nullable": true,
+            "description": "Message text body.",
+            "example": "hi"
+          },
+          "type": {
+            "type": "string",
+            "description": "Engine-neutral message type.",
+            "example": "text"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "incoming",
+              "outgoing"
+            ],
+            "example": "incoming"
+          },
+          "timestamp": {
+            "type": "number",
+            "nullable": true,
+            "description": "Unix seconds the message was sent, when the engine reported one.",
+            "example": 1700000010
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "description": "Engine-specific extras (media inline copy, poll data, …). Absent when none were stored.",
+            "additionalProperties": true
+          },
+          "mediaPath": {
+            "type": "string",
+            "nullable": true,
+            "description": "Storage key of the archived media, when one was archived."
+          },
+          "mediaMimetype": {
+            "type": "string",
+            "nullable": true,
+            "description": "Mimetype of the archived media."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sent",
+              "delivered",
+              "read",
+              "failed"
+            ],
+            "example": "delivered"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-13T09:00:00Z"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "chatId",
+          "from",
+          "to",
+          "type",
+          "direction",
+          "status",
+          "createdAt"
+        ]
+      },
+      "MessageListResponseDto": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "description": "Newest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageListItemDto"
+            }
+          },
+          "total": {
+            "type": "number",
+            "description": "Total rows matching the filters (before pagination).",
+            "example": 132
+          }
+        },
+        "required": [
+          "messages",
+          "total"
+        ]
       },
       "CustomLinkPreviewDto": {
         "type": "object",
@@ -10947,6 +11556,378 @@
           "emoji"
         ]
       },
+      "MessageActionResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Always true — a failure is reported as a non-2xx status, not as false.",
+            "example": true
+          }
+        },
+        "required": [
+          "success"
+        ]
+      },
+      "ChatHistoryCallDto": {
+        "type": "object",
+        "properties": {
+          "video": {
+            "type": "boolean",
+            "description": "Video (true) vs voice (false) call.",
+            "example": false
+          },
+          "missed": {
+            "type": "boolean",
+            "description": "Whether an incoming call went unanswered.",
+            "example": true
+          }
+        },
+        "required": [
+          "video",
+          "missed"
+        ]
+      },
+      "ChatHistoryContactDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Sender JID (`…@c.us` or a `…@lid` privacy id).",
+            "example": "628123456789@c.us"
+          },
+          "number": {
+            "type": "string",
+            "description": "Phone digits, best-effort.",
+            "example": "628123456789"
+          },
+          "name": {
+            "type": "string",
+            "example": "Alice"
+          },
+          "pushName": {
+            "type": "string",
+            "example": "Alice"
+          },
+          "shortName": {
+            "type": "string",
+            "example": "Al"
+          },
+          "type": {
+            "type": "string",
+            "description": "Engine contact type token.",
+            "example": "in"
+          },
+          "isMyContact": {
+            "type": "boolean",
+            "description": "Saved in the account address book.",
+            "example": true
+          },
+          "isWAContact": {
+            "type": "boolean",
+            "description": "Is a WhatsApp user.",
+            "example": true
+          },
+          "isBusiness": {
+            "type": "boolean",
+            "example": false
+          },
+          "isEnterprise": {
+            "type": "boolean",
+            "example": false
+          },
+          "verifiedName": {
+            "type": "string",
+            "description": "Business verified name."
+          },
+          "verifiedLevel": {
+            "type": "number",
+            "description": "Business verification level.",
+            "example": 2
+          },
+          "isBlocked": {
+            "type": "boolean",
+            "example": false
+          },
+          "labels": {
+            "description": "Label ids (CRM); names are not resolved.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ChatHistoryMediaDto": {
+        "type": "object",
+        "properties": {
+          "mimetype": {
+            "type": "string",
+            "example": "image/jpeg"
+          },
+          "filename": {
+            "type": "string",
+            "example": "photo.jpg"
+          },
+          "data": {
+            "type": "string",
+            "description": "Base64 payload; absent when the blob was omitted."
+          },
+          "omitted": {
+            "type": "boolean",
+            "description": "True when the blob was dropped by a size cap, timeout, or saturation."
+          },
+          "sizeBytes": {
+            "type": "number",
+            "description": "Decoded byte size of the media; always set when omitted.",
+            "example": 102400
+          }
+        },
+        "required": [
+          "mimetype"
+        ]
+      },
+      "ChatHistoryQuotedMessageDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "true_628123456789@c.us_3EB0123456789"
+          },
+          "body": {
+            "type": "string",
+            "example": "original text"
+          }
+        },
+        "required": [
+          "id",
+          "body"
+        ]
+      },
+      "ChatHistoryLocationDto": {
+        "type": "object",
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "example": -6.2088
+          },
+          "longitude": {
+            "type": "number",
+            "example": 106.8456
+          },
+          "description": {
+            "type": "string",
+            "example": "Monas"
+          },
+          "address": {
+            "type": "string",
+            "example": "Jakarta"
+          },
+          "url": {
+            "type": "string",
+            "example": "https://maps.example.com/…"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ]
+      },
+      "ChatHistoryMessageDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "true_628123456789@c.us_3EB0123456789"
+          },
+          "from": {
+            "type": "string",
+            "example": "628123456789@c.us"
+          },
+          "to": {
+            "type": "string",
+            "example": "628987654321@c.us"
+          },
+          "chatId": {
+            "type": "string",
+            "example": "628123456789@c.us"
+          },
+          "body": {
+            "type": "string",
+            "example": "hi"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "voice",
+              "document",
+              "sticker",
+              "location",
+              "contact",
+              "poll",
+              "call",
+              "revoked",
+              "masked",
+              "unknown"
+            ],
+            "description": "Engine-neutral message type.",
+            "example": "text"
+          },
+          "timestamp": {
+            "type": "number",
+            "description": "Unix seconds the message was sent.",
+            "example": 1700000010
+          },
+          "fromMe": {
+            "type": "boolean",
+            "example": false
+          },
+          "isGroup": {
+            "type": "boolean",
+            "example": false
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "individual",
+              "group",
+              "channel",
+              "status",
+              "broadcast",
+              "unknown"
+            ],
+            "description": "User-facing chat kind of the conversation.",
+            "example": "individual"
+          },
+          "isStatusBroadcast": {
+            "type": "boolean",
+            "description": "True for a status/story broadcast.",
+            "example": false
+          },
+          "ephemeralDuration": {
+            "type": "number",
+            "description": "Disappearing-messages timer in seconds; 0 or absent means off.",
+            "example": 0
+          },
+          "author": {
+            "type": "string",
+            "description": "Group participant who actually sent it (`from` is the group JID there).",
+            "example": "628123456789@c.us"
+          },
+          "mentionedIds": {
+            "description": "WIDs @mentioned in the message.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "call": {
+            "description": "Set for `call` messages.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ChatHistoryCallDto"
+              }
+            ]
+          },
+          "isLidSender": {
+            "type": "boolean",
+            "description": "Sender is identified by a privacy id rather than a phone number."
+          },
+          "senderPhone": {
+            "type": "string",
+            "nullable": true,
+            "description": "Best-effort phone digits of a privacy-id sender, when resolved.",
+            "example": null
+          },
+          "contact": {
+            "description": "Sender contact info, best-effort.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ChatHistoryContactDto"
+              }
+            ]
+          },
+          "backgroundColor": {
+            "type": "string",
+            "description": "Text-status background as `#RRGGBB`.",
+            "example": "#FF5733"
+          },
+          "font": {
+            "type": "number",
+            "description": "Text-status WhatsApp font index.",
+            "example": 1
+          },
+          "media": {
+            "$ref": "#/components/schemas/ChatHistoryMediaDto"
+          },
+          "quotedMessage": {
+            "$ref": "#/components/schemas/ChatHistoryQuotedMessageDto"
+          },
+          "location": {
+            "$ref": "#/components/schemas/ChatHistoryLocationDto"
+          }
+        },
+        "required": [
+          "id",
+          "from",
+          "to",
+          "chatId",
+          "body",
+          "type",
+          "timestamp",
+          "fromMe",
+          "isGroup",
+          "kind"
+        ]
+      },
+      "MessageReactionSenderDto": {
+        "type": "object",
+        "properties": {
+          "senderId": {
+            "type": "string",
+            "example": "628123456789@c.us"
+          },
+          "emoji": {
+            "type": "string",
+            "example": "👍"
+          },
+          "timestamp": {
+            "type": "number",
+            "description": "Unix seconds the reaction was placed.",
+            "example": 1700000010
+          }
+        },
+        "required": [
+          "senderId",
+          "emoji",
+          "timestamp"
+        ]
+      },
+      "MessageReactionDto": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string",
+            "description": "The emoji this entry groups.",
+            "example": "👍"
+          },
+          "senders": {
+            "description": "Who placed this emoji.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageReactionSenderDto"
+            }
+          }
+        },
+        "required": [
+          "emoji",
+          "senders"
+        ]
+      },
       "DeleteMessageDto": {
         "type": "object",
         "properties": {
@@ -11255,6 +12236,173 @@
           "status",
           "totalMessages",
           "statusUrl"
+        ]
+      },
+      "BatchProgressDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "example": 10
+          },
+          "sent": {
+            "type": "number",
+            "example": 7
+          },
+          "failed": {
+            "type": "number",
+            "example": 1
+          },
+          "pending": {
+            "type": "number",
+            "example": 2
+          },
+          "cancelled": {
+            "type": "number",
+            "example": 0
+          }
+        },
+        "required": [
+          "total",
+          "sent",
+          "failed",
+          "pending",
+          "cancelled"
+        ]
+      },
+      "BatchMessageErrorDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Machine-readable failure code.",
+            "example": "RECIPIENT_UNREACHABLE"
+          },
+          "message": {
+            "type": "string",
+            "example": "The number is not registered on WhatsApp"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "BatchMessageResultDto": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string",
+            "example": "628123456789@c.us"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sent",
+              "failed",
+              "cancelled"
+            ],
+            "example": "sent"
+          },
+          "messageId": {
+            "type": "string",
+            "description": "Assigned on a successful send.",
+            "example": "true_628123456789@c.us_3EB0123456789"
+          },
+          "error": {
+            "description": "Present on a failed send.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BatchMessageErrorDto"
+              }
+            ]
+          },
+          "sentAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the send completed."
+          }
+        },
+        "required": [
+          "chatId",
+          "status"
+        ]
+      },
+      "BatchStatusResponseDto": {
+        "type": "object",
+        "properties": {
+          "batchId": {
+            "type": "string",
+            "example": "batch_abc123"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
+            "example": "processing"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/BatchProgressDto"
+          },
+          "results": {
+            "description": "One entry per recipient already attempted.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchMessageResultDto"
+            }
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When processing started; null while the batch is pending."
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When the batch reached a terminal status; null while it is still running."
+          }
+        },
+        "required": [
+          "batchId",
+          "status",
+          "progress",
+          "results"
+        ]
+      },
+      "BatchCancelResponseDto": {
+        "type": "object",
+        "properties": {
+          "batchId": {
+            "type": "string",
+            "example": "batch_abc123"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
+            "example": "cancelled"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/BatchProgressDto"
+          }
+        },
+        "required": [
+          "batchId",
+          "status",
+          "progress"
         ]
       },
       "CreateTemplateDto": {
@@ -14928,6 +16076,113 @@
           "url"
         ]
       },
+      "PluginCatalogEntryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "echo"
+          },
+          "name": {
+            "type": "string",
+            "example": "Echo Bot"
+          },
+          "version": {
+            "type": "string",
+            "example": "1.2.0"
+          },
+          "type": {
+            "type": "string",
+            "example": "utility"
+          },
+          "status": {
+            "type": "string",
+            "example": "stable"
+          },
+          "description": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "license": {
+            "type": "string",
+            "example": "MIT"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "minOpenWAVersion": {
+            "type": "string",
+            "example": "0.18.0"
+          },
+          "testedOpenWAVersion": {
+            "type": "string",
+            "example": "0.18.0"
+          },
+          "releasedAt": {
+            "type": "string",
+            "example": "2026-08-01"
+          },
+          "repoUrl": {
+            "type": "string",
+            "example": "https://github.com/example/echo-plugin"
+          },
+          "homepage": {
+            "type": "string"
+          },
+          "download": {
+            "type": "string",
+            "description": "Download URL of the plugin package."
+          },
+          "installed": {
+            "type": "boolean",
+            "description": "Whether this instance has the plugin installed.",
+            "example": false
+          },
+          "installedVersion": {
+            "type": "string",
+            "nullable": true,
+            "description": "The installed version, or null when not installed.",
+            "example": null
+          },
+          "updateAvailable": {
+            "type": "boolean",
+            "description": "True when installed and the catalog version is strictly newer.",
+            "example": false
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "version",
+          "installed",
+          "installedVersion",
+          "updateAvailable"
+        ]
+      },
+      "PluginActionResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the change was applied; a refusal is carried in `message`.",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable outcome.",
+            "example": "Plugin echo configuration updated"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ]
+      },
       "PluginConfigDto": {
         "type": "object",
         "properties": {
@@ -14956,6 +16211,49 @@
         },
         "required": [
           "sessions"
+        ]
+      },
+      "PluginHealthResponseDto": {
+        "type": "object",
+        "properties": {
+          "healthy": {
+            "type": "boolean",
+            "description": "Whether the plugin reports healthy.",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "description": "Failure detail when unhealthy.",
+            "example": "worker did not answer in time"
+          }
+        },
+        "required": [
+          "healthy"
+        ]
+      },
+      "RedriveResultDto": {
+        "type": "object",
+        "properties": {
+          "redriven": {
+            "type": "number",
+            "description": "Deliveries re-dispatched by this call.",
+            "example": 25
+          },
+          "remaining": {
+            "type": "number",
+            "description": "Dead-lettered deliveries still retained after this batch.",
+            "example": 75
+          },
+          "batchSize": {
+            "type": "number",
+            "description": "The bounded batch size this call processed.",
+            "example": 25
+          }
+        },
+        "required": [
+          "redriven",
+          "remaining",
+          "batchSize"
         ]
       },
       "CreateInstanceDto": {
