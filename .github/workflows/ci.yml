@@ -103,10 +103,11 @@ jobs:
         run: npm ci
 
       - name: Security audit
-        # high (not critical): the `overrides` in package.json clear the root tree's HIGH advisories
-        # (brace-expansion CVE-2026-14257, js-yaml GHSA-pm4m-ph32-ghv5), so this threshold now fences
-        # HIGH regressions instead of only catching criticals.
-        run: npm audit --audit-level=high
+        # Same high (not critical) threshold, applied per advisory rather than all-or-nothing: an
+        # advisory with no patched version can be excused BY ID in scripts/check-audit.mjs, with its
+        # reason recorded, instead of lowering the bar for everything. The script also fails on an
+        # allowlist entry whose advisory has gone, so a carve-out cannot outlive its cause.
+        run: npm run check:audit
 
       # The dashboard is a SECOND dependency tree, and it is the one that reaches a browser: its
       # runtime deps are bundled into dashboard/dist, which the production image copies and serves.

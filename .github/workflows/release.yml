@@ -63,9 +63,11 @@ jobs:
           echo "Tag $TAG matches package.json $PKG_VERSION"
 
       - name: Security audit
-        # Matches ci.yml's threshold: high (not critical). The release gate must not be laxer than the
-        # PR gate, or a HIGH advisory blocked on every PR would still sail through at tag time.
-        run: npm audit --audit-level=high
+        # Matches ci.yml exactly, including its per-advisory allowlist. The release gate must not be
+        # laxer than the PR gate, or a HIGH advisory blocked on every PR would still sail through at
+        # tag time — and it must not be STRICTER either, or a tag fails on something main has already
+        # accepted, which is how a release stalls with nothing actionable to fix.
+        run: npm run check:audit
 
       # Second tree, same rule. The dashboard's runtime deps are bundled into dashboard/dist and the
       # published image serves them to every operator's browser, so the tag path must scan them for
