@@ -5,7 +5,9 @@ jest.mock('archiver', () => ({ default: jest.fn() }));
 
 // saveConfig writes the generated env via fs.writeFileSync and reads the existing file
 // via fs.existsSync/readFileSync; mock those so tests assert produced content without
-// touching the filesystem. existsSync defaults to false (no prior config).
+// touching the filesystem. existsSync defaults to false (no prior config) — except for
+// .node probes, which better-sqlite3's binding loader uses to locate its prebuilt binary;
+// a blanket false would send it after a node-gyp build that isn't there.
 jest.mock('fs', () => {
   const actual = jest.requireActual<typeof import('fs')>('fs');
   return {
@@ -14,7 +16,7 @@ jest.mock('fs', () => {
     // saveConfig now writes the generated env via writeSecretFile, which chmods 0600 — mock it
     // so the secret-hygiene path never touches the real filesystem.
     chmodSync: jest.fn(),
-    existsSync: jest.fn().mockReturnValue(false),
+    existsSync: jest.fn((p: unknown) => (typeof p === 'string' && p.endsWith('.node') ? actual.existsSync(p) : false)),
     readFileSync: jest.fn().mockReturnValue(''),
     createReadStream: jest.fn(() => jest.requireActual<typeof import('stream')>('stream').Readable.from([])),
   };
