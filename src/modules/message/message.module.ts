@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MessageService } from './message.service';
+import { MessageSendService } from './message-send.service';
 import { BulkMessageService } from './bulk-message.service';
 import { MessageTypeBackfillService } from './message-type-backfill.service';
 import { PendingMessageReaperService } from './pending-message-reaper.service';
@@ -23,6 +24,7 @@ import { MessageBatch } from './entities/message-batch.entity';
   controllers: [MessageController],
   providers: [
     MessageService,
+    MessageSendService,
     BulkMessageService,
     MessageTypeBackfillService,
     PendingMessageReaperService,
