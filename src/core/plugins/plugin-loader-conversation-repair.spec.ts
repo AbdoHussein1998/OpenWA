@@ -6,7 +6,7 @@ import { PluginStorageService } from './plugin-storage.service';
 import { HookManager } from '../hooks';
 import { PluginContext, PluginInstance, PluginManifest, PluginStatus, PluginType } from './plugin.interfaces';
 import { ConversationMappingConflict } from '../../modules/integration/conversation-mapping.service';
-import { PLUGIN_CONVERSATION_MAPPING_PORT, PLUGIN_MESSAGE_PORT, PLUGIN_SESSION_PORT } from './plugin-host-ports';
+import { PLUGIN_CONVERSATION_MAPPING_PORT, PLUGIN_SESSION_PORT } from './plugin-host-ports';
 
 /**
  * Stale-mapping repair after a session is deleted and re-paired under a new id. The cross-session
