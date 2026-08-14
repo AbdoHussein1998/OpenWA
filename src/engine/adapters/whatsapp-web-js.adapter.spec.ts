@@ -4789,7 +4789,7 @@ describe('WhatsAppWebJsAdapter puppeteer death detection (browser/page silent de
       pupBrowser: new EventEmitter(),
       pupPage: new EventEmitter(),
       ...overrides.client,
-    }) as PuppeteerFakeClient;
+    });
     const onDisconnected = jest.fn();
     (adapter as unknown as { client: unknown }).client = client;
     (adapter as unknown as { callbacks: unknown }).callbacks = { onDisconnected };
@@ -4957,7 +4957,7 @@ describe('WhatsAppWebJsAdapter navigation re-inject grace (#1081)', () => {
       pupBrowser: new EventEmitter(),
       pupPage: new EventEmitter(),
       ...clientOverrides,
-    }) as NavFakeClient;
+    });
     (adapter as unknown as { client: unknown }).client = client;
     (adapter as unknown as { callbacks: unknown }).callbacks = {};
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
@@ -6818,7 +6818,7 @@ describe('WhatsAppWebJsAdapter account-restriction reporting', () => {
     const client = Object.assign(new EventEmitter(), {
       getState: jest.fn().mockResolvedValue(WAState.CONNECTED),
       pupPage: { evaluate: jest.fn().mockResolvedValue(true) },
-    }) as FakeClient;
+    });
     const onAccountRestriction = jest.fn();
     const onDisconnected = jest.fn();
     (adapter as unknown as { client: unknown }).client = client;

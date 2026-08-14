@@ -182,18 +182,18 @@ describe('AuthService', () => {
         setParameters() {
           return this;
         },
-        async execute(): Promise<{ affected: number }> {
+        execute(): Promise<{ affected: number }> {
           const target = keys.get(this.targetId as string);
-          if (!target) return { affected: 0 };
+          if (!target) return Promise.resolve({ affected: 0 });
           const guardPasses =
             !this.guarded ||
             !isUsableAdminRow(target) ||
             [...keys.values()].some(k => k.id !== target.id && isUsableAdminRow(k));
-          if (!guardPasses) return { affected: 0 };
+          if (!guardPasses) return Promise.resolve({ affected: 0 });
           if (this.mode === 'delete') keys.delete(this.targetId as string);
           else Object.assign(target, this.patch ?? {});
           committedWrites.push({ mode: this.mode, patch: this.patch, guarded: this.guarded });
-          return { affected: 1 };
+          return Promise.resolve({ affected: 1 });
         },
       };
       return qb;

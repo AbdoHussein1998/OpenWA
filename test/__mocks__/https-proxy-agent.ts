@@ -12,7 +12,7 @@ import { Agent } from 'node:https';
 export class HttpsProxyAgent extends Agent {
   readonly proxy: string;
 
-  constructor(proxy: string | URL, _options?: Record<string, unknown>) {
+  constructor(proxy: string | URL) {
     super();
     this.proxy = String(proxy);
   }
