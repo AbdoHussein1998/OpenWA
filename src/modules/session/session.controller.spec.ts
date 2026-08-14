@@ -95,7 +95,7 @@ describe('SessionController — create() response contract', () => {
   });
 });
 
-// POST /sessions/:id/logout audits SESSION_LOGGED_OUT only after the service resolves — an
+// POST /sessions/:sessionId/logout audits SESSION_LOGGED_OUT only after the service resolves — an
 // incomplete engine-backed attempt (502 SESSION_LOGOUT_INCOMPLETE) must NOT record a success
 // audit row, and the service's structured rejection must be forwarded verbatim.
 describe('SessionController — logout() audit + error forwarding contract', () => {
@@ -158,7 +158,7 @@ describe('SessionController — logout() audit + error forwarding contract', () 
   });
 });
 
-// POST /sessions/:id/start and /stop are thin, but they carry two contracts worth pinning: the
+// POST /sessions/:sessionId/start and /stop are thin, but they carry two contracts worth pinning: the
 // success audit row is written ONLY after the service resolves (a refused lifecycle change — the
 // engine-not-started 400, the foreign-node 409 — must leave no audit trace), and `engineLoaded`
 // in the response comes from the live engine map, not from the row's status column.

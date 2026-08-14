@@ -416,12 +416,12 @@
         ]
       }
     },
-    "/api/sessions/{id}": {
+    "/api/sessions/{sessionId}": {
       "get": {
         "operationId": "SessionController_findOne",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -454,7 +454,7 @@
         "operationId": "SessionController_delete",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -480,12 +480,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/config": {
+    "/api/sessions/{sessionId}/config": {
       "get": {
         "operationId": "SessionController_getConfig",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -519,7 +519,7 @@
         "operationId": "SessionController_updateConfig",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -562,12 +562,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/start": {
+    "/api/sessions/{sessionId}/start": {
       "post": {
         "operationId": "SessionController_start",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -603,12 +603,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/stop": {
+    "/api/sessions/{sessionId}/stop": {
       "post": {
         "operationId": "SessionController_stop",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -641,13 +641,13 @@
         ]
       }
     },
-    "/api/sessions/{id}/logout": {
+    "/api/sessions/{sessionId}/logout": {
       "post": {
         "description": "Attempts an engine-native unlink of this companion device, then tears the session down locally. `200` means the engine-native unlink operation completed AND the required local credential cleanup completed — for Baileys a valid companion identity, an acknowledged `remove-companion-device` IQ response, and removal of the on-disk auth dir; for whatsapp-web.js the native `Client.logout()` promise settled. `200` is NOT an independent observation that the handset UI no longer shows the linked device. Because a completed unlink wipes the stored credentials, reconnecting after a `200` always requires a fresh QR scan or pairing code.",
         "operationId": "SessionController_logout",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -697,12 +697,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/force-kill": {
+    "/api/sessions/{sessionId}/force-kill": {
       "post": {
         "operationId": "SessionController_forceKill",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -735,12 +735,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/qr": {
+    "/api/sessions/{sessionId}/qr": {
       "get": {
         "operationId": "SessionController_getQRCode",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -776,12 +776,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/pairing-code": {
+    "/api/sessions/{sessionId}/pairing-code": {
       "post": {
         "operationId": "SessionController_requestPairingCode",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -944,12 +944,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/chats": {
+    "/api/sessions/{sessionId}/chats": {
       "get": {
         "operationId": "SessionController_getChats",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1009,12 +1009,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/chats/read": {
+    "/api/sessions/{sessionId}/chats/read": {
       "post": {
         "operationId": "SessionController_markChatRead",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1063,13 +1063,13 @@
         ]
       }
     },
-    "/api/sessions/{id}/presence/subscribe": {
+    "/api/sessions/{sessionId}/presence/subscribe": {
       "post": {
         "description": "Asks WhatsApp to start reporting who is online or typing in this chat. Updates arrive as the `presence.update` webhook and socket event — there is no synchronous answer, because presence cannot be queried from either engine, only received.\n\nThe subscription belongs to the connection: it does **not** survive a restart or an automatic reconnect, and must be re-issued. Subscribe per chat rather than to everything — WhatsApp emits an update on every transition, so a broad subscription is a firehose.\n\nwhatsapp-web.js cannot do this at all (it exposes no presence subscribe and emits no presence event) and answers `501`.",
         "operationId": "SessionController_subscribeToPresence",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1118,13 +1118,13 @@
         ]
       }
     },
-    "/api/sessions/{id}/presence": {
+    "/api/sessions/{sessionId}/presence": {
       "put": {
         "description": "Publishes whether this account appears online. WhatsApp routes notifications away from the phone while a linked device announces itself online, so a headless bot that never goes offline suppresses the phone's own alerts — set `available: false` to hand them back.\n\nThe setting belongs to the connection: it does not survive a restart or reconnect and must be re-issued after `session.status` reports one (on Baileys the socket re-announces itself per its connect-time behaviour). Supported on both engines.",
         "operationId": "SessionController_setOnlinePresence",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1170,13 +1170,13 @@
         ]
       }
     },
-    "/api/sessions/{id}/presence/{chatId}": {
+    "/api/sessions/{sessionId}/presence/{chatId}": {
       "get": {
         "description": "Serves the most recent report received since the chat was subscribed. Returns `null` when nothing has been reported — either the chat was never subscribed, or nothing has changed since. That is a normal state, not a missing resource, so it is `200` with a null body rather than a `404`.\n\nHeld in memory and never persisted: presence is short-lived, and answering \"typing\" from before a restart would be worse than answering nothing.",
         "operationId": "SessionController_getPresence",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1215,12 +1215,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/chats/unread": {
+    "/api/sessions/{sessionId}/chats/unread": {
       "post": {
         "operationId": "SessionController_markChatUnread",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1269,12 +1269,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/chats/{chatId}/messages": {
+    "/api/sessions/{sessionId}/chats/{chatId}/messages": {
       "delete": {
         "operationId": "SessionController_clearChatMessages",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1322,12 +1322,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/chats/archive": {
+    "/api/sessions/{sessionId}/chats/archive": {
       "post": {
         "operationId": "SessionController_archiveChat",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1376,12 +1376,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/chats/mute": {
+    "/api/sessions/{sessionId}/chats/mute": {
       "post": {
         "operationId": "SessionController_muteChat",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1430,12 +1430,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/chats/pin": {
+    "/api/sessions/{sessionId}/chats/pin": {
       "post": {
         "operationId": "SessionController_pinChat",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1484,12 +1484,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/chats/delete": {
+    "/api/sessions/{sessionId}/chats/delete": {
       "post": {
         "operationId": "SessionController_deleteChat",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -1538,12 +1538,12 @@
         ]
       }
     },
-    "/api/sessions/{id}/chats/typing": {
+    "/api/sessions/{sessionId}/chats/typing": {
       "post": {
         "operationId": "SessionController_sendChatState",
         "parameters": [
           {
-            "name": "id",
+            "name": "sessionId",
             "required": true,
             "in": "path",
             "description": "Session ID",
@@ -9915,7 +9915,7 @@
           },
           "config": {
             "type": "object",
-            "description": "Session configuration. Only three keys are read: autoRejectCalls (boolean, default false) rejects incoming calls as soon as they ring — the call.received event is still emitted first; maxReconnectAttempts (0-20, default unlimited) caps consecutive reconnects; and reconnectBaseDelay (1000-300000 ms, default 5000) sets the backoff base. Anything else is stored but ignored. All three can be changed later with PATCH /api/sessions/{id}/config, without restarting the session.",
+            "description": "Session configuration. Only three keys are read: autoRejectCalls (boolean, default false) rejects incoming calls as soon as they ring — the call.received event is still emitted first; maxReconnectAttempts (0-20, default unlimited) caps consecutive reconnects; and reconnectBaseDelay (1000-300000 ms, default 5000) sets the backoff base. Anything else is stored but ignored. All three can be changed later with PATCH /api/sessions/{sessionId}/config, without restarting the session.",
             "example": {
               "autoRejectCalls": false,
               "maxReconnectAttempts": 5,
@@ -10048,7 +10048,7 @@
           },
           "engineLoaded": {
             "type": "boolean",
-            "description": "Whether the gateway currently holds a live engine for this session. This is the precondition the lifecycle routes actually enforce, and `status` alone does not imply it: a `disconnected` session keeps its engine for the duration of an automatic reconnect backoff, while a session stopped through `POST /sessions/:id/stop` carries the same status with no engine. When `true`, `stop`, `logout` and `force-kill` can act and `start` answers 400; when `false`, the reverse. Derived per request from live process state, so it is never persisted and never historical.",
+            "description": "Whether the gateway currently holds a live engine for this session. This is the precondition the lifecycle routes actually enforce, and `status` alone does not imply it: a `disconnected` session keeps its engine for the duration of an automatic reconnect backoff, while a session stopped through `POST /sessions/:sessionId/stop` carries the same status with no engine. When `true`, `stop`, `logout` and `force-kill` can act and `start` answers 400; when `false`, the reverse. Derived per request from live process state, so it is never persisted and never historical.",
             "example": true
           }
         },

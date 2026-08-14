@@ -239,17 +239,17 @@ List all sessions, scoped to the API key's `allowedSessions`, ordered `createdAt
 
 **Errors:** `401` missing/invalid `X-API-Key`
 
-#### GET /api/sessions/:id
+#### GET /api/sessions/:sessionId
 
 Get a single session by ID.
 
-**Auth:** API key · **Scope:** session-scoped (key's `allowedSessions` enforced against `:id`)
+**Auth:** API key · **Scope:** session-scoped (key's `allowedSessions` enforced against `:sessionId`)
 
 **Path parameters**
 
-| Name | Type   | Description           |
-| ---- | ------ | --------------------- |
-| `id` | string | WhatsApp session UUID |
+| Name        | Type   | Description           |
+| ----------- | ------ | --------------------- |
+| `sessionId` | string | WhatsApp session UUID |
 
 **Response** `200`
 
@@ -271,20 +271,20 @@ Get a single session by ID.
 
 **Errors:** `401` missing/invalid key, or key not scoped to this session · `404` session not found
 
-#### GET /api/sessions/:id/config
+#### GET /api/sessions/:sessionId/config
 
 Get the effective tunable configuration for a session. Only the three recognised keys are reported,
 resolved through the same clamps the engine applies — the opaque stored `config` column is never
 echoed back (it is stripped from `SessionResponseDto` alongside `proxyUrl`, and anything else placed
 in it is stored but ignored).
 
-**Auth:** API key · **Scope:** session-scoped (key's `allowedSessions` enforced against `:id`)
+**Auth:** API key · **Scope:** session-scoped (key's `allowedSessions` enforced against `:sessionId`)
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Response** `200`
 
@@ -297,7 +297,7 @@ See §5 (Database Design) for what each key does and the moment it is read.
 
 **Errors:** `401` · `403` key not scoped to this session · `404` session not found
 
-#### PATCH /api/sessions/:id/config
+#### PATCH /api/sessions/:sessionId/config
 
 Merge a patch into the session's tunable configuration. No restart is required or performed:
 omitted keys keep their stored value, and an explicit `null` clears a key back to its default (the
@@ -309,9 +309,9 @@ and therefore apply on the next start, leaving a reconnect sequence already in f
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `UpdateSessionConfigDto` (any subset; each key also accepts `null`)
 
@@ -329,7 +329,7 @@ and therefore apply on the next start, leaving a reconnect sequence already in f
 
 **Errors:** `400` a supplied value is outside its accepted range · `401` · `403` key lacks OPERATOR role or is not scoped to this session · `404` session not found
 
-#### GET /api/sessions/:id/qr
+#### GET /api/sessions/:sessionId/qr
 
 Get the QR code (PNG data URL) for session authentication.
 
@@ -337,9 +337,9 @@ Get the QR code (PNG data URL) for session authentication.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Response** `200` — `QRCodeResponseDto`
 
@@ -362,9 +362,9 @@ Get all groups the session is a member of (paginated).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Query parameters**
 
@@ -383,7 +383,7 @@ Bare array mapped from the engine's group list then paginated. `linkedParentJID`
 
 **Errors:** `400` session not started (engine not in memory) · `401` · `403` · `404` session not found
 
-#### GET /api/sessions/:id/chats
+#### GET /api/sessions/:sessionId/chats
 
 Get active chats for a session, most-recent first (paginated).
 
@@ -391,9 +391,9 @@ Get active chats for a session, most-recent first (paginated).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Query parameters**
 
@@ -482,7 +482,7 @@ network cannot reach WhatsApp directly. Set `proxyUrl`/`proxyType` on the same r
 
 > ⚠ `proxyUrl` **must point at a real, reachable proxy server.** A placeholder or unreachable value
 > (e.g. `http://proxy.example.com:8080`) launches the engine pinned to a dead proxy, so the WhatsApp
-> WebSocket never connects, **no QR code is ever delivered**, and `POST /api/sessions/:id/start`
+> WebSocket never connects, **no QR code is ever delivered**, and `POST /api/sessions/:sessionId/start`
 > returns `504 Gateway Timeout` after ~30s. Leave `proxyUrl` unset unless you genuinely need a proxy.
 
 **Response** `201`
@@ -507,7 +507,7 @@ Like every other session route, this returns the `SessionResponseDto` shape (via
 
 **Errors:** `400` validation (bad `name`/`proxyUrl`/`proxyType`, or an extra non-whitelisted field) · `401` · `403` key lacks OPERATOR role · `409` session name already exists
 
-#### POST /api/sessions/:id/start
+#### POST /api/sessions/:sessionId/start
 
 Start a session and initialize the WhatsApp connection.
 
@@ -515,9 +515,9 @@ Start a session and initialize the WhatsApp connection.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 No request body.
 
@@ -543,7 +543,7 @@ Returned via `transformSession`. Status typically transitions to `initializing` 
 
 **Errors:** `400` session already started / already starting · `401` · `403` · `404` not found · `409` credential teardown for the same session name still in flight (retryable; body carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; no destructive side effect runs before the refusal — a retry after cleanup settles proceeds)
 
-#### POST /api/sessions/:id/stop
+#### POST /api/sessions/:sessionId/stop
 
 Stop a session and disconnect WhatsApp.
 
@@ -551,9 +551,9 @@ Stop a session and disconnect WhatsApp.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 No request body.
 
@@ -579,7 +579,7 @@ Returned via `transformSession`; status typically becomes `disconnected`.
 
 **Errors:** `401` · `403` · `404` not found
 
-#### POST /api/sessions/:id/logout
+#### POST /api/sessions/:sessionId/logout
 
 Attempt an engine-native unlink of this companion device, then tear the session down locally.
 
@@ -618,9 +618,9 @@ simply be left as-is.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 No request body.
 
@@ -648,7 +648,7 @@ distinguishing an intentional unlink from a plain stop.
 
 **Errors:** `400` session is not started (no engine to send through; the row is left untouched) · `401` · `403` · `404` not found · `502` `SESSION_LOGOUT_INCOMPLETE` — session stopped locally but the logout operation did not complete (retryable; `phone` cleared, no success audit)
 
-#### POST /api/sessions/:id/force-kill
+#### POST /api/sessions/:sessionId/force-kill
 
 Force-kill a stuck session (SIGKILL the wedged engine, then tear it down).
 
@@ -656,9 +656,9 @@ Force-kill a stuck session (SIGKILL the wedged engine, then tear it down).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 No request body.
 
@@ -684,7 +684,7 @@ Returned via `transformSession`.
 
 **Errors:** `400` session is not started (no live engine to kill) · `401` · `403` · `404` not found
 
-#### POST /api/sessions/:id/pairing-code
+#### POST /api/sessions/:sessionId/pairing-code
 
 Request an 8-char pairing code to link via phone number (alternative to QR).
 
@@ -692,9 +692,9 @@ Request an 8-char pairing code to link via phone number (alternative to QR).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `RequestPairingCodeDto`
 
@@ -716,7 +716,7 @@ Request an 8-char pairing code to link via phone number (alternative to QR).
 
 **Errors:** `400` validation, or session not started, or already authenticated · `401` · `403` · `404` not found
 
-#### POST /api/sessions/:id/presence/subscribe
+#### POST /api/sessions/:sessionId/presence/subscribe
 
 Ask WhatsApp to start reporting who is online or typing in a chat.
 
@@ -724,7 +724,7 @@ Ask WhatsApp to start reporting who is online or typing in a chat.
 
 There is no synchronous answer: presence cannot be _fetched_ from either engine, only received.
 Updates arrive as the `presence.update` webhook and socket event; the latest is readable at
-`GET /api/sessions/:id/presence/:chatId`.
+`GET /api/sessions/:sessionId/presence/:chatId`.
 
 Two properties to design around:
 
@@ -737,9 +737,9 @@ Two properties to design around:
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `SubscribePresenceDto`
 
@@ -755,7 +755,7 @@ Two properties to design around:
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `501` the active engine cannot observe presence (whatsapp-web.js exposes only `sendPresenceAvailable`/`sendPresenceUnavailable`, which publish the account's _own_ presence, and emits no presence event)
 
-#### GET /api/sessions/:id/presence/:chatId
+#### GET /api/sessions/:sessionId/presence/:chatId
 
 The last presence reported for a chat.
 
@@ -787,7 +787,7 @@ restart would be worse than answering nothing.
 
 **Errors:** `401` · `403` · `404` session not found
 
-#### PUT /api/sessions/:id/presence
+#### PUT /api/sessions/:sessionId/presence
 
 Set the account's OWN global presence: appear online or offline. WhatsApp routes notifications away
 from the phone while a linked device announces itself online, so a headless bot that never goes
@@ -818,7 +818,7 @@ leaving the account silently online.
 
 **Errors:** `400` session not started / validation · `401` · `403` key lacks OPERATOR role · `404` session not found · `409` engine not ready
 
-#### POST /api/sessions/:id/chats/read
+#### POST /api/sessions/:sessionId/chats/read
 
 Mark a chat as read/seen.
 
@@ -826,9 +826,9 @@ Mark a chat as read/seen.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `MarkChatReadDto`
 
@@ -850,7 +850,7 @@ Returns HTTP `200`, matching the OpenAPI contract.
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/unread
+#### POST /api/sessions/:sessionId/chats/unread
 
 Mark a chat as unread.
 
@@ -858,9 +858,9 @@ Mark a chat as unread.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `MarkChatReadDto` (reused)
 
@@ -882,7 +882,7 @@ Returns HTTP `200`, matching the OpenAPI contract.
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### DELETE /api/sessions/:id/chats/:chatId/messages
+#### DELETE /api/sessions/:sessionId/chats/:chatId/messages
 
 Delete every message in a chat, keeping the chat itself in the list.
 
@@ -890,10 +890,10 @@ Delete every message in a chat, keeping the chat itself in the list.
 
 **Path parameters**
 
-| Name     | Type   | Description                                                                           |
-| -------- | ------ | ------------------------------------------------------------------------------------- |
-| `id`     | string | Session UUID                                                                          |
-| `chatId` | string | Engine-native JID, e.g. `1234567890-123@g.us`. URL-encode it if your client does not. |
+| Name        | Type   | Description                                                                           |
+| ----------- | ------ | ------------------------------------------------------------------------------------- |
+| `sessionId` | string | Session UUID                                                                          |
+| `chatId`    | string | Engine-native JID, e.g. `1234567890-123@g.us`. URL-encode it if your client does not. |
 
 **Response** `200`
 
@@ -907,7 +907,7 @@ Delete every message in a chat, keeping the chat itself in the list.
 
 **Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/archive
+#### POST /api/sessions/:sessionId/chats/archive
 
 Archive or unarchive a chat.
 
@@ -915,9 +915,9 @@ Archive or unarchive a chat.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `ArchiveChatDto`
 
@@ -947,7 +947,7 @@ Archive or unarchive a chat.
 
 **Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/mute
+#### POST /api/sessions/:sessionId/chats/mute
 
 Mute a chat's notifications until a given moment, or unmute it.
 
@@ -955,9 +955,9 @@ Mute a chat's notifications until a given moment, or unmute it.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `MuteChatDto`
 
@@ -999,7 +999,7 @@ Mute a chat's notifications until a given moment, or unmute it.
 **Errors:** `400` session not ready, or invalid `chatId`/`muteUntil` · `401` missing/invalid API key ·
 `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/pin
+#### POST /api/sessions/:sessionId/chats/pin
 
 Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct from
 `messages/pin`, which pins a message inside a chat.
@@ -1008,9 +1008,9 @@ Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct fro
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `PinChatDto`
 
@@ -1042,7 +1042,7 @@ Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct fro
 **Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found ·
 `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/delete
+#### POST /api/sessions/:sessionId/chats/delete
 
 Delete a chat from the chat list (e.g. a group you have left).
 
@@ -1050,9 +1050,9 @@ Delete a chat from the chat list (e.g. a group you have left).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `DeleteChatDto`
 
@@ -1074,7 +1074,7 @@ Returns HTTP `200`, matching the OpenAPI contract.
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/typing
+#### POST /api/sessions/:sessionId/chats/typing
 
 Send a typing/recording presence indicator to a chat (or clear it with `paused`).
 
@@ -1082,9 +1082,9 @@ Send a typing/recording presence indicator to a chat (or clear it with `paused`)
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `SendChatStateDto`
 
@@ -1107,7 +1107,7 @@ Always returns `{ "success": true }` (the service returns void; the controller h
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found
 
-#### DELETE /api/sessions/:id
+#### DELETE /api/sessions/:sessionId
 
 Delete a session.
 
@@ -1115,9 +1115,9 @@ Delete a session.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Response** `204` — empty body (`@HttpCode(204)`, returns void). A `findOne` lookup runs first, so a missing id yields `404`.
 
@@ -3843,7 +3843,7 @@ Every chat carrying a label.
 
 **Auth:** API key · **Scope:** session-scoped · **Engines:** whatsapp-web.js only
 
-**Response** `200` — a bare array of `ChatSummary`, the same shape `GET /sessions/:id/chats` returns.
+**Response** `200` — a bare array of `ChatSummary`, the same shape `GET /sessions/:sessionId/chats` returns.
 
 **Errors:** `400` session not started · `401` · `404` session not found · `501` Baileys, which has no label query
 
@@ -5526,7 +5526,7 @@ Replace all Data DB rows with the supplied export. **Destructive and transaction
 
 **Orphan-engine pre-flight.** Before the transaction opens, any running engine whose session id is absent from `tables.sessions` is an orphan (the replace would delete its DB row, leaving an unstoppable engine writing into freshly restored tables). Default behaviour is to refuse with `409` listing those ids; `stopOrphans: true` stops them in-request and proceeds; `force: true` proceeds and leaves them running until restart.
 
-Because that pre-flight runs _before_ the transaction, its teardown is not covered by the rollback. A response with `imported:false` therefore still reports the engines it really stopped, and `restartRequired` on that path means only that a teardown **failed** — a cleanly stopped orphan leaves its session row intact (restart it with `POST /sessions/{id}/start`), and an engine `force` left running was never orphaned after all, since the data that would have orphaned it was not replaced.
+Because that pre-flight runs _before_ the transaction, its teardown is not covered by the rollback. A response with `imported:false` therefore still reports the engines it really stopped, and `restartRequired` on that path means only that a teardown **failed** — a cleanly stopped orphan leaves its session row intact (restart it with `POST /sessions/{sessionId}/start`), and an engine `force` left running was never orphaned after all, since the data that would have orphaned it was not replaced.
 
 Inside the transaction every migration table is emptied. `webhooks` and `sessions` are DELETEd directly, so a missing table there fails the restore; 11 more go through a tolerant helper where a _genuinely missing_ table is skipped; and `automation_rules` is emptied by the `DELETE FROM sessions` cascade rather than by the helper. Any other DELETE failure propagates to the rollback. Rows are then re-inserted, sessions first. JSON object/array fields are auto-stringified before insert, and the Postgres-form `$N` placeholders are rewritten for SQLite. Two guards return `imported:false` after a rollback: any `warnings`, and a payload that restores **zero** rows in total (a wrong/empty backup would otherwise commit a silent wipe — the response then carries `Backup contained no rows to restore; refused to replace existing data. Check the file.`). On commit the lid→phone mirror is reloaded from the restored rows.
 
@@ -6731,7 +6731,7 @@ These are the events OpenWA actually emits. A webhook is registered with an `eve
 | `message.revoked`                                 | A message is deleted/recalled                                                                                                                                                                                                         | `{ id, revokedId?, chatId, from, to, type: "revoked", body: "", timestamp }` — **reconcile on `revokedId`** (the original deleted message's id), falling back to `id`. On whatsapp-web.js `id` is the _revocation notification_ (a distinct message that won't match a stored id) and `revokedId` may be absent when the original isn't cached locally; on Baileys the two coincide                                                                                                                                                                                                      |
 | `message.reaction`                                | A reaction is added, changed, or removed                                                                                                                                                                                              | `{ messageId, chatId, reaction, senderId, reactions? }` — `reactions` is the post-apply `{ senderId: emoji }` snapshot, omitted when the gateway holds no stored copy of the message to compute it from (an ephemeral message, or one predating the session going live); treat it as unknown rather than empty and keep the map you already hold. `reaction` is empty when removed                                                                                                                                                                                                       |
 | `message.edited`                                  | A message body or media caption is edited                                                                                                                                                                                             | `{ messageId, chatId, body, senderId, from, to, fromMe, isGroup, type, hasMedia, author?, mentionedIds?, timestamp }` — `messageId` is the original message id, `body` is the latest text/caption, and `timestamp` is the edit occurrence time in epoch **seconds** (not the original creation time)                                                                                                                                                                                                                                                                                     |
-| `session.qr`                                      | A new pairing QR is generated                                                                                                                                                                                                         | `{ sessionId, qr }` — `qr` is a **PNG data URL** (`data:image/png;base64,…`), the same rendered value `GET /api/sessions/{id}/qr` returns as `qrCode`, not the raw `2@…` linking ref. Render it directly in an `<img src>`; the raw ref never leaves the engine adapter                                                                                                                                                                                                                                                                                                                  |
+| `session.qr`                                      | A new pairing QR is generated                                                                                                                                                                                                         | `{ sessionId, qr }` — `qr` is a **PNG data URL** (`data:image/png;base64,…`), the same rendered value `GET /api/sessions/{sessionId}/qr` returns as `qrCode`, not the raw `2@…` linking ref. Render it directly in an `<img src>`; the raw ref never leaves the engine adapter                                                                                                                                                                                                                                                                                                           |
 | `session.authenticated`                           | The session pairs and becomes ready                                                                                                                                                                                                   | `{ sessionId, phone, pushName }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `session.disconnected`                            | The session disconnects on the engine or WhatsApp side (drop, conflict, or a phone-initiated unlink). Not fired for API-initiated stop/logout/delete — those are acknowledged by the API response and the `session.status` transition | `{ sessionId, reason }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `session.reconnect_loop`                          | Every 5th consecutive reconnect attempt is scheduled (attempt 5, 10, 15, …) — the session is failing to come back up                                                                                                                  | `{ sessionId, attempts, nextDelayMs }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |

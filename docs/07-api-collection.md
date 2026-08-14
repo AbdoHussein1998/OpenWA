@@ -51,7 +51,7 @@ curl -X GET "$BASE/api/sessions?limit=100&offset=0" \
   -H "X-API-Key: $API_KEY"
 ```
 
-#### GET /api/sessions/:id
+#### GET /api/sessions/:sessionId
 
 Get a single session by ID.
 
@@ -60,7 +60,7 @@ curl -X GET "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a" \
   -H "X-API-Key: $API_KEY"
 ```
 
-#### GET /api/sessions/:id/qr
+#### GET /api/sessions/:sessionId/qr
 
 Get the QR code (PNG data URL) for authentication (OPERATOR).
 
@@ -78,7 +78,7 @@ curl -X GET "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/groups?limi
   -H "X-API-Key: $API_KEY"
 ```
 
-#### GET /api/sessions/:id/chats
+#### GET /api/sessions/:sessionId/chats
 
 List active chats, most-recent first (paginated).
 
@@ -109,7 +109,7 @@ curl -X POST "$BASE/api/sessions" \
 
 With an optional per-session egress proxy — only if your network can't reach WhatsApp directly. The
 proxy **must be a real, reachable host**; an unreachable value silently blocks the WhatsApp WebSocket
-(no QR is ever delivered) and `POST /api/sessions/:id/start` returns `504` after ~30s:
+(no QR is ever delivered) and `POST /api/sessions/:sessionId/start` returns `504` after ~30s:
 
 ```bash
 curl -X POST "$BASE/api/sessions" \
@@ -118,7 +118,7 @@ curl -X POST "$BASE/api/sessions" \
   -d '{ "name": "my-bot", "proxyUrl": "http://user:pass@your-real-proxy.host:8080", "proxyType": "http" }'
 ```
 
-#### POST /api/sessions/:id/start
+#### POST /api/sessions/:sessionId/start
 
 Start a session and initialize the connection (OPERATOR).
 
@@ -127,7 +127,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/start" \
   -H "X-API-Key: $API_KEY"
 ```
 
-#### POST /api/sessions/:id/stop
+#### POST /api/sessions/:sessionId/stop
 
 Stop a session and disconnect (OPERATOR).
 
@@ -136,7 +136,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/stop" \
   -H "X-API-Key: $API_KEY"
 ```
 
-#### POST /api/sessions/:id/logout
+#### POST /api/sessions/:sessionId/logout
 
 Attempt an engine-native unlink of this device, then stop the session (OPERATOR). Requires a running
 session. A `200` means the unlink operation AND the required local cleanup completed — it is not an
@@ -151,7 +151,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/logout" \
   -H "X-API-Key: $API_KEY"
 ```
 
-#### POST /api/sessions/:id/force-kill
+#### POST /api/sessions/:sessionId/force-kill
 
 Force-kill a stuck session (OPERATOR). Returns `400` when the session is not started (there is no live engine to kill).
 
@@ -160,7 +160,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/force-kill
   -H "X-API-Key: $API_KEY"
 ```
 
-#### POST /api/sessions/:id/pairing-code
+#### POST /api/sessions/:sessionId/pairing-code
 
 Request an 8-char pairing code via phone number (OPERATOR).
 
@@ -171,7 +171,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/pairing-co
   -d '{ "phoneNumber": "628123456789" }'
 ```
 
-#### POST /api/sessions/:id/presence/subscribe
+#### POST /api/sessions/:sessionId/presence/subscribe
 
 Subscribe to presence updates (online/typing) for a chat (OPERATOR). Baileys only — whatsapp-web.js
 answers `501`. The subscription belongs to the connection: re-issue it after a restart or reconnect.
@@ -184,7 +184,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/presence/s
   -d '{ "chatId": "1234567890@c.us" }'
 ```
 
-#### GET /api/sessions/:id/presence/:chatId
+#### GET /api/sessions/:sessionId/presence/:chatId
 
 Read the last presence report received for a chat (any role). Returns `200` with a `null` body when
 nothing has been reported yet — presence is held in memory, never persisted.
@@ -194,7 +194,7 @@ curl "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/presence/123456789
   -H "X-API-Key: $API_KEY"
 ```
 
-#### PUT /api/sessions/:id/presence
+#### PUT /api/sessions/:sessionId/presence
 
 Set the account's OWN global presence — appear online or offline (OPERATOR, both engines). The
 setting does not survive a restart or reconnect; re-issue it after `session.status` reports one.
@@ -206,7 +206,7 @@ curl -X PUT "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/presence" \
   -d '{ "available": false }'
 ```
 
-#### POST /api/sessions/:id/chats/read
+#### POST /api/sessions/:sessionId/chats/read
 
 Mark a chat as read/seen (OPERATOR).
 
@@ -217,7 +217,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/read
   -d '{ "chatId": "1234567890@c.us" }'
 ```
 
-#### POST /api/sessions/:id/chats/unread
+#### POST /api/sessions/:sessionId/chats/unread
 
 Mark a chat as unread (OPERATOR).
 
@@ -228,7 +228,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/unre
   -d '{ "chatId": "1234567890@c.us" }'
 ```
 
-#### DELETE /api/sessions/:id/chats/:chatId/messages
+#### DELETE /api/sessions/:sessionId/chats/:chatId/messages
 
 Delete every message in a chat, keeping the chat.
 
@@ -237,7 +237,7 @@ curl -X DELETE "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/12
   -H "X-API-Key: $API_KEY"
 ```
 
-#### POST /api/sessions/:id/chats/archive
+#### POST /api/sessions/:sessionId/chats/archive
 
 Archive or unarchive a chat.
 
@@ -247,7 +247,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/arch
   -d '{"chatId":"1234567890-123@g.us","archive":true}'
 ```
 
-#### POST /api/sessions/:id/chats/mute
+#### POST /api/sessions/:sessionId/chats/mute
 
 Mute a chat until an epoch-**milliseconds** timestamp, or send `"muteUntil":null` to unmute (OPERATOR).
 
@@ -257,7 +257,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/mute
   -d '{"chatId":"1234567890-123@g.us","muteUntil":1800000000000}'
 ```
 
-#### POST /api/sessions/:id/chats/pin
+#### POST /api/sessions/:sessionId/chats/pin
 
 Pin a chat to the top of the list, or unpin it (OPERATOR). WhatsApp allows at most three pinned chats.
 
@@ -267,7 +267,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/pin"
   -d '{"chatId":"1234567890-123@g.us","pin":true}'
 ```
 
-#### POST /api/sessions/:id/chats/delete
+#### POST /api/sessions/:sessionId/chats/delete
 
 Delete a chat from the chat list (OPERATOR).
 
@@ -278,7 +278,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/dele
   -d '{ "chatId": "1234567890-123@g.us" }'
 ```
 
-#### POST /api/sessions/:id/chats/typing
+#### POST /api/sessions/:sessionId/chats/typing
 
 Send a typing/recording presence indicator (or clear it with `paused`) (OPERATOR).
 
@@ -289,7 +289,7 @@ curl -X POST "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a/chats/typi
   -d '{ "chatId": "1234567890@c.us", "state": "typing" }'
 ```
 
-#### DELETE /api/sessions/:id
+#### DELETE /api/sessions/:sessionId
 
 Delete a session (OPERATOR). Returns `204` with no body.
 

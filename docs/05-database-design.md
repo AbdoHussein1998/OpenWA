@@ -368,7 +368,7 @@ clears it, and so does a gateway restart.
 | `autoRejectCalls`      | `false`   | Auto-reject an incoming call as soon as it rings                         |
 
 Set them at creation with `POST /api/sessions`, or on an existing session with
-`PATCH /api/sessions/{id}/config` — no restart, and no re-scan of the QR. The patch merges, so a key
+`PATCH /api/sessions/{sessionId}/config` — no restart, and no re-scan of the QR. The patch merges, so a key
 it does not mention keeps its stored value, and an explicit `null` clears a key back to the default
 above (the only way back to unlimited reconnect attempts once a cap is set).
 
@@ -377,7 +377,7 @@ re-read from this row on every incoming call, so a patch applies to the next cal
 keys are read once per `start()` into the in-memory reconnect state, so a patch applies on the next
 start and leaves a reconnect sequence already in flight alone.
 
-`GET /api/sessions/{id}/config` reports the effective values. It reports only these three keys and
+`GET /api/sessions/{sessionId}/config` reports the effective values. It reports only these three keys and
 never the raw column — `config` is stripped from `SessionResponseDto` alongside the
 credential-bearing `proxyUrl`, and echoing an opaque blob back would defeat that.
 

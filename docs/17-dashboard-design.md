@@ -199,12 +199,13 @@ a non-admin hitting the path falls through to the `*` redirect.
 │  └─────────────────────────────────────────────────────────────┘    │
 │                                                                      │
 │  Unlink Device attempts an engine-native unlink of this companion   │
-│  device (POST /sessions/:id/logout), then stops the session. A 200  │
-│  means the unlink + local cleanup completed (not an independent      │
-│  Linked-Devices observation) — reconnecting then requires a fresh   │
-│  QR scan or pairing code. A 502 (SESSION_LOGOUT_INCOMPLETE) stops   │
-│  locally but leaves the operation incomplete; retry after starting. │
-│  Delete only clears the local data; it does NOT unlink.             │
+│  device (POST /sessions/:sessionId/logout), then stops the          │
+│  session. A 200 means the unlink + local cleanup completed (not an  │
+│  independent Linked-Devices observation) — reconnecting then        │
+│  requires a fresh QR scan or pairing code. A 502                    │
+│  (SESSION_LOGOUT_INCOMPLETE) stops locally but leaves the           │
+│  operation incomplete; retry after starting. Delete only clears     │
+│  the local data; it does NOT unlink.                                │
 │                                                                      │
 │  ┌─────────────────────┬─────────────────────┐                      │
 │  │  📊 Statistics      │  ⚙️ Configuration    │                      │
