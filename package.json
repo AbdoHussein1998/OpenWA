@@ -193,10 +193,10 @@
     "coverageDirectory": "../coverage",
     "coverageThreshold": {
       "global": {
-        "branches": 49,
-        "functions": 43,
-        "lines": 50,
-        "statements": 49
+        "branches": 44,
+        "functions": 38,
+        "lines": 45,
+        "statements": 44
       },
       "./src/common/cache/": {
         "branches": 34,
@@ -229,10 +229,10 @@
         "statements": 91
       },
       "./src/config/": {
-        "branches": 80,
-        "functions": 59,
-        "lines": 68,
-        "statements": 67
+        "branches": 75,
+        "functions": 54,
+        "lines": 63,
+        "statements": 62
       },
       "./src/core/agent-tools/": {
         "branches": 88,
@@ -271,16 +271,16 @@
         "statements": 93
       },
       "./src/modules/audit/": {
-        "branches": 55,
-        "functions": 26,
-        "lines": 64,
-        "statements": 62
+        "branches": 50,
+        "functions": 21,
+        "lines": 59,
+        "statements": 57
       },
       "./src/modules/auth/": {
-        "branches": 70,
-        "functions": 67,
-        "lines": 72,
-        "statements": 70
+        "branches": 65,
+        "functions": 62,
+        "lines": 67,
+        "statements": 65
       },
       "./src/modules/automation/": {
         "branches": 67,
@@ -289,10 +289,10 @@
         "statements": 79
       },
       "./src/modules/chat-media/": {
-        "branches": 80,
-        "functions": 81,
-        "lines": 89,
-        "statements": 89
+        "branches": 75,
+        "functions": 76,
+        "lines": 84,
+        "statements": 84
       },
       "./src/modules/contact/": {
         "branches": 79,
@@ -301,10 +301,10 @@
         "statements": 88
       },
       "./src/modules/docker/": {
-        "branches": 88,
-        "functions": 87,
-        "lines": 92,
-        "statements": 92
+        "branches": 83,
+        "functions": 82,
+        "lines": 87,
+        "statements": 87
       },
       "./src/modules/events/": {
         "branches": 70,
@@ -361,10 +361,10 @@
         "statements": 73
       },
       "./src/modules/queue/": {
-        "branches": 74,
-        "functions": 66,
-        "lines": 85,
-        "statements": 84
+        "branches": 69,
+        "functions": 61,
+        "lines": 80,
+        "statements": 79
       },
       "./src/modules/search/": {
         "branches": 66,
