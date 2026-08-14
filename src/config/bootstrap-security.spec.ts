@@ -303,6 +303,39 @@ describe('assertNoDefaultSecretsInProduction', () => {
     );
   });
 
+  it('refuses prod with an API_MASTER_KEY below the 32-character floor, however unique it looks', () => {
+    expect(() =>
+      assertNoDefaultSecretsInProduction({ nodeEnv: 'production', apiMasterKey: 'short-but-unique' }),
+    ).toThrow(/API_MASTER_KEY/);
+    // One character under the floor still fails; the floor itself passes.
+    expect(() => assertNoDefaultSecretsInProduction({ nodeEnv: 'production', apiMasterKey: 'k'.repeat(31) })).toThrow(
+      /API_MASTER_KEY \(below the 32-character minimum\)/,
+    );
+    expect(() =>
+      assertNoDefaultSecretsInProduction({ nodeEnv: 'production', apiMasterKey: 'k'.repeat(32) }),
+    ).not.toThrow();
+  });
+
+  it('measures the master key trimmed — surrounding whitespace is not key material', () => {
+    // validateApiKey trims before hashing, so a padded 31-char key authenticates as 31 chars.
+    expect(() =>
+      assertNoDefaultSecretsInProduction({ nodeEnv: 'production', apiMasterKey: ` ${'k'.repeat(31)} ` }),
+    ).toThrow(/API_MASTER_KEY/);
+  });
+
+  it('does not length-check API_MASTER_KEY outside production (dev keeps its short keys)', () => {
+    for (const nodeEnv of ['development', 'test', undefined]) {
+      expect(() => assertNoDefaultSecretsInProduction({ nodeEnv, apiMasterKey: 'short' })).not.toThrow();
+    }
+  });
+
+  it('allows prod with a strong generated-shape API_MASTER_KEY', () => {
+    // The shape the first-boot generator emits: `owa_k1_` + 32 bytes hex (71 chars).
+    expect(() =>
+      assertNoDefaultSecretsInProduction({ nodeEnv: 'production', apiMasterKey: `owa_k1_${'ab'.repeat(32)}` }),
+    ).not.toThrow();
+  });
+
   it('allows ALLOW_DEV_API_KEY=true outside production (the dev opt-in still works)', () => {
     expect(() => assertNoDefaultSecretsInProduction({ nodeEnv: 'development', allowDevApiKey: 'true' })).not.toThrow();
   });
@@ -378,7 +411,10 @@ describe('assertNoDefaultSecretsInProduction', () => {
       }),
     ).not.toThrow();
     expect(() =>
-      assertNoDefaultSecretsInProduction({ nodeEnv: 'production', apiMasterKey: 'root-pw-8821x' }),
+      assertNoDefaultSecretsInProduction({
+        nodeEnv: 'production',
+        apiMasterKey: 'root-pw-8821x-and-the-rest-of-entropy',
+      }),
     ).not.toThrow();
   });
 });

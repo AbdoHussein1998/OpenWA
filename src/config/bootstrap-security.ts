@@ -100,6 +100,13 @@ export function resolveBodyLimit(bodySizeEnv?: string): string {
   return trimmed && BODY_LIMIT_PATTERN.test(trimmed) ? trimmed : '25mb';
 }
 
+/**
+ * Minimum length for an explicit API_MASTER_KEY in production. A static master key is the seed of an
+ * ADMIN credential, so below this it is brute-forceable however unique it looks. The first-boot
+ * generator emits 71 chars (`owa_k1_` + 32 bytes hex), so a generated key always passes.
+ */
+const MIN_PROD_MASTER_KEY_LENGTH = 32;
+
 /** Known weak/default/placeholder secret values that must never reach production. */
 const FORBIDDEN_PROD_SECRETS = new Set([
   'openwa',
@@ -173,8 +180,9 @@ export interface SecretCheckEnv {
 }
 
 /**
- * Refuse to boot in production when a required secret is empty or a known default/
- * placeholder. Only secrets actually in use are checked: the DB password
+ * Refuse to boot in production when a required secret is empty, a known default/
+ * placeholder, or — for an explicit API_MASTER_KEY — below the length floor.
+ * Only secrets actually in use are checked: the DB password
  * when DATABASE_TYPE=postgres, the S3 keys when STORAGE_TYPE=s3, and API_MASTER_KEY
  * whenever it is set. Throws with the offending var names so the operator can fix them.
  */
@@ -215,9 +223,16 @@ export function assertNoDefaultSecretsInProduction(env: SecretCheckEnv): void {
     if (isWeak(env.s3AccessKey)) problems.push('S3_ACCESS_KEY');
     if (isWeak(env.s3SecretKey)) problems.push('S3_SECRET_KEY');
   }
-  // API_MASTER_KEY is optional, but if provided it must not be a known default.
-  if (env.apiMasterKey && FORBIDDEN_PROD_SECRETS.has(env.apiMasterKey.trim().toLowerCase())) {
-    problems.push('API_MASTER_KEY');
+  // API_MASTER_KEY is optional, but if provided it must neither be a known default nor fall below
+  // the length floor — both are refused the same way, like the other weak secrets above. Unset stays
+  // allowed: first boot then generates a strong random key (resolveSeedApiKey).
+  if (env.apiMasterKey) {
+    const masterKey = env.apiMasterKey.trim();
+    if (FORBIDDEN_PROD_SECRETS.has(masterKey.toLowerCase())) {
+      problems.push('API_MASTER_KEY');
+    } else if (masterKey.length < MIN_PROD_MASTER_KEY_LENGTH) {
+      problems.push(`API_MASTER_KEY (below the ${MIN_PROD_MASTER_KEY_LENGTH}-character minimum)`);
+    }
   }
   // Redis auth is optional (passwordless private-network Redis is a supported deployment), so unlike
   // DATABASE_PASSWORD this rejects only a known placeholder VALUE — never an empty/unset password.
