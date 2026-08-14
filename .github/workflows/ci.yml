@@ -153,6 +153,13 @@ jobs:
       - name: Run unit tests
         run: npm test -- --coverage
 
+      # Repo-file drift gates (docs, manifests, compose, workflows vs the code they describe). They
+      # read files and assert content — no runtime behavior — so they run as their own jest selection
+      # (`test:docs`) instead of padding the unit lane; `testPathIgnorePatterns` in package.json keeps
+      # the default run to behavioral suites only. The two lists must stay in sync.
+      - name: Run doc-lint tests
+        run: npm run test:docs
+
       # node:test specs for the repo-level scripts (postinstall exit-code propagation) — jest's
       # rootDir is src/, so these live outside its reach and run on the plain node runner.
       - name: Run script unit tests
