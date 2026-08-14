@@ -5039,28 +5039,6 @@ Notes: raw return of an in-memory `Settings` object built once in the controller
 
 **Errors:** `401` — missing/invalid `X-API-Key` · `403` — API key lacks the ADMIN role, or the key is session-restricted.
 
-#### PUT /api/settings
-
-Update settings — intentionally not implemented; always returns `501` (settings are env-derived and read-only at runtime).
-
-**Auth:** API key (ADMIN)
-
-**Request body** — none. There is no request DTO; any body is ignored (the exception is thrown before validation matters).
-
-**Response** `501`
-
-```json
-{
-  "statusCode": 501,
-  "message": "Settings are derived from environment configuration and are read-only at runtime. Change the corresponding environment variable and restart the service.",
-  "error": "Not Implemented"
-}
-```
-
-Notes: the handler unconditionally throws `NotImplementedException`. Even an ADMIN key always gets `501`; there is no success response.
-
-**Errors:** `401` — missing/invalid key · `403` — key lacks `ADMIN` · `501` — always (not implemented).
-
 #### GET /api/audit
 
 List audit-log entries, newest first. Every API-key lifecycle change, session/message/webhook event and ADMIN infra operation lands here.

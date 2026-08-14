@@ -98,7 +98,7 @@ deployment rather than on a single session:
   and per-session config remain available, scoped to the sessions the key
   allows)
 - Cross-session statistics (`GET /api/stats/overview`, `GET /api/stats/messages`)
-- Application settings (`GET` / `PUT /api/settings`)
+- Application settings (`GET /api/settings`)
 - Session creation (`POST /api/sessions`)
 - The queue dashboard (`/api/admin/queues`)
 

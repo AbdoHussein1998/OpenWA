@@ -1332,15 +1332,6 @@ curl "$BASE/api/settings" \
   -H "X-API-Key: $API_KEY"
 ```
 
-#### PUT /api/settings
-
-Always returns `501` — settings are read-only at runtime. ADMIN key required (still `501`).
-
-```bash
-curl -X PUT "$BASE/api/settings" \
-  -H "X-API-Key: $API_KEY"
-```
-
 #### GET /api/audit
 
 List audit-log entries, newest first (ADMIN; rows stay confined to the key's allowed sessions).

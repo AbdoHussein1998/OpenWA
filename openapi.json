@@ -3945,19 +3945,6 @@
         "tags": [
           "settings"
         ]
-      },
-      "put": {
-        "operationId": "SettingsController_update",
-        "parameters": [],
-        "responses": {
-          "501": {
-            "description": "Settings are derived from environment configuration and cannot be changed at runtime"
-          }
-        },
-        "summary": "Settings are read-only at runtime (environment-derived)",
-        "tags": [
-          "settings"
-        ]
       }
     },
     "/api/infra/status": {
