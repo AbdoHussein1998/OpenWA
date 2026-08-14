@@ -1,4 +1,7 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
+// Default import (not `import * as`) on purpose: it binds straight to pg's module.exports, so the
+// constructor spy below reaches the same object pg-boot-migrations reads `Client` from at call time.
+import pg, { Client as PgClient, ClientConfig } from 'pg';
 import {
   AdvisoryLockClient,
   BootDataSourceDeps,
@@ -174,5 +177,143 @@ describe('createBootDataSource (postgres boot migrations)', () => {
     expect(deps.createDataSource).toHaveBeenCalledWith(sqliteOptions);
     expect(deps.createLockClient).not.toHaveBeenCalled();
     expect(dataSource.initialize).not.toHaveBeenCalled();
+  });
+
+  it('still resolves when the advisory unlock fails: end() below drops the session and the lock', async () => {
+    const { calls, dataSource, lockClient, deps } = makeFakes();
+    (lockClient.query as jest.Mock).mockImplementation((text: string) => {
+      calls.push(text);
+      // Postgres killing the connection right after the last migration statement — the unlock
+      // call itself fails, which must never turn a finished boot into a failed one.
+      return text.includes('unlock') ? Promise.reject(new Error('connection terminated')) : Promise.resolve();
+    });
+
+    const returned = await createBootDataSource(PG_OPTIONS, deps);
+
+    expect(returned).toBe(dataSource);
+    expect(calls).toEqual([
+      'initialize',
+      'connect',
+      'SELECT pg_advisory_lock($1, $2)',
+      'runMigrations',
+      'SELECT pg_advisory_unlock($1, $2)',
+      'end',
+    ]);
+    expect(dataSource.destroy).not.toHaveBeenCalled();
+  });
+
+  it('still resolves when lock-client end() fails: the boot result does not depend on client teardown', async () => {
+    const { calls, dataSource, lockClient, deps } = makeFakes();
+    (lockClient.end as jest.Mock).mockImplementation(() => {
+      calls.push('end');
+      return Promise.reject(new Error('socket hang up'));
+    });
+
+    const returned = await createBootDataSource(PG_OPTIONS, deps);
+
+    expect(returned).toBe(dataSource);
+    expect(calls).toEqual([
+      'initialize',
+      'connect',
+      'SELECT pg_advisory_lock($1, $2)',
+      'runMigrations',
+      'SELECT pg_advisory_unlock($1, $2)',
+      'end',
+    ]);
+    expect(dataSource.destroy).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the migration error, not the teardown error, when destroy() rejects too', async () => {
+    const migrationFailure = new Error('duplicate table: messages');
+    const { calls, dataSource, lockClient, deps } = makeFakes(jest.fn(() => Promise.reject(migrationFailure)));
+    (dataSource.destroy as jest.Mock).mockImplementation(() => {
+      calls.push('destroy');
+      return Promise.reject(new Error('pool already destroyed'));
+    });
+
+    // The original boot failure wins; the destroy() rejection it triggered is swallowed so it
+    // cannot mask what actually went wrong.
+    await expect(createBootDataSource(PG_OPTIONS, deps)).rejects.toBe(migrationFailure);
+
+    expect(calls).toEqual([
+      'initialize',
+      'connect',
+      'SELECT pg_advisory_lock($1, $2)',
+      'runMigrations',
+      'SELECT pg_advisory_unlock($1, $2)',
+      'end',
+      'destroy',
+    ]);
+    expect(lockClient.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults the lock-client connect timeout to 10s when options carry no extra block', async () => {
+    const { deps } = makeFakes();
+
+    await createBootDataSource({ ...PG_OPTIONS, extra: undefined }, deps);
+
+    expect(deps.createLockClient).toHaveBeenCalledWith(
+      expect.objectContaining({ connectionTimeoutMillis: 10000, options: '-c statement_timeout=0' }),
+    );
+  });
+
+  it('takes the connect timeout from extra and forwards ssl by reference', async () => {
+    const ssl = { rejectUnauthorized: false };
+    const { deps } = makeFakes();
+
+    await createBootDataSource({ ...PG_OPTIONS, ssl, extra: { connectionTimeoutMillis: 2500 } }, deps);
+
+    // A value distinct from the 10s default proves the timeout comes from extra, and identity on
+    // ssl proves the TLS shape is passed through untouched — the same object the driver built.
+    const createLockClient = deps.createLockClient as jest.Mock<AdvisoryLockClient, [ClientConfig]>;
+    const config = createLockClient.mock.calls[0][0];
+    expect(config.connectionTimeoutMillis).toBe(2500);
+    expect(config.ssl).toBe(ssl);
+  });
+
+  it('falls back to the real DataSource and pg Client constructors when no deps are injected', async () => {
+    // The production path. Only the spots that would touch the outside world are stubbed — the
+    // DataSource lifecycle methods (initialize would open a pool) and the pg Client constructor
+    // (connect would open a socket) — so both default factories run as shipped.
+    const lockClient: AdvisoryLockClient = {
+      connect: jest.fn(() => Promise.resolve()),
+      query: jest.fn(() => Promise.resolve()),
+      end: jest.fn(() => Promise.resolve()),
+    };
+    const clientCtor = jest.spyOn(pg, 'Client').mockImplementation(() => lockClient as unknown as PgClient);
+    const initialize = jest.spyOn(DataSource.prototype, 'initialize').mockImplementation(function (this: DataSource) {
+      return Promise.resolve(this);
+    });
+    const runMigrations = jest.spyOn(DataSource.prototype, 'runMigrations').mockResolvedValue([]);
+    const destroy = jest.spyOn(DataSource.prototype, 'destroy').mockResolvedValue(undefined);
+    try {
+      const returned = await createBootDataSource(PG_OPTIONS);
+
+      expect(returned).toBeInstanceOf(DataSource);
+      // The default factory path still neutralizes migrationsRun before construction.
+      expect(returned.options.migrationsRun).toBe(false);
+      // The real Client constructor received the same lock-client config the fakes assert above.
+      expect(clientCtor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: 'db',
+          user: 'openwa',
+          database: 'openwa',
+          options: '-c statement_timeout=0',
+        }),
+      );
+      expect(lockClient.query).toHaveBeenNthCalledWith(1, 'SELECT pg_advisory_lock($1, $2)', [
+        ...POSTGRES_BOOT_MIGRATION_LOCK_KEYS,
+      ]);
+      expect(lockClient.query).toHaveBeenNthCalledWith(2, 'SELECT pg_advisory_unlock($1, $2)', [
+        ...POSTGRES_BOOT_MIGRATION_LOCK_KEYS,
+      ]);
+      expect(runMigrations).toHaveBeenCalledWith({ transaction: 'all' });
+      expect(destroy).not.toHaveBeenCalled();
+    } finally {
+      clientCtor.mockRestore();
+      initialize.mockRestore();
+      runMigrations.mockRestore();
+      destroy.mockRestore();
+    }
   });
 });
