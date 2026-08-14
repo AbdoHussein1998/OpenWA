@@ -89,6 +89,9 @@ const BLOCKED_V4_RANGES: ReadonlyArray<readonly [string, number]> = [
 const BLOCKED_V6_RANGES: ReadonlyArray<readonly [string, number]> = [
   ['::', 128], // unspecified
   ['::1', 128], // loopback
+  ['0000::', 3], // reserved by IETF (RFC 4291: global unicast is 2000::/3) — ::, ::1 and the
+  // IPv4-embedding forms return earlier via the ladder or their own entries, so the fallthrough
+  // check only catches the rest of the block (e.g. 1::, fc0::, fe8::)
   ['fc00::', 7], // ULA (RFC 4193)
   ['fe80::', 10], // link-local
   ['fec0::', 10], // deprecated site-local (RFC 3879)
@@ -208,9 +211,10 @@ export function isBlockedAddress(ip: string): boolean {
       }
     }
 
-    // Reserved-range membership (unspecified, loopback, ULA, link-local, deprecated site-local) via
-    // the stdlib BlockList — numeric, so compressed and fully-expanded spellings of the same
-    // address answer alike. Embedded forms already returned above (public embeddings stay allowed).
+    // Reserved-range membership (unspecified, loopback, ULA, link-local, deprecated site-local,
+    // IETF-reserved 0000::/3) via the stdlib BlockList — numeric, so compressed and fully-expanded
+    // spellings of the same address answer alike. Embedded forms already returned above (public
+    // embeddings, NAT64 included, stay allowed — only the ladder decides those).
     return BLOCKED_V6.check(lower, 'ipv6');
   }
 
