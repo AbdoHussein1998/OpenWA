@@ -1,12 +1,10 @@
 import { CatalogController } from './catalog.controller';
 import type { CatalogService } from './catalog.service';
-import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import type { Catalog, PaginatedProducts, Product } from '../../engine/interfaces/whatsapp-engine.interface';
 
 /**
  * The controller is a thin map from route params/DTOs onto CatalogService's positional arguments.
- * What is worth pinning here is the wiring itself (which field lands in which argument slot) and
- * that the deliberate 501 from send-catalog reaches the caller instead of being swallowed.
+ * What is worth pinning here is the wiring itself (which field lands in which argument slot).
  */
 describe('CatalogController', () => {
   const service = {
@@ -14,7 +12,6 @@ describe('CatalogController', () => {
     getProducts: jest.fn(),
     getProduct: jest.fn(),
     sendProduct: jest.fn(),
-    sendCatalog: jest.fn(),
   };
   const controller = new CatalogController(service as unknown as CatalogService);
 
@@ -51,14 +48,5 @@ describe('CatalogController', () => {
     const dto = { chatId: '628123@c.us', productId: 'prod-1', body: 'Back in stock!' };
     await expect(controller.sendProduct('s1', dto)).resolves.toBe(sent);
     expect(service.sendProduct).toHaveBeenCalledWith('s1', '628123@c.us', 'prod-1', 'Back in stock!');
-  });
-
-  it('sendCatalog lets the deliberate 501 through — no engine can send catalog links', async () => {
-    const unsupported = new EngineNotSupportedError('sendCatalog');
-    service.sendCatalog.mockRejectedValue(unsupported);
-
-    await expect(controller.sendCatalog('s1', { chatId: '628123@c.us', body: 'hi' })).rejects.toBe(unsupported);
-    expect(unsupported.getStatus()).toBe(501);
-    expect(service.sendCatalog).toHaveBeenCalledWith('s1', '628123@c.us', 'hi');
   });
 });

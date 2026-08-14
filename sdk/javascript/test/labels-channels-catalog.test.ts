@@ -76,17 +76,13 @@ describe('CatalogResource — exact paths (note: catalog controller is session-r
     expect(t.lastCall!.url).toBe('http://localhost:2785/api/sessions/s/catalog/products/p1');
   });
 
-  it('sendProduct / sendCatalog share the messages path', async () => {
+  it('sendProduct shares the messages path', async () => {
     const t = new MockTransport()
-      .on('POST', /\/messages\/send-product$/, { body: { messageId: 'm', timestamp: 1 } })
-      .on('POST', /\/messages\/send-catalog$/, { body: { messageId: 'm', timestamp: 1 } });
+      .on('POST', /\/messages\/send-product$/, { body: { messageId: 'm', timestamp: 1 } });
     const c = client(t);
     await c.catalog.sendProduct('s', { chatId: 'a@c.us', productId: 'p1', body: 'see this' });
     expect(t.lastCall!.url).toBe('http://localhost:2785/api/sessions/s/messages/send-product');
     expect(t.lastCall!.body).toEqual({ chatId: 'a@c.us', productId: 'p1', body: 'see this' });
-    await c.catalog.sendCatalog('s', { chatId: 'a@c.us', body: 'our catalog' });
-    expect(t.lastCall!.url).toBe('http://localhost:2785/api/sessions/s/messages/send-catalog');
-    expect(t.lastCall!.body).toEqual({ chatId: 'a@c.us', body: 'our catalog' });
   });
 });
 

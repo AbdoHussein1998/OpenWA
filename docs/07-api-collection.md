@@ -907,7 +907,7 @@ curl -X DELETE "$BASE/api/sessions/$SESSION_ID/templates/$TEMPLATE_ID" \
 
 ### 07.8 Catalog & Channels
 
-The catalog routes work on the **Baileys** engine (WhatsApp Business accounts) — `getCatalog`/`getProducts`/`getProduct` read the session's own catalog and `sendProduct` sends a native product card. On **whatsapp-web.js** they raise `EngineNotSupportedError` (`501 Not Implemented`) — the library has no catalog API at all; on that engine the readiness check runs first, so a session that exists but is not yet READY returns `409` instead. The exception is `send-catalog`, which returns `501` on **both** engines (no catalog-share message type exists in either library). The per-engine gaps are listed in `docs/29-engine-capability-matrix.md`. The channel routes that follow are a separate group with real engine support.
+The catalog routes work on the **Baileys** engine (WhatsApp Business accounts) — `getCatalog`/`getProducts`/`getProduct` read the session's own catalog and `sendProduct` sends a native product card. On **whatsapp-web.js** they raise `EngineNotSupportedError` (`501 Not Implemented`) — the library has no catalog API at all; on that engine the readiness check runs first, so a session that exists but is not yet READY returns `409` instead. The per-engine gaps are listed in `docs/29-engine-capability-matrix.md`. The channel routes that follow are a separate group with real engine support.
 
 #### GET /api/sessions/:sessionId/catalog
 
@@ -945,17 +945,6 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/send-product" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "chatId": "6281234567890@c.us", "productId": "PROD_12345", "body": "Check out this item!" }'
-```
-
-#### POST /api/sessions/:sessionId/messages/send-catalog
-
-Send the business catalog link to a chat (OPERATOR key required). Returns `501` on both engines.
-
-```bash
-curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/send-catalog" \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{ "chatId": "6281234567890@c.us", "body": "Browse our full catalog here" }'
 ```
 
 #### GET /api/sessions/:sessionId/channels

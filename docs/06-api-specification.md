@@ -1434,7 +1434,7 @@ Get the processing status and progress of a bulk batch.
 ### Send pacing (opt-in, `429 SEND_PACING_LIMITED`)
 
 Every outbound message send — the `messages/send-*` routes, `messages/edit`, `messages/forward`,
-bulk batches, status posts and both catalog sends (`messages/send-product`, `messages/send-catalog`) — passes an optional pacing governor before
+bulk batches, status posts and the catalog send (`messages/send-product`) — passes an optional pacing governor before
 it reaches WhatsApp. Actions on existing messages (react, vote, pin, star) are not sends and are
 not paced. It is **off by default**: unless `SEND_PACING_ENABLED=true`, nothing is refused and no
 extra work is done.
@@ -1562,7 +1562,7 @@ Nine `send-*` routes accept an optional `quotedMessageId`: `send-text` above, an
 a contact card or a poll — not only text. `POST .../messages/reply` is unchanged and remains the text
 shorthand.
 
-`send-template`, `send-bulk`, `send-product` and `send-catalog` do NOT accept the field, and reject it
+`send-template`, `send-bulk` and `send-product` do NOT accept the field, and reject it
 as an unknown property.
 
 ```json
@@ -3488,49 +3488,6 @@ On whatsapp-web.js the readiness guard runs before the refusal, so a session tha
 `READY` gets `409` instead of `501`; Baileys refuses unconditionally.
 
 **Errors:** `400` missing `chatId`/`productId`, wrong types, or any field not on the DTO · `401` missing/invalid API key · `403` API-key role below OPERATOR · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY (whatsapp-web.js only) · `500` engine error
-
-#### POST /api/sessions/:sessionId/messages/send-catalog
-
-Send the business catalog link to a chat. Note: this route lives under the `/messages` path but belongs to the catalog module.
-
-**Auth:** API key (OPERATOR)
-
-**Path parameters**
-
-| Name        | Type   | Description          |
-| ----------- | ------ | -------------------- |
-| `sessionId` | string | WhatsApp session id. |
-
-**Request body** — `SendCatalogDto`
-
-| Field    | Type   | Required | Constraints | Description                    |
-| -------- | ------ | -------- | ----------- | ------------------------------ |
-| `chatId` | string | Yes      | `@IsString` | Target chat/recipient id.      |
-| `body`   | string | No       | `@IsString` | Optional message body/caption. |
-
-```json
-{
-  "chatId": "6281234567890@c.us",
-  "body": "Browse our full catalog here"
-}
-```
-
-**Response** `501` (not implemented on either engine)
-
-```json
-{
-  "statusCode": 501,
-  "message": "Operation not supported by the active engine: sendCatalog",
-  "error": "Not Implemented"
-}
-```
-
-No engine implements this. whatsapp-web.js and Baileys both raise `EngineNotSupportedError`, so the
-route cannot return a success body on any deployment; it is documented here because it is mounted.
-On whatsapp-web.js the readiness guard runs before the refusal, so a session that exists but is not
-`READY` gets `409` instead of `501`; Baileys refuses unconditionally.
-
-**Errors:** `400` missing/invalid `chatId` or any non-DTO field · `401` missing/invalid API key · `403` API-key role below OPERATOR · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY (whatsapp-web.js only) · `500` engine error
 
 #### GET /api/sessions/:sessionId/channels
 

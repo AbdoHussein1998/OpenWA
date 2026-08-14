@@ -143,7 +143,6 @@ func TestRouting(t *testing.T) {
 		{"Catalog.Products", func(c *Client) { c.Catalog.Products(ctx, "s1", nil) }, "GET", "/api/sessions/s1/catalog/products"},
 		{"Catalog.Product", func(c *Client) { c.Catalog.Product(ctx, "s1", "p1") }, "GET", "/api/sessions/s1/catalog/products/p1"},
 		{"Catalog.SendProduct", func(c *Client) { c.Catalog.SendProduct(ctx, "s1", SendProductRequest{}) }, "POST", "/api/sessions/s1/messages/send-product"},
-		{"Catalog.SendCatalog", func(c *Client) { c.Catalog.SendCatalog(ctx, "s1", SendCatalogRequest{}) }, "POST", "/api/sessions/s1/messages/send-catalog"},
 
 		{"Templates.List", func(c *Client) { c.Templates.List(ctx, "s1") }, "GET", "/api/sessions/s1/templates"},
 		{"Templates.Get", func(c *Client) { c.Templates.Get(ctx, "s1", "t1") }, "GET", "/api/sessions/s1/templates/t1"},

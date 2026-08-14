@@ -36,7 +36,7 @@ All five SDKs expose the same fluent surface:
 | `chats`     | list, subscribePresence, getPresence, markRead, markUnread, archive, pin, mute, clearMessages, delete, sendState                                                                                                                                                                                         |
 | `labels`    | list, get, chats, upsert, delete, forChat, addToChat, removeFromChat _(WhatsApp Business)_                                                                                                                                                                                                               |
 | `channels`  | list, get, messages, create, delete, mute, subscribe, unsubscribe, demoteAdmin, transferOwnership _(Newsletters)_                                                                                                                                                                                        |
-| `catalog`   | info, products, product, sendProduct, sendCatalog _(WhatsApp Business)_                                                                                                                                                                                                                                  |
+| `catalog`   | info, products, product, sendProduct _(WhatsApp Business)_                                                                                                                                                                                                                                               |
 | `status`    | list, fromContact, media, sendText, sendImage, sendVideo, sendVoice, delete _(Stories)_                                                                                                                                                                                                                  |
 | `search`    | search                                                                                                                                                                                                                                                                                                   |
 | `templates` | list, get, create, update, delete                                                                                                                                                                                                                                                                        |
@@ -282,7 +282,6 @@ Media bodies share the `SendMediaRequest` shape: `{ chatId, url? | base64?, mime
 | `products`    | `products(sessionId, query?)`   | List catalog products; returns `{ products, pagination }`. |
 | `product`     | `product(sessionId, productId)` | Get a single product by id.                                |
 | `sendProduct` | `sendProduct(sessionId, body)`  | Send a product message. **OPERATOR**                       |
-| `sendCatalog` | `sendCatalog(sessionId, body)`  | Send a catalog link message. **OPERATOR**                  |
 
 #### `status` _(Stories)_
 
@@ -645,13 +644,12 @@ Resources are accessed as properties on the client (e.g. `client.messages`). All
 
 #### `client.catalog` _(WhatsApp Business)_
 
-| Method         | Signature                                               | Description                               |
-| -------------- | ------------------------------------------------------- | ----------------------------------------- |
-| `info`         | `info(session_id) -> CatalogInfo`                       | Get catalog info.                         |
-| `products`     | `products(session_id, query=None) -> PaginatedProducts` | List products (paginated).                |
-| `product`      | `product(session_id, product_id) -> CatalogProduct`     | Get one product.                          |
-| `send_product` | `send_product(session_id, body) -> MessageResponse`     | Send a product message. **OPERATOR**      |
-| `send_catalog` | `send_catalog(session_id, body) -> MessageResponse`     | Send a catalog link message. **OPERATOR** |
+| Method         | Signature                                               | Description                          |
+| -------------- | ------------------------------------------------------- | ------------------------------------ |
+| `info`         | `info(session_id) -> CatalogInfo`                       | Get catalog info.                    |
+| `products`     | `products(session_id, query=None) -> PaginatedProducts` | List products (paginated).           |
+| `product`      | `product(session_id, product_id) -> CatalogProduct`     | Get one product.                     |
+| `send_product` | `send_product(session_id, body) -> MessageResponse`     | Send a product message. **OPERATOR** |
 
 #### `client.status` _(Stories)_
 
@@ -993,7 +991,6 @@ All payloads are associative arrays; all listed methods are synchronous and retu
 | `products`    | `products(string $sessionId, array $query = []): array` | List products (e.g. `['page' => 1, 'limit' => 20]`).          |
 | `product`     | `product(string $sessionId, string $productId): array`  | Get one product.                                              |
 | `sendProduct` | `sendProduct(string $sessionId, array $body): array`    | Send a product message (`chatId` + `productId`). **OPERATOR** |
-| `sendCatalog` | `sendCatalog(string $sessionId, array $body): array`    | Send a catalog link (`chatId`). **OPERATOR**                  |
 
 #### `status` _(Stories)_
 

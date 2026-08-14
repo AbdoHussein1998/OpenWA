@@ -8112,46 +8112,6 @@
         ]
       }
     },
-    "/api/sessions/{sessionId}/messages/send-catalog": {
-      "post": {
-        "operationId": "CatalogController_sendCatalog",
-        "parameters": [
-          {
-            "name": "sessionId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SendCatalogDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "404": {
-            "description": "No session is running under that id — it was never started, was stopped, or does not exist. These routes report an unstarted session as `404`, where the message and group routes report it as `400`."
-          },
-          "409": {
-            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
-          },
-          "501": {
-            "description": "Not supported by the active engine: no engine can send catalog links."
-          }
-        },
-        "summary": "Send catalog link (not supported by any engine)",
-        "tags": [
-          "catalog"
-        ]
-      }
-    },
     "/api/plugins": {
       "get": {
         "operationId": "PluginsController_findAll",
@@ -15929,24 +15889,6 @@
         "required": [
           "id",
           "timestamp"
-        ]
-      },
-      "SendCatalogDto": {
-        "type": "object",
-        "properties": {
-          "chatId": {
-            "type": "string",
-            "description": "Chat to send the catalog to (@c.us or @g.us).",
-            "example": "628123456789@c.us"
-          },
-          "body": {
-            "type": "string",
-            "description": "Optional body text accompanying the catalog.",
-            "example": "Browse our full catalog"
-          }
-        },
-        "required": [
-          "chatId"
         ]
       },
       "PluginDto": {
