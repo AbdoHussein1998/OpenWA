@@ -234,6 +234,18 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
    * SSRF flag + SSRF_ALLOWED_HOSTS escape-hatch as delivery. Maps the guard error to 400.
    */
   private async validateWebhookUrl(url: string): Promise<void> {
+    // Credentials embedded in the URL (https://user:pass@host/hook) would be persisted with the row
+    // and echoed into delivery logs and dead-letter rows, and are never legitimate for a webhook
+    // target — reject outright rather than strip-and-accept. Runs regardless of the SSRF flag.
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      // Unparseable: @IsUrl on the DTO (and the SSRF guard when enabled) owns that rejection.
+    }
+    if (parsed && (parsed.username !== '' || parsed.password !== '')) {
+      throw new BadRequestException('Webhook URL must not contain credentials (userinfo)');
+    }
     if (!isSsrfProtectionEnabled()) return;
     try {
       await assertSafeFetchUrl(url);

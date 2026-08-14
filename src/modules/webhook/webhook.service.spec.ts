@@ -225,6 +225,39 @@ describe('WebhookService', () => {
       }
     });
 
+    // ── URLs must not embed credentials ───────────────────
+
+    it('rejects a webhook URL carrying userinfo at registration', async () => {
+      await expect(service.create('sess-1', { url: 'https://user:pass@example.com/hook' })).rejects.toMatchObject({
+        status: 400,
+      });
+      await expect(service.create('sess-1', { url: 'https://user:pass@example.com/hook' })).rejects.toThrow(
+        /must not contain credentials/,
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a username-only userinfo URL as well', async () => {
+      await expect(service.create('sess-1', { url: 'https://user@example.com/hook' })).rejects.toThrow(
+        /must not contain credentials/,
+      );
+    });
+
+    it('rejects userinfo URLs even when SSRF protection is explicitly disabled', async () => {
+      const origProtect = process.env.WEBHOOK_SSRF_PROTECT;
+      process.env.WEBHOOK_SSRF_PROTECT = 'false';
+      try {
+        await expect(service.create('sess-1', { url: 'https://user:pass@example.com/hook' })).rejects.toMatchObject({
+          status: 400,
+        });
+        expect(repository.create).not.toHaveBeenCalled();
+      } finally {
+        if (origProtect === undefined) delete process.env.WEBHOOK_SSRF_PROTECT;
+        else process.env.WEBHOOK_SSRF_PROTECT = origProtect;
+      }
+    });
+
     // ── per-session fan-out cap ───────────────────────────
 
     it('rejects a NEW webhook with 400 once the session is at the per-session cap (default 16)', async () => {
@@ -344,6 +377,17 @@ describe('WebhookService', () => {
 
       expect(result.url).toBe('https://new-url.com/hook');
       expect(result.events).toEqual(['message.received']); // unchanged
+    });
+
+    it('rejects a URL carrying userinfo on update and leaves the stored URL unchanged', async () => {
+      const webhook = createMockWebhook();
+      (repository.findOne as jest.Mock).mockResolvedValue(webhook);
+
+      await expect(
+        service.update('sess-1', 'wh-uuid-1', { url: 'https://user:pass@evil.example/hook' }),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(webhook.url).toBe('https://example.com/webhook');
+      expect(repository.save).not.toHaveBeenCalled();
     });
   });
 

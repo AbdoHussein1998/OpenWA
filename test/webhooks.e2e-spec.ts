@@ -250,6 +250,18 @@ describe('Webhooks (e2e)', () => {
   // ── registration validation ───────────────────────────────────────
 
   describe('registration validation', () => {
+    it('rejects a URL embedding credentials (userinfo) even with SSRF protection off', async () => {
+      const session = await nextSession();
+      // This suite runs with WEBHOOK_SSRF_PROTECT=false, so a 400 here proves the credential
+      // rejection is not tied to the SSRF flag.
+      const res = await request(app.getHttpServer())
+        .post(`/api/sessions/${session}/webhooks`)
+        .set('X-API-Key', apiKey)
+        .send({ url: 'https://user:pass@example.com/hook' })
+        .expect(400);
+      expect((res.body as { message: string }).message).toMatch(/must not contain credentials/);
+    });
+
     it('rejects an internal URL with 400 when SSRF protection is on', async () => {
       const session = await nextSession();
       // Self-contained: turn protection on and clear any ambient SSRF_ALLOWED_HOSTS (a dev .env may
