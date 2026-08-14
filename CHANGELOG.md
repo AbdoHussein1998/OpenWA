@@ -23,12 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/restore.sh` refuses to restore over a live database unless `--force` is passed.
 - Dashboard: upload size is pre-checked before reading the file, login reuses the validated role, socket subscriptions are memoised, and restart-flow timers clear on unmount.
 - Engine/session lifecycle: a floating `saveCreds()` rejection is handled, the listener cleanup list covers `group.join-request`, and duplicated helpers (`clampNumber`, `extFromMimetype`, `resolveLid`) are single-sourced.
+- `POST /sessions/:sessionId/stop` escalates to a force-destroy when the graceful disconnect fails and answers a retryable `502` (`code: 'SESSION_STOP_INCOMPLETE'`, session left `disconnected`, no success audit) only when both fail — a wedged browser no longer leaks until the next start. The `502` is documented in the API reference and all five SDKs.
+- The status and chat-media stores share one orphaned-file reconciliation sweep, and the integration module reads the engine registry and session table through narrow dependencies instead of importing the session module.
 - Removed unused code, dead DTO types and three dev dependencies, plus dead dashboard API helpers.
+
+### Removed
+
+- ⚠️ **Breaking (API).** `POST /sessions/:sessionId/messages/send-catalog` is removed — it answered `501 not supported` on every engine since it shipped. The catalog reads and `send-product` are unchanged; the five SDK `sendCatalog` methods went with it.
+- ⚠️ **Breaking (API).** `PUT /api/settings` is removed — it always answered `501`. Settings remain readable via `GET /api/settings`.
 
 ### Changed
 
 - The runtime image sets `NODE_ENV=production`; it previously ran unset, which several code paths treat as development.
 - Base image is digest-pinned (`node:22-slim`) with `npm@12` pinned, `@types/node` moved to `^22`, `whatsapp-web.js` pinned exactly, and the backup/restore scripts now ship in the image.
+- The session routes' path parameter is uniformly `{sessionId}` (22 routes previously mixed `{id}`). The URLs are unchanged — OpenAPI path templates, reference tables and Prometheus route labels respell only.
 
 ### Documentation
 
@@ -37,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 
 - Coverage floors ratcheted; new specs for the message send endpoints, catalog, label delegation and session lifecycle edges; e2e wall-clock waits replaced with poll-for-condition.
+- `npm test` now runs the unit lane only: the 21 repo-file drift-gate specs moved to `npm run test:docs`, which CI runs as its own step — both lanes together are the former suite. The automation-rule controller gained a direct route spec, and per-scope coverage floors were re-derived around the split.
 
 ## [0.18.0] - 2026-08-13
 
