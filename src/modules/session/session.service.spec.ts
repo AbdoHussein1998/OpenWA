@@ -330,16 +330,50 @@ describe('SessionService', () => {
       expect(engineFactory.purgeSessionData).toHaveBeenCalledWith('test-session');
     });
 
-    it('stop() completes when engine.disconnect() rejects — map reconciled, status updated', async () => {
+    it('stop() escalates to forceDestroy when engine.disconnect() rejects — stop completes with a warning', async () => {
       (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
       (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
-      const engine = { disconnect: jest.fn().mockRejectedValue(new Error('stuck socket')) };
+      const engine = {
+        disconnect: jest.fn().mockRejectedValue(new Error('stuck socket')),
+        forceDestroy: jest.fn().mockResolvedValue(undefined),
+      };
       enginesOf().set('sess-uuid-1', engine);
+      const warn = jest.spyOn((lifecycle as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger, 'warn');
 
       await expect(service.stop('sess-uuid-1')).resolves.toBeDefined();
 
       expect(engine.disconnect).toHaveBeenCalledTimes(1);
+      expect(engine.forceDestroy).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('escalating to force-destroy'),
+        expect.objectContaining({ sessionId: 'sess-uuid-1' }),
+      );
       expect(enginesOf().has('sess-uuid-1')).toBe(false);
+      expect(repository.update).toHaveBeenCalledWith('sess-uuid-1', { status: SessionStatus.DISCONNECTED });
+      warn.mockRestore();
+    });
+
+    it('stop() surfaces a retryable 502 when the graceful disconnect AND the force-destroy both fail', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      const engine = {
+        disconnect: jest.fn().mockRejectedValue(new Error('stuck socket')),
+        forceDestroy: jest.fn().mockRejectedValue(new Error('SIGKILL refused')),
+      };
+      enginesOf().set('sess-uuid-1', engine);
+
+      const thrown = await service.stop('sess-uuid-1').catch((e: unknown) => e);
+
+      expect(thrown).toBeInstanceOf(BadGatewayException);
+      const response = (thrown as BadGatewayException).getResponse() as { code?: string; message?: string };
+      expect(response.code).toBe('SESSION_STOP_INCOMPLETE');
+      expect(engine.disconnect).toHaveBeenCalledTimes(1);
+      expect(engine.forceDestroy).toHaveBeenCalledTimes(1);
+      // The engine leaves the map regardless — it must not hold a concurrency slot — but the stop is
+      // reported as incomplete rather than claimed clean for a process that may still be running.
+      expect(enginesOf().has('sess-uuid-1')).toBe(false);
+      // Local state is still settled, mirroring logout()'s incomplete path.
+      expect(repository.update).toHaveBeenCalledWith('sess-uuid-1', { status: SessionStatus.DISCONNECTED });
     });
 
     it('delete() still surfaces a real DB-removal failure (engine teardown is best-effort, DB is not)', async () => {
