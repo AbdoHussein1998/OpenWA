@@ -240,6 +240,15 @@ export class SessionController {
       'it here would report the session down while the owner keeps running it, so the request is ' +
       'refused. Retry against the owning node, or once its lease has lapsed.',
   })
+  @ApiResponse({
+    status: 502,
+    description:
+      'Session was stopped locally, but the engine teardown did not complete (the graceful ' +
+      'disconnect and the force-destroy escalation both failed, so the engine process may still ' +
+      "be running). Retryable — the body carries `code: 'SESSION_STOP_INCOMPLETE'`; the status " +
+      'is settled to `disconnected` and no success audit is written. Retry the stop; restart the ' +
+      'node to reap a leaked process.',
+  })
   async stop(@Param('sessionId', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.stop(id);
     await this.auditService.logInfo(AuditAction.SESSION_STOPPED, {
