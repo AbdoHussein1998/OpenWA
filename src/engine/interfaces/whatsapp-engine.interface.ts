@@ -818,19 +818,41 @@ export interface EngineEventCallbacks {
   claimStuckAuthRecovery?: () => boolean;
 }
 
-export interface IWhatsAppEngine {
-  // Lifecycle
+// ---------------------------------------------------------------------------
+// Capability slices
+//
+// The engine surface is one contract per consumer domain rather than one flat list: each
+// interface below is the slice one domain uses, and IWhatsAppEngine at the end of this section
+// composes them all. Adapters keep implementing the union; a consumer that only touches one
+// domain can narrow to the slice it needs. The slices deliberately live in this same file: the
+// parity gate (engine-parity.spec.ts) reads the method inventory straight out of this file's
+// text, so every method declaration stays here, indented as a member, doc comment attached.
+// ---------------------------------------------------------------------------
+
+/**
+ * Session lifecycle, connection health, and identity: start/stop the engine, observe its status,
+ * and read the identity it authenticated as. The QR and pairing-code members are the
+ * link-a-new-session surface.
+ *
+ * Status and liveness stay with lifecycle rather than forming their own slice because the
+ * session-lifecycle consumer uses them for exactly that: deciding whether a session is alive.
+ */
+export interface SessionLifecycleCapability {
   initialize(callbacks: EngineEventCallbacks): Promise<void>;
+
   disconnect(): Promise<void>; // Closes browser but keeps session (can reconnect without QR)
+
   logout(): Promise<void>; // Logs out and clears session data (requires QR scan again)
+
   destroy(): Promise<void>;
+
   // Force-kill THIS engine's own resources immediately (e.g. SIGKILL a wedged Chromium for a stuck
   // session), then best-effort graceful teardown — used to recover a session that destroy() can't.
   // Each adapter kills only its own resources (never a process-wide pkill).
   forceDestroy(): Promise<void>;
 
-  // Status
   getStatus(): EngineStatus;
+
   /**
    * Active liveness probe: performs a real round-trip against the engine's connection and
    * resolves true only when the session is genuinely alive. Implementations must treat probe
@@ -840,13 +862,23 @@ export interface IWhatsAppEngine {
    * cheap local check. Polled periodically by the session watchdog.
    */
   probeLiveness?(): Promise<boolean>;
+
   getQRCode(): string | null;
+
   /** Request an 8-char pairing code to link via phone number instead of scanning the QR. */
   requestPairingCode(phoneNumber: string): Promise<string>;
-  getPhoneNumber(): string | null;
-  getPushName(): string | null;
 
-  // Messaging - Basic
+  getPhoneNumber(): string | null;
+
+  getPushName(): string | null;
+}
+
+/**
+ * Outbound messaging: every member that composes a NEW message into a chat — text, media,
+ * location, contact card, sticker, poll — plus reply and forward, which are sends that quote or
+ * re-route existing content.
+ */
+export interface MessagingCapability {
   /**
    * Send text.
    *
@@ -860,119 +892,53 @@ export interface IWhatsAppEngine {
     mentions?: string[],
     options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview } & Quotable,
   ): Promise<MessageResult>;
+
   sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
+
   sendVideoMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
+
   sendAudioMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
+
   sendDocumentMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
 
-  // Messaging - Extended (Phase 3)
   sendLocationMessage(chatId: string, location: LocationInput): Promise<MessageResult>;
+
   sendContactMessage(chatId: string, contact: ContactCard): Promise<MessageResult>;
+
   sendStickerMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
+
   sendPollMessage(chatId: string, poll: PollInput): Promise<MessageResult>;
 
-  // Reply & Forward
   replyToMessage(chatId: string, quotedMsgId: string, text: string): Promise<MessageResult>;
-  forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult>;
 
-  // Reactions (Phase 3)
+  forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult>;
+}
+
+/**
+ * Operations on messages that already exist: delete, edit, star, pin, and the reaction surface.
+ *
+ * votePoll lives here rather than with the poll send in MessagingCapability: it mutates an
+ * existing poll message (the same shape of act as reactToMessage), it does not compose one.
+ */
+export interface MessageOperationsCapability {
   reactToMessage(chatId: string, messageId: string, emoji: string): Promise<void>;
+
   getMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]>;
 
-  // Contacts
-  getContacts(): Promise<Contact[]>;
-  getContactById(contactId: string): Promise<Contact | null>;
-  checkNumberExists(number: string): Promise<boolean>;
-  /**
-   * Resolve a phone number to its canonical chat id in the neutral dialect (`<phone>@c.us`), or null
-   * if the number is not registered. The engine owns the JID scheme and returns it already neutralized,
-   * so the value is engine-agnostic and round-trips back to a send on any engine.
-   */
-  getNumberId(number: string): Promise<string | null>;
-  /**
-   * Best-effort resolution of a contact id to a phone number (MSISDN digits), or `null` when the
-   * engine cannot map it (e.g. a privacy `@lid` the account has never seen). The contact id is the
-   * engine's native scheme; the adapter decides how to resolve it.
-   */
-  resolveContactPhone(contactId: string): Promise<string | null>;
-
-  // Groups - Basic
-  getGroups(): Promise<Group[]>;
-
-  // Groups - Extended (Phase 3)
-  getGroupInfo(groupId: string): Promise<GroupInfo | null>;
-  createGroup(name: string, participants: string[]): Promise<Group>;
-  /**
-   * Membership writes resolve one {@link ParticipantOperationResult} per participant, so a partial
-   * refusal (one invite-only number among several added) is visible instead of being flattened into
-   * a blanket success. They THROW only when the operation failed for every requested participant —
-   * e.g. the account lacks admin rights — or the batch itself was refused.
-   */
-  addParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]>;
-  removeParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]>;
-  promoteParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]>;
-  demoteParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]>;
-  leaveGroup(groupId: string): Promise<void>;
-  setGroupSubject(groupId: string, subject: string): Promise<void>;
-  setGroupDescription(groupId: string, description: string): Promise<void>;
-  getGroupInviteCode(groupId: string): Promise<string>;
-  revokeGroupInviteCode(groupId: string): Promise<string>;
-  /**
-   * Join a group via an invite code (the token from a `https://chat.whatsapp.com/<code>` link).
-   * Resolves with the joined group's neutral id (`<id>@g.us`).
-   */
-  joinGroupViaInviteCode(inviteCode: string): Promise<string>;
-  /**
-   * What an invite code discloses about a group, without joining it. Read-only: nothing about the
-   * account's membership changes, which is what makes it safe to call on an untrusted code.
-   */
-  getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo>;
-  /** Set the "only admins can send messages" group setting (WhatsApp announce). */
-  setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
-  /** Set the "only admins can edit group info" group setting (WhatsApp locked/restrict). */
-  setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
-  /**
-   * Set the group's picture. Requires admin rights on both engines; the engines report a refusal
-   * differently, so the adapters normalise it. Reading the current picture needs no dedicated
-   * method — `getProfilePicture` accepts a group JID.
-   */
-  setGroupPicture(groupId: string, media: MediaInput): Promise<void>;
-  /** Remove the group's picture. */
-  deleteGroupPicture(groupId: string): Promise<void>;
-  /** Set who may add participants to the group. */
-  setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void>;
-  /**
-   * Set the group's disappearing-messages timer in seconds; 0 disables it.
-   * Known values: 86400 (24h), 604800 (7d), 7776000 (90d).
-   */
-  setGroupEphemeral(groupId: string, durationSec: number): Promise<void>;
-  /**
-   * Pending join requests for a group with join-approval turned on. Admin-only on both engines;
-   * a non-admin's read is refused by the engine and surfaced as-is.
-   */
-  getGroupMembershipRequests(groupId: string): Promise<GroupMembershipRequest[]>;
-  /**
-   * Approve pending join requests — the named participants, or EVERY pending request when
-   * `participants` is omitted. Per-participant outcomes follow the membership-write contract
-   * (see addParticipants); the all-failed/no-outcome guards apply only when participants were
-   * NAMED — approving an empty queue is a no-op that resolves [].
-   */
-  approveGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]>;
-  /** Reject pending join requests; same contract as approveGroupMembershipRequests. */
-  rejectGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]>;
-
-  // Message Operations
   deleteMessage(chatId: string, messageId: string, forEveryone?: boolean): Promise<void>;
+
   /**
    * Edit the body of a text message. Only the account's OWN messages can be edited; engines reject
    * non-text or foreign messages at their own layer — the engine's error is surfaced as-is.
    */
   editMessage(chatId: string, messageId: string, body: string): Promise<MessageResult>;
+
   /**
    * Star (bookmark) a message, or remove its star. Starring is a private, account-local marker —
    * it is not visible to the other party and has no group-admin restriction.
    */
   starMessage(chatId: string, messageId: string, star: boolean): Promise<void>;
+
   /**
    * Cast a vote on a poll. `options` are the option TEXTS, not ids: whatsapp-web.js matches by name
    * (`Message.js:1027-1031`), and no engine surfaces a stable per-option id through this interface,
@@ -984,6 +950,7 @@ export interface IWhatsAppEngine {
    * duplicates, and the name is the only handle available.
    */
   votePoll(chatId: string, pollMessageId: string, options: string[]): Promise<void>;
+
   /**
    * Pin a message in its chat for a bounded window. WhatsApp only recognises three durations —
    * 86400 (24h), 604800 (7d), 2592000 (30d) — so `durationSeconds` must be one of those; it is
@@ -991,8 +958,17 @@ export interface IWhatsAppEngine {
    * admins may pin; the engines surface their own refusal.
    */
   pinMessage(chatId: string, messageId: string, durationSeconds: number): Promise<void>;
+
   /** Remove a message's pin. Unpinning takes no duration — an existing pin's window is irrelevant. */
   unpinMessage(chatId: string, messageId: string): Promise<void>;
+}
+
+/**
+ * Reading a chat's stored messages. Kept apart from the chat-management slice because this is
+ * the engine's only media-bearing read path — the media budget parameters are a download
+ * concern no other member shares.
+ */
+export interface ChatHistoryCapability {
   /**
    * Read a chat's recent messages, newest first. When `includeMedia` downloads blobs, an optional
    * `mediaMaxBytes` tightens the declared-size pre-gate below the global MEDIA_DOWNLOAD_MAX_BYTES —
@@ -1009,30 +985,42 @@ export interface IWhatsAppEngine {
     mediaMaxBytes?: number,
     signal?: AbortSignal,
   ): Promise<IncomingMessage[]>;
+}
 
-  // Calls
-  /**
-   * Reject an incoming call. Only a currently-ringing call can be rejected: the adapter keeps the
-   * engine's live call handle (keyed by the `callId` from {@link IncomingCallEvent}) for the
-   * ringing window, and an unknown or expired callId fails with a not-found error (HTTP 404).
-   */
-  rejectCall(callId: string): Promise<void>;
-  /**
-   * Generate a shareable WhatsApp call link, returning the finished `https://call.whatsapp.com/…`
-   * URL. `startTime` is an absolute epoch-MILLISECONDS timestamp; both engines take seconds on the
-   * wire and each adapter converts.
-   *
-   * The engines return different things and the adapters reconcile them: whatsapp-web.js resolves
-   * the finished link (or `''` on failure), Baileys resolves only the bare token and the adapter
-   * assembles it behind the library's own prefix. A WhatsApp-side failure throws rather than
-   * returning an empty or prefix-only link, which would look like a working link and is not one.
-   */
-  createCallLink(type: CallLinkType, startTime: number): Promise<string>;
+/**
+ * Contacts and the account's addressbook: reads, number/identity resolution, the blocklist, and
+ * addressbook writes.
+ *
+ * getProfilePicture sits here rather than with profiles: it reads any party's picture (a group
+ * JID included — see setGroupPicture), and its consumer domain is contact data.
+ */
+export interface ContactCapability {
+  getContacts(): Promise<Contact[]>;
 
-  // Contact Extended Operations
+  getContactById(contactId: string): Promise<Contact | null>;
+
+  checkNumberExists(number: string): Promise<boolean>;
+
+  /**
+   * Resolve a phone number to its canonical chat id in the neutral dialect (`<phone>@c.us`), or null
+   * if the number is not registered. The engine owns the JID scheme and returns it already neutralized,
+   * so the value is engine-agnostic and round-trips back to a send on any engine.
+   */
+  getNumberId(number: string): Promise<string | null>;
+
+  /**
+   * Best-effort resolution of a contact id to a phone number (MSISDN digits), or `null` when the
+   * engine cannot map it (e.g. a privacy `@lid` the account has never seen). The contact id is the
+   * engine's native scheme; the adapter decides how to resolve it.
+   */
+  resolveContactPhone(contactId: string): Promise<string | null>;
+
   getProfilePicture(contactId: string): Promise<string | null>;
+
   blockContact(contactId: string): Promise<void>;
+
   unblockContact(contactId: string): Promise<void>;
+
   /**
    * Neutral ids of the contacts this account has blocked — the read half of block/unblockContact.
    * Ids only: whatsapp-web.js resolves full Contact models, but Baileys' blocklist query answers
@@ -1047,16 +1035,137 @@ export interface IWhatsAppEngine {
    * adapters convert. An empty `lastName` is normal — WhatsApp stores single-name contacts.
    */
   upsertContact(contactId: string, firstName: string, lastName?: string): Promise<void>;
+
   /** Remove a contact from the account's addressbook. Does not block or delete the chat. */
   deleteContact(contactId: string): Promise<void>;
+}
 
-  // Profile (own account)
+/** Groups: reads, membership writes, settings mutations, invites, and join approvals. */
+export interface GroupCapability {
+  getGroups(): Promise<Group[]>;
+
+  getGroupInfo(groupId: string): Promise<GroupInfo | null>;
+
+  createGroup(name: string, participants: string[]): Promise<Group>;
+
+  /**
+   * Membership writes resolve one {@link ParticipantOperationResult} per participant, so a partial
+   * refusal (one invite-only number among several added) is visible instead of being flattened into
+   * a blanket success. They THROW only when the operation failed for every requested participant —
+   * e.g. the account lacks admin rights — or the batch itself was refused.
+   */
+  addParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]>;
+
+  removeParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]>;
+
+  promoteParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]>;
+
+  demoteParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]>;
+
+  leaveGroup(groupId: string): Promise<void>;
+
+  setGroupSubject(groupId: string, subject: string): Promise<void>;
+
+  setGroupDescription(groupId: string, description: string): Promise<void>;
+
+  getGroupInviteCode(groupId: string): Promise<string>;
+
+  revokeGroupInviteCode(groupId: string): Promise<string>;
+
+  /**
+   * Join a group via an invite code (the token from a `https://chat.whatsapp.com/<code>` link).
+   * Resolves with the joined group's neutral id (`<id>@g.us`).
+   */
+  joinGroupViaInviteCode(inviteCode: string): Promise<string>;
+
+  /**
+   * What an invite code discloses about a group, without joining it. Read-only: nothing about the
+   * account's membership changes, which is what makes it safe to call on an untrusted code.
+   */
+  getGroupJoinInfo(inviteCode: string): Promise<GroupJoinInfo>;
+
+  /** Set the "only admins can send messages" group setting (WhatsApp announce). */
+  setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
+
+  /** Set the "only admins can edit group info" group setting (WhatsApp locked/restrict). */
+  setGroupInfoAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
+
+  /**
+   * Set the group's picture. Requires admin rights on both engines; the engines report a refusal
+   * differently, so the adapters normalise it. Reading the current picture needs no dedicated
+   * method — `getProfilePicture` accepts a group JID.
+   */
+  setGroupPicture(groupId: string, media: MediaInput): Promise<void>;
+
+  /** Remove the group's picture. */
+  deleteGroupPicture(groupId: string): Promise<void>;
+
+  /** Set who may add participants to the group. */
+  setGroupMemberAddMode(groupId: string, mode: GroupMemberAddMode): Promise<void>;
+
+  /**
+   * Set the group's disappearing-messages timer in seconds; 0 disables it.
+   * Known values: 86400 (24h), 604800 (7d), 7776000 (90d).
+   */
+  setGroupEphemeral(groupId: string, durationSec: number): Promise<void>;
+
+  /**
+   * Pending join requests for a group with join-approval turned on. Admin-only on both engines;
+   * a non-admin's read is refused by the engine and surfaced as-is.
+   */
+  getGroupMembershipRequests(groupId: string): Promise<GroupMembershipRequest[]>;
+
+  /**
+   * Approve pending join requests — the named participants, or EVERY pending request when
+   * `participants` is omitted. Per-participant outcomes follow the membership-write contract
+   * (see addParticipants); the all-failed/no-outcome guards apply only when participants were
+   * NAMED — approving an empty queue is a no-op that resolves [].
+   */
+  approveGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]>;
+
+  /** Reject pending join requests; same contract as approveGroupMembershipRequests. */
+  rejectGroupMembershipRequests(groupId: string, participants?: string[]): Promise<ParticipantOperationResult[]>;
+}
+
+/**
+ * Calls: rejecting a ringing call and generating call links. Call EVENTS arrive through
+ * EngineEventCallbacks (onCall / onCallOutcome), not through this slice.
+ */
+export interface CallCapability {
+  /**
+   * Reject an incoming call. Only a currently-ringing call can be rejected: the adapter keeps the
+   * engine's live call handle (keyed by the `callId` from {@link IncomingCallEvent}) for the
+   * ringing window, and an unknown or expired callId fails with a not-found error (HTTP 404).
+   */
+  rejectCall(callId: string): Promise<void>;
+
+  /**
+   * Generate a shareable WhatsApp call link, returning the finished `https://call.whatsapp.com/…`
+   * URL. `startTime` is an absolute epoch-MILLISECONDS timestamp; both engines take seconds on the
+   * wire and each adapter converts.
+   *
+   * The engines return different things and the adapters reconcile them: whatsapp-web.js resolves
+   * the finished link (or `''` on failure), Baileys resolves only the bare token and the adapter
+   * assembles it behind the library's own prefix. A WhatsApp-side failure throws rather than
+   * returning an empty or prefix-only link, which would look like a working link and is not one.
+   */
+  createCallLink(type: CallLinkType, startTime: number): Promise<string>;
+}
+
+/**
+ * The account's OWN profile: display name, about text, and picture. Distinct from
+ * ContactCapability, which reads and writes other parties.
+ */
+export interface ProfileCapability {
   /** Set the account's display name. */
   setProfileName(name: string): Promise<void>;
+
   /** Set the account's "about" / status text. */
   setProfileStatus(status: string): Promise<void>;
+
   /** Set the account's profile picture (a URL payload is fetched server-side). */
   setProfilePicture(media: MediaInput): Promise<void>;
+
   /**
    * Remove the account's own profile picture. Resolves when the removal is acknowledged; deleting a
    * picture that is not there is a no-op rather than an error, so the call is idempotent.
@@ -1067,26 +1176,61 @@ export interface IWhatsAppEngine {
    * write.
    */
   deleteProfilePicture(): Promise<void>;
+}
 
-  // Labels (Phase 3) - WhatsApp Business only
+/**
+ * Labels (WhatsApp Business): label reads and writes, and the label-to-chat assignment surface.
+ * A non-business account has no labels at all.
+ */
+export interface LabelCapability {
   getLabels(): Promise<Label[]>;
+
   getLabelById(labelId: string): Promise<Label | null>;
+
   getChatLabels(chatId: string): Promise<Label[]>;
+
   addLabelToChat(chatId: string, labelId: string): Promise<void>;
+
   /**
    * Create or update a label, keyed on `label.id`. One operation, not two: the engines express both
    * through a single app-state write, and which one happens depends on whether the id already
    * exists. Only fields that are set are changed.
    */
+  upsertLabel(label: LabelInput): Promise<void>;
+
+  /** Delete a label. It disappears from every chat it was on. */
+  deleteLabel(labelId: string): Promise<void>;
+
+  /** Every chat carrying a label. */
+  getChatsByLabel(labelId: string): Promise<ChatSummary[]>;
+
+  removeLabelFromChat(chatId: string, labelId: string): Promise<void>;
+}
+
+/** Channels/newsletters: subscription, reads, and the owner-only administration writes. */
+export interface ChannelCapability {
+  getSubscribedChannels(): Promise<Channel[]>;
+
+  getChannelById(channelId: string): Promise<Channel | null>;
+
+  subscribeToChannel(inviteCode: string): Promise<Channel>;
+
+  unsubscribeFromChannel(channelId: string): Promise<void>;
+
+  getChannelMessages(channelId: string, limit?: number): Promise<ChannelMessage[]>;
+
   /**
    * Create a channel and return it. The account becomes its owner, which is what makes deleting it
    * possible later — neither engine can delete a channel it does not own.
    */
   createChannel(name: string, description?: string): Promise<Channel>;
+
   /** Delete a channel this account owns. Irreversible, and its subscribers lose it. */
   deleteChannel(channelId: string): Promise<void>;
+
   /** Mute or unmute a channel's notifications for this account. Does not affect subscription. */
   muteChannel(channelId: string, mute: boolean): Promise<void>;
+
   /**
    * Demote a channel admin back to a plain subscriber. Requires this account to own the channel.
    *
@@ -1095,6 +1239,7 @@ export interface IWhatsAppEngine {
    * the WhatsApp app and can then be demoted here.
    */
   demoteChannelAdmin(channelId: string, userId: string): Promise<void>;
+
   /**
    * Hand a channel this account owns to a new owner. **Irreversible** — the account stops being the
    * owner and cannot take it back through this API.
@@ -1104,51 +1249,67 @@ export interface IWhatsAppEngine {
    * own errors, so it would fail silently rather than refusing.
    */
   transferChannelOwnership(channelId: string, newOwnerId: string): Promise<void>;
-  upsertLabel(label: LabelInput): Promise<void>;
-  /** Delete a label. It disappears from every chat it was on. */
-  deleteLabel(labelId: string): Promise<void>;
-  /** Every chat carrying a label. */
-  getChatsByLabel(labelId: string): Promise<ChatSummary[]>;
-  removeLabelFromChat(chatId: string, labelId: string): Promise<void>;
+}
 
-  // Channels/Newsletter (Phase 3)
-  getSubscribedChannels(): Promise<Channel[]>;
-  getChannelById(channelId: string): Promise<Channel | null>;
-  subscribeToChannel(inviteCode: string): Promise<Channel>;
-  unsubscribeFromChannel(channelId: string): Promise<void>;
-  getChannelMessages(channelId: string, limit?: number): Promise<ChannelMessage[]>;
-
-  // Status/Stories (Phase 3)
+/** Status/stories: reading contacts' statuses and posting or deleting the account's own. */
+export interface StatusCapability {
   getContactStatuses(): Promise<Status[]>;
+
   getContactStatus(contactId: string): Promise<Status[]>;
+
   postTextStatus(text: string, options: StatusPostOptions): Promise<StatusResult>;
+
   postImageStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult>;
+
   postVideoStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult>;
+
   /**
    * Post an audio status as a voice note. WhatsApp plays a status voice note only for Ogg/Opus, and
    * neither engine transcodes — the media conversion endpoints exist to produce it.
    */
   postVoiceStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult>;
+
   deleteStatus(statusId: string): Promise<void>;
+}
 
-  // Catalog (Phase 3) - WhatsApp Business only
+/**
+ * Catalog (WhatsApp Business): catalog and product reads. sendProduct and sendCatalog stay here
+ * rather than in MessagingCapability — they ship a catalog entity into a chat, and their consumer
+ * is the commerce domain, so a messaging-only dependency need not carry them.
+ */
+export interface CatalogCapability {
   getCatalog(): Promise<Catalog | null>;
-  getProducts(options?: ProductQueryOptions): Promise<PaginatedProducts>;
-  getProduct(productId: string): Promise<Product | null>;
-  sendProduct(chatId: string, productId: string, body?: string): Promise<MessageResult>;
-  sendCatalog(chatId: string, body?: string): Promise<MessageResult>;
 
-  // Chats
+  getProducts(options?: ProductQueryOptions): Promise<PaginatedProducts>;
+
+  getProduct(productId: string): Promise<Product | null>;
+
+  sendProduct(chatId: string, productId: string, body?: string): Promise<MessageResult>;
+
+  sendCatalog(chatId: string, body?: string): Promise<MessageResult>;
+}
+
+/**
+ * Chat-list management: enumeration and per-chat flags (seen, unread, archive, pin, mute,
+ * clear). These operate on the chat itself; pinning a message INSIDE a chat is
+ * MessageOperationsCapability.pinMessage.
+ */
+export interface ChatCapability {
   getChats(): Promise<ChatSummary[]>;
+
   sendSeen(chatId: string): Promise<boolean>;
+
   markUnread(chatId: string): Promise<boolean>;
+
   deleteChat(chatId: string): Promise<boolean>;
+
   /**
    * Archive or unarchive a chat. Resolves false when the engine cannot act — on Baileys the
    * archive is an app-state modification keyed to the chat's last message, so a chat with no known
    * history cannot be archived at all. Same shape as deleteChat/markUnread, which share that limit.
    */
   archiveChat(chatId: string, archive: boolean): Promise<boolean>;
+
   /**
    * Pin or unpin a chat at the top of the chat list. Chat-level — distinct from `pinMessage`, which
    * pins a message inside a chat.
@@ -1160,6 +1321,7 @@ export interface IWhatsAppEngine {
    * archiveChat the patch carries no `lastMessages`, so a chat with no known history pins fine.
    */
   pinChat(chatId: string, pin: boolean): Promise<boolean>;
+
   /**
    * Mute or unmute a chat's notifications. `muteUntil` is an absolute epoch-MILLISECONDS timestamp
    * the mute expires at; `null` unmutes now. To mute indefinitely, pass a far-future timestamp —
@@ -1178,17 +1340,26 @@ export interface IWhatsAppEngine {
    * history mutes like any other. That is why it resolves void rather than boolean.
    */
   muteChat(chatId: string, muteUntil: number | null): Promise<void>;
+
   /**
    * Delete every message in a chat while keeping the chat itself in the list. Resolves false when
    * the engine cannot act — an unknown chat on whatsapp-web.js, or (as with archiveChat) a chat
    * with no known history on Baileys, whose clear is keyed to the last message.
    */
   clearChatMessages(chatId: string): Promise<boolean>;
+}
+
+/**
+ * Presence: chat typing/recording indicators, the account's own online visibility, and presence
+ * subscriptions (delivered through onPresenceUpdate).
+ */
+export interface PresenceCapability {
   /**
    * Send a typing/recording presence indicator to a chat, or clear it (`paused`).
    * Engine-agnostic and best-effort: engines without a presence concept should no-op.
    */
   sendChatState(chatId: string, state: ChatState): Promise<void>;
+
   /**
    * Publish the ACCOUNT's own global presence: `true` = appear online, `false` = appear offline.
    * A linked device that announces itself online routes notifications away from the phone, so a
@@ -1199,6 +1370,7 @@ export interface IWhatsAppEngine {
    * socket option), so callers re-issue it after a reconnect.
    */
   setOnlinePresence(available: boolean): Promise<void>;
+
   /**
    * Ask WhatsApp to start reporting a chat's presence, delivered through `onPresenceUpdate`.
    *
@@ -1212,3 +1384,25 @@ export interface IWhatsAppEngine {
    */
   subscribeToPresence(chatId: string): Promise<void>;
 }
+
+/**
+ * The complete engine contract: every capability slice above, composed. Nothing is declared here
+ * directly — a member belongs to the slice its consumer domain forms, so an engine-wide member
+ * would mean a domain that has no other surface. Adapters implement this union unchanged.
+ */
+export interface IWhatsAppEngine
+  extends
+    SessionLifecycleCapability,
+    MessagingCapability,
+    MessageOperationsCapability,
+    ChatHistoryCapability,
+    ContactCapability,
+    GroupCapability,
+    CallCapability,
+    ProfileCapability,
+    LabelCapability,
+    ChannelCapability,
+    StatusCapability,
+    CatalogCapability,
+    ChatCapability,
+    PresenceCapability {}
