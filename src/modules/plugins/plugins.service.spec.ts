@@ -242,7 +242,7 @@ describe('PluginsService — install / uninstall (real loader + disk)', () => {
   });
 });
 
-describe('PluginsService — download integrity (optional #sha256 pinning)', () => {
+describe('PluginsService — download integrity + install-URL transport rule', () => {
   let tmpDir: string;
   let pluginsDir: string;
   let loader: PluginLoaderService;
@@ -335,6 +335,49 @@ describe('PluginsService — download integrity (optional #sha256 pinning)', () 
     const dto = await service.installFromUrl('https://plugins.example/svc-plg.zip');
 
     expect(dto.id).toBe('svc-plg');
+  });
+
+  it('rejects a plain http URL without a content pin BEFORE any fetch', async () => {
+    fetchMock.mockClear();
+
+    await expect(service.installFromUrl('http://plugins.example/svc-plg.zip')).rejects.toThrow(/#sha256=/);
+
+    // Nothing was downloaded and nothing was installed.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(loader.getPlugin('svc-plg')).toBeUndefined();
+    expect(fs.existsSync(path.join(pluginsDir, 'svc-plg'))).toBe(false);
+  });
+
+  it('installs over plain http when the #sha256 pin matches the downloaded bytes', async () => {
+    const buf = pkg();
+    serveOnce(buf);
+
+    const dto = await service.installFromUrl(`http://plugins.example/svc-plg.zip#sha256=${sha256(buf)}`);
+
+    expect(dto.id).toBe('svc-plg');
+    expect(loader.getPlugin('svc-plg')).toBeDefined();
+  });
+
+  it('fails closed over plain http when the pinned digest does not match', async () => {
+    serveOnce(pkg());
+    const wrong = '0'.repeat(64);
+
+    await expect(service.installFromUrl(`http://plugins.example/svc-plg.zip#sha256=${wrong}`)).rejects.toThrow(
+      /integrity check failed/i,
+    );
+
+    expect(loader.getPlugin('svc-plg')).toBeUndefined();
+    expect(fs.existsSync(path.join(pluginsDir, 'svc-plg'))).toBe(false);
+  });
+
+  it('updateFromUrl applies the same transport rule: plain http without a pin is rejected before any fetch', async () => {
+    service.install({ buffer: pkg({ version: '1.0.0' }) });
+    fetchMock.mockClear();
+
+    await expect(service.updateFromUrl('svc-plg', 'http://plugins.example/svc-plg.zip')).rejects.toThrow(/#sha256=/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(loader.getPlugin('svc-plg')?.manifest.version).toBe('1.0.0');
   });
 
   it('updateFromUrl fails closed on a mismatch and leaves the old version intact', async () => {

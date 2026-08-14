@@ -53,6 +53,28 @@ export function assertDownloadSha256(url: string, body: Buffer): void {
 }
 
 /**
+ * Transport rule for a plugin install/update URL, enforced BEFORE any fetch. The downloaded bytes
+ * are executable code, so plain http is only accepted when the URL pins the expected content with a
+ * `#sha256=<64 hex>` fragment — the pin is then verified against the download (fail-closed) before
+ * anything is installed. https is accepted as-is (TLS is the integrity layer), and anything else —
+ * an unparseable URL or a non-http(s) scheme — is left for the SSRF guard to reject downstream.
+ */
+export function assertPluginInstallUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return; // not a parseable URL — resolveSafeFetchTarget rejects it with the clearer error
+  }
+  if (parsed.protocol !== 'http:') return; // https unaffected; other schemes are the SSRF guard's call
+  // expectedSha256FromUrl throws on a malformed marker, so an explicit-but-unusable pin fails
+  // closed here rather than silently degrading to "no pin".
+  if (expectedSha256FromUrl(url) === null) {
+    throw new Error('plain http is only accepted with a content pin: append #sha256=<64 hex> to the URL, or use https');
+  }
+}
+
+/**
  * Fetch a remote resource (plugin .zip or catalog JSON) as a Buffer, always behind the SSRF guard:
  * every host (the original URL and every redirect hop) is validated before its socket opens and a hop
  * resolving to an internal/reserved address is refused. Redirects ARE followed — public release hosts

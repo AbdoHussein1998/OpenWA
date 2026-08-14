@@ -1,4 +1,4 @@
-import { expectedSha256FromUrl, assertDownloadSha256 } from './plugin-download';
+import { expectedSha256FromUrl, assertDownloadSha256, assertPluginInstallUrl } from './plugin-download';
 import { createHash } from 'crypto';
 
 /**
@@ -53,5 +53,34 @@ describe('assertDownloadSha256', () => {
 
   it('throws when the digest does not match (substituted package)', () => {
     expect(() => assertDownloadSha256(`https://h/pkg.zip#sha256=${'0'.repeat(64)}`, body)).toThrow(/sha256 mismatch/i);
+  });
+});
+
+describe('assertPluginInstallUrl', () => {
+  const digest = 'a'.repeat(64);
+
+  it('accepts https as-is, with or without an integrity pin', () => {
+    expect(() => assertPluginInstallUrl('https://h/pkg.zip')).not.toThrow();
+    expect(() => assertPluginInstallUrl(`https://h/pkg.zip#sha256=${digest}`)).not.toThrow();
+  });
+
+  it('rejects plain http without a content pin — the package is executable code', () => {
+    expect(() => assertPluginInstallUrl('http://h/pkg.zip')).toThrow(/#sha256=/);
+    // A query-param digest is NOT a pin (it belongs to the download host).
+    expect(() => assertPluginInstallUrl(`http://h/pkg.zip?sha256=${digest}`)).toThrow(/#sha256=/);
+  });
+
+  it('accepts plain http carrying a well-formed #sha256= pin (verified against the download)', () => {
+    expect(() => assertPluginInstallUrl(`http://h/pkg.zip#sha256=${digest}`)).not.toThrow();
+    expect(() => assertPluginInstallUrl(`http://h/pkg.zip#sha256=${digest.toUpperCase()}`)).not.toThrow();
+  });
+
+  it('fails closed on http with a malformed pin rather than degrading to no verification', () => {
+    expect(() => assertPluginInstallUrl('http://h/pkg.zip#sha256=xyz')).toThrow(/64-character hex/i);
+  });
+
+  it('leaves unparseable URLs and other schemes to the SSRF guard (no duplicate rejection here)', () => {
+    expect(() => assertPluginInstallUrl('not a url')).not.toThrow();
+    expect(() => assertPluginInstallUrl('ftp://h/pkg.zip')).not.toThrow();
   });
 });
