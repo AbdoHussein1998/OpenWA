@@ -15,11 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GET /api/infra/export-data` no longer exports webhook `secret` and `headers`; redacted archives restore as unsigned webhooks.
 - Webhook registration rejects URLs embedding credentials (`user:pass@host`) with a `400`, on create and update.
 - Boot now warns when `NODE_ENV` is unset on a publicly bound listener, and the MCP fallback body parser carries a size limit.
+- The webhook SSRF guard classifies addresses with `net.BlockList` subnet math and now blocks the entire reserved space below the global-unicast range (`::/3`, including literals the old prefix list missed); embedded-IPv6 forms (NAT64, 6to4, mapped) still deliver when the inner address is public, and unrecognized literals still block.
+- The last-admin guard runs inside the same statement as the write, so demoting, deleting or revoking the last usable admin key is refused even when the requests arrive through different processes.
 - The dependency audit now gates per advisory (`npm run check:audit`); `GHSA-jmr9-qjv8-65gv` (`extract-zip`, via `puppeteer-core` ← `whatsapp-web.js`, no patched release, reachable only at image-build time) is allowlisted by id, and the entry fails closed once the advisory disappears.
 
 ### Fixed
 
 - Creating a webhook for a nonexistent session answers `404` instead of a `500`.
+- Postgres boot migrations serialize across replicas: concurrent boots queue on a session-scoped advisory lock instead of racing DDL transactions, and a crashed boot releases its lock automatically.
+- `GET /api/infra/export-data` can no longer silently miss a table: the export/import table set is validated against the entity metadata in both directions, and a spec fails when a new entity ships without a backup decision.
 - `scripts/restore.sh` refuses to restore over a live database unless `--force` is passed.
 - Dashboard: upload size is pre-checked before reading the file, login reuses the validated role, socket subscriptions are memoised, and restart-flow timers clear on unmount.
 - Engine/session lifecycle: a floating `saveCreds()` rejection is handled, the listener cleanup list covers `group.join-request`, and duplicated helpers (`clampNumber`, `extFromMimetype`, `resolveLid`) are single-sourced.
@@ -37,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The runtime image sets `NODE_ENV=production`; it previously ran unset, which several code paths treat as development.
 - Base image is digest-pinned (`node:22-slim`) with `npm@12` pinned, `@types/node` moved to `^22`, `whatsapp-web.js` pinned exactly, and the backup/restore scripts now ship in the image.
 - The session routes' path parameter is uniformly `{sessionId}` (22 routes previously mixed `{id}`). The URLs are unchanged — OpenAPI path templates, reference tables and Prometheus route labels respell only.
+- Major dependency bumps, each landed separately behind the full suite plus a live-Redis queue run: bullmq 6 (with `@nestjs/bullmq` 11.0.5), ioredis 6 (RESP3 connections by default — no configuration change required), better-sqlite3 13 (N-API prebuilds ship in the package), and https-proxy-agent 9 / socks-proxy-agent 10 for the Baileys proxy path.
+- Internal reorganization behind unchanged public surfaces: the webhook delivery engine, the message send path, and the plugin loader's installer/sandbox each split into dedicated services; the engine interface is composed of fourteen capability slices; the wwebjs adapter delegates lifecycle, reconciliation, stuck-auth and call tracking; the engine capability matrix is derived from the interface with curated exceptions; plugin host services resolve core-defined ports instead of reaching into feature modules.
 
 ### Documentation
 
