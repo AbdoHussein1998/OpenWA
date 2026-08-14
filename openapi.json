@@ -12522,14 +12522,13 @@
           },
           "version": {
             "type": "string",
-            "description": "Running application version.",
+            "description": "Running application version. Included only when the request carries a valid API key.",
             "example": "0.14.4"
           }
         },
         "required": [
           "status",
-          "timestamp",
-          "version"
+          "timestamp"
         ]
       },
       "LivenessResponseDto": {

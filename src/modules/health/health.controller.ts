@@ -1,11 +1,15 @@
-import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { Controller, Get, Req, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { HealthCheckResponseDto, LivenessResponseDto, ReadinessResponseDto } from './dto/health-response.dto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import type { Request } from 'express';
 import { Public } from '../auth/decorators/auth.decorators';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ShutdownService } from '../../common/services/shutdown.service';
+import { AuthService } from '../auth/auth.service';
+import { resolveClientIp } from '../../common/utils/ip';
 
 interface DependencyStatus {
   status: 'up' | 'down';
@@ -19,8 +23,9 @@ interface HealthCheckResult {
 /** Bound each dependency probe so a hung connection can't stall the readiness check. */
 const READINESS_PROBE_TIMEOUT_MS = 3000;
 
-// Source the running version from package.json (same pattern as swagger.config.ts) so the dashboard
-// can read it live and never show a stale build-time-baked version. Read once at module load.
+// Source the running version from package.json (same pattern as swagger.config.ts) so authenticated
+// callers (e.g. the dashboard) read it live and never show a stale build-time-baked version. Read
+// once at module load.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { version: APP_VERSION } = require('../../../package.json') as { version: string };
 
@@ -33,17 +38,45 @@ export class HealthController {
     @InjectDataSource('main') private readonly mainDataSource: DataSource,
     @InjectDataSource('data') private readonly dataDataSource: DataSource,
     private readonly shutdownService: ShutdownService,
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Get()
   @ApiOperation({ summary: 'Basic health check' })
   @ApiResponse({ status: 200, description: 'Application is healthy', type: HealthCheckResponseDto })
-  check(): { status: string; timestamp: string; version: string } {
-    return {
+  async check(@Req() req: Request): Promise<{ status: string; timestamp: string; version?: string }> {
+    const body: { status: string; timestamp: string; version?: string } = {
       status: 'ok',
       timestamp: new Date().toISOString(),
-      version: APP_VERSION,
     };
+    // The exact running version is disclosed only to authenticated callers; the route itself stays
+    // public so uptime probes keep working without credentials.
+    if (await this.hasValidApiKey(req)) {
+      body.version = APP_VERSION;
+    }
+    return body;
+  }
+
+  /**
+   * The route is @Public, so the global ApiKeyGuard never runs here — resolve a presented key the
+   * same way the guard does (X-API-Key header or Bearer token, trusted-proxy-aware client IP so an
+   * allowedIps-restricted key is enforced identically). Any outcome other than a validated key —
+   * none presented, invalid, revoked, IP-denied — withholds the version; it never fails the check.
+   */
+  private async hasValidApiKey(req: Request): Promise<boolean> {
+    const xApiKey = req.headers['x-api-key'];
+    const authHeader = req.headers['authorization'];
+    const rawKey =
+      (typeof xApiKey === 'string' && xApiKey) || (authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined);
+    if (!rawKey) return false;
+    try {
+      const trustedProxies = this.configService.get<string[]>('security.trustedProxies') ?? [];
+      await this.authService.validateApiKey(rawKey, resolveClientIp(req, trustedProxies));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   @Get('live')
