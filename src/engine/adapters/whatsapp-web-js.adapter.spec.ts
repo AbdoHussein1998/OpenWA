@@ -5272,7 +5272,7 @@ describe('WhatsAppWebJsAdapter orphaned Chromium sweep (pre-launch)', () => {
 
   it('does not mutate the caller-owned puppeteer args array shared across sessions', async () => {
     // Every adapter receives the SAME array instance — ConfigService.get() returns a live reference
-    // into the cached config tree, via the plugin path (plugins/engines/whatsapp-web-js) and the
+    // into the cached config tree, via the plugin path (engine/builtin/whatsapp-web-js) and the
     // factory fallback alike. Appending in place therefore rewrites global config for the rest of
     // the process lifetime, leaking one session's flags (proxy, session marker) into every later
     // launch. Without the defensive copy this assertion sees both session markers accumulate.
