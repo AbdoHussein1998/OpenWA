@@ -1088,9 +1088,9 @@ describe('InfraConfigController.requestRestart constrains teardown to managed pr
   });
 });
 
-// C002: the infra module exposed sensitive ADMIN operations (credential config write, restart/Docker
-// orchestration, full-DB + storage export/import) with no audit trail. Each now emits an AuditAction.
-describe('InfraConfigController C002 audit trail (light-dependency handlers)', () => {
+// The infra module's sensitive ADMIN operations (credential config write, restart/Docker
+// orchestration, full-DB + storage export/import) must leave an audit trail — each emits an AuditAction.
+describe('InfraConfigController audit trail (light-dependency handlers)', () => {
   const makeAudit = (): { logInfo: jest.Mock } => ({ logInfo: jest.fn().mockResolvedValue(null) });
 
   // Positional constructor: (engineFactory, dockerService, shutdownService, auditService?).

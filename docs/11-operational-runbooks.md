@@ -496,8 +496,9 @@ git checkout v<old-version>
 docker compose build openwa-api
 
 # 3. Restore from the pre-upgrade backup (both DBs + sessions) — the archive step 2 produced is
-#    "$BACKUP_DIR/openwa-backup-<timestamp>.tar.gz"
-./scripts/restore.sh "$BACKUP_DIR/openwa-backup-<timestamp>.tar.gz"
+#    "$BACKUP_DIR/openwa-backup-<timestamp>.tar.gz". The databases in place still hold the failed
+#    upgrade's data, so the restore refuses to touch them without --force
+./scripts/restore.sh "$BACKUP_DIR/openwa-backup-<timestamp>.tar.gz" --force
 
 # 4. Start with old version
 docker compose up -d

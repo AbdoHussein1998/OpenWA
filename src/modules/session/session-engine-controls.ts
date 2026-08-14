@@ -350,7 +350,7 @@ export class SessionEngineControls {
     const engine = this.engines.get(id);
 
     if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
+      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
     }
 
     // Mark as tearing down BEFORE cleanup so an in-flight reconnect can't resurrect it.
@@ -418,7 +418,7 @@ export class SessionEngineControls {
     // refusal. A wedged engine torn down earlier is reaped by the next start()'s orphan sweep (and
     // by process exit), not by force-kill.
     if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
+      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
     }
 
     // Mark as tearing down BEFORE cleanup so an in-flight reconnect can't resurrect it.

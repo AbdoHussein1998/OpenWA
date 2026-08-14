@@ -38,7 +38,9 @@ describe('AutomationRuleController', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('create delegates to the service and projects the entity onto the response DTO', async () => {
-    const dto = { name: 'Greet new enquiries', replyText: 'Thanks for reaching out — we reply within the hour.' };
+    // Distinct from ruleEntity()'s name/replyText, so a projection that reads the DTO's slots
+    // instead of the entity's cannot pass by echoing identical values.
+    const dto = { name: 'Away-hours autoresponder', replyText: 'We are closed — we reply next business day.' };
     service.create.mockResolvedValue(ruleEntity());
 
     const result = await controller.create('s1', dto);

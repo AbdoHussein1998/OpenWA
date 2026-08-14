@@ -456,7 +456,7 @@ export class InfraDataController {
     };
 
     // Audit the full-DB export: this payload carries plugin-instance secrets, so WHO pulled
-    // a dump (and the per-table row counts) is exactly the trail C002 was missing. Data itself is never
+    // a dump (and the per-table row counts) must land in the audit log. Data itself is never
     // logged — only counts.
     await this.auditService?.logInfo(AuditAction.INFRA_DATA_EXPORTED, { metadata: { counts } });
 

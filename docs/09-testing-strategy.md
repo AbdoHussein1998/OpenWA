@@ -214,10 +214,10 @@ authoritative gate. Current policy:
 | `src/modules/template/`     | 77%      | 99%       | 92%   | 89%        |
 | `src/modules/webhook/`      | 72%      | 89%       | 90%   | 87%        |
 
-Set each floor about five points below that scope's measured coverage, so it catches a real
-regression without failing on ordinary churn. Floors track measured coverage: they are reset when
-coverage legitimately moves — a refactor relocating covered logic, a lane split changing which
-specs a lane runs — and they exist to catch regressions, not to force coverage.
+When raising a floor, set it about five points below that scope's measured coverage, so it catches
+a real regression without failing on ordinary churn. When coverage legitimately shifts — a refactor
+relocating covered logic, a lane split changing which specs a lane runs — reset the floor to the
+newly measured coverage instead. Floors exist to catch regressions, not to force coverage.
 
 Two behaviours of Jest's threshold matching are worth knowing before adding a scope:
 

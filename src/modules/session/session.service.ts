@@ -479,7 +479,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     const engine = this.engines.get(id);
 
     if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
+      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
     }
 
     const qrCode = engine.getQRCode();
@@ -506,7 +506,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     const engine = this.engines.get(id);
 
     if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
+      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
     }
     if (session.status === SessionStatus.READY) {
       throw new BadRequestException('Session is already authenticated, no pairing needed');

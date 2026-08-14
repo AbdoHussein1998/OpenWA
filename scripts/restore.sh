@@ -190,14 +190,15 @@ snapshot_external_db() {
 
 # A restore target that already holds a working install's tables is LIVE: overwriting it destroys
 # real data, and the pre-restore snapshot is a convenience, not a recovery guarantee. Probe with
-# the same sqlite3 CLI backup.sh snapshots with; a missing file — or one with no tables yet, as a
+# the same sqlite3 CLI backup.sh snapshots with, opened read-only so the guard itself cannot touch
+# the target it is guarding; a missing file — or one with no tables yet, as a
 # fresh install leaves behind — is safe to restore over. Without the CLI there is no way to prove
 # the file empty, so any non-empty target counts as live rather than guessed safe.
 db_appears_live() {
   target="$1"
   [ -f "$target" ] || return 1
   if command -v sqlite3 >/dev/null 2>&1; then
-    tables="$(sqlite3 "$target" "SELECT count(*) FROM sqlite_master;" 2>/dev/null)" || return 0
+    tables="$(sqlite3 -readonly "$target" "SELECT count(*) FROM sqlite_master;" 2>/dev/null)" || return 0
     [ "${tables:-0}" -gt 0 ]
   else
     [ -s "$target" ]

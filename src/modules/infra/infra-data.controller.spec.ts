@@ -1412,7 +1412,7 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
   });
 });
 
-describe('InfraDataController C002 audit trail — import emits only on a committed restore', () => {
+describe('InfraDataController audit trail — import emits only on a committed restore', () => {
   let ds: DataSource;
   const cfg = { get: (key: string, def?: unknown) => (key === 'dataDatabase.type' ? 'sqlite' : def) };
   const build = (audit: { logInfo: jest.Mock }): InfraDataController =>
@@ -1890,9 +1890,9 @@ describe('InfraDataController.importData status_updates + runtime reconciliation
   });
 });
 
-// C002: the infra module exposed sensitive ADMIN operations (credential config write, restart/Docker
-// orchestration, full-DB + storage export/import) with no audit trail. Each now emits an AuditAction.
-describe('InfraDataController C002 audit trail (light-dependency handlers)', () => {
+// The infra module's sensitive ADMIN operations (credential config write, restart/Docker
+// orchestration, full-DB + storage export/import) must leave an audit trail — each emits an AuditAction.
+describe('InfraDataController audit trail (light-dependency handlers)', () => {
   const makeAudit = (): { logInfo: jest.Mock } => ({ logInfo: jest.fn().mockResolvedValue(null) });
 
   // Positional constructor: (config, dataDs, auditService?, sessionService?, lidMappingStore?).

@@ -28,7 +28,7 @@ import { InfraStorageController } from './infra-storage.controller';
 import { REQUIRED_ROLE_KEY } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 
-describe('Infra controllers access control (Vuln 2)', () => {
+describe('Infra controllers access control', () => {
   const reflector = new Reflector();
 
   // Every mutating, data-exfiltration, and operational-read endpoint must require
