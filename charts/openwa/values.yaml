@@ -3,6 +3,10 @@
 # happen. What is still process-local is the reason: API-key socket eviction, the WS
 # rate-limit buckets, the liveness watchdog and reconnect timers, and in-flight bulk
 # batches. See docs/13-horizontal-scaling.md.
+# Postgres boot migrations no longer add a cross-replica hazard: replicas serialize them
+# with a session-scoped advisory lock at startup, so simultaneous boots cannot race DDL
+# against the shared migrations ledger. That part is enforced in-process, not by keeping
+# replicaCount at 1 — the process-local state above is what still keeps it at 1.
 replicaCount: 1
 
 image:
