@@ -33,12 +33,6 @@ export interface PluginMessagePort {
     sessionId: string,
     dto: { chatId: string; latitude: number; longitude: number; description?: string },
   ): Promise<MessageResponseDto>;
-  getChatHistory(
-    sessionId: string,
-    chatId: string,
-    limit?: number,
-    includeMedia?: boolean,
-  ): ReturnType<IWhatsAppEngine['getChatHistory']>;
 }
 
 /** Live-engine resolution + the deleted-session probe the capability gates rely on. */
