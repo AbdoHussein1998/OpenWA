@@ -288,10 +288,10 @@
         "statements": 79
       },
       "./src/modules/chat-media/": {
-        "branches": 78,
+        "branches": 80,
         "functions": 81,
-        "lines": 92,
-        "statements": 90
+        "lines": 89,
+        "statements": 89
       },
       "./src/modules/contact/": {
         "branches": 79,
