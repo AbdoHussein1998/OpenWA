@@ -6,7 +6,7 @@ import { Repository } from 'typeorm';
 import { createLogger } from '../../common/services/logger.service';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { evaluateFilters } from '../webhook/filters/filter-evaluator';
-import type { MessageService } from '../message/message.service';
+import { PLUGIN_MESSAGE_PORT, type PluginMessagePort } from '../../core/plugins/plugin-host-ports';
 import { AutomationRule } from './entities/automation-rule.entity';
 import { CreateAutomationRuleDto, UpdateAutomationRuleDto } from './dto/automation-rule.dto';
 
@@ -25,11 +25,12 @@ const MAX_MESSAGE_AGE_SECONDS = 300;
  * Single-message autoreply rules: evaluated on every inbound message, first matching rule replies
  * into the chat through the ordinary send path.
  *
- * The reply is sent via `MessageService.sendText`, which the module graph cannot inject directly:
- * `MessageModule` imports `SessionModule`, and this module is imported BY `SessionModule` (the
- * projector calls `evaluateInbound`), so a constructor dependency here would close a module cycle.
- * `ModuleRef.get(..., { strict: false })` resolves it lazily at first use instead — the same escape
- * hatch `AuthService` uses. In unit contexts without a ModuleRef the evaluator logs and skips.
+ * The reply is sent via the plugin message port (bound to `MessageService.sendText` by
+ * MessageModule), which the module graph cannot inject directly: `MessageModule` imports
+ * `SessionModule`, and this module is imported BY `SessionModule` (the projector calls
+ * `evaluateInbound`), so a constructor dependency here would close a module cycle.
+ * `ModuleRef.get(..., { strict: false })` resolves the core-owned token lazily at first use
+ * instead. In unit contexts without a ModuleRef the evaluator logs and skips.
  */
 @Injectable()
 export class AutomationRulesService {
@@ -38,7 +39,7 @@ export class AutomationRulesService {
   /** `${ruleId}:${chatId}` -> epoch ms until which the rule stays quiet in that chat. Per-process. */
   private readonly cooldowns = new Map<string, number>();
 
-  private messageService?: MessageService;
+  private messagePort?: PluginMessagePort;
 
   constructor(
     @InjectRepository(AutomationRule, 'data')
@@ -156,9 +157,9 @@ export class AutomationRulesService {
     this.enterCooldown(rule, chatId);
 
     try {
-      const messageService = this.resolveMessageService();
-      if (!messageService) return;
-      await messageService.sendText(sessionId, { chatId, text: rule.replyText });
+      const messagePort = this.resolveMessagePort();
+      if (!messagePort) return;
+      await messagePort.sendText(sessionId, { chatId, text: rule.replyText });
       this.logger.log('Automation rule replied', { sessionId, ruleId: rule.id, chatId });
     } catch (error) {
       // The send path already persisted/audited its own failure; here it only must not propagate.
@@ -171,18 +172,17 @@ export class AutomationRulesService {
     }
   }
 
-  private resolveMessageService(): MessageService | undefined {
-    if (!this.messageService) {
+  private resolveMessagePort(): PluginMessagePort | undefined {
+    if (!this.messagePort) {
       try {
-        // Deferred require, not a static import: a value-import of MessageService here closes the
-        // file cycle session (projector) -> automation -> message -> session, and whichever class
-        // evaluates last in that cycle is `undefined` while Nest builds the graph. By reply time
-        // every module is loaded, so requiring the token lazily sidesteps the cycle entirely.
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { MessageService: token } = require('../message/message.service') as {
-          MessageService: new (...args: never[]) => MessageService;
-        };
-        this.messageService = this.moduleRef?.get(token, { strict: false });
+        // The core-owned port token, resolved lazily — never a static import of MessageService: a
+        // value-import here closes the file cycle session (projector) -> automation -> message ->
+        // session, and whichever class evaluates last in that cycle is `undefined` while Nest builds
+        // the graph. By reply time every module is loaded, so resolving the token lazily sidesteps
+        // the cycle entirely.
+        this.messagePort = this.moduleRef?.get<typeof PLUGIN_MESSAGE_PORT, PluginMessagePort>(PLUGIN_MESSAGE_PORT, {
+          strict: false,
+        });
       } catch (error) {
         this.logger.warn('MessageService is not resolvable; automation replies are disabled', {
           error: error instanceof Error ? error.message : String(error),
@@ -190,7 +190,7 @@ export class AutomationRulesService {
         return undefined;
       }
     }
-    return this.messageService;
+    return this.messagePort;
   }
 
   private inCooldown(rule: AutomationRule, chatId: string): boolean {

@@ -16,6 +16,7 @@ import { IntegrationRetentionService } from './integration-retention.service';
 import { IntegrationInstanceController } from './integration-instance.controller';
 import { ScopeBindingService } from './scope-binding.service';
 import { PluginLoaderService } from '../../core/plugins/plugin-loader.service';
+import { PLUGIN_INSTANCE_PORT, type PluginInstancePort } from '../../core/plugins/plugin-host-ports';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { Session } from '../session/entities/session.entity';
 import { createLogger } from '../../common/services/logger.service';
@@ -55,6 +56,13 @@ if (process.env.QUEUE_ENABLED === 'true') {
     RedriveService,
     ScopeBindingService,
     IntegrationRetentionService,
+    // Binds the core-owned plugin capability port to this module's service; resolved lazily by the
+    // plugin runtime (PluginHostServices) so its provider cycle stays broken.
+    {
+      provide: PLUGIN_INSTANCE_PORT,
+      useFactory: (instances: PluginInstanceService): PluginInstancePort => instances,
+      inject: [PluginInstanceService],
+    },
     {
       provide: IngressService,
       inject: [

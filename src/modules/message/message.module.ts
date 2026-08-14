@@ -13,6 +13,7 @@ import { Message } from './entities/message.entity';
 import { Session } from '../session/entities/session.entity';
 import { SendPacingService } from './send-pacing.service';
 import { MessageBatch } from './entities/message-batch.entity';
+import { PLUGIN_MESSAGE_PORT, type PluginMessagePort } from '../../core/plugins/plugin-host-ports';
 
 @Module({
   imports: [
@@ -29,6 +30,14 @@ import { MessageBatch } from './entities/message-batch.entity';
     MessageTypeBackfillService,
     PendingMessageReaperService,
     SendPacingService,
+    // Binds the core-owned plugin capability port to this module's service. The plugin runtime
+    // resolves the token lazily via ModuleRef (PluginHostServices), which keeps its provider cycle
+    // broken; this adapter is how core reaches the service without importing it.
+    {
+      provide: PLUGIN_MESSAGE_PORT,
+      useFactory: (message: MessageService): PluginMessagePort => message,
+      inject: [MessageService],
+    },
   ],
   exports: [MessageService, BulkMessageService, SendPacingService],
 })

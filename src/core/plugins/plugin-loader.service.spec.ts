@@ -783,7 +783,7 @@ describe('PluginLoaderService — search-provider wiring', () => {
     } as unknown as ModuleRef);
   }
 
-  // getSearchRegistry's own behaviour now lives in plugin-host-services.spec.ts, tested on the class
+  // getSearchRegistryPort's own behaviour now lives in plugin-host-services.spec.ts, tested on the class
   // that owns it instead of through a private reach-in on the loader.
 
   it('disablePlugin unregisters the plugin’s search-provider entry', async () => {

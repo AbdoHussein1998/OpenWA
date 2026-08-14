@@ -18,6 +18,7 @@ import { WebhookModule } from '../webhook/webhook.module';
 import { StatusStoreModule } from '../status-store/status-store.module';
 import { ChatMediaModule } from '../chat-media/chat-media.module';
 import { AutomationModule } from '../automation/automation.module';
+import { PLUGIN_SESSION_PORT, type PluginSessionPort } from '../../core/plugins/plugin-host-ports';
 
 @Module({
   // WebhookModule/StatusStoreModule/ChatMediaModule/AutomationModule do not import SessionModule
@@ -42,6 +43,13 @@ import { AutomationModule } from '../automation/automation.module';
     SessionLivenessWatchdog,
     SessionOwnershipService,
     MessageProjector,
+    // Binds the core-owned plugin capability port to this module's service; resolved lazily by the
+    // plugin runtime (PluginHostServices) so its provider cycle stays broken.
+    {
+      provide: PLUGIN_SESSION_PORT,
+      useFactory: (session: SessionService): PluginSessionPort => session,
+      inject: [SessionService],
+    },
   ],
   exports: [SessionService, MessageProjector, SessionOwnershipService],
 })

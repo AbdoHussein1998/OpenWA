@@ -733,7 +733,7 @@ export class PluginLoaderService implements OnModuleInit, OnApplicationBootstrap
       // Unregister all hooks for this plugin
       this.hookManager.unregisterPlugin(pluginId);
       // Drop the plugin's search-provider entry (if any) so queries don't route to a terminated worker.
-      unregisterPluginSearchProvider(this.hostServices.getSearchRegistry(), pluginId);
+      unregisterPluginSearchProvider(this.hostServices.getSearchRegistryPort(), pluginId);
 
       plugin.status = PluginStatus.DISABLED;
 

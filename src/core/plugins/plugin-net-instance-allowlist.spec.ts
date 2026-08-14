@@ -57,7 +57,7 @@ describe('the net allowlist admits every provisioned instance host', () => {
 
   const netCapability = (instances: InstanceRow[]) => {
     const hostServices = {
-      getPluginInstanceService: () => ({ list: () => Promise.resolve(instances) }),
+      getPluginInstancePort: () => ({ list: () => Promise.resolve(instances) }),
     } as unknown as PluginHostServices;
     const ctx = new PluginCapabilityContext(createLogger('net-allowlist.spec'), hostServices, new HookManager(), {
       createPluginStorage: () => ({}),
@@ -110,7 +110,7 @@ describe('the net allowlist admits every provisioned instance host', () => {
    */
   it('falls back to the config-derived allowlist when the instance lookup is unavailable', async () => {
     const hostServices = {
-      getPluginInstanceService: () => {
+      getPluginInstancePort: () => {
         throw new Error('no instance service in this host');
       },
     } as unknown as PluginHostServices;
