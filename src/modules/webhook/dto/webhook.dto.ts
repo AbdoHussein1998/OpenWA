@@ -188,8 +188,8 @@ export class UpdateWebhookDto {
 /**
  * Public response shape for a webhook. Deliberately omits `secret` (the HMAC
  * signing key) and `headers` (which may carry receiver credentials) — these are
- * write-only and must never appear in a response built from this DTO. They are not secret from
- * every route: GET /api/infra/export-data dumps the webhooks rows verbatim, secret included.
+ * write-only and never appear in a response built from this DTO. The backup route
+ * (`GET /api/infra/export-data`) also omits both from its webhook rows.
  *
  * `@Expose()` is required on every field: `fromEntity` maps with
  * `excludeExtraneousValues: true`, so only exposed fields are serialized and any

@@ -372,6 +372,13 @@ export class InfraDataController {
     // Get all entities from Data DB
     const sessions = await this.dataDataSource.query<SessionRow[]>('SELECT * FROM sessions');
     const webhooks = await this.dataDataSource.query<WebhookRow[]>('SELECT * FROM webhooks');
+    // Webhook credentials (the HMAC secret and custom headers, which may carry receiver tokens) do
+    // not belong in a backup payload — omit them from the export. The importer restores the row
+    // with secret null and headers {} when they are absent.
+    for (const row of webhooks) {
+      delete row.secret;
+      delete row.headers;
+    }
 
     // The tables below may legitimately not exist yet (created by migrations an older DB has not run).
     // Only a GENUINE missing-table error (isMissingTableError) may be tolerated — anything else (lock,
@@ -448,7 +455,7 @@ export class InfraDataController {
       automationRules: automationRules.length,
     };
 
-    // Audit the full-DB export: this payload carries webhook + plugin-instance secrets, so WHO pulled
+    // Audit the full-DB export: this payload carries plugin-instance secrets, so WHO pulled
     // a dump (and the per-table row counts) is exactly the trail C002 was missing. Data itself is never
     // logged — only counts.
     await this.auditService?.logInfo(AuditAction.INFRA_DATA_EXPORTED, { metadata: { counts } });

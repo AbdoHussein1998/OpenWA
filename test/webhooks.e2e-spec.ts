@@ -142,8 +142,8 @@ describe('Webhooks (e2e)', () => {
       expect(dto.id).toBeDefined();
       expect(dto.sessionId).toBe(session);
       expect(dto.active).toBe(true);
-      // Write-only fields must never appear in a webhook-route response. (The infra export route
-      // does return them — that is deliberate and covered by its own ADMIN + unscoped-key fence.)
+      // Write-only fields must never appear in a webhook-route response (nor in the infra
+      // export, which omits them from webhook rows — covered in infra-data.controller.spec.ts).
       expect(dto.secret).toBeUndefined();
       expect(dto.headers).toBeUndefined();
     });

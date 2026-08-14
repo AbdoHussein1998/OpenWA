@@ -1379,6 +1379,37 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
     // The active flag (exported as integer 1 from SQLite) must round-trip as a real boolean.
     expect((await ds.getRepository(Webhook).findOneByOrFail({ id: 'w1' })).active).toBe(true);
   });
+
+  it('omits webhook credentials (secret, headers) from the export but keeps the row restorable', async () => {
+    await seedSession('s1');
+    await ds.getRepository(Webhook).save(
+      ds.getRepository(Webhook).create({
+        id: 'w1',
+        sessionId: 's1',
+        url: 'https://example.com/hook',
+        events: ['message'],
+        secret: 'hmac-secret',
+        headers: { Authorization: 'Bearer receiver-token' },
+        active: true,
+        retryCount: 3,
+      }),
+    );
+
+    const dump = await controller.exportData();
+    expect(dump.tables.webhooks).toHaveLength(1);
+    const exported = dump.tables.webhooks[0] as unknown as Record<string, unknown>;
+    expect(exported).not.toHaveProperty('secret');
+    expect(exported).not.toHaveProperty('headers');
+    expect(exported.url).toBe('https://example.com/hook');
+
+    // The redacted archive still restores: the webhook comes back unsigned, with no custom headers.
+    const res = await controller.importData({ tables: dump.tables });
+    expect(res.warnings).toEqual([]);
+    expect(res.imported).toBe(true);
+    const restored = await ds.getRepository(Webhook).findOneByOrFail({ id: 'w1' });
+    expect(restored.secret).toBeNull();
+    expect(restored.headers).toEqual({});
+  });
 });
 
 describe('InfraDataController C002 audit trail — import emits only on a committed restore', () => {
