@@ -427,6 +427,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       if (this.ownership) await this.assertNotHeldElsewhere(id);
       session = await this.engineLifecycle.stop(id);
     } catch (error) {
+      // Deliberately no release here, unlike logout()/forceKill(): this catch also carries the
+      // foreign-node 409, where the claim is the peer's and a blanket release would delete it. The
+      // local-502 path keeps the claim, and only claims with a live engine are renewed — it lapses
+      // at lease TTL instead of pinning the session here.
       this.discardStopMarkForMissingSession(id, error);
       throw error;
     }

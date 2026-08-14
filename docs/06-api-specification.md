@@ -577,7 +577,7 @@ No request body.
 
 Returned via `transformSession`; status typically becomes `disconnected`.
 
-**Errors:** `401` · `403` · `404` not found · `502` `SESSION_STOP_INCOMPLETE` — session stopped locally but the engine teardown did not complete (retryable; the graceful disconnect and the force-destroy escalation both failed, status `disconnected`, no success audit)
+**Errors:** `401` · `403` · `404` not found · `409` another node currently holds this session's live engine (multi-node deployments) · `502` `SESSION_STOP_INCOMPLETE` — session stopped locally but the engine teardown did not complete (retryable; the graceful disconnect and the force-destroy escalation both failed, status `disconnected`, no success audit)
 
 #### POST /api/sessions/:sessionId/logout
 
