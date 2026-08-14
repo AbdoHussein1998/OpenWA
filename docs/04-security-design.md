@@ -171,14 +171,14 @@ OpenWA serves plain HTTP on its port; terminate **TLS at your reverse proxy / lo
 
 > **There is currently no application-level encryption at rest.** API keys are stored **hashed** (one-way), but other sensitive values are stored as plaintext in the database / on disk and are protected by filesystem and database permissions, not by encryption. Encryption at rest for these fields is a roadmap item, not a shipped feature — do not assume it.
 
-| Data                                      | At rest                                                                       | How it is protected                                                                                                                                    |
-| ----------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| API keys                                  | **Hashed** — SHA-256 with an optional `API_KEY_PEPPER` HMAC; never reversible | A database leak alone cannot recover the keys; with a pepper set, hashes can't be precomputed offline. See §4.2.                                       |
-| Session auth state (WhatsApp credentials) | Plaintext on disk (the engine's auth store under the data volume)             | Filesystem permissions on the data volume — keep it private.                                                                                           |
+| Data                                      | At rest                                                                       | How it is protected                                                                                                                       |
+| ----------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| API keys                                  | **Hashed** — SHA-256 with an optional `API_KEY_PEPPER` HMAC; never reversible | A database leak alone cannot recover the keys; with a pepper set, hashes can't be precomputed offline. See §4.2.                          |
+| Session auth state (WhatsApp credentials) | Plaintext on disk (the engine's auth store under the data volume)             | Filesystem permissions on the data volume — keep it private.                                                                              |
 | Webhook secrets                           | Plaintext — `webhooks.secret` (`varchar`)                                     | Database access control; never returned by the webhook read DTOs (write-only) and omitted from `GET /api/infra/export-data` webhook rows. |
-| Proxy credentials                         | Plaintext — `sessions.proxyUrl` may embed `user:pass`                         | Database access control; never returned by the session read DTOs.                                                                                      |
-| Generated config (`data/.env.generated`)  | Plaintext file, written `0600`                                                | Owner-only file permissions.                                                                                                                           |
-| Message content                           | Plaintext in the `messages` table                                             | Database access control.                                                                                                                               |
+| Proxy credentials                         | Plaintext — `sessions.proxyUrl` may embed `user:pass`                         | Database access control; never returned by the session read DTOs.                                                                         |
+| Generated config (`data/.env.generated`)  | Plaintext file, written `0600`                                                | Owner-only file permissions.                                                                                                              |
+| Message content                           | Plaintext in the `messages` table                                             | Database access control.                                                                                                                  |
 
 **Hardening you can apply today:** set `API_KEY_PEPPER`; restrict the data volume and database to the app's user; and encrypt at the infrastructure layer (LUKS / cloud-provider encrypted volumes / an encrypted managed Postgres) rather than relying on application-level field encryption, which is not implemented.
 
@@ -516,14 +516,14 @@ flowchart TB
 
 ### Secrets Inventory
 
-| Secret                            | Storage                                                                                                          | Rotation guidance                               |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| Database credentials              | Environment variable                                                                                             | 90 days                                         |
-| Redis password                    | Environment variable                                                                                             | 90 days                                         |
-| API master key (`API_MASTER_KEY`) | Environment variable                                                                                             | 180 days                                        |
-| API key pepper (`API_KEY_PEPPER`) | Environment variable                                                                                             | Rotating it invalidates all existing key hashes |
+| Secret                            | Storage                                                                                                            | Rotation guidance                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| Database credentials              | Environment variable                                                                                               | 90 days                                         |
+| Redis password                    | Environment variable                                                                                               | 90 days                                         |
+| API master key (`API_MASTER_KEY`) | Environment variable                                                                                               | 180 days                                        |
+| API key pepper (`API_KEY_PEPPER`) | Environment variable                                                                                               | Rotating it invalidates all existing key hashes |
 | Webhook secrets                   | Database — **plaintext**; not in the webhook read DTOs, and omitted from `GET /api/infra/export-data` webhook rows | Per webhook                                     |
-| Session auth state                | File system (data volume) — **not encrypted**                                                                    | Never (tied to the WA session)                  |
+| Session auth state                | File system (data volume) — **not encrypted**                                                                      | Never (tied to the WA session)                  |
 
 > There is no application `ENCRYPTION_KEY` — OpenWA does not encrypt data at rest (see §4.4). The rotation cadences above are operational recommendations, not enforced by the app.
 
