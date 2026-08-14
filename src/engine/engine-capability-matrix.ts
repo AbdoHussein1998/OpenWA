@@ -476,12 +476,24 @@ function readInterfaceMethods(): string[] {
 function deriveEngineCapabilityMatrix(): Record<string, MethodCapability> {
   const matrix: Record<string, MethodCapability> = {};
   for (const method of readInterfaceMethods()) {
-    matrix[method] = CURATED_CAPABILITY_EXCEPTIONS[method] ?? {
-      wwjs: { status: 'supported' },
-      baileys: { status: 'supported' },
-    };
+    // Copy, never alias: a consumer mutating its matrix row (or an adapter cell on it) must not
+    // write through into CURATED_CAPABILITY_EXCEPTIONS, which every future derivation reads.
+    matrix[method] = copyCapability(
+      CURATED_CAPABILITY_EXCEPTIONS[method] ?? {
+        wwjs: { status: 'supported' },
+        baileys: { status: 'supported' },
+      },
+    );
   }
   return matrix;
+}
+
+/** A two-level copy — exactly the shape MethodCapability has, so the derived row shares no object
+ * with the curated table it came from. */
+function copyCapability(entry: MethodCapability): MethodCapability {
+  const copy: MethodCapability = { wwjs: { ...entry.wwjs }, baileys: { ...entry.baileys } };
+  if (entry.evidence !== undefined) copy.evidence = entry.evidence;
+  return copy;
 }
 
 export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = deriveEngineCapabilityMatrix();

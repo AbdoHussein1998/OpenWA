@@ -253,8 +253,9 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       // The row's post-write state, for the eviction comparison below.
       saved = await this.findOne(id);
     } else {
-      Object.assign(apiKey, patch);
-      saved = await this.apiKeyRepository.save(apiKey);
+      await this.applyUnguardedUpdate(patch, id);
+      // The row's post-write state, for the eviction comparison below.
+      saved = await this.findOne(id);
     }
 
     // Compare membership, not order: a pure reorder of allowedIps/allowedSessions is a no-op for the
@@ -304,8 +305,9 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       await this.assertMutationApplied(id, result.affected);
       saved = await this.findOne(id);
     } else {
-      apiKey.isActive = false;
-      saved = await this.apiKeyRepository.save(apiKey);
+      // A non-admin target cannot strand the system — no guard needed.
+      await this.applyUnguardedUpdate({ isActive: false }, id);
+      saved = await this.findOne(id);
     }
     // A revoked key fails validation before its next flush, so its accumulator would orphan —
     // drop it here.
@@ -377,6 +379,27 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     if (affected) return;
     await this.findOne(id);
     throw new ConflictException('Cannot remove the last active admin key');
+  }
+
+  /**
+   * Apply a single-row UPDATE with no last-admin guard — the caller has established the target
+   * cannot strand the system (non-admin target, or a non-stripping patch). The SET list is only
+   * the patch itself: saving the pre-read ENTITY instead would write every column from that
+   * snapshot, resurrecting a revoke or demote that committed between the read and the write (a
+   * rename writing isActive: true back over a concurrent false, for instance). There is no guard
+   * clause that can refuse, so zero affected rows can only mean a concurrent delete won the race;
+   * the re-read then raises the same NotFoundException the pre-read would have.
+   */
+  private async applyUnguardedUpdate(patch: QueryDeepPartialEntity<ApiKey>, id: string): Promise<void> {
+    const result = await this.apiKeyRepository
+      .createQueryBuilder()
+      .update(ApiKey)
+      .set(patch)
+      .where('"id" = :id', { id })
+      .execute();
+    if (!result.affected) {
+      await this.findOne(id);
+    }
   }
 
   /**

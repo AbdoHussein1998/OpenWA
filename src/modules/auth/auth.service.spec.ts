@@ -90,12 +90,12 @@ describe('bannerKeyLine (startup banner key masking)', () => {
 describe('AuthService', () => {
   let service: AuthService;
   let repository: jest.Mocked<Partial<Repository<ApiKey>>>;
-  /** In-memory stand-in for the api_keys table, shared by the findOne/remove/save mocks and the
-   * guarded-statement double below. */
+  /** In-memory stand-in for the api_keys table, shared by the findOne/remove mocks and the
+   * statement double below. */
   let keys: Map<string, ApiKey>;
-  /** Guarded statements whose write committed (affected = 1), newest last — for assertions on what
-   * actually landed. */
-  let committedGuardedWrites: Array<{ mode: 'update' | 'delete'; patch?: Record<string, unknown> }>;
+  /** Statements whose write committed (affected = 1), newest last, with whether the last-admin
+   * guard clause was bound — for assertions on what actually landed, and how. */
+  let committedWrites: Array<{ mode: 'update' | 'delete'; patch?: Record<string, unknown>; guarded: boolean }>;
 
   beforeEach(async () => {
     repository = {
@@ -129,14 +129,16 @@ describe('AuthService', () => {
 
   /**
    * In-memory stand-in for the api_keys table: findOne()/save()/remove() and the query-builder
-   * double below are all backed by the same Map. The last-admin guard now lives inside the guarded
+   * double below are all backed by the same Map. The last-admin guard lives inside the guarded
    * SQL statement itself, so the double's execute() evaluates the guard and performs the write as
    * ONE synchronous step — mirroring the single atomic statement, so concurrency scenarios stay
-   * deterministic (statements interleave only before or after that step, never inside it).
+   * deterministic (statements interleave only before or after that step, never inside it). Only
+   * statements built through withLastAdminGuard carry the guard (the double mirrors the clause
+   * onto the andWhere call); an unguarded statement always touches an existing row.
    */
   function setupKeys(seed: ApiKey[]): void {
     keys = new Map(seed.map(k => [k.id, k]));
-    committedGuardedWrites = [];
+    committedWrites = [];
     (repository.findOne as jest.Mock).mockImplementation((options: { where: { id: string } }) =>
       Promise.resolve(keys.get(options.where.id) ?? null),
     );
@@ -153,6 +155,7 @@ describe('AuthService', () => {
         mode: 'update' as 'update' | 'delete',
         patch: undefined as Record<string, unknown> | undefined,
         targetId: undefined as string | undefined,
+        guarded: false,
         update() {
           this.mode = 'update';
           return this;
@@ -173,6 +176,7 @@ describe('AuthService', () => {
           return this;
         },
         andWhere() {
+          this.guarded = true;
           return this;
         },
         setParameters() {
@@ -182,11 +186,13 @@ describe('AuthService', () => {
           const target = keys.get(this.targetId as string);
           if (!target) return { affected: 0 };
           const guardPasses =
-            !isUsableAdminRow(target) || [...keys.values()].some(k => k.id !== target.id && isUsableAdminRow(k));
+            !this.guarded ||
+            !isUsableAdminRow(target) ||
+            [...keys.values()].some(k => k.id !== target.id && isUsableAdminRow(k));
           if (!guardPasses) return { affected: 0 };
           if (this.mode === 'delete') keys.delete(this.targetId as string);
           else Object.assign(target, this.patch ?? {});
-          committedGuardedWrites.push({ mode: this.mode, patch: this.patch });
+          committedWrites.push({ mode: this.mode, patch: this.patch, guarded: this.guarded });
           return { affected: 1 };
         },
       };
@@ -285,9 +291,7 @@ describe('AuthService', () => {
 
   describe('update', () => {
     it('should update only the provided fields', async () => {
-      const key = createMockApiKey();
-      (repository.findOne as jest.Mock).mockResolvedValue(key);
-      (repository.save as jest.Mock).mockImplementation(k => Promise.resolve(k));
+      setupKeys([createMockApiKey({ id: 'uuid-1' })]);
 
       const result = await service.update('uuid-1', { name: 'Updated' });
 
@@ -300,9 +304,7 @@ describe('AuthService', () => {
       jest
         .spyOn((service as unknown as { moduleRef: { get: (...a: unknown[]) => unknown } }).moduleRef, 'get')
         .mockReturnValue({ evictApiKey });
-      const key = createMockApiKey({ allowedSessions: ['sess-A', 'sess-B'] });
-      (repository.findOne as jest.Mock).mockResolvedValue(key);
-      (repository.save as jest.Mock).mockImplementation(k => Promise.resolve(k));
+      setupKeys([createMockApiKey({ id: 'uuid-1', allowedSessions: ['sess-A', 'sess-B'] })]);
 
       await service.update('uuid-1', { allowedSessions: ['sess-A'] });
 
@@ -314,9 +316,7 @@ describe('AuthService', () => {
       jest
         .spyOn((service as unknown as { moduleRef: { get: (...a: unknown[]) => unknown } }).moduleRef, 'get')
         .mockReturnValue({ evictApiKey });
-      const key = createMockApiKey({ role: ApiKeyRole.OPERATOR });
-      (repository.findOne as jest.Mock).mockResolvedValue(key);
-      (repository.save as jest.Mock).mockImplementation(k => Promise.resolve(k));
+      setupKeys([createMockApiKey({ id: 'uuid-1', role: ApiKeyRole.OPERATOR })]);
 
       await service.update('uuid-1', { role: ApiKeyRole.ADMIN });
 
@@ -328,9 +328,7 @@ describe('AuthService', () => {
       jest
         .spyOn((service as unknown as { moduleRef: { get: (...a: unknown[]) => unknown } }).moduleRef, 'get')
         .mockReturnValue({ evictApiKey });
-      const key = createMockApiKey({ name: 'original' });
-      (repository.findOne as jest.Mock).mockResolvedValue(key);
-      (repository.save as jest.Mock).mockImplementation(k => Promise.resolve(k));
+      setupKeys([createMockApiKey({ id: 'uuid-1', name: 'original' })]);
 
       await service.update('uuid-1', { name: 'renamed' });
 
@@ -338,14 +336,13 @@ describe('AuthService', () => {
     });
 
     it('rejects demoting or expiring the last usable admin', async () => {
-      const key = createMockApiKey({ role: ApiKeyRole.ADMIN });
-      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      setupKeys([createMockApiKey({ id: 'uuid-1', role: ApiKeyRole.ADMIN })]);
 
       await expect(service.update('uuid-1', { role: ApiKeyRole.OPERATOR })).rejects.toThrow(/last active admin/i);
       await expect(
         service.update('uuid-1', { expiresAt: new Date(Date.now() + 60_000).toISOString() }),
       ).rejects.toThrow(/last active admin/i);
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(committedWrites).toHaveLength(0); // neither write landed
     });
   });
 
@@ -402,9 +399,7 @@ describe('AuthService', () => {
 
   describe('revoke', () => {
     it('should set isActive to false', async () => {
-      const key = createMockApiKey({ isActive: true });
-      (repository.findOne as jest.Mock).mockResolvedValue(key);
-      (repository.save as jest.Mock).mockImplementation(k => Promise.resolve(k));
+      setupKeys([createMockApiKey({ id: 'uuid-1', isActive: true })]);
 
       const result = await service.revoke('uuid-1');
 
@@ -417,13 +412,11 @@ describe('AuthService', () => {
         .spyOn((service as unknown as { moduleRef: { get: (...a: unknown[]) => unknown } }).moduleRef, 'get')
         .mockReturnValue({ evictApiKey });
 
-      const key = createMockApiKey({ isActive: true });
-      (repository.findOne as jest.Mock).mockResolvedValue(key);
-      (repository.save as jest.Mock).mockImplementation(k => Promise.resolve(k));
+      setupKeys([createMockApiKey({ id: 'uuid-1', isActive: true })]);
 
       await service.revoke('uuid-1');
 
-      expect(key.isActive).toBe(false);
+      expect((await service.findOne('uuid-1')).isActive).toBe(false);
       expect(evictApiKey).toHaveBeenCalledWith('uuid-1', 'revoked');
     });
 
@@ -434,9 +427,7 @@ describe('AuthService', () => {
           throw new Error('gateway unavailable');
         });
 
-      const key = createMockApiKey({ isActive: true });
-      (repository.findOne as jest.Mock).mockResolvedValue(key);
-      (repository.save as jest.Mock).mockImplementation(k => Promise.resolve(k));
+      setupKeys([createMockApiKey({ id: 'uuid-1', isActive: true })]);
 
       const result = await service.revoke('uuid-1');
 
@@ -444,12 +435,11 @@ describe('AuthService', () => {
     });
 
     it('rejects revoking the last usable admin', async () => {
-      const key = createMockApiKey({ role: ApiKeyRole.ADMIN, isActive: true });
-      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      setupKeys([createMockApiKey({ id: 'uuid-1', role: ApiKeyRole.ADMIN, isActive: true })]);
 
       await expect(service.revoke('uuid-1')).rejects.toThrow(/last active admin/i);
-      expect(repository.save).not.toHaveBeenCalled();
-      expect(key.isActive).toBe(true);
+      expect(committedWrites).toHaveLength(0); // the write never landed
+      expect((await service.findOne('uuid-1')).isActive).toBe(true);
     });
   });
 
@@ -487,7 +477,7 @@ describe('AuthService', () => {
       expect(succeeded).toHaveLength(1);
       expect(conflicts).toHaveLength(1);
       // The loser's write never happened: exactly one capability-stripping write in total.
-      const strippingWrites = committedGuardedWrites.filter(
+      const strippingWrites = committedWrites.filter(
         w =>
           w.mode === 'delete' ||
           (w.patch?.role !== undefined && w.patch.role !== ApiKeyRole.ADMIN) ||
@@ -508,7 +498,7 @@ describe('AuthService', () => {
       await expect(service.findOne('admin-b')).rejects.toThrow(NotFoundException);
     });
 
-    it('keeps non-admin mutations and benign admin updates off the guarded statement', async () => {
+    it('runs non-admin mutations and benign admin updates on unguarded statements', async () => {
       setupKeys([
         createMockApiKey({ id: 'op-del', role: ApiKeyRole.OPERATOR }),
         createMockApiKey({ id: 'op-rev', role: ApiKeyRole.OPERATOR }),
@@ -521,7 +511,47 @@ describe('AuthService', () => {
       await service.update('op-demote', { role: ApiKeyRole.VIEWER }); // demote of a non-admin
       await service.update('adm-1', { name: 'renamed' }); // benign update of an admin
 
-      expect(repository.createQueryBuilder).not.toHaveBeenCalled();
+      // The last-admin guard is bound via andWhere; none of these statements carries it — the
+      // benign admin rename runs unguarded even though the target IS a usable admin, because a
+      // non-stripping patch cannot strand the system.
+      expect(committedWrites).toHaveLength(3); // revoke + demote + rename (the delete removes the row)
+      expect(committedWrites.every(w => !w.guarded)).toBe(true);
+      await expect(service.findOne('op-del')).rejects.toThrow(NotFoundException);
+      expect((await service.findOne('op-rev')).isActive).toBe(false);
+    });
+  });
+
+  // ── racing mutations on the unguarded paths ───────────────────────
+
+  describe('racing mutations on unguarded targets', () => {
+    // Both scenarios model the same interleaving: the pre-read (findOne #1) returns a STALE
+    // snapshot, a concurrent mutation has already committed into the table by the time the
+    // write runs. The write must carry only its own patch — a full-entity save from the stale
+    // snapshot would resurrect the concurrent commit.
+    it('a rename does not resurrect a concurrent revoke: the write carries only name', async () => {
+      setupKeys([createMockApiKey({ id: 'op-1', role: ApiKeyRole.OPERATOR, isActive: false, name: 'original' })]);
+      (repository.findOne as jest.Mock).mockResolvedValueOnce(
+        createMockApiKey({ id: 'op-1', role: ApiKeyRole.OPERATOR, isActive: true, name: 'original' }), // stale pre-read
+      );
+
+      const result = await service.update('op-1', { name: 'renamed' });
+
+      expect(result.name).toBe('renamed');
+      expect(result.isActive).toBe(false); // the revoke survives the rename
+      expect((await service.findOne('op-1')).isActive).toBe(false); // in the table, not just the reply
+    });
+
+    it('a revoke does not clobber a concurrent rename: isActive is the only column written', async () => {
+      setupKeys([createMockApiKey({ id: 'op-1', role: ApiKeyRole.OPERATOR, isActive: true, name: 'renamed-by-peer' })]);
+      (repository.findOne as jest.Mock).mockResolvedValueOnce(
+        createMockApiKey({ id: 'op-1', role: ApiKeyRole.OPERATOR, isActive: true, name: 'original' }), // stale pre-read
+      );
+
+      const result = await service.revoke('op-1');
+
+      expect(result.isActive).toBe(false);
+      expect(result.name).toBe('renamed-by-peer'); // the concurrent rename survives the revoke
+      expect((await service.findOne('op-1')).name).toBe('renamed-by-peer');
     });
   });
 

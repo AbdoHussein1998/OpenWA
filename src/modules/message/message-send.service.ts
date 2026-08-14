@@ -144,9 +144,11 @@ export class MessageSendService {
   /**
    * Run the pre-send `message:sending` plugin gate for one outbound message and return the
    * (possibly plugin-modified) input, or throw BadRequestException if a plugin blocked the send.
-   * Centralised so EVERY public sender — text, media, extended (location/contact/poll/sticker/
-   * reply/forward) and edit — passes through the same moderation chokepoint, instead of only
-   * `sendText`. The implementation is shared with StatusService via core/hooks/sending-gate.
+   * Centralised so EVERY public sender in this class — text, media, extended (location/contact/
+   * poll/sticker/reply/forward) — passes through the same moderation chokepoint, instead of only
+   * `sendText`. The edit path is gated by the twin method in MessageService (the query side of
+   * the send/query split), on the same core/hooks/sending-gate implementation shared with
+   * StatusService.
    */
   private async applySendingGate<T extends object>(sessionId: string, type: string, input: T): Promise<T> {
     // Pacing runs BEFORE the plugin gate, so a send that policy forbids never reaches a plugin at

@@ -87,7 +87,7 @@ Three automated gates keep the matrix honest:
 
 ```mermaid
 flowchart TD
-    M["engine-capability-matrix.ts<br/>hand-curated status + evidence"] --> SPEC["engine-parity.spec.ts<br/>matrix keys match interface methods<br/>throw-invariants scan"]
+    M["engine-capability-matrix.ts<br/>rows derived from the interface,<br/>status + evidence from curated exceptions"] --> SPEC["engine-parity.spec.ts<br/>matrix keys match interface methods<br/>throw-invariants scan"]
     NM["node_modules<br/>installed engines"] --> SURF["check-upstream-surface.mjs<br/>npm run test:scripts"]
     SNAP["upstream-surface.snapshot.json<br/>reviewed surface"] --> SURF
     SURF -->|"new or removed symbol"| FAIL["fail until reviewed:<br/>expose / defer / record exclusion"]
