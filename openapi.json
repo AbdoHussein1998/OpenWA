@@ -1642,6 +1642,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Session not found"
           }
         },
         "summary": "Create a webhook for the session",

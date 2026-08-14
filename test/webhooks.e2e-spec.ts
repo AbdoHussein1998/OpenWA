@@ -148,6 +148,14 @@ describe('Webhooks (e2e)', () => {
       expect(dto.headers).toBeUndefined();
     });
 
+    it('returns 404 when creating a webhook for a session that does not exist', async () => {
+      await request(app.getHttpServer())
+        .post('/api/sessions/no-such-session/webhooks')
+        .set('X-API-Key', apiKey)
+        .send({ url: receiverUrl, events: ['*'] })
+        .expect(404);
+    });
+
     it('lists webhooks for a session', async () => {
       const session = await nextSession();
       const created = await createWebhook(session);

@@ -15,6 +15,7 @@ import * as crypto from 'crypto';
 import { setTimeout } from 'node:timers/promises';
 import { Webhook } from './entities/webhook.entity';
 import { WebhookDeliveryFailure } from './entities/webhook-delivery-failure.entity';
+import { Session } from '../session/entities/session.entity';
 import { recordWebhookDeliveryFailure, statusCodeFromError } from './utils/record-delivery-failure';
 import { CreateWebhookDto, UpdateWebhookDto } from './dto';
 import { createLogger } from '../../common/services/logger.service';
@@ -115,6 +116,8 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
     private readonly webhookRepository: Repository<Webhook>,
     @InjectRepository(WebhookDeliveryFailure, 'data')
     private readonly failureRepository: Repository<WebhookDeliveryFailure>,
+    @InjectRepository(Session, 'data')
+    private readonly sessionRepository: Repository<Session>,
     private readonly configService: ConfigService,
     private readonly hookManager: HookManager,
     @Optional()
@@ -245,6 +248,12 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
   }
 
   async create(sessionId: string, dto: CreateWebhookDto): Promise<Webhook> {
+    // The webhooks.sessionId FK makes a missing session surface as a driver error (500) at save time;
+    // check first so the caller gets a truthful 404 for a session that does not exist.
+    const sessionExists = await this.sessionRepository.exists({ where: { id: sessionId } });
+    if (!sessionExists) {
+      throw new NotFoundException(`Session with id '${sessionId}' not found`);
+    }
     await this.validateWebhookUrl(dto.url);
     // Per-session fan-out cap. Soft by design: a concurrent create can race the count check — the
     // cap bounds amplification, it is not a hard invariant. Webhooks already above the cap are left

@@ -20,7 +20,7 @@ describe('WebhookService.listDeliveryFailures session scoping', () => {
     await ds.initialize();
     const failureRepo = ds.getRepository(WebhookDeliveryFailure);
     const cfg = { get: () => false };
-    service = new WebhookService({} as never, failureRepo, cfg as never, {} as never, undefined);
+    service = new WebhookService({} as never, failureRepo, {} as never, cfg as never, {} as never, undefined);
     for (const sessionId of ['sessA', 'sessB']) {
       await failureRepo.save(
         failureRepo.create({

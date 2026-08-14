@@ -25,8 +25,9 @@ describe('WebhookService session-scoped access', () => {
     await ds.initialize();
     const repo = ds.getRepository(Webhook);
     const cfg = { get: () => false }; // queue.enabled = false
-    // 2nd arg is the delivery-failure repo, unused by the scoped read/update/delete paths under test.
-    service = new WebhookService(repo, {} as never, cfg as never, {} as never, undefined);
+    // 2nd arg is the delivery-failure repo and 3rd the session repo — the scoped read/update/delete
+    // paths under test never touch them (only create() checks session existence).
+    service = new WebhookService(repo, {} as never, {} as never, cfg as never, {} as never, undefined);
 
     const sessions = ds.getRepository(Session);
     for (const id of ['sessA', 'sessB']) {

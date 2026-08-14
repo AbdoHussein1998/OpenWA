@@ -19,6 +19,7 @@ export class WebhookController {
     description: 'Webhook created',
     type: WebhookResponseDto,
   })
+  @ApiResponse({ status: 404, description: 'Session not found' })
   async create(@Param('sessionId') sessionId: string, @Body() dto: CreateWebhookDto): Promise<WebhookResponseDto> {
     return WebhookResponseDto.fromEntity(await this.webhookService.create(sessionId, dto));
   }

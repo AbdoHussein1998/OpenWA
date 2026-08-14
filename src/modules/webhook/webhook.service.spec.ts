@@ -53,6 +53,7 @@ describe('WebhookService', () => {
   let service: WebhookService;
   let repository: jest.Mocked<Partial<Repository<Webhook>>>;
   let failureRepository: jest.Mocked<Partial<Repository<WebhookDeliveryFailure>>>;
+  let sessionRepository: jest.Mocked<Partial<Repository<Session>>>;
   let configService: jest.Mocked<Partial<ConfigService>>;
   let hookManager: jest.Mocked<Partial<HookManager>>;
   let webhookQueue: jest.Mocked<Record<string, jest.Mock>>;
@@ -73,6 +74,11 @@ describe('WebhookService', () => {
       insert: jest.fn().mockResolvedValue({}),
       find: jest.fn().mockResolvedValue([]),
       delete: jest.fn().mockResolvedValue({ affected: 0 }),
+    };
+
+    sessionRepository = {
+      // Default to an existing session; the 404 cases below override this per test.
+      exists: jest.fn().mockResolvedValue(true),
     };
 
     configService = {
@@ -109,6 +115,7 @@ describe('WebhookService', () => {
         WebhookService,
         { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
         { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+        { provide: getRepositoryToken(Session, 'data'), useValue: sessionRepository },
         { provide: ConfigService, useValue: configService },
         { provide: HookManager, useValue: hookManager },
         { provide: LidMappingStoreService, useValue: lidStore },
@@ -160,6 +167,31 @@ describe('WebhookService', () => {
           secret: 'my-secret',
         }),
       );
+    });
+
+    // ── session existence ─────────────────────────────────
+
+    it('returns 404 when the session does not exist, without persisting anything', async () => {
+      (sessionRepository.exists as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.create('sess-missing', { url: 'https://example.com/webhook' })).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.create('sess-missing', { url: 'https://example.com/webhook' })).rejects.toThrow(
+        "Session with id 'sess-missing' not found",
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+      expect(repository.save).not.toHaveBeenCalled();
+      expect(repository.count).not.toHaveBeenCalled(); // existence is checked before the fan-out cap
+    });
+
+    it('checks session existence against the sessions table and creates when present', async () => {
+      const webhook = createMockWebhook();
+      (repository.create as jest.Mock).mockReturnValue(webhook);
+      (repository.save as jest.Mock).mockResolvedValue(webhook);
+
+      await expect(service.create('sess-1', { url: 'https://example.com/webhook' })).resolves.toBeDefined();
+      expect(sessionRepository.exists).toHaveBeenCalledWith({ where: { id: 'sess-1' } });
     });
 
     // ── validate URL at registration, default-on ──────────
@@ -1424,6 +1456,7 @@ describe('WebhookService', () => {
           WebhookService,
           { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
           { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+          { provide: getRepositoryToken(Session, 'data'), useValue: sessionRepository },
           { provide: ConfigService, useValue: { get: jest.fn().mockImplementation(configGet) } },
           { provide: HookManager, useValue: hookManager },
           { provide: getQueueToken(QUEUE_NAMES.WEBHOOK), useValue: webhookQueue },
@@ -1515,6 +1548,7 @@ describe('WebhookService', () => {
           WebhookService,
           { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
           { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+          { provide: getRepositoryToken(Session, 'data'), useValue: sessionRepository },
           {
             provide: ConfigService,
             useValue: {
@@ -1575,6 +1609,7 @@ describe('WebhookService', () => {
           WebhookService,
           { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
           { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+          { provide: getRepositoryToken(Session, 'data'), useValue: sessionRepository },
           {
             provide: ConfigService,
             useValue: {
