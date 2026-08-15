@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /sessions/:sessionId/stop` escalates to a force-destroy when the graceful disconnect fails and answers a retryable `502` (`code: 'SESSION_STOP_INCOMPLETE'`, session left `disconnected`, no success audit) only when both fail — a wedged browser no longer leaks until the next start. The `502` is documented in the API reference and all five SDKs.
 - The status and chat-media stores share one orphaned-file reconciliation sweep, and the integration module reads the engine registry and session table through narrow dependencies instead of importing the session module.
 - Removed unused code, dead DTO types and three dev dependencies, plus dead dashboard API helpers.
+- The release workflow now runs its two Postgres-gated specs in band, matching the CI job it mirrors: jest's default file-parallelism ran them simultaneously against the one shared postgres service, racing their schema resets — the first v0.19.0 tag attempt failed its own release gate on the boot-migration advisory-lock spec (`relation "messages" already exists`) over a tree CI had passed minutes earlier, because the CI job already passes `--runInBand` for exactly this reason.
 
 ### Removed
 
