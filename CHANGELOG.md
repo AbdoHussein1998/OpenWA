@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GET /sessions/:sessionId/status/:statusId/media` now serves `image/svg+xml` status media as an inert download (`application/octet-stream` plus `Content-Disposition: attachment`), matching the chat-media route: SVG is scriptable despite the `image/` prefix, and serving it with its declared Content-Type made the endpoint stored-XSS material on the API origin.
 - Session credential directories (whatsapp-web.js profiles and Baileys auth state) are created owner-only (`0o700`) and re-tightened on every session start, whichever engine runs: read access to the data volume alone is no longer equivalent to taking over the linked WhatsApp account.
 
+### Added
+
+- Weekly scheduled security scan (`.github/workflows/security-scan.yml`): the merge-time audit gates re-run against the current dependency trees, and the release image scan re-runs against the published `latest` image on both architectures — a newly published advisory surfaces within days instead of at the next push or release. Also dispatchable on demand.
+
 ## [0.19.0] - 2026-08-15
 
 ### Security
