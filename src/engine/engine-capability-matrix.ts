@@ -1,9 +1,19 @@
 /**
- * Committed engine capability matrix: for each `IWhatsAppEngine` method, the REAL availability on
- * each adapter — `wwjs` = whatsapp-web.js (the default engine), `baileys` = the browser-free
+ * Engine capability matrix: for each `IWhatsAppEngine` method, the REAL availability on each
+ * adapter — `wwjs` = whatsapp-web.js (the default engine), `baileys` = the browser-free
  * alternative.
  *
- * Two fields tell the story:
+ * DERIVED — membership and the default. The method list is not hand-maintained: it is read from
+ * `interfaces/whatsapp-engine.interface.ts` with the same member regex the parity gate
+ * (`engine-parity.spec.ts`) applies, so a method added to the interface appears in the derived
+ * matrix the moment it compiles and a removed one drops out. A method with no
+ * curated entry defaults to `{wwjs: supported, baileys: supported}` — "plainly works on both" is
+ * the common case and costs no line here.
+ *
+ * CURATED — availability truth. Introspection alone CANNOT derive whether a capability actually
+ * works (an adapter body can exist and still not deliver), so every row that is more than the
+ * default — a `not-available` cell on either adapter, or a `supported` row worth annotating — is
+ * hand-curated in CURATED_CAPABILITY_EXCEPTIONS below. The curated fields:
  *  - `status`: 'supported' (the capability genuinely works end-to-end) or 'not-available' (the method
  *    either throws `EngineNotSupportedError`/`ChannelMediaNotSupportedError` at the adapter boundary
  *    → HTTP 501, OR the adapter claims support but the underlying library cannot deliver — a
@@ -20,13 +30,16 @@
  *
  * `evidence` cites the library symbol(s) that were inspected, so an engineer can open the exact file
  * and start wiring immediately. REQUIRED when at least one adapter is `not-available`; may also
- * annotate a newly-wired `supported` row with the symbols it now calls.
+ * annotate a newly-wired `supported` row with the symbols it now calls — such a row stays curated
+ * until its evidence stops being worth a contributor's attention.
  *
- * This is a SNAPSHOT. `engine-parity.spec.ts` enforces exact matrix-key↔interface-method correspondence
- * and the throw-invariants it can observe in live adapter method bodies. It does not read the operator
- * documentation and cannot classify non-throwing phantom stubs. The `status`, `rootCause`, and
- * `evidence` fields therefore remain hand-curated, source-traced annotations that must be reviewed as
- * adapters are wired or libraries change.
+ * `engine-parity.spec.ts` enforces exact correspondence between the derived matrix keys and the
+ * interface methods, the throw-invariants it can observe in live adapter method bodies, and a
+ * stale-curation fence: a curated entry naming a method that no longer exists on the interface
+ * FAILS the spec instead of being silently dropped. It does not read the operator documentation
+ * and cannot classify non-throwing phantom stubs. The `status`, `rootCause`, and `evidence` fields
+ * therefore remain hand-curated, source-traced annotations that must be reviewed as adapters are
+ * wired or libraries change.
  *
  * NOTE on phantom support: the drift gate's throw-heuristic cannot see adapter methods that silently
  * stub (return null/[] + a warn log) without throwing. The wwjs catalog rows (getCatalog/getProducts/
@@ -38,6 +51,9 @@
  * whatsapp-web.js; their rows say `supported` and the adapter really does read stories, so they no
  * longer belong here.
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 export type CapabilityStatus = 'supported' | 'not-available';
 export type RootCause = 'adapter-gap' | 'library-limitation' | 'uncertain';
 
@@ -54,8 +70,13 @@ export interface MethodCapability {
   evidence?: string;
 }
 
-export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
-  addLabelToChat: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
+/**
+ * The hand-curated half: every method whose capability is more than the supported/supported
+ * default. Adding a plain supported/supported row here is a no-op by construction (the derivation
+ * already produces it); an entry whose method leaves the interface is a fence failure, not a
+ * silent drop.
+ */
+export const CURATED_CAPABILITY_EXCEPTIONS: Record<string, MethodCapability> = {
   upsertLabel: {
     wwjs: { status: 'not-available', rootCause: 'library-limitation' },
     baileys: { status: 'supported' },
@@ -92,14 +113,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       "wwjs Client.archiveChat(chatId)/unarchiveChat(chatId) → Promise<boolean> (index.d.ts:46,328) — the CLIENT methods, not Chat.archive(), which resolves void; baileys chatModify({archive,lastMessages}, jid) (Types/Chat.d.ts:63-66) needs the chat's last message, so a chat with no known history resolves false rather than throwing",
   },
-  blockContact: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getBlockedContacts: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
     evidence:
       'wwjs Client.getBlockedContacts() → Contact[] models (index.d.ts:97) — mapped to neutral ids via readWid; baileys fetchBlocklist() → bare jid strings (Socket/chats.d.ts:41; chats.js:263-274) — an unanswered query would resolve [] (query() swallows its timeout), so the adapter bounds it with its own deadline',
   },
-  checkNumberExists: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   clearChatMessages: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
@@ -112,7 +131,6 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'baileys groupCreate(subject, participants) → GroupMetadata (Socket/groups.d.ts). wwjs Client.createGroup exists and is typed Promise<CreateGroupResult | string> (index.d.ts) but its injected evaluate reaches a WhatsApp Web internal that no longer exposes findImpl (Client.js:2325) — measured live on TWO builds, 2.3000.1044858477-alpha auto-resolved and 2.3000.1044770897-alpha pinned, both TypeError "this.findImpl is not a function" reaching the caller as a bare 500. Bare and @c.us-qualified participant ids fail identically, so the id shape is not the variable, and varying the build is what separates this from registry pin drift. findImpl appears in neither the installed Client.js nor any OpenWA patcher, so it is the page\'s, not the library\'s, and cannot be patched around. Baileys creates groups normally on the same account',
   },
-  deleteChat: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   deleteContact: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
@@ -125,33 +143,24 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'wwjs GroupChat.deletePicture() → boolean (index.d.ts:2249; false → adapter throws EngineRefusedError); baileys removeProfilePicture(groupJid) (Socket/groups.d.ts:83) — the same call used for the own account, addressed at the group JID',
   },
-  deleteMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  deleteStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   demoteParticipants: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
     evidence:
       "wwjs GroupChat.demoteParticipants → batch {status:200} only (index.d.ts:2195 ChangeParticipantsPermissions; GroupChat.js:343-374) — a non-200 now throws at the adapter; baileys groupParticipantsUpdate(jid,pids,'demote') → per-jid [{status}] (Socket/groups.js:140-156)",
   },
-  destroy: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  disconnect: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   editMessage: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
     evidence:
       'wwjs Message.edit(content,options?) (index.d.ts:1362; MessageEditOptions:1600); baileys Editable.edit?: WAMessageKey on the text content variant (Types/Message.d.ts:86, AnyRegularMessageContent:168) via sendMessage(jid,{text,edit:key})',
   },
-  forceDestroy: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  forwardMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getCatalog: {
     wwjs: { status: 'not-available', rootCause: 'library-limitation' },
     baileys: { status: 'supported' },
     evidence:
       'baileys getCollections(jid) (Socket/business.d.ts:11) → first collection synthesized into Catalog metadata at BaileysCatalog (adapters/baileys-catalog.ts; #905); wwjs index.d.ts has NO Client.getCatalog (0 hits) — adapter throws EngineNotSupportedError',
   },
-  createChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  deleteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  muteChannel: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   transferChannelOwnership: {
     wwjs: { status: 'not-available', rootCause: 'library-limitation' },
     baileys: { status: 'supported' },
@@ -170,14 +179,12 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'baileys chatModify({mute: <epoch milliseconds> | null}) (ChatModification, Types/Chat.d.ts) → MuteAction.muteEndTimestamp (Utils/chat-utils.js:417-425); wwjs Client.muteChat(chatId, unmuteDate)/unmuteChat(chatId) (index.d.ts:182,331), which floors getTime()/1000 before the page write (Client.js:2092)',
   },
-  getGroupJoinInfo: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getGroupMembershipRequests: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
     evidence:
       'wwjs Client.getGroupMembershipRequests(groupId) → raw page-context store objects {id, addedBy, parentGroupId, requestMethod, t} (index.d.ts:355; Client.js:2990-3000) — wids read via readWid for the #747 $1 rename; baileys groupRequestParticipantsList(jid) → bare wire attrs [{jid, request_method, request_time}] (Socket/groups.d.ts:10; groups.js:105-115)',
   },
-  getChannelById: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getChannelMessages: {
     wwjs: { status: 'supported' },
     baileys: { status: 'not-available', rootCause: 'adapter-gap' },
@@ -196,8 +203,6 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'baileys no getChatLabels in lib/**/*.d.ts; Types/LabelAssociation.d.ts defines ChatLabelAssociation but no query fn (only addChatLabel/removeChatLabel writes @chats.d.ts:70-71); wwjs Client.getChatLabels (Client.js:2851)',
   },
-  getChats: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  getContactById: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getContactStatus: {
     wwjs: { status: 'supported' },
     baileys: { status: 'not-available', rootCause: 'library-limitation' },
@@ -209,10 +214,6 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     baileys: { status: 'not-available', rootCause: 'library-limitation' },
     evidence: 'baileys fetchStatus = about text only; no story enumerate in lib',
   },
-  getContacts: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  getGroupInfo: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  getGroupInviteCode: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  getGroups: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getLabelById: {
     wwjs: { status: 'supported' },
     baileys: { status: 'not-available', rootCause: 'library-limitation' },
@@ -231,8 +232,6 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'baileys no getReactions/fetchReactions; reactions exist only as event-augmented WAMessage.reactions (proto.IReaction @WAProto/index.d.ts:10623) via messages.reaction event; adapter does not persist them into its store; wwjs Message.getReactions (Message.js)',
   },
-  getNumberId: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  getPhoneNumber: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getProduct: {
     wwjs: { status: 'not-available', rootCause: 'library-limitation' },
     baileys: { status: 'supported' },
@@ -245,26 +244,18 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'baileys getCatalog({jid,limit,cursor}) (Socket/business.d.ts:7) cursor-walked in full, then page/limit sliced at the adapter (adapters/baileys-catalog.ts; #905); wwjs no Client.getProducts in index.d.ts (0 hits) — adapter throws EngineNotSupportedError',
   },
-  getProfilePicture: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  getPushName: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  getQRCode: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  getStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   getSubscribedChannels: {
     wwjs: { status: 'supported' },
     baileys: { status: 'not-available', rootCause: 'library-limitation' },
     evidence:
       'baileys no enumerate-newsletters fn; 18 of the 19 Socket/newsletter.d.ts newsletter members are per-jid (only newsletterCreate is not) (newsletterMetadata requires a key; newsletterSubscribers returns the count of ONE). Only the newsletter EVENT surfaces jids opportunistically (incremental, not list-all); wwjs Client.getChannels (Client.js:1691)',
   },
-  initialize: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   joinGroupViaInviteCode: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
     evidence:
       'wwjs Client.acceptInvite(inviteCode) → res.gid._serialized (index.d.ts:23; Client.js:1845); baileys groupAcceptInvite(code) → string|undefined (Socket/groups.d.ts:25) — undefined mapped to a thrown error',
   },
-  leaveGroup: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  logout: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  markUnread: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   pinChat: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
@@ -277,24 +268,18 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       'wwjs Message.pin(duration) → boolean (index.d.ts:1340); the injected helper returns false for a non-number duration and for an unknown message (Injected/Utils.js:1698), so the adapter maps false → EngineRefusedError; baileys sendMessage(jid,{pin:key,type:PinInChat.Type.PIN_FOR_ALL,time}) (Types/Message.d.ts:196-201) — NOT chatModify({pin}), which pins the CHAT in the chat list',
   },
-  postImageStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  postTextStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   probeLiveness: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
     evidence:
       'Both implement it, but not to the same depth, which is what the optional marker on the interface allows: wwjs races a real Client.getState() round trip against a 10s timeout (whatsapp-web-js.adapter.ts:1710) and answers alive inside the bounded navigation re-inject window; baileys returns a local check, status === READY && sock != null (baileys-lifecycle.ts:738), because its keepalive already emits a close event within ~35s. So a wedged wwjs page is caught by the probe, while a wedged baileys socket is caught by the transport rather than here',
   },
-  postVideoStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  postVoiceStatus: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   promoteParticipants: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
     evidence:
       "wwjs GroupChat.promoteParticipants → batch {status:200} only (index.d.ts:2193 ChangeParticipantsPermissions; GroupChat.js:305-340) — a non-200 now throws at the adapter; baileys groupParticipantsUpdate(jid,pids,'promote') → per-jid [{status}] (Socket/groups.js:140-156)",
   },
-  reactToMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  removeLabelFromChat: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   removeParticipants: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
@@ -319,39 +304,24 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       "wwjs Call.reject() (index.d.ts:2417) on the live Call cached from the client 'call' event (index.d.ts:643); baileys rejectCall(callId, callFrom) (Socket/messages-recv.d.ts:10) with the raw `from` JID cached from the 'offer' call event (Types/Call.d.ts)",
   },
-  replyToMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  requestPairingCode: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  resolveContactPhone: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  revokeGroupInviteCode: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  sendAudioMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   sendCatalog: {
     wwjs: { status: 'not-available', rootCause: 'library-limitation' },
     baileys: { status: 'not-available', rootCause: 'library-limitation' },
     evidence:
       'baileys AnyMessageContent (Types/Message.d.ts:166-210) has no catalog key — only {product} single-product + product_catalog_edit/add/delete CRUD (Socket/business.js:294-362); wwjs no Client.sendCatalog in index.d.ts (0 hits)',
   },
-  sendChatState: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  sendContactMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  sendDocumentMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  sendImageMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  sendLocationMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  sendPollMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   sendProduct: {
     wwjs: { status: 'not-available', rootCause: 'library-limitation' },
     baileys: { status: 'supported' },
     evidence:
       'baileys AnyRegularMessageContent {product: WASendableProduct} (Types/Message.d.ts:203) — adapter resolves the product via getCatalog then sends the snapshot with businessOwnerJid=self (adapters/baileys-messaging.ts; #905); wwjs no Client.sendProduct — Product/Order are inbound-only parsers',
   },
-  sendSeen: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   subscribeToPresence: {
     wwjs: { status: 'not-available', rootCause: 'library-limitation' },
     baileys: { status: 'supported' },
     evidence:
       "baileys presenceSubscribe(toJid) (Socket/chats.d.ts:39) + the 'presence.update' event carrying a per-participant PresenceData map (Types/Events.d.ts:50-55, Types/Chat.d.ts:20-24); whatsapp-web.js 1.34.7 has only sendPresenceAvailable/sendPresenceUnavailable (index.d.ts:230,233), which publish the ACCOUNT's own presence — it exposes no subscribe and emits no presence event",
   },
-  sendStickerMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  sendTextMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
-  sendVideoMessage: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   starMessage: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
@@ -448,7 +418,6 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
     evidence:
       "wwjs Message.vote(selectedOptions: string[]) (index.d.ts:1376) matches poll options BY NAME against msg.pollOptions and throws a bare STRING on a non-poll target (Message.js:1009-1040); baileys has no vote-send helper at all — only decryptPollVote for RECEIVING (Utils/process-message.d.ts), so sending needs a hand-built proto.Message.PollUpdateMessage with HMAC-SHA256 vote encryption keyed by the poll creation's messageSecret",
   },
-  unblockContact: { wwjs: { status: 'supported' }, baileys: { status: 'supported' } },
   unpinMessage: {
     wwjs: { status: 'supported' },
     baileys: { status: 'supported' },
@@ -462,3 +431,85 @@ export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = {
       'wwjs Client.unsubscribeFromChannel(channelId, options?) → boolean (index.d.ts:74; Client.js:2563; false → adapter throws EngineRefusedError); baileys newsletterUnfollow(jid) (Socket/newsletter.d.ts)',
   },
 };
+
+/**
+ * The `IWhatsAppEngine` method inventory, read from the interface file itself — the same source of
+ * truth `engine-parity.spec.ts` walks with its own copy of this regex. The two readers are bound
+ * together by the parity gate's correspondence check: if either drifted, the derived matrix keys
+ * and the spec's inventory would disagree and the spec would fail. `\??` is load-bearing — an
+ * optional member (`probeLiveness?()`) is still a member.
+ */
+const MEMBER_RE = /^\s{2}([a-zA-Z][a-zA-Z0-9]*)\??\s*\(/;
+
+function readInterfaceMethods(): string[] {
+  // The interface SOURCE is the inventory's source of truth, so it is read from disk when the
+  // matrix is first derived — lazily, on the first engineCapabilityMatrix() call, never at import.
+  // Two layouts resolve it: this file among its sources (ts-jest / ts-node), and this file compiled
+  // into dist inside a checkout (dist/engine → ../../src/engine). A deployment image that ships
+  // only dist cannot read it — a dist-only runtime consumer would still fail at CALL time with the
+  // error below; making the matrix a build-time artifact is the fix if such a consumer ever appears.
+  const candidates = [
+    join(__dirname, 'interfaces', 'whatsapp-engine.interface.ts'),
+    join(__dirname, '..', '..', 'src', 'engine', 'interfaces', 'whatsapp-engine.interface.ts'),
+  ];
+  const path = candidates.find(p => existsSync(p));
+  if (!path) {
+    throw new Error(
+      `Cannot derive the engine capability matrix: the interface source was not found (tried ${candidates.join(', ')}). ` +
+        'The matrix is derived from src/engine/interfaces/whatsapp-engine.interface.ts, which must be present.',
+    );
+  }
+  const src = readFileSync(path, 'utf8');
+  const names = new Set<string>();
+  for (const line of src.split('\n')) {
+    const match = line.match(MEMBER_RE);
+    if (match) names.add(match[1]);
+  }
+  return [...names].sort();
+}
+
+/**
+ * Derive the full matrix: one row per interface method, the curated exception where there is one,
+ * the supported/supported default where there is not. Entries keyed by a name that is not on the
+ * interface are not reachable from here — the parity gate's stale-curation fence is what makes
+ * that visible instead of silent.
+ */
+function deriveEngineCapabilityMatrix(): Record<string, MethodCapability> {
+  const matrix: Record<string, MethodCapability> = {};
+  for (const method of readInterfaceMethods()) {
+    // Copy, never alias: a consumer mutating its matrix row (or an adapter cell on it) must not
+    // write through into CURATED_CAPABILITY_EXCEPTIONS, which every future derivation reads.
+    matrix[method] = copyCapability(
+      CURATED_CAPABILITY_EXCEPTIONS[method] ?? {
+        wwjs: { status: 'supported' },
+        baileys: { status: 'supported' },
+      },
+    );
+  }
+  return matrix;
+}
+
+/** A two-level copy — exactly the shape MethodCapability has, so the derived row shares no object
+ * with the curated table it came from. */
+function copyCapability(entry: MethodCapability): MethodCapability {
+  const copy: MethodCapability = { wwjs: { ...entry.wwjs }, baileys: { ...entry.baileys } };
+  if (entry.evidence !== undefined) copy.evidence = entry.evidence;
+  return copy;
+}
+
+/**
+ * The derived matrix, produced on FIRST CALL and memoized. Deriving at module load meant importing
+ * this module read `whatsapp-engine.interface.ts` from disk at import time — harmless for the spec
+ * and docs gates that are its only consumers today, but a runtime import from a dist-only
+ * deployment image would have crashed at import. Lazy derivation moves that failure to CALL time,
+ * where the loud named error in readInterfaceMethods still names the fix; if a dist-only runtime
+ * consumer ever appears for real, making the matrix a build-time artifact is the fix, not this
+ * cache. The memoized object is shared across callers exactly like the const it replaced, and
+ * derivation copies each row, so no caller can alias CURATED_CAPABILITY_EXCEPTIONS.
+ */
+let cachedMatrix: Record<string, MethodCapability> | undefined;
+
+export function engineCapabilityMatrix(): Record<string, MethodCapability> {
+  cachedMatrix ??= deriveEngineCapabilityMatrix();
+  return cachedMatrix;
+}

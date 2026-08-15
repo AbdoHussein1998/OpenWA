@@ -5,6 +5,7 @@ import { In, IsNull, LessThan, Not, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { Message } from '../message/entities/message.entity';
 import { StorageService } from '../../common/storage/storage.service';
+import { sweepOrphanedFiles } from '../../common/storage/orphan-sweep';
 import { createLogger } from '../../common/services/logger.service';
 
 /** Storage key prefix owned by the chat-media archive; the media bucket is shared with statuses. */
@@ -259,54 +260,24 @@ export class ChatMediaArchiveService implements OnModuleInit, OnModuleDestroy {
    */
   async sweepOrphanedMedia(now: number = Date.now()): Promise<number> {
     const graceMs = this.configService.get<number>('chatMedia.orphanGraceMs', DEFAULT_ORPHAN_GRACE_MS);
-    let removed = 0;
-    // Keys still unreferenced at the end of THIS pass. Bounded by the orphan count (normally ~0),
-    // not by the size of the store, so it can safely drive the bookkeeping prune below.
-    const stillOrphaned = new Set<string>();
-
-    // Reconciled in chunks rather than as two whole-store sets. iterateFiles streams (listFiles
-    // truncates at STORAGE_LIST_MAX_FILES, which would strand every orphan past the cap), but
-    // collecting every key AND every archived row into memory would undo that: with the default
-    // TTL of 0 the archive grows without bound, so a mature gateway would spend an hourly spike
-    // holding millions of key strings. Each chunk asks the DB only which of ITS keys are
-    // referenced — an indexed lookup over a bounded id list.
-    let chunk: string[] = [];
-    const flush = async (): Promise<void> => {
-      if (chunk.length === 0) return;
-      const rows = await this.repository.find({ where: { mediaPath: In(chunk) }, select: { mediaPath: true } });
-      const referenced = new Set(rows.map(row => row.mediaPath));
-      for (const file of chunk) {
-        if (referenced.has(file)) {
-          this.orphanFirstSeenAt.delete(file);
-          continue;
-        }
-        stillOrphaned.add(file);
-        const firstSeenAt = this.orphanFirstSeenAt.get(file) ?? now;
-        this.orphanFirstSeenAt.set(file, firstSeenAt);
-        if (now - firstSeenAt < graceMs) continue;
-        try {
-          await this.storageService.deleteFile(file);
-          this.orphanFirstSeenAt.delete(file);
-          stillOrphaned.delete(file);
-          removed += 1;
-        } catch (err) {
-          this.logger.warn(`Failed to delete orphaned chat media ${file}`, { error: String(err) });
-        }
-      }
-      chunk = [];
-    };
-
-    for await (const file of this.storageService.iterateFiles(CHAT_MEDIA_PREFIX)) {
-      if (!file.startsWith(CHAT_MEDIA_PREFIX)) continue;
-      chunk.push(file);
-      if (chunk.length >= SWEEP_CHUNK_SIZE) await flush();
-    }
-    await flush();
-    // Drop bookkeeping for anything not still orphaned this pass — the file is gone, or a row now
-    // references it. Keyed off the orphan set rather than a full listing so this stays bounded too.
-    for (const key of [...this.orphanFirstSeenAt.keys()]) {
-      if (!stillOrphaned.has(key)) this.orphanFirstSeenAt.delete(key);
-    }
+    // Reconciled in chunks rather than as two whole-store sets: with the default TTL of 0 the
+    // archive grows without bound, so collecting every key AND every archived row into memory would
+    // turn the hourly sweep into a memory spike. Each chunk asks the DB only which of ITS keys are
+    // referenced — an indexed lookup over a bounded key list.
+    const removed = await sweepOrphanedFiles({
+      storage: this.storageService,
+      prefix: CHAT_MEDIA_PREFIX,
+      graceMs,
+      now,
+      firstSeenAt: this.orphanFirstSeenAt,
+      chunkSize: SWEEP_CHUNK_SIZE,
+      referencedAmong: async keys => {
+        const rows = await this.repository.find({ where: { mediaPath: In(keys) }, select: { mediaPath: true } });
+        return new Set(rows.map(row => row.mediaPath));
+      },
+      onDeleteFailed: (file, err) =>
+        this.logger.warn(`Failed to delete orphaned chat media ${file}`, { error: String(err) }),
+    });
     if (removed > 0) this.logger.log(`Chat media orphan sweep removed ${removed} file(s)`);
     return removed;
   }

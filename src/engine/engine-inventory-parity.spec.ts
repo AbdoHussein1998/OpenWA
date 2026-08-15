@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ENGINE_CAPABILITY_MATRIX } from './engine-capability-matrix';
+import { engineCapabilityMatrix } from './engine-capability-matrix';
 
 /**
  * Drift invariants for the hand-maintained halves of docs/29-engine-capability-matrix.md.
@@ -200,11 +200,12 @@ describe('engine inventory (docs/29 §29.5) — drift invariants', () => {
     });
 
     it('every interface method named in a ✅ exposure cell is `supported` for this engine', () => {
+      const matrix = engineCapabilityMatrix();
       const offenders: string[] = [];
       for (const row of readInventory(engine)) {
         if (!row.exposure.startsWith('✅')) continue;
         for (const [, method] of row.exposure.matchAll(/`([a-zA-Z][a-zA-Z0-9]*)`/g)) {
-          const entry = ENGINE_CAPABILITY_MATRIX[method];
+          const entry = matrix[method];
           if (!entry) continue; // prose backtick, not an interface method
           if (entry[engine].status !== 'supported') offenders.push(`${row.symbol} → ${method}`);
         }

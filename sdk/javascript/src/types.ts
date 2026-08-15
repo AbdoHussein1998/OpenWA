@@ -1181,12 +1181,6 @@ export interface SendProductRequest {
   body?: string;
 }
 
-export interface SendCatalogRequest {
-  chatId: Jid;
-  /** Optional body/caption text. */
-  body?: string;
-}
-
 // ── Search ────────────────────────────────────────────────────────
 
 /** Query parameters for `GET /search`. Only `q` is required; all filters are optional. */

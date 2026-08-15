@@ -4,6 +4,7 @@ import { SearchController } from './search.controller';
 import { SearchService } from './search.service';
 import { SearchProviderRegistry } from './search-provider.registry';
 import { BuiltInFtsProvider } from './providers/builtin-fts.provider';
+import { PLUGIN_SEARCH_REGISTRY_PORT, type PluginSearchRegistryPort } from '../../core/plugins/plugin-host-ports';
 
 /**
  * Wires the global search feature: the route (SearchController), the service layer (SearchService),
@@ -46,6 +47,14 @@ export function bootstrapSearchProviders(
       provide: 'SEARCH_BOOTSTRAP',
       inject: [SearchProviderRegistry, BuiltInFtsProvider, ConfigService],
       useFactory: bootstrapSearchProviders,
+    },
+    // Binds the core-owned plugin capability port to this module's registry; resolved lazily by the
+    // plugin runtime (PluginHostServices), which no-ops when this whole module is omitted
+    // (SEARCH_ENABLED=false).
+    {
+      provide: PLUGIN_SEARCH_REGISTRY_PORT,
+      useFactory: (registry: SearchProviderRegistry): PluginSearchRegistryPort => registry,
+      inject: [SearchProviderRegistry],
     },
   ],
 })

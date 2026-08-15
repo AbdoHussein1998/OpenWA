@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ToStrictBoolean } from '../../../common/utils/strict-boolean';
+import { BatchMessageStatus, BatchStatus } from '../entities/message-batch.entity';
 
 class BulkMediaDto {
   @ApiPropertyOptional({ description: 'Media URL (http/https)' })
@@ -170,4 +171,91 @@ export class BulkMessageResponseDto {
 
   @ApiProperty()
   statusUrl!: string;
+}
+
+export class BatchProgressDto {
+  @ApiProperty({ example: 10 })
+  total!: number;
+
+  @ApiProperty({ example: 7 })
+  sent!: number;
+
+  @ApiProperty({ example: 1 })
+  failed!: number;
+
+  @ApiProperty({ example: 2 })
+  pending!: number;
+
+  @ApiProperty({ example: 0 })
+  cancelled!: number;
+}
+
+export class BatchMessageErrorDto {
+  @ApiProperty({ description: 'Machine-readable failure code.', example: 'RECIPIENT_UNREACHABLE' })
+  code!: string;
+
+  @ApiProperty({ example: 'The number is not registered on WhatsApp' })
+  message!: string;
+}
+
+/** Per-recipient outcome of a batch send. */
+export class BatchMessageResultDto {
+  @ApiProperty({ example: '628123456789@c.us' })
+  chatId!: string;
+
+  @ApiProperty({ enum: BatchMessageStatus, example: BatchMessageStatus.SENT })
+  status!: BatchMessageStatus;
+
+  @ApiPropertyOptional({
+    description: 'Assigned on a successful send.',
+    example: 'true_628123456789@c.us_3EB0123456789',
+  })
+  messageId?: string;
+
+  @ApiPropertyOptional({ type: BatchMessageErrorDto, description: 'Present on a failed send.' })
+  error?: BatchMessageErrorDto;
+
+  @ApiPropertyOptional({ type: String, format: 'date-time', description: 'When the send completed.' })
+  sentAt?: Date;
+}
+
+export class BatchStatusResponseDto {
+  @ApiProperty({ example: 'batch_abc123' })
+  batchId!: string;
+
+  @ApiProperty({ enum: BatchStatus, example: BatchStatus.PROCESSING })
+  status!: BatchStatus;
+
+  @ApiProperty({ type: BatchProgressDto })
+  progress!: BatchProgressDto;
+
+  @ApiProperty({ type: [BatchMessageResultDto], description: 'One entry per recipient already attempted.' })
+  results!: BatchMessageResultDto[];
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'When processing started; null while the batch is pending.',
+  })
+  startedAt?: Date | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'When the batch reached a terminal status; null while it is still running.',
+  })
+  completedAt?: Date | null;
+}
+
+export class BatchCancelResponseDto {
+  @ApiProperty({ example: 'batch_abc123' })
+  batchId!: string;
+
+  @ApiProperty({ enum: BatchStatus, example: BatchStatus.CANCELLED })
+  status!: BatchStatus;
+
+  @ApiProperty({ type: BatchProgressDto })
+  progress!: BatchProgressDto;
 }

@@ -123,8 +123,9 @@ if [ "$DATABASE_TYPE" = "postgres" ]; then
     log "ERROR: DATABASE_TYPE=postgres but pg_dump is not installed"
     exit 1
   fi
-  if [ -n "${DATABASE_URL:-}" ]; then
-    pg_dump "$DATABASE_URL" >"$STAGE/database.sql"
+  DATABASE_URL_RESOLVED="$(openwa_resolve DATABASE_URL '')"
+  if [ -n "$DATABASE_URL_RESOLVED" ]; then
+    pg_dump "$DATABASE_URL_RESOLVED" >"$STAGE/database.sql"
   else
     # Same layered resolution as the paths above: a dashboard-provisioned Postgres keeps its
     # connection details in <data dir>/.env.generated, never in the operator's shell.

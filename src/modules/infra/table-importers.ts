@@ -98,7 +98,9 @@ export const TABLE_IMPORTERS: AnyTableImporter[] = [
       webhook.sessionId,
       webhook.url,
       typeof webhook.events === 'string' ? webhook.events : JSON.stringify(webhook.events || []),
-      webhook.secret,
+      // Rows exported after credential redaction (and hand-trimmed archives) carry no secret at
+      // all — restore those as unsigned rather than failing the row on a missing key.
+      webhook.secret ?? null,
       typeof webhook.headers === 'string' ? webhook.headers : JSON.stringify(webhook.headers || {}),
       webhook.filters == null
         ? null

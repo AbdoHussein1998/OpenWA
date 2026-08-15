@@ -87,7 +87,7 @@ export class SessionResponseDto {
       'Whether the gateway currently holds a live engine for this session. This is the precondition ' +
       'the lifecycle routes actually enforce, and `status` alone does not imply it: a `disconnected` ' +
       'session keeps its engine for the duration of an automatic reconnect backoff, while a session ' +
-      'stopped through `POST /sessions/:id/stop` carries the same status with no engine. When `true`, ' +
+      'stopped through `POST /sessions/:sessionId/stop` carries the same status with no engine. When `true`, ' +
       '`stop`, `logout` and `force-kill` can act and `start` answers 400; when `false`, the reverse. ' +
       'Derived per request from live process state, so it is never persisted and never historical.',
     example: true,

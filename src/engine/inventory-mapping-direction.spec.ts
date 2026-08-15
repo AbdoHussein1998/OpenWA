@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ts from 'typescript';
-import { ENGINE_CAPABILITY_MATRIX } from './engine-capability-matrix';
+import { engineCapabilityMatrix } from './engine-capability-matrix';
 
 /**
  * The DIRECTION of the docs/29 §29.5 inventory: a row saying "`groupMetadata` → `getGroupInfo`,
@@ -144,15 +144,14 @@ function reachers(symbol: string, engine: Engine): Set<string> {
 
 function inventoryRows(engine: Engine): { symbol: string; listed: string[] }[] {
   const doc = readFileSync(DOC, 'utf8');
+  const matrix = engineCapabilityMatrix();
   const start = doc.indexOf(engine === 'baileys' ? '### 29.5.1' : '### 29.5.2');
   const end = doc.indexOf(engine === 'baileys' ? '### 29.5.2' : '### 29.5.3');
   const rows: { symbol: string; listed: string[] }[] = [];
   for (const line of doc.slice(start, end).split('\n')) {
     const m = /^\|\s*`([^`]+)`\s*\|\s*(✅.*?)\s*\|\s*$/.exec(line);
     if (!m) continue;
-    const listed = [...m[2].matchAll(/`([a-zA-Z][\w]*)`/g)]
-      .map(x => x[1])
-      .filter(name => name in ENGINE_CAPABILITY_MATRIX);
+    const listed = [...m[2].matchAll(/`([a-zA-Z][\w]*)`/g)].map(x => x[1]).filter(name => name in matrix);
     if (listed.length) rows.push({ symbol: m[1], listed });
   }
   return rows;

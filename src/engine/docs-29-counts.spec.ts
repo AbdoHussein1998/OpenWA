@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { engineCapabilityMatrix } from './engine-capability-matrix';
 
 /**
  * `docs/29` states the same three figures in ten places — the intro, the architecture prose, a
@@ -13,28 +14,22 @@ import { join } from 'node:path';
 describe('docs/29 counts match the capability matrix', () => {
   const read = (...parts: string[]): string => readFileSync(join(__dirname, '..', '..', ...parts), 'utf8');
 
-  /** Recount from the matrix source. Line-oriented on purpose — see the note on the fixture below. */
+  /**
+   * Recount from the matrix VALUE. The matrix is derived (interface inventory + curated
+   * exceptions), so the file text no longer carries one row per method — the derived object is
+   * the one source the figures restate, and reading it directly cannot drop a row the way a
+   * line-oriented parse could.
+   */
   const recount = () => {
-    const lines = read('src', 'engine', 'engine-capability-matrix.ts').split('\n');
-    const rows: { wwjs: string | null; baileys: string | null }[] = [];
-    let current: { wwjs: string | null; baileys: string | null } | null = null;
-    for (const line of lines) {
-      if (/^ {2}[A-Za-z][A-Za-z0-9_]*: \{/.test(line)) {
-        current = { wwjs: null, baileys: null };
-        rows.push(current);
-      }
-      if (!current) continue;
-      const wwjs = line.match(/wwjs: \{ ?status: '([a-z-]+)'/);
-      if (wwjs && current.wwjs === null) current.wwjs = wwjs[1];
-      const baileys = line.match(/baileys: \{ ?status: '([a-z-]+)'/);
-      if (baileys && current.baileys === null) current.baileys = baileys[1];
-    }
-    const complete = rows.filter(r => r.wwjs && r.baileys);
-    // A parse that dropped rows would understate every figure and make the whole file "agree".
-    expect(complete.length).toBe(rows.length);
+    const rows = Object.values(engineCapabilityMatrix()).map(entry => ({
+      wwjs: entry.wwjs.status,
+      baileys: entry.baileys.status,
+    }));
+    // Non-vacuous: an empty or truncated matrix would understate every figure and make the whole
+    // document "agree".
     expect(rows.length).toBeGreaterThan(80);
 
-    const ok = (s: string | null): boolean => s === 'supported';
+    const ok = (s: string): boolean => s === 'supported';
     const supported = rows.filter(r => ok(r.wwjs)).length + rows.filter(r => ok(r.baileys)).length;
     // The REST caller's view counts the two store-backed status reads as neutral rather than
     // wwjs-only; docs/29 states that adjustment explicitly where it uses the figure.

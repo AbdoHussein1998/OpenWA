@@ -87,7 +87,7 @@ Three automated gates keep the matrix honest:
 
 ```mermaid
 flowchart TD
-    M["engine-capability-matrix.ts<br/>hand-curated status + evidence"] --> SPEC["engine-parity.spec.ts<br/>matrix keys match interface methods<br/>throw-invariants scan"]
+    M["engine-capability-matrix.ts<br/>rows derived from the interface,<br/>status + evidence from curated exceptions"] --> SPEC["engine-parity.spec.ts<br/>matrix keys match interface methods<br/>throw-invariants scan"]
     NM["node_modules<br/>installed engines"] --> SURF["check-upstream-surface.mjs<br/>npm run test:scripts"]
     SNAP["upstream-surface.snapshot.json<br/>reviewed surface"] --> SURF
     SURF -->|"new or removed symbol"| FAIL["fail until reviewed:<br/>expose / defer / record exclusion"]
@@ -229,7 +229,7 @@ socket is caught by the transport instead. No REST route: the session watchdog p
 | `sendLocationMessage` | ✅                  | ✅               | ✅              |
 | `sendPollMessage`     | ✅                  | ✅               | ✅              |
 | `sendProduct`         | ✅                  | ❌ lib           | ⚠️ baileys only |
-| `sendCatalog`         | ❌ lib              | ❌ lib           | ❌ 501          |
+| `sendCatalog`         | ❌ lib              | ❌ lib           | ❌ not exposed  |
 | `replyToMessage`      | ✅                  | ✅               | ✅              |
 | `forwardMessage`      | ✅                  | ✅               | ✅              |
 | `sendChatState`       | ✅                  | ✅               | ✅              |
@@ -381,7 +381,8 @@ answers 501.
 **Totals:** 112 methods → 224 adapter cells: **199 ✅, 25 ❌** (2 adapter-gaps, 23
 library-limitations, 0 uncertain) across 24 methods. From the REST caller's side: **90** methods
 work on any engine (89 fully supported + 2 store-backed status reads), **11** are Baileys-only,
-**9** are wwjs-only (the 2 store-backed rows excluded), **1** (`sendCatalog`) is 501 on both.
+**9** are wwjs-only (the 2 store-backed rows excluded); `sendCatalog`, unavailable on both engines,
+is not exposed.
 
 ## 29.5 Full engine method inventory — every library method, mapped to OpenWA
 
@@ -921,7 +922,7 @@ adapter sources — re-derive the same way when anything changes:
   depends on 🔧¹, the whole Baileys column on 🔧⁵ — so every row rests on a patch on each side,
   even though no row carries a row-level mark on both.
 - REST caller's view: **90** engine-neutral (88 + 2 store-backed status reads), **12** Baileys-only,
-  **9** wwjs-only, **1** unavailable on both (`sendCatalog`).
+  **9** wwjs-only; `sendCatalog` (unavailable on both engines) is not exposed.
 - Full engine inventory (29.5), split by the exposure legend rather than lumped: Baileys **152**
   socket methods — 48 wired into interface methods, 5 internal wiring, 29 plumbing, **70 ❌ not
   exposed** (incl. the whole 23-method community cluster); wwjs **81** Client methods — 44 wired,

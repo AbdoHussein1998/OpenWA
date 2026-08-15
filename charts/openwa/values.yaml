@@ -3,6 +3,10 @@
 # happen. What is still process-local is the reason: API-key socket eviction, the WS
 # rate-limit buckets, the liveness watchdog and reconnect timers, and in-flight bulk
 # batches. See docs/13-horizontal-scaling.md.
+# Postgres boot migrations no longer add a cross-replica hazard: replicas serialize them
+# with a session-scoped advisory lock at startup, so simultaneous boots cannot race DDL
+# against the shared migrations ledger. That part is enforced in-process, not by keeping
+# replicaCount at 1 — the process-local state above is what still keeps it at 1.
 replicaCount: 1
 
 image:
@@ -18,6 +22,9 @@ imagePullSecrets: []
 # NOTE: the container port is fixed at 2785 (containerPort, probes and the Service
 # targetPort are all pinned to it). Setting PORT here breaks the pod — use
 # service.port to change the Service port instead.
+# PII warning: never leave DATABASE_LOGGING=true here outside a debug session — TypeORM
+# then logs every query WITH its parameters (message bodies, phone numbers) into pod
+# logs, which a wider RBAC audience can usually read than the database itself.
 env:
   NODE_ENV: production
   LOG_LEVEL: info

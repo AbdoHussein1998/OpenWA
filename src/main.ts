@@ -27,6 +27,7 @@ import {
   resolveBodyLimit,
   assertNoDefaultSecretsInProduction,
   isApiKeyPepperMissingInProduction,
+  isNodeEnvUnset,
 } from './config/bootstrap-security';
 import { BullBoardAuthMiddleware } from './common/security/bull-board-auth.middleware';
 import { AuthService } from './modules/auth/auth.service';
@@ -58,6 +59,18 @@ async function bootstrap() {
   // raw stack to stderr, bypassing the structured log pipeline, and exits(1). Route the stack through the
   // logger WITHOUT swallowing the exception, so the crash-and-restart posture is unchanged (see the helper).
   registerUncaughtExceptionMonitor(bootstrapLogger);
+
+  // Advisory (not enforced): an unset/blank NODE_ENV is the deliberate local-dev default, but it
+  // silently degrades four controls to their dev posture (the default-secret guard, wildcard CORS,
+  // Swagger UI, validation error detail) — warn so a production deployment that simply forgot the
+  // variable can tell. The defaults themselves stay unchanged.
+  if (isNodeEnvUnset(process.env.NODE_ENV)) {
+    bootstrapLogger.warn(
+      'NODE_ENV is not set: running with development defaults — the default-secret guard is skipped, ' +
+        'wildcard CORS is allowed, Swagger UI is served, and validation error detail is exposed. ' +
+        'Set NODE_ENV=production for a production deployment.',
+    );
+  }
 
   // Fail fast: never start production with default/placeholder secrets.
   assertNoDefaultSecretsInProduction({

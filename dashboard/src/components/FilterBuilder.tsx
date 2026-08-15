@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, X } from 'lucide-react';
 import {
+  MESSAGE_TYPES,
   type Chat,
   type WebhookFilters,
   type WebhookFilterCondition,
@@ -15,24 +16,8 @@ interface FieldDescriptor {
   field: string;
   kind: FieldKind;
   operators: WebhookFilterOperator[];
-  enumValues?: string[];
+  enumValues?: readonly string[];
 }
-
-const MESSAGE_TYPES = [
-  'text',
-  'image',
-  'video',
-  'audio',
-  'voice',
-  'document',
-  'sticker',
-  'location',
-  'contact',
-  'call',
-  'revoked',
-  'masked',
-  'unknown',
-];
 
 // Mirrors the backend message-family field registry (src/modules/webhook/filters/filter-types.ts).
 const MESSAGE_FIELDS: FieldDescriptor[] = [

@@ -69,7 +69,12 @@ func (s *SessionsService) Start(ctx context.Context, sessionID string) (*Session
 	return &out, nil
 }
 
-// Stop disconnects a session gracefully.
+// Stop disconnects a session gracefully. Returns an HTTP 502 error with
+// code 'SESSION_STOP_INCOMPLETE' when the session was stopped locally but the engine
+// teardown did not complete (the graceful disconnect and the force-destroy escalation
+// both failed, so the engine process may still be running); the status is settled to
+// disconnected and no success audit is written. Retry the stop; restart the node to
+// reap a leaked process.
 func (s *SessionsService) Stop(ctx context.Context, sessionID string) (*SessionResponse, error) {
 	var out SessionResponse
 	err := s.client.do(ctx, "POST", "/api/sessions/"+pathEscape(sessionID)+"/stop", nil, nil, &out)

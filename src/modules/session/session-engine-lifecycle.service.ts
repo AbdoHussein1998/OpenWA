@@ -5,7 +5,7 @@ import { Repository, DataSource } from 'typeorm';
 import { Session, SessionStatus } from './entities/session.entity';
 import { EngineFactory } from '../../engine/engine.factory';
 import { EngineRegistry } from '../../engine/engine-registry.service';
-import { decideReconnect, type ReconnectAttemptState } from './reconnect-policy';
+import { decideReconnect, clampNumber, type ReconnectAttemptState } from './reconnect-policy';
 import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
@@ -56,8 +56,6 @@ export interface ReconnectState extends ReconnectAttemptState {
 const RECONNECT_BASE_DELAY_MIN_MS = 1000;
 const RECONNECT_BASE_DELAY_MAX_MS = 300_000;
 const RECONNECT_MAX_ATTEMPTS_CAP = 20;
-
-const clampNumber = (n: number, min: number, max: number): number => Math.min(Math.max(n, min), max);
 
 /** Coerce + clamp the untyped session.config reconnect knobs to finite, bounded values. Defaults are
  *  a 5000ms base delay and UNLIMITED attempts (`Infinity`): a long-lived session must keep retrying

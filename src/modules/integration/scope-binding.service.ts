@@ -1,8 +1,10 @@
-import { Injectable, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { AuditService } from '../audit/audit.service';
 import { PluginLoaderService } from '../../core/plugins/plugin-loader.service';
-import { SessionService } from '../session/session.service';
+import { Session } from '../session/entities/session.entity';
 import { PluginInstanceService } from './plugin-instance.service';
 import { PluginInstance } from './entities/plugin-instance.entity';
 import { createLogger } from '../../common/services/logger.service';
@@ -22,7 +24,8 @@ export class ScopeBindingService implements OnApplicationBootstrap {
     private readonly instances: PluginInstanceService,
     private readonly loader: PluginLoaderService,
     private readonly audit: AuditService,
-    private readonly sessions: SessionService,
+    @InjectRepository(Session, 'data')
+    private readonly sessions: Repository<Session>,
   ) {}
 
   /**
@@ -92,12 +95,12 @@ export class ScopeBindingService implements OnApplicationBootstrap {
   private async warnIfScopeHasNoSession(inst: PluginInstance): Promise<void> {
     if (!inst.sessionScope || inst.sessionScope === '*') return;
     try {
-      await this.sessions.findOne(inst.sessionScope);
-    } catch (err) {
-      // findOne throws NotFoundException only for a genuinely missing row. Any other failure (a DB
-      // hiccup mid-boot) is not evidence the session is gone, and reporting it as gone would send an
-      // operator hunting a binding that is in fact fine — so stay quiet rather than cry wolf.
-      if (!(err instanceof NotFoundException)) return;
+      // The same row read SessionService.findOne performs ({ where: { id } }), straight through the
+      // repository: a missing row resolves to null instead of throwing NotFoundException, and the
+      // service's runtime-state projection is more than this existence check needs.
+      const session = await this.sessions.findOne({ where: { id: inst.sessionScope } });
+      // A null row (and only a null row) means the session is genuinely missing.
+      if (session) return;
       this.logger.warn(
         `Plugin instance ${inst.pluginId}:${inst.instanceId} is bound to session '${inst.sessionScope}', which does not exist — it will receive no events until that session is restored or the instance is re-scoped`,
         {
@@ -107,6 +110,10 @@ export class ScopeBindingService implements OnApplicationBootstrap {
           sessionScope: inst.sessionScope,
         },
       );
+    } catch {
+      // A failure that throws (a DB hiccup mid-boot) is not evidence the session is gone, and
+      // reporting it as gone would send an operator hunting a binding that is in fact fine — so
+      // stay quiet rather than cry wolf.
     }
   }
 

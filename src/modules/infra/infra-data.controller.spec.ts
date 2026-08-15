@@ -5,7 +5,9 @@ jest.mock('archiver', () => ({ default: jest.fn() }));
 
 // saveConfig writes the generated env via fs.writeFileSync and reads the existing file
 // via fs.existsSync/readFileSync; mock those so tests assert produced content without
-// touching the filesystem. existsSync defaults to false (no prior config).
+// touching the filesystem. existsSync defaults to false (no prior config) — except for
+// .node probes, which better-sqlite3's binding loader uses to locate its prebuilt binary;
+// a blanket false would send it after a node-gyp build that isn't there.
 jest.mock('fs', () => {
   const actual = jest.requireActual<typeof import('fs')>('fs');
   return {
@@ -14,7 +16,7 @@ jest.mock('fs', () => {
     // saveConfig now writes the generated env via writeSecretFile, which chmods 0600 — mock it
     // so the secret-hygiene path never touches the real filesystem.
     chmodSync: jest.fn(),
-    existsSync: jest.fn().mockReturnValue(false),
+    existsSync: jest.fn((p: unknown) => (typeof p === 'string' && p.endsWith('.node') ? actual.existsSync(p) : false)),
     readFileSync: jest.fn().mockReturnValue(''),
     createReadStream: jest.fn(() => jest.requireActual<typeof import('stream')>('stream').Readable.from([])),
   };
@@ -22,7 +24,9 @@ jest.mock('fs', () => {
 
 import { DataSource, QueryFailedError } from 'typeorm';
 import { ConflictException } from '@nestjs/common';
-import { InfraDataController, restoreSessionOwnership } from './infra-data.controller';
+import { InfraDataController } from './infra-data.controller';
+import { InfraDataService, restoreSessionOwnership } from './infra-data.service';
+import { EXPORT_TABLES } from './export-tables';
 import { Session, SessionStatus } from '../session/entities/session.entity';
 import { Webhook } from '../webhook/entities/webhook.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
@@ -46,7 +50,13 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
   // exportData only reads dataDatabase.type off the config; everything else is unused here.
   const cfg = { get: (key: string, def?: unknown) => (key === 'dataDatabase.type' ? 'sqlite' : def) };
 
-  const newController = () => new InfraDataController(cfg as never, ds);
+  // The full data-connection entity set: exportData validates its table registry against the
+  // DataSource's entity metadata before reading anything, so a partial entity list would fail the
+  // export as registry drift rather than exercise the round-trip.
+  const newController = (ownership?: unknown) =>
+    new InfraDataController(
+      new InfraDataService(cfg as never, ds, undefined, undefined, undefined, ownership as never),
+    );
 
   beforeEach(async () => {
     ds = new DataSource({
@@ -57,11 +67,16 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
         Webhook,
         Message,
         MessageBatch,
+        Template,
+        BaileysStoredMessage,
+        LidMapping,
         PluginInstance,
         ConversationMapping,
         IngressEvent,
         WebhookDeliveryFailure,
         IntegrationDeliveryFailure,
+        StatusUpdate,
+        AutomationRule,
       ],
       synchronize: true,
     });
@@ -172,7 +187,14 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
       runner.query = (async (...args: unknown[]): Promise<unknown> => {
         if (!stalled && typeof args[0] === 'string' && args[0].startsWith('DELETE FROM sessions')) {
           stalled = true;
-          await new Promise(resolve => setTimeout(resolve, remainingMs * 1.5));
+          // Wait until the original lease has genuinely expired, polling the clock instead of
+          // sleeping a fixed multiple of the TTL: the property under test is "the transaction
+          // outlived the remaining time", so wait for exactly that — no shorter (the lease would
+          // still be live) and no longer (extra sleep only eats the assertion margin below).
+          const expiredAt = readAt + remainingMs;
+          while (Date.now() < expiredAt) {
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
         }
         return realQuery(...args);
       }) as typeof runner.query;
@@ -228,14 +250,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
       return runner;
     });
 
-    const withOwnership = new InfraDataController(
-      cfg as never,
-      ds,
-      undefined,
-      undefined,
-      undefined,
-      ownership as never,
-    );
+    const withOwnership = newController(ownership);
     const res = await withOwnership.importData({ tables: dump.tables });
     jest.restoreAllMocks();
 
@@ -343,14 +358,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
       return runner;
     });
 
-    const withOwnership = new InfraDataController(
-      cfg as never,
-      ds,
-      undefined,
-      undefined,
-      undefined,
-      ownership as never,
-    );
+    const withOwnership = newController(ownership);
     await expect(withOwnership.importData({ tables: dump.tables })).rejects.toThrow('within a transaction');
     jest.restoreAllMocks();
 
@@ -375,14 +383,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
       throw new Error('no connection available');
     });
 
-    const withOwnership = new InfraDataController(
-      cfg as never,
-      ds,
-      undefined,
-      undefined,
-      undefined,
-      ownership as never,
-    );
+    const withOwnership = newController(ownership);
     await expect(withOwnership.importData({ tables: dump.tables })).rejects.toThrow('no connection available');
     jest.restoreAllMocks();
 
@@ -410,14 +411,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
     const realOptions = ds.options;
     Object.defineProperty(ds, 'options', { value: { ...realOptions, type: 'postgres' }, configurable: true });
 
-    const withOwnership = new InfraDataController(
-      cfg as never,
-      ds,
-      undefined,
-      undefined,
-      undefined,
-      ownership as never,
-    );
+    const withOwnership = newController(ownership);
     await withOwnership.importData({ tables: dump.tables }).catch(() => undefined);
     Object.defineProperty(ds, 'options', { value: realOptions, configurable: true });
 
@@ -1195,13 +1189,30 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
   let ds: DataSource;
   let controller: InfraDataController;
   const cfg = { get: (key: string, def?: unknown) => (key === 'dataDatabase.type' ? 'sqlite' : def) };
-  const newController = () => new InfraDataController(cfg as never, ds);
+  const newController = () => new InfraDataController(new InfraDataService(cfg as never, ds));
 
   beforeEach(async () => {
     ds = new DataSource({
       type: 'better-sqlite3',
       database: ':memory:',
-      entities: [Session, Webhook, Message, MessageBatch, Template, BaileysStoredMessage, LidMapping],
+      // The full data-connection entity set, matching app.module.ts: exportData validates its table
+      // registry against the DataSource's entity metadata, so a subset would read as registry drift.
+      entities: [
+        Session,
+        Webhook,
+        Message,
+        MessageBatch,
+        Template,
+        BaileysStoredMessage,
+        LidMapping,
+        PluginInstance,
+        ConversationMapping,
+        IngressEvent,
+        WebhookDeliveryFailure,
+        IntegrationDeliveryFailure,
+        StatusUpdate,
+        AutomationRule,
+      ],
       synchronize: true,
     });
     await ds.initialize();
@@ -1372,28 +1383,66 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
     // The active flag (exported as integer 1 from SQLite) must round-trip as a real boolean.
     expect((await ds.getRepository(Webhook).findOneByOrFail({ id: 'w1' })).active).toBe(true);
   });
+
+  it('omits webhook credentials (secret, headers) from the export but keeps the row restorable', async () => {
+    await seedSession('s1');
+    await ds.getRepository(Webhook).save(
+      ds.getRepository(Webhook).create({
+        id: 'w1',
+        sessionId: 's1',
+        url: 'https://example.com/hook',
+        events: ['message'],
+        secret: 'hmac-secret',
+        headers: { Authorization: 'Bearer receiver-token' },
+        active: true,
+        retryCount: 3,
+      }),
+    );
+
+    const dump = await controller.exportData();
+    expect(dump.tables.webhooks).toHaveLength(1);
+    const exported = dump.tables.webhooks[0] as unknown as Record<string, unknown>;
+    expect(exported).not.toHaveProperty('secret');
+    expect(exported).not.toHaveProperty('headers');
+    expect(exported.url).toBe('https://example.com/hook');
+
+    // The redacted archive still restores: the webhook comes back unsigned, with no custom headers.
+    const res = await controller.importData({ tables: dump.tables });
+    expect(res.warnings).toEqual([]);
+    expect(res.imported).toBe(true);
+    const restored = await ds.getRepository(Webhook).findOneByOrFail({ id: 'w1' });
+    expect(restored.secret).toBeNull();
+    expect(restored.headers).toEqual({});
+  });
 });
 
-describe('InfraDataController C002 audit trail — import emits only on a committed restore', () => {
+describe('InfraDataController audit trail — import emits only on a committed restore', () => {
   let ds: DataSource;
   const cfg = { get: (key: string, def?: unknown) => (key === 'dataDatabase.type' ? 'sqlite' : def) };
   const build = (audit: { logInfo: jest.Mock }): InfraDataController =>
-    new InfraDataController(cfg as never, ds, audit as never);
+    new InfraDataController(new InfraDataService(cfg as never, ds, audit as never));
 
   beforeEach(async () => {
     ds = new DataSource({
       type: 'better-sqlite3',
       database: ':memory:',
+      // The full data-connection entity set: exportData validates its table registry against the
+      // DataSource's entity metadata, so a subset would read as registry drift.
       entities: [
         Session,
         Webhook,
         Message,
         MessageBatch,
+        Template,
+        BaileysStoredMessage,
+        LidMapping,
         PluginInstance,
         ConversationMapping,
         IngressEvent,
         WebhookDeliveryFailure,
         IntegrationDeliveryFailure,
+        StatusUpdate,
+        AutomationRule,
       ],
       synchronize: true,
     });
@@ -1444,7 +1493,15 @@ describe('InfraDataController C002 audit trail — import emits only on a commit
 
 describe('InfraDataController.exportData optional-table strictness', () => {
   const cfg = { get: (key: string, def?: unknown) => (key === 'dataDatabase.type' ? 'sqlite' : def) };
-  const build = (query: jest.Mock) => new InfraDataController(cfg as never, { query } as never);
+  // exportData validates its table registry against the DataSource's entity metadata before reading;
+  // the fake stands in for a fully-migrated connection so the registry check passes and the tests
+  // below pin the QUERY-time strictness instead.
+  const fakeDataSource = (query: jest.Mock): unknown => ({
+    query,
+    entityMetadatas: EXPORT_TABLES.map(entry => ({ tableName: entry.table })),
+  });
+  const build = (query: jest.Mock) =>
+    new InfraDataController(new InfraDataService(cfg as never, fakeDataSource(query) as never));
 
   it('rethrows a non-missing-table error (lock/IO/timeout) instead of reporting a partial export as complete', async () => {
     // A lock on ONE optional table must fail the whole export: silently exporting without that table
@@ -1503,11 +1560,13 @@ describe('InfraDataController.importData status_updates + runtime reconciliation
   let ds: DataSource;
   const cfg = { get: (key: string, def?: unknown) => (key === 'dataDatabase.type' ? 'sqlite' : def) };
 
-  // Positional constructor: (config, dataDs, auditService?, sessionService?, lidMappingStore?).
+  // Positional service constructor: (config, dataDs, auditService?, sessionService?, lidMappingStore?).
   // The @Optional args trail the required ones; auditService is unused in these tests, so its slot
   // stays undefined.
   const build = (opts: { sessionService?: unknown; lidMappingStore?: unknown } = {}) =>
-    new InfraDataController(cfg as never, ds, undefined, opts.sessionService as never, opts.lidMappingStore as never);
+    new InfraDataController(
+      new InfraDataService(cfg as never, ds, undefined, opts.sessionService as never, opts.lidMappingStore as never),
+    );
 
   beforeEach(async () => {
     ds = new DataSource({
@@ -1852,13 +1911,14 @@ describe('InfraDataController.importData status_updates + runtime reconciliation
   });
 });
 
-// C002: the infra module exposed sensitive ADMIN operations (credential config write, restart/Docker
-// orchestration, full-DB + storage export/import) with no audit trail. Each now emits an AuditAction.
-describe('InfraDataController C002 audit trail (light-dependency handlers)', () => {
+// The infra module's sensitive ADMIN operations (credential config write, restart/Docker
+// orchestration, full-DB + storage export/import) must leave an audit trail — each emits an AuditAction.
+describe('InfraDataController audit trail (light-dependency handlers)', () => {
   const makeAudit = (): { logInfo: jest.Mock } => ({ logInfo: jest.fn().mockResolvedValue(null) });
 
-  // Positional constructor: (config, dataDs, auditService?, sessionService?, lidMappingStore?).
-  // auditService is the first trailing @Optional arg.
+  // Positional service constructor: (config, dataDs, auditService?, sessionService?, lidMappingStore?).
+  // auditService is the first trailing @Optional arg. The dataDs override needs entityMetadatas so
+  // exportData's registry check sees a fully-migrated connection.
   const build = (
     audit: { logInfo: jest.Mock },
     overrides: Partial<{
@@ -1866,13 +1926,18 @@ describe('InfraDataController C002 audit trail (light-dependency handlers)', () 
       dataDs: unknown;
     }> = {},
   ): InfraDataController =>
-    new InfraDataController((overrides.config ?? {}) as never, (overrides.dataDs ?? {}) as never, audit as never);
+    new InfraDataController(
+      new InfraDataService((overrides.config ?? {}) as never, (overrides.dataDs ?? {}) as never, audit as never),
+    );
 
   it('exportData emits INFRA_DATA_EXPORTED with per-table counts', async () => {
     const audit = makeAudit();
     const controller = build(audit, {
       config: { get: (k: string, d?: unknown) => (k === 'dataDatabase.type' ? 'sqlite' : d) },
-      dataDs: { query: jest.fn().mockResolvedValue([]) },
+      dataDs: {
+        query: jest.fn().mockResolvedValue([]),
+        entityMetadatas: EXPORT_TABLES.map(entry => ({ tableName: entry.table })),
+      },
     });
     await controller.exportData();
     const calls = audit.logInfo.mock.calls as Array<[AuditAction, { metadata: { counts: { sessions: number } } }]>;
@@ -2007,7 +2072,8 @@ describe('restoreSessionOwnership', () => {
  * answer was wrong.
  */
 describe('InfraDataController.importData rejects a malformed table value', () => {
-  const controller = () => new InfraDataController({ get: () => undefined } as never, {} as never);
+  const controller = () =>
+    new InfraDataController(new InfraDataService({ get: () => undefined } as never, {} as never));
 
   it.each([
     ['a string', 'not-an-array'],

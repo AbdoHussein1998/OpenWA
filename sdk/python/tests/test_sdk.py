@@ -799,7 +799,6 @@ class TestLabelsChannelsCatalog:
         })
         backend.on("GET", "/catalog/products/p1", body={"id": "p1", "name": "Widget"})
         backend.on("POST", "/messages/send-product", body={"messageId": "m", "timestamp": 1})
-        backend.on("POST", "/messages/send-catalog", body={"messageId": "m", "timestamp": 1})
         client = make_client(backend)
         client.catalog.info("s")
         assert "/sessions/s/catalog" in backend.calls[-1].url
@@ -810,8 +809,6 @@ class TestLabelsChannelsCatalog:
         client.catalog.send_product("s", {"chatId": "a@c.us", "productId": "p1", "body": "x"})
         assert "/messages/send-product" in backend.calls[-1].url
         assert backend.calls[-1].body == {"chatId": "a@c.us", "productId": "p1", "body": "x"}
-        client.catalog.send_catalog("s", {"chatId": "a@c.us", "body": "cat"})
-        assert "/messages/send-catalog" in backend.calls[-1].url
 
     def test_templates_crud(self):
         tpl = {"id": "t1", "sessionId": "s", "name": "welcome", "body": "Hi {{name}}", "createdAt": "", "updatedAt": ""}

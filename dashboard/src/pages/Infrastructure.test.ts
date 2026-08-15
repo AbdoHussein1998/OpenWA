@@ -228,7 +228,7 @@ afterEach(() => {
   overrides = {};
 });
 
-function renderInfrastructure(): { container: HTMLElement } {
+function renderInfrastructure() {
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 1_000 } } });
   return rtl.render(
     createElement(
@@ -309,8 +309,8 @@ test('a successful save opens the restart modal', async () => {
 
   const dialog = await screen.findByRole('dialog');
   within(dialog).getByText('Configuration saved');
-  // The idle restart state offers both actions; asserting the button exists (not clicking it) keeps
-  // this test clear of handleRestart's uncancelled setInterval/setTimeout chain.
+  // The idle restart state offers both actions; the click-through (and its timer cleanup on
+  // unmount) is covered by the last test in this file.
   within(dialog).getByRole('button', { name: 'Restart Now' });
   within(dialog).getByRole('button', { name: 'Restart Later' });
 });
@@ -441,4 +441,30 @@ test('saving while ENGINE_TYPE is pinned does not write the running engine over 
     const body = call!.body as { engine?: { type?: string } };
     assert.equal(body.engine?.type, 'baileys');
   });
+});
+
+// ── Restart-flow timer cleanup on unmount ────────────────────────────────────
+
+test('unmounting mid-restart cancels the health poll and countdown timers', { timeout: 10_000 }, async () => {
+  const { screen, waitFor, fireEvent, within } = rtl;
+  resetFetchCalls();
+  const { unmount } = renderInfrastructure();
+
+  await screen.findByText('Database Configuration');
+  fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Restart Now' }));
+
+  // The restart POST resolving is what arms the 3s health-poll timeout chain and the 1s countdown
+  // interval in useRestartFlow.
+  await waitFor(() => assert.ok(findFetchCall('POST', '/api/infra/restart'), 'expected the restart POST'));
+
+  // Unmount, then outwait the first health poll (fires at 3s): a leaked chain would call
+  // /api/health/ready here. Real timers only — mixing fake timers in after the flow has armed
+  // would leave the pre-armed real handles un-clearable by the mocked clearTimeout.
+  unmount();
+  resetFetchCalls();
+  await new Promise(resolve => setTimeout(resolve, 4000));
+
+  assert.equal(findFetchCall('GET', '/api/health/ready'), undefined);
 });

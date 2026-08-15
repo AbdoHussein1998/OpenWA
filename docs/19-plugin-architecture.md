@@ -616,6 +616,14 @@ route requires the `ADMIN` role** (`@RequireRole(ApiKeyRole.ADMIN)` — not a ba
 is **no** `POST :id/reload` and **no** `GET :id/config`. Install is a multipart `.zip` upload (or by
 URL / catalog), not an npm/github source descriptor.
 
+> **Installed plugins are trusted code.** The worker sandbox (doc 30) is crash and heap-OOM
+> _containment_, not a security boundary: plugin code runs inside the gateway's OS process and can
+> reach Node built-ins (`fs`, `net`, `child_process`) directly — the capability permission model
+> gates only the `ctx.*` verbs, not raw Node access. The SSRF guard and digest pin on
+> `install-url` protect the _delivery_ of the package, not what the package does once loaded.
+> Install only plugins you trust, and keep the OS-level containment from doc 30 (container,
+> read-only rootfs, dropped capabilities) in place when you do.
+
 | Method & path                        | Purpose                                                                                                    |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
 | `GET /plugins`                       | List all plugins                                                                                           |

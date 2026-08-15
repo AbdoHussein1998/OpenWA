@@ -13,6 +13,8 @@
  *   - Does NOT cover Go or Java: both assemble paths by concatenating a base with a suffix, so there
  *     is no literal to harvest. A drift there is invisible to this gate.
  *   - Checks that a route EXISTS, not that its method, request shape or response shape match.
+ *   - The send-media verbs are harvested separately (see SEND_MEDIA_VERBS below): each SDK passes
+ *     the verb as a plain string to a shared builder, so no per-route literal exists to scan.
  *
  * Lives in ci.yml's lint job rather than sdk-ci.yml on purpose: sdk-ci is path-filtered and does not
  * list openapi.json, so changing the contract alone runs none of it — and it never runs on a release
@@ -77,6 +79,19 @@ const ALLOWED = new Map([
   ['/api/sessions/*/messages/*', 'the send-* family shares one builder; the verb itself is the variable'],
 ]);
 
+/**
+ * The send-media family is the one set of routes the literal scan above CANNOT see: each SDK passes
+ * the verb as a plain string to a shared builder (`sendMedia(sessionId, 'send-image', body)`), so the
+ * only path literal anywhere is the allowlisted `/api/sessions/{id}/messages/{verb}` template. Renaming
+ * `/messages/send-image` on the server would regenerate the contract, pass `openapi:check`, and pass
+ * the scan above while every send-image call 404s. Harvest the verb arguments themselves and pin
+ * each one to a concrete contract path.
+ */
+const SEND_MEDIA_VERBS = [
+  { name: 'javascript', dir: 'sdk/javascript/src', exts: ['.ts'], re: /\.sendMedia\(\s*\w+\s*,\s*['"`]([\w-]+)['"`]/g },
+  { name: 'python', dir: 'sdk/python/openwa', exts: ['.py'], re: /\._send_media\(\s*\w+\s*,\s*["']([\w-]+)["']/g },
+];
+
 const contract = JSON.parse(readFileSync(join(root, 'openapi.json'), 'utf8'));
 const known = new Set(Object.keys(contract.paths).map(normalize));
 
@@ -103,6 +118,29 @@ for (const sdk of SDKS) {
   for (const route of [...found].sort()) {
     if (known.has(route) || ALLOWED.has(route)) continue;
     errors.push(`${sdk.name}: builds ${route}, which is not a path in openapi.json.`);
+  }
+}
+
+for (const sdk of SEND_MEDIA_VERBS) {
+  const verbs = new Set();
+  for (const file of walk(join(root, sdk.dir), sdk.exts)) {
+    // Same comment strip as the literal scan: prose mentions of the helper are not call sites.
+    const src = readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*(\/\/|#).*$/gm, '');
+    for (const m of src.matchAll(sdk.re)) verbs.add(m[1]);
+  }
+  // Same non-vacuity guard as the literal scan — today each SDK passes exactly five verbs, so a
+  // pattern that silently stopped matching must fail here rather than pin nothing.
+  if (verbs.size < 5) {
+    errors.push(`${sdk.name}: harvested only ${verbs.size} send-media verbs from ${sdk.dir} — the scan pattern has drifted.`);
+    continue;
+  }
+  for (const verb of [...verbs].sort()) {
+    const route = `/api/sessions/*/messages/${verb}`;
+    if (!known.has(route)) {
+      errors.push(`${sdk.name}: send-media verb '${verb}' builds ${route}, which is not a path in openapi.json.`);
+    }
   }
 }
 

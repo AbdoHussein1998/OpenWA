@@ -87,7 +87,7 @@ function makeBridge(opts: {
   ]);
 
   const hostServices = {
-    getPluginInstanceService: () => ({
+    getPluginInstancePort: () => ({
       resolve: (pluginId: string, instanceId: string) =>
         Promise.resolve(opts.rows.find(r => r.pluginId === pluginId && r.instanceId === instanceId) ?? null),
       list: (pluginId: string) => Promise.resolve(opts.rows.filter(r => r.pluginId === pluginId)),

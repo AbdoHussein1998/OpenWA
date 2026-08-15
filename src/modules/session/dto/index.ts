@@ -10,3 +10,4 @@ export * from './send-chat-state.dto';
 export * from './request-pairing-code.dto';
 export * from './chat-summary.dto';
 export * from './presence.dto';
+export * from './session-actions-response.dto';

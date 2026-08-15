@@ -142,10 +142,18 @@ describe('Webhooks (e2e)', () => {
       expect(dto.id).toBeDefined();
       expect(dto.sessionId).toBe(session);
       expect(dto.active).toBe(true);
-      // Write-only fields must never appear in a webhook-route response. (The infra export route
-      // does return them — that is deliberate and covered by its own ADMIN + unscoped-key fence.)
+      // Write-only fields must never appear in a webhook-route response (nor in the infra
+      // export, which omits them from webhook rows — covered in infra-data.controller.spec.ts).
       expect(dto.secret).toBeUndefined();
       expect(dto.headers).toBeUndefined();
+    });
+
+    it('returns 404 when creating a webhook for a session that does not exist', async () => {
+      await request(app.getHttpServer())
+        .post('/api/sessions/no-such-session/webhooks')
+        .set('X-API-Key', apiKey)
+        .send({ url: receiverUrl, events: ['*'] })
+        .expect(404);
     });
 
     it('lists webhooks for a session', async () => {
@@ -242,6 +250,18 @@ describe('Webhooks (e2e)', () => {
   // ── registration validation ───────────────────────────────────────
 
   describe('registration validation', () => {
+    it('rejects a URL embedding credentials (userinfo) even with SSRF protection off', async () => {
+      const session = await nextSession();
+      // This suite runs with WEBHOOK_SSRF_PROTECT=false, so a 400 here proves the credential
+      // rejection is not tied to the SSRF flag.
+      const res = await request(app.getHttpServer())
+        .post(`/api/sessions/${session}/webhooks`)
+        .set('X-API-Key', apiKey)
+        .send({ url: 'https://user:pass@example.com/hook' })
+        .expect(400);
+      expect((res.body as { message: string }).message).toMatch(/must not contain credentials/);
+    });
+
     it('rejects an internal URL with 400 when SSRF protection is on', async () => {
       const session = await nextSession();
       // Self-contained: turn protection on and clear any ambient SSRF_ALLOWED_HOSTS (a dev .env may
@@ -291,9 +311,11 @@ describe('Webhooks (e2e)', () => {
         filters: { conditions: [{ field: 'sender', operator: 'is', value: ['boss@c.us'] }] },
       });
 
+      // dispatch() awaits every per-webhook delivery attempt end-to-end in this queue-off suite
+      // (Promise.allSettled over the direct deliveries, each awaiting the receiver's response), and
+      // the receiver records a hit BEFORE it answers — so a wrongly-attempted delivery would already
+      // be in `received` here. A fixed sleep would only slow the assertion, not strengthen it.
       await webhookService.dispatch(session, 'message.received', { from: 'spammer@c.us', body: 'spam' });
-      // No way to await a non-event; give dispatch a real chance to (not) deliver, then assert silence.
-      await new Promise(r => setTimeout(r, 100));
       expect(received).toHaveLength(0);
     });
 
@@ -317,8 +339,9 @@ describe('Webhooks (e2e)', () => {
         .send({ active: false })
         .expect(200);
 
+      // Same settled-dispatch reasoning as the filter-mismatch case above: the awaited dispatch()
+      // resolves only after every attempted delivery completed, so no wait is needed before asserting.
       await webhookService.dispatch(session, 'message.received', { from: 'a@c.us' });
-      await new Promise(r => setTimeout(r, 100));
       expect(received).toHaveLength(0);
     });
 

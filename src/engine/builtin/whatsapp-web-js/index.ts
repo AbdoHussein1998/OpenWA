@@ -4,9 +4,9 @@
  */
 
 import { PluginContext, PluginType, IEnginePlugin } from '../../../core/plugins';
-import { IWhatsAppEngine } from '../../../engine/interfaces/whatsapp-engine.interface';
-import { WhatsAppWebJsAdapter } from '../../../engine/adapters/whatsapp-web-js.adapter';
-import { LidMappingStore } from '../../../engine/identity/lid-mapping-store.service';
+import { IWhatsAppEngine } from '../../interfaces/whatsapp-engine.interface';
+import { WhatsAppWebJsAdapter } from '../../adapters/whatsapp-web-js.adapter';
+import { LidMappingStore } from '../../identity/lid-mapping-store.service';
 
 export class WhatsAppWebJsPlugin implements IEnginePlugin {
   type = PluginType.ENGINE as const;

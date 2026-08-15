@@ -239,17 +239,17 @@ List all sessions, scoped to the API key's `allowedSessions`, ordered `createdAt
 
 **Errors:** `401` missing/invalid `X-API-Key`
 
-#### GET /api/sessions/:id
+#### GET /api/sessions/:sessionId
 
 Get a single session by ID.
 
-**Auth:** API key · **Scope:** session-scoped (key's `allowedSessions` enforced against `:id`)
+**Auth:** API key · **Scope:** session-scoped (key's `allowedSessions` enforced against `:sessionId`)
 
 **Path parameters**
 
-| Name | Type   | Description           |
-| ---- | ------ | --------------------- |
-| `id` | string | WhatsApp session UUID |
+| Name        | Type   | Description           |
+| ----------- | ------ | --------------------- |
+| `sessionId` | string | WhatsApp session UUID |
 
 **Response** `200`
 
@@ -271,7 +271,65 @@ Get a single session by ID.
 
 **Errors:** `401` missing/invalid key, or key not scoped to this session · `404` session not found
 
-#### GET /api/sessions/:id/qr
+#### GET /api/sessions/:sessionId/config
+
+Get the effective tunable configuration for a session. Only the three recognised keys are reported,
+resolved through the same clamps the engine applies — the opaque stored `config` column is never
+echoed back (it is stripped from `SessionResponseDto` alongside `proxyUrl`, and anything else placed
+in it is stored but ignored).
+
+**Auth:** API key · **Scope:** session-scoped (key's `allowedSessions` enforced against `:sessionId`)
+
+**Path parameters**
+
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
+
+**Response** `200`
+
+```json
+{ "autoRejectCalls": false, "maxReconnectAttempts": null, "reconnectBaseDelay": 5000 }
+```
+
+`maxReconnectAttempts: null` means unlimited (the default); `reconnectBaseDelay` is milliseconds.
+See §5 (Database Design) for what each key does and the moment it is read.
+
+**Errors:** `401` · `403` key not scoped to this session · `404` session not found
+
+#### PATCH /api/sessions/:sessionId/config
+
+Merge a patch into the session's tunable configuration. No restart is required or performed:
+omitted keys keep their stored value, and an explicit `null` clears a key back to its default (the
+only way back to unlimited reconnect attempts once a cap is set). `autoRejectCalls` is re-read on
+every incoming call, so it applies immediately; the two reconnect settings are read once per start
+and therefore apply on the next start, leaving a reconnect sequence already in flight alone.
+
+**Auth:** API key (OPERATOR) · **Scope:** session-scoped
+
+**Path parameters**
+
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
+
+**Request body** — `UpdateSessionConfigDto` (any subset; each key also accepts `null`)
+
+| Field                  | Type    | Constraints               | Description                                                        |
+| ---------------------- | ------- | ------------------------- | ------------------------------------------------------------------ |
+| `autoRejectCalls`      | boolean | —                         | Auto-reject every incoming call as soon as it rings                |
+| `maxReconnectAttempts` | number  | integer, 0–20             | Reconnect attempt cap (`0` disables reconnect; `null` = unlimited) |
+| `reconnectBaseDelay`   | number  | integer, 1000–300000 (ms) | Base delay of the reconnect backoff                                |
+
+```json
+{ "maxReconnectAttempts": 5 }
+```
+
+**Response** `200` — the resulting `SessionConfigResponseDto` (same shape as the GET above).
+
+**Errors:** `400` a supplied value is outside its accepted range · `401` · `403` key lacks OPERATOR role or is not scoped to this session · `404` session not found
+
+#### GET /api/sessions/:sessionId/qr
 
 Get the QR code (PNG data URL) for session authentication.
 
@@ -279,9 +337,9 @@ Get the QR code (PNG data URL) for session authentication.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Response** `200` — `QRCodeResponseDto`
 
@@ -304,9 +362,9 @@ Get all groups the session is a member of (paginated).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Query parameters**
 
@@ -325,7 +383,7 @@ Bare array mapped from the engine's group list then paginated. `linkedParentJID`
 
 **Errors:** `400` session not started (engine not in memory) · `401` · `403` · `404` session not found
 
-#### GET /api/sessions/:id/chats
+#### GET /api/sessions/:sessionId/chats
 
 Get active chats for a session, most-recent first (paginated).
 
@@ -333,9 +391,9 @@ Get active chats for a session, most-recent first (paginated).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Query parameters**
 
@@ -424,7 +482,7 @@ network cannot reach WhatsApp directly. Set `proxyUrl`/`proxyType` on the same r
 
 > ⚠ `proxyUrl` **must point at a real, reachable proxy server.** A placeholder or unreachable value
 > (e.g. `http://proxy.example.com:8080`) launches the engine pinned to a dead proxy, so the WhatsApp
-> WebSocket never connects, **no QR code is ever delivered**, and `POST /api/sessions/:id/start`
+> WebSocket never connects, **no QR code is ever delivered**, and `POST /api/sessions/:sessionId/start`
 > returns `504 Gateway Timeout` after ~30s. Leave `proxyUrl` unset unless you genuinely need a proxy.
 
 **Response** `201`
@@ -449,7 +507,7 @@ Like every other session route, this returns the `SessionResponseDto` shape (via
 
 **Errors:** `400` validation (bad `name`/`proxyUrl`/`proxyType`, or an extra non-whitelisted field) · `401` · `403` key lacks OPERATOR role · `409` session name already exists
 
-#### POST /api/sessions/:id/start
+#### POST /api/sessions/:sessionId/start
 
 Start a session and initialize the WhatsApp connection.
 
@@ -457,9 +515,9 @@ Start a session and initialize the WhatsApp connection.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 No request body.
 
@@ -485,7 +543,7 @@ Returned via `transformSession`. Status typically transitions to `initializing` 
 
 **Errors:** `400` session already started / already starting · `401` · `403` · `404` not found · `409` credential teardown for the same session name still in flight (retryable; body carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; no destructive side effect runs before the refusal — a retry after cleanup settles proceeds)
 
-#### POST /api/sessions/:id/stop
+#### POST /api/sessions/:sessionId/stop
 
 Stop a session and disconnect WhatsApp.
 
@@ -493,9 +551,9 @@ Stop a session and disconnect WhatsApp.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 No request body.
 
@@ -519,9 +577,9 @@ No request body.
 
 Returned via `transformSession`; status typically becomes `disconnected`.
 
-**Errors:** `401` · `403` · `404` not found
+**Errors:** `401` · `403` · `404` not found · `409` another node currently holds this session's live engine (multi-node deployments) · `502` `SESSION_STOP_INCOMPLETE` — session stopped locally but the engine teardown did not complete (retryable; the graceful disconnect and the force-destroy escalation both failed, status `disconnected`, no success audit)
 
-#### POST /api/sessions/:id/logout
+#### POST /api/sessions/:sessionId/logout
 
 Attempt an engine-native unlink of this companion device, then tear the session down locally.
 
@@ -560,9 +618,9 @@ simply be left as-is.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 No request body.
 
@@ -590,7 +648,7 @@ distinguishing an intentional unlink from a plain stop.
 
 **Errors:** `400` session is not started (no engine to send through; the row is left untouched) · `401` · `403` · `404` not found · `502` `SESSION_LOGOUT_INCOMPLETE` — session stopped locally but the logout operation did not complete (retryable; `phone` cleared, no success audit)
 
-#### POST /api/sessions/:id/force-kill
+#### POST /api/sessions/:sessionId/force-kill
 
 Force-kill a stuck session (SIGKILL the wedged engine, then tear it down).
 
@@ -598,9 +656,9 @@ Force-kill a stuck session (SIGKILL the wedged engine, then tear it down).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 No request body.
 
@@ -626,7 +684,7 @@ Returned via `transformSession`.
 
 **Errors:** `400` session is not started (no live engine to kill) · `401` · `403` · `404` not found
 
-#### POST /api/sessions/:id/pairing-code
+#### POST /api/sessions/:sessionId/pairing-code
 
 Request an 8-char pairing code to link via phone number (alternative to QR).
 
@@ -634,9 +692,9 @@ Request an 8-char pairing code to link via phone number (alternative to QR).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `RequestPairingCodeDto`
 
@@ -658,7 +716,7 @@ Request an 8-char pairing code to link via phone number (alternative to QR).
 
 **Errors:** `400` validation, or session not started, or already authenticated · `401` · `403` · `404` not found
 
-#### POST /api/sessions/:id/presence/subscribe
+#### POST /api/sessions/:sessionId/presence/subscribe
 
 Ask WhatsApp to start reporting who is online or typing in a chat.
 
@@ -666,7 +724,7 @@ Ask WhatsApp to start reporting who is online or typing in a chat.
 
 There is no synchronous answer: presence cannot be _fetched_ from either engine, only received.
 Updates arrive as the `presence.update` webhook and socket event; the latest is readable at
-`GET /api/sessions/:id/presence/:chatId`.
+`GET /api/sessions/:sessionId/presence/:chatId`.
 
 Two properties to design around:
 
@@ -679,9 +737,9 @@ Two properties to design around:
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `SubscribePresenceDto`
 
@@ -697,7 +755,7 @@ Two properties to design around:
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `501` the active engine cannot observe presence (whatsapp-web.js exposes only `sendPresenceAvailable`/`sendPresenceUnavailable`, which publish the account's _own_ presence, and emits no presence event)
 
-#### GET /api/sessions/:id/presence/:chatId
+#### GET /api/sessions/:sessionId/presence/:chatId
 
 The last presence reported for a chat.
 
@@ -729,7 +787,7 @@ restart would be worse than answering nothing.
 
 **Errors:** `401` · `403` · `404` session not found
 
-#### PUT /api/sessions/:id/presence
+#### PUT /api/sessions/:sessionId/presence
 
 Set the account's OWN global presence: appear online or offline. WhatsApp routes notifications away
 from the phone while a linked device announces itself online, so a headless bot that never goes
@@ -760,7 +818,7 @@ leaving the account silently online.
 
 **Errors:** `400` session not started / validation · `401` · `403` key lacks OPERATOR role · `404` session not found · `409` engine not ready
 
-#### POST /api/sessions/:id/chats/read
+#### POST /api/sessions/:sessionId/chats/read
 
 Mark a chat as read/seen.
 
@@ -768,9 +826,9 @@ Mark a chat as read/seen.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `MarkChatReadDto`
 
@@ -792,7 +850,7 @@ Returns HTTP `200`, matching the OpenAPI contract.
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/unread
+#### POST /api/sessions/:sessionId/chats/unread
 
 Mark a chat as unread.
 
@@ -800,9 +858,9 @@ Mark a chat as unread.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `MarkChatReadDto` (reused)
 
@@ -824,7 +882,7 @@ Returns HTTP `200`, matching the OpenAPI contract.
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### DELETE /api/sessions/:id/chats/:chatId/messages
+#### DELETE /api/sessions/:sessionId/chats/:chatId/messages
 
 Delete every message in a chat, keeping the chat itself in the list.
 
@@ -832,10 +890,10 @@ Delete every message in a chat, keeping the chat itself in the list.
 
 **Path parameters**
 
-| Name     | Type   | Description                                                                           |
-| -------- | ------ | ------------------------------------------------------------------------------------- |
-| `id`     | string | Session UUID                                                                          |
-| `chatId` | string | Engine-native JID, e.g. `1234567890-123@g.us`. URL-encode it if your client does not. |
+| Name        | Type   | Description                                                                           |
+| ----------- | ------ | ------------------------------------------------------------------------------------- |
+| `sessionId` | string | Session UUID                                                                          |
+| `chatId`    | string | Engine-native JID, e.g. `1234567890-123@g.us`. URL-encode it if your client does not. |
 
 **Response** `200`
 
@@ -849,7 +907,7 @@ Delete every message in a chat, keeping the chat itself in the list.
 
 **Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/archive
+#### POST /api/sessions/:sessionId/chats/archive
 
 Archive or unarchive a chat.
 
@@ -857,9 +915,9 @@ Archive or unarchive a chat.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `ArchiveChatDto`
 
@@ -889,7 +947,7 @@ Archive or unarchive a chat.
 
 **Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/mute
+#### POST /api/sessions/:sessionId/chats/mute
 
 Mute a chat's notifications until a given moment, or unmute it.
 
@@ -897,9 +955,9 @@ Mute a chat's notifications until a given moment, or unmute it.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `MuteChatDto`
 
@@ -941,7 +999,7 @@ Mute a chat's notifications until a given moment, or unmute it.
 **Errors:** `400` session not ready, or invalid `chatId`/`muteUntil` · `401` missing/invalid API key ·
 `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/pin
+#### POST /api/sessions/:sessionId/chats/pin
 
 Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct from
 `messages/pin`, which pins a message inside a chat.
@@ -950,9 +1008,9 @@ Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct fro
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `PinChatDto`
 
@@ -984,7 +1042,7 @@ Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct fro
 **Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found ·
 `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/delete
+#### POST /api/sessions/:sessionId/chats/delete
 
 Delete a chat from the chat list (e.g. a group you have left).
 
@@ -992,9 +1050,9 @@ Delete a chat from the chat list (e.g. a group you have left).
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `DeleteChatDto`
 
@@ -1016,7 +1074,7 @@ Returns HTTP `200`, matching the OpenAPI contract.
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
-#### POST /api/sessions/:id/chats/typing
+#### POST /api/sessions/:sessionId/chats/typing
 
 Send a typing/recording presence indicator to a chat (or clear it with `paused`).
 
@@ -1024,9 +1082,9 @@ Send a typing/recording presence indicator to a chat (or clear it with `paused`)
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Request body** — `SendChatStateDto`
 
@@ -1049,7 +1107,7 @@ Always returns `{ "success": true }` (the service returns void; the controller h
 
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found
 
-#### DELETE /api/sessions/:id
+#### DELETE /api/sessions/:sessionId
 
 Delete a session.
 
@@ -1057,9 +1115,9 @@ Delete a session.
 
 **Path parameters**
 
-| Name | Type   | Description  |
-| ---- | ------ | ------------ |
-| `id` | string | Session UUID |
+| Name        | Type   | Description  |
+| ----------- | ------ | ------------ |
+| `sessionId` | string | Session UUID |
 
 **Response** `204` — empty body (`@HttpCode(204)`, returns void). A `findOne` lookup runs first, so a missing id yields `404`.
 
@@ -1376,7 +1434,7 @@ Get the processing status and progress of a bulk batch.
 ### Send pacing (opt-in, `429 SEND_PACING_LIMITED`)
 
 Every outbound message send — the `messages/send-*` routes, `messages/edit`, `messages/forward`,
-bulk batches, status posts and both catalog sends (`messages/send-product`, `messages/send-catalog`) — passes an optional pacing governor before
+bulk batches, status posts and the catalog send (`messages/send-product`) — passes an optional pacing governor before
 it reaches WhatsApp. Actions on existing messages (react, vote, pin, star) are not sends and are
 not paced. It is **off by default**: unless `SEND_PACING_ENABLED=true`, nothing is refused and no
 extra work is done.
@@ -1504,7 +1562,7 @@ Nine `send-*` routes accept an optional `quotedMessageId`: `send-text` above, an
 a contact card or a poll — not only text. `POST .../messages/reply` is unchanged and remains the text
 shorthand.
 
-`send-template`, `send-bulk`, `send-product` and `send-catalog` do NOT accept the field, and reject it
+`send-template`, `send-bulk` and `send-product` do NOT accept the field, and reject it
 as an unknown property.
 
 ```json
@@ -3431,49 +3489,6 @@ On whatsapp-web.js the readiness guard runs before the refusal, so a session tha
 
 **Errors:** `400` missing `chatId`/`productId`, wrong types, or any field not on the DTO · `401` missing/invalid API key · `403` API-key role below OPERATOR · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY (whatsapp-web.js only) · `500` engine error
 
-#### POST /api/sessions/:sessionId/messages/send-catalog
-
-Send the business catalog link to a chat. Note: this route lives under the `/messages` path but belongs to the catalog module.
-
-**Auth:** API key (OPERATOR)
-
-**Path parameters**
-
-| Name        | Type   | Description          |
-| ----------- | ------ | -------------------- |
-| `sessionId` | string | WhatsApp session id. |
-
-**Request body** — `SendCatalogDto`
-
-| Field    | Type   | Required | Constraints | Description                    |
-| -------- | ------ | -------- | ----------- | ------------------------------ |
-| `chatId` | string | Yes      | `@IsString` | Target chat/recipient id.      |
-| `body`   | string | No       | `@IsString` | Optional message body/caption. |
-
-```json
-{
-  "chatId": "6281234567890@c.us",
-  "body": "Browse our full catalog here"
-}
-```
-
-**Response** `501` (not implemented on either engine)
-
-```json
-{
-  "statusCode": 501,
-  "message": "Operation not supported by the active engine: sendCatalog",
-  "error": "Not Implemented"
-}
-```
-
-No engine implements this. whatsapp-web.js and Baileys both raise `EngineNotSupportedError`, so the
-route cannot return a success body on any deployment; it is documented here because it is mounted.
-On whatsapp-web.js the readiness guard runs before the refusal, so a session that exists but is not
-`READY` gets `409` instead of `501`; Baileys refuses unconditionally.
-
-**Errors:** `400` missing/invalid `chatId` or any non-DTO field · `401` missing/invalid API key · `403` API-key role below OPERATOR · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY (whatsapp-web.js only) · `500` engine error
-
 #### GET /api/sessions/:sessionId/channels
 
 List all channels/newsletters the session is subscribed to.
@@ -3828,7 +3843,7 @@ Every chat carrying a label.
 
 **Auth:** API key · **Scope:** session-scoped · **Engines:** whatsapp-web.js only
 
-**Response** `200` — a bare array of `ChatSummary`, the same shape `GET /sessions/:id/chats` returns.
+**Response** `200` — a bare array of `ChatSummary`, the same shape `GET /sessions/:sessionId/chats` returns.
 
 **Errors:** `400` session not started · `401` · `404` session not found · `501` Baileys, which has no label query
 
@@ -4256,7 +4271,7 @@ The service returns `void`; the controller returns a fixed success object. DELET
 
 Webhooks are configured per session and managed under `/api/sessions/:sessionId/webhooks` (handled by `WebhookController`). Two cross-session endpoints live on `WebhooksListController`: `GET /api/webhooks` (list, **OPERATOR**) and `GET /api/webhooks/delivery-failures` (dead-letter log, **ADMIN**). Every other route requires an API key with **OPERATOR** role or higher.
 
-Two fields — `secret` and `headers` — are **write-only**: they are accepted on create/update but are never returned by any webhook route (the response DTO has no `@Expose` for them, so `fromEntity` drops them). The one exception is `GET /api/infra/export-data`, which dumps the `webhooks` rows verbatim and so carries both in cleartext. The `secret` is used to compute the `X-OpenWA-Signature: sha256=<hex>` HMAC-SHA256 header on deliveries.
+Two fields — `secret` and `headers` — are **write-only**: they are accepted on create/update but are never returned by any webhook route (the response DTO has no `@Expose` for them, so `fromEntity` drops them). `GET /api/infra/export-data` also omits both from its `webhooks` rows, so a backup no longer carries webhook credentials — a restored webhook comes back unsigned (`secret` null, `headers` `{}`) until you set them again. The `secret` is used to compute the `X-OpenWA-Signature: sha256=<hex>` HMAC-SHA256 header on deliveries.
 
 The `events` array accepts these members plus the `*` wildcard: `message.received`, `message.sent`, `message.ack`, `message.failed`, `message.revoked`, `message.reaction`, `message.edited`, `session.status`, `session.qr`, `session.authenticated`, `session.disconnected`, `session.reconnect_loop`, `session.restriction`, `presence.update`, `call.accepted`, `call.rejected`, `call.missed`, `group.join`, `group.leave`, `group.update`, `group.join_request`, `call.received`, `status.received`. All of them are actively dispatched by at least one engine — none is a reserved placeholder. Four are **Baileys only**, because whatsapp-web.js produces no callback behind them: `presence.update` (its prerequisite `POST .../presence/subscribe` answers `501` there, so this one announces itself) and `call.accepted` / `call.rejected` / `call.missed` (whatsapp-web.js sees a call ring but never its outcome, so these three are accepted on subscribe and then simply never fire). See the per-event catalog below for engine scope.
 
@@ -4409,9 +4424,9 @@ Create a webhook for the session.
 
 **Path parameters**
 
-| Name      | Type   | Description                                                                                                              |
-| --------- | ------ | ------------------------------------------------------------------------------------------------------------------------ |
-| sessionId | string | Session the webhook is scoped to; stored as `webhook.sessionId`. No session-existence check is performed at create time. |
+| Name      | Type   | Description                                                                                                                                   |
+| --------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| sessionId | string | Session the webhook is scoped to; stored as `webhook.sessionId`. The session must exist — an unknown id is refused with `404` at create time. |
 
 **Request body** — `CreateWebhookDto`
 
@@ -4419,8 +4434,8 @@ Create a webhook for the session.
 | ---------- | ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | url        | string                 | yes      | `@IsUrl({ require_tld: false })` (allows hostnames without a dot, e.g. `http://localhost:3000`); also run through the SSRF guard, which can reject with `400`. Entity column max 2048 chars.                                                                                                                                                                           | Webhook URL to receive events.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | events     | string[]               | no       | `@IsArray`, `@ArrayMinSize(1)`, `@IsIn([...WEBHOOK_EVENTS, '*'], { each: true })`                                                                                                                                                                                                                                                                                      | Event names to subscribe to (see allowed set above). Defaults to `["message.received"]` when omitted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| secret     | string                 | no       | `@IsString`, `@MaxLength(255)`                                                                                                                                                                                                                                                                                                                                         | HMAC-SHA256 signing key. **Write-only** — never returned by a webhook route (`GET /api/infra/export-data` does return it). Used for `X-OpenWA-Signature`. Defaults to `null`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| headers    | Record<string,string>  | no       | `@IsHeaderMap()` — flat object (not array), ≤50 entries, names match `/^[A-Za-z0-9-]+$/`, values are strings ≤1024 chars with no C0 control/DEL (CR/LF injection guard).                                                                                                                                                                                               | Custom headers added to deliveries. **Write-only** — never returned by a webhook route (`GET /api/infra/export-data` does return it). At delivery, `content-type` and `x-openwa-*` names are stripped. Defaults to `{}`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| secret     | string                 | no       | `@IsString`, `@MaxLength(255)`                                                                                                                                                                                                                                                                                                                                         | HMAC-SHA256 signing key. **Write-only** — never returned by a webhook route (not returned by `GET /api/infra/export-data` either). Used for `X-OpenWA-Signature`. Defaults to `null`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| headers    | Record<string,string>  | no       | `@IsHeaderMap()` — flat object (not array), ≤50 entries, names match `/^[A-Za-z0-9-]+$/`, values are strings ≤1024 chars with no C0 control/DEL (CR/LF injection guard).                                                                                                                                                                                               | Custom headers added to deliveries. **Write-only** — never returned by a webhook route (not returned by `GET /api/infra/export-data` either). At delivery, `content-type` and `x-openwa-*` names are stripped. Defaults to `{}`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | filters    | WebhookFilters \| null | no       | `@IsValidWebhookFilters()` — `{ conditions: [...] }`; each condition `{ field, operator('is'\|'isNot'\|'contains'\|'equals'), value(string\|string[]\|boolean), caseSensitive?:boolean }`; bounds: max 20 conditions, 100 values/condition, 1000-char text values. Message fields: `sender`, `recipient`, `body`, `type`, `isGroup`, `fromMe`, `hasMedia`, `mentions`. | Optional AND pre-filter; **all** conditions must match for the webhook to fire. Omit/null = fire on every subscribed event. Defaults to `null`. ⚠️ A condition whose field is DEFINED for the event family but absent from that event's payload cannot match, so it suppresses the event entirely (a field with no definition for the family is skipped instead, and does not suppress) — `message.ack`/`message.failed` carry `{ id, messageId, status, ack }` and `message.reaction` carries `{ messageId, chatId, reaction, senderId }`, none of which has a sender or body, so a `sender` filter silently drops all three. Scope the subscription with `events[]` rather than relying on a filter to be inert. Set `LOG_LEVEL=debug` to see each suppression and the payload fields that were available. |
 | retryCount | number (int)           | no       | `@IsInt`, `@Min(0)`, `@Max(5)`                                                                                                                                                                                                                                                                                                                                         | Delivery retry attempts on failure. Defaults to `3`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
@@ -4464,7 +4479,7 @@ Create a webhook for the session.
 
 `secret` and `headers` are deliberately excluded from the response. `active` defaults to `true`, `lastTriggeredAt` is `null` on create.
 
-**Errors:** `400` validation failure, unknown body field (whitelist), SSRF URL rejection, or the per-session webhook limit (`WEBHOOK_MAX_PER_SESSION`, default 16 — delete an existing webhook before registering another; webhooks already above the cap are grandfathered and keep working) · `401` missing/invalid API key · `403` insufficient role
+**Errors:** `400` validation failure, unknown body field (whitelist), URL rejection (SSRF guard, or embedded credentials in the URL), or the per-session webhook limit (`WEBHOOK_MAX_PER_SESSION`, default 16 — delete an existing webhook before registering another; webhooks already above the cap are grandfathered and keep working) · `401` missing/invalid API key · `403` insufficient role · `404` session not found (message `"Session with id '<id>' not found"`)
 
 #### PUT /api/sessions/:sessionId/webhooks/:id
 
@@ -4519,7 +4534,7 @@ Update a webhook. Partial — only fields present in the body are changed.
 
 Returns the saved entity; `secret` and `headers` excluded.
 
-**Errors:** `400` validation failure, unknown body field (whitelist), or SSRF URL rejection · `401` missing/invalid API key · `403` insufficient role · `404` webhook not found in this session
+**Errors:** `400` validation failure, unknown body field (whitelist), or URL rejection (SSRF guard, or embedded credentials in the URL) · `401` missing/invalid API key · `403` insufficient role · `404` webhook not found in this session
 
 #### POST /api/sessions/:sessionId/webhooks/:id/test
 
@@ -4800,9 +4815,9 @@ System endpoints expose operational status, Prometheus metrics, aggregate statis
 
 #### GET /api/health
 
-Basic health check returning status, the current timestamp, and the running app version.
+Basic health check returning status and the current timestamp; the running app version is disclosed only to authenticated callers.
 
-**Auth:** public
+**Auth:** public — the check itself needs no credentials, so uptime probes keep working. The `version` field is added only when the request carries a valid API key (`X-API-Key` header or `Authorization: Bearer`); an absent or invalid key still answers `200` without it.
 
 **Response** `200`
 
@@ -4810,7 +4825,7 @@ Basic health check returning status, the current timestamp, and the running app 
 { "status": "ok", "timestamp": "2026-06-25T12:34:56.789Z", "version": "0.7.3" }
 ```
 
-Notes: `timestamp` is an ISO-8601 string (`new Date().toISOString()`). `version` is read from `package.json` at module load. Exempt from rate limiting (`@SkipThrottle`).
+Notes: `timestamp` is an ISO-8601 string (`new Date().toISOString()`). `version` is read from `package.json` at module load and present only on an authenticated request. Exempt from rate limiting (`@SkipThrottle`).
 
 #### GET /api/health/live
 
@@ -5023,28 +5038,6 @@ Get application settings (environment-derived; `general`/`api`/`notifications` g
 Notes: raw return of an in-memory `Settings` object built once in the controller constructor from `ConfigService` (snapshotted at construction, not re-read per request). `api.rateLimitWindow` is in ms. `enableDocs` reflects the `ENABLE_SWAGGER` gate (enabled by default outside production; disabled by default in production unless explicitly enabled). Only `notifications.*` is currently hardcoded (`emailEnabled: false`, `notificationEmail: ''`, `webhookAlerts: true`).
 
 **Errors:** `401` — missing/invalid `X-API-Key` · `403` — API key lacks the ADMIN role, or the key is session-restricted.
-
-#### PUT /api/settings
-
-Update settings — intentionally not implemented; always returns `501` (settings are env-derived and read-only at runtime).
-
-**Auth:** API key (ADMIN)
-
-**Request body** — none. There is no request DTO; any body is ignored (the exception is thrown before validation matters).
-
-**Response** `501`
-
-```json
-{
-  "statusCode": 501,
-  "message": "Settings are derived from environment configuration and are read-only at runtime. Change the corresponding environment variable and restart the service.",
-  "error": "Not Implemented"
-}
-```
-
-Notes: the handler unconditionally throws `NotImplementedException`. Even an ADMIN key always gets `501`; there is no success response.
-
-**Errors:** `401` — missing/invalid key · `403` — key lacks `ADMIN` · `501` — always (not implemented).
 
 #### GET /api/audit
 
@@ -5434,7 +5427,7 @@ The migration set (`MigrationTables`) is, in payload-key order: `sessions`, `web
 }
 ```
 
-Rows are raw DB column shapes (e.g. `messageBatches` rows use snake_case columns: `batch_id`, `session_id`, `current_index`, `created_at`, …). **`webhooks` rows include `secret` in cleartext**, and `pluginInstances` rows carry integration secrets — treat the payload as a credential dump. On Postgres the generated `body_ts` FTS column is stripped from `messages` so archives stay dialect-neutral.
+Rows are raw DB column shapes (e.g. `messageBatches` rows use snake_case columns: `batch_id`, `session_id`, `current_index`, `created_at`, …). **`webhooks` rows omit `secret` and `headers`** (webhook credentials are excluded from backups; they restore as `null`/`{}`), while `pluginInstances` rows still carry integration secrets — treat the payload as a credential dump. On Postgres the generated `body_ts` FTS column is stripped from `messages` so archives stay dialect-neutral.
 
 `sessions`/`webhooks` are queried directly, so a hard DB error there yields `500`. The other 12 are queried tolerantly: a _genuinely missing_ table (an older DB that has not run the migration) exports as `[]` and its name is listed in `skippedTables`; any other error (lock, I/O, timeout) fails the export rather than reporting the table as empty. Check `skippedTables` before restoring — a skipped table is "not migrated yet", not "exported empty".
 
@@ -5456,7 +5449,7 @@ Replace all Data DB rows with the supplied export. **Destructive and transaction
 | ----------------------------- | ------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tables`                      | object              | Yes      | Container of per-table row arrays, keyed exactly as the export's `tables`. Absent, `null` or not an object is rejected `400` before the restore runs                         |
 | `tables.sessions`             | `SessionRow[]`      | No       | Inserted first; a row whose `name` is not a safe directory name is skipped with a warning (which then rolls the whole restore back)                                          |
-| `tables.webhooks`             | `WebhookRow[]`      | No       | Includes `secret`                                                                                                                                                            |
+| `tables.webhooks`             | `WebhookRow[]`      | No       | Export rows omit `secret`/`headers`; an absent key restores as `null`/`{}`                                                                                                   |
 | `tables.messageBatches`       | `MessageBatchRow[]` | No       | snake_case columns                                                                                                                                                           |
 | `tables.*` (the remaining 11) | `Row[]`             | No       | Same keys as the export; an omitted table restores **zero** rows into an emptied table                                                                                       |
 | `stopOrphans`                 | boolean             | No       | Stop the running engines for sessions the backup does not contain, inside this request and before the replace (best-effort, time-bounded per engine). Preferred over `force` |
@@ -5533,7 +5526,7 @@ Replace all Data DB rows with the supplied export. **Destructive and transaction
 
 **Orphan-engine pre-flight.** Before the transaction opens, any running engine whose session id is absent from `tables.sessions` is an orphan (the replace would delete its DB row, leaving an unstoppable engine writing into freshly restored tables). Default behaviour is to refuse with `409` listing those ids; `stopOrphans: true` stops them in-request and proceeds; `force: true` proceeds and leaves them running until restart.
 
-Because that pre-flight runs _before_ the transaction, its teardown is not covered by the rollback. A response with `imported:false` therefore still reports the engines it really stopped, and `restartRequired` on that path means only that a teardown **failed** — a cleanly stopped orphan leaves its session row intact (restart it with `POST /sessions/{id}/start`), and an engine `force` left running was never orphaned after all, since the data that would have orphaned it was not replaced.
+Because that pre-flight runs _before_ the transaction, its teardown is not covered by the rollback. A response with `imported:false` therefore still reports the engines it really stopped, and `restartRequired` on that path means only that a teardown **failed** — a cleanly stopped orphan leaves its session row intact (restart it with `POST /sessions/{sessionId}/start`), and an engine `force` left running was never orphaned after all, since the data that would have orphaned it was not replaced.
 
 Inside the transaction every migration table is emptied. `webhooks` and `sessions` are DELETEd directly, so a missing table there fails the restore; 11 more go through a tolerant helper where a _genuinely missing_ table is skipped; and `automation_rules` is emptied by the `DELETE FROM sessions` cascade rather than by the helper. Any other DELETE failure propagates to the rollback. Rows are then re-inserted, sessions first. JSON object/array fields are auto-stringified before insert, and the Postgres-form `$N` placeholders are rewritten for SQLite. Two guards return `imported:false` after a rollback: any `warnings`, and a payload that restores **zero** rows in total (a wrong/empty backup would otherwise commit a silent wipe — the response then carries `Backup contained no rows to restore; refused to replace existing data. Check the file.`). On commit the lid→phone mirror is reloaded from the restored rows.
 
@@ -5754,17 +5747,17 @@ all kept. A directory the gateway did not install is still refused.
 
 #### POST /api/plugins/install-url
 
-Install a plugin by downloading its `.zip` from an HTTPS URL (SSRF-guarded fetch: host validated, redirects followed with every hop re-validated through the guard and the chain capped at 5 hops, size-capped at `plugins.downloadMaxBytes`, default 5 MB). Plain `http://` is rejected — the package is executable code and must be integrity-protected in transit; private-network targets remain subject to the SSRF guard. A redirect hop that downgrades back to plain `http://` mid-chain is likewise refused (set `PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS=true` only if your vendor genuinely redirects that way); a chain over the cap fails with an explicit "too many redirects" error.
+Install a plugin by downloading its `.zip` from a URL (SSRF-guarded fetch: host validated, redirects followed with every hop re-validated through the guard and the chain capped at 5 hops, size-capped at `plugins.downloadMaxBytes`, default 5 MB). `https://` is accepted as-is; plain `http://` is only accepted when the URL carries a content pin (below) — the package is executable code and must be integrity-protected in transit; private-network targets remain subject to the SSRF guard. A redirect hop that downgrades back to plain `http://` mid-chain is likewise refused (set `PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS=true` only if your vendor genuinely redirects that way); a chain over the cap fails with an explicit "too many redirects" error.
 
-Optional content pinning: append `#sha256=<64 hex>` (URL fragment — never sent to the server) to require the downloaded bytes to match that digest; the fragment is the only honored marker — query params are deliberately ignored. A mismatch or a malformed marker fails the install closed; no marker means no verification (HTTPS + the SSRF guard are the baseline).
+Content pinning: append `#sha256=<64 hex>` (URL fragment — never sent to the server) to require the downloaded bytes to match that digest; the fragment is the only honored marker — query params are deliberately ignored. A mismatch or a malformed marker fails the install closed. The pin is optional over HTTPS (TLS + the SSRF guard are the baseline) and REQUIRED over plain HTTP, which is rejected without one.
 
 **Auth:** API key (ADMIN)
 
 **Request body** — `InstallFromUrlDto` (class-validated; extra fields → `400`)
 
-| Field | Type   | Required | Constraints                                              | Description                                                       |
-| ----- | ------ | -------- | -------------------------------------------------------- | ----------------------------------------------------------------- |
-| `url` | string | Yes      | `@IsUrl({ protocols:['https'], require_protocol:true })` | Absolute https URL of the package; optional `#sha256=` digest pin |
+| Field | Type   | Required | Constraints                                                     | Description                                                                            |
+| ----- | ------ | -------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `url` | string | Yes      | `@IsUrl({ protocols:['http','https'], require_protocol:true })` | Absolute URL of the package; https as-is, plain http only with a `#sha256=` digest pin |
 
 ```json
 { "url": "https://github.com/openwa-plugins/chat-flow/releases/download/v1.0.0/chat-flow.zip" }
@@ -5919,7 +5912,7 @@ Set which sessions a session-scoped plugin is activated for. This is a **full re
 
 #### POST /api/plugins/:id/update
 
-Update an installed plugin in place from a URL, preserving config + enabled state. The new package is written to a staging sibling and validated BEFORE the running plugin is stopped, then swapped in with two renames (live → backup, staging → live); a failure before or during the swap restores the previous version, and a process crash mid-swap is reconciled at boot (the backup is restored when the live directory is missing), so an interrupted update can never make the plugin silently vanish. Accepts the same optional `#sha256=` digest pin as `install-url` (fail-closed on mismatch).
+Update an installed plugin in place from a URL, preserving config + enabled state. The new package is written to a staging sibling and validated BEFORE the running plugin is stopped, then swapped in with two renames (live → backup, staging → live); a failure before or during the swap restores the previous version, and a process crash mid-swap is reconciled at boot (the backup is restored when the live directory is missing), so an interrupted update can never make the plugin silently vanish. The URL follows the same transport rule as `install-url`: https as-is, plain http only with a `#sha256=` digest pin (fail-closed on mismatch).
 
 **Auth:** API key (ADMIN)
 
@@ -5931,9 +5924,9 @@ Update an installed plugin in place from a URL, preserving config + enabled stat
 
 **Request body** — `InstallFromUrlDto` (class-validated)
 
-| Field | Type   | Required | Constraints                                              | Description                                                                                  |
-| ----- | ------ | -------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `url` | string | Yes      | `@IsUrl({ protocols:['https'], require_protocol:true })` | Absolute https URL of the new `.zip` (SSRF-guarded download); optional `#sha256=` digest pin |
+| Field | Type   | Required | Constraints                                                     | Description                                                                                          |
+| ----- | ------ | -------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `url` | string | Yes      | `@IsUrl({ protocols:['http','https'], require_protocol:true })` | Absolute URL of the new `.zip` (SSRF-guarded download); https as-is, http only with a `#sha256=` pin |
 
 ```json
 { "url": "https://example.com/plugins/chat-flow-1.1.0.zip" }
@@ -6395,6 +6388,166 @@ Partial update (any subset of the create fields). **Auth:** API key (OPERATOR) �
 
 Delete a rule. **Auth:** API key (OPERATOR) · **Response** `204`.
 
+### 6.4.17 Integration fabric (ingress & instances)
+
+The operator surface of the Integration Fabric — **doc 25** holds the design (DLQ, ordering,
+per-instance fairness); this section is the route reference. An ADMIN key provisions per-plugin
+instances — one bound provider account, e.g. one Chatwoot inbox — and each instance gets one
+ingress URL per route the plugin declares. Only a plugin that declares an ingress route AND the
+`webhook:ingress` permission can have instances; any other plugin is rejected before persistence.
+
+An instance's ingress `secret` and `verifyToken` are revealed **once** — in the create and
+regenerate-secret responses — and masked (`***`) on every later read. `config` fields flagged
+`secret` in the plugin's config schema stay masked even in those one-shot reveal responses.
+
+Every instance route is session-scope aware: a key restricted to `allowedSessions` only sees
+instances bound to one of its own sessions, and an out-of-scope instance answers `404` (identical
+to a missing one), so the routes cannot probe which instances exist on other sessions. The DLQ
+redrive route is documented with the administration routes in §6.4.11.
+
+#### POST /api/integration/plugins/:pluginId/instances
+
+Create an instance of an ingress-capable plugin.
+
+**Auth:** API key (ADMIN)
+
+**Path parameters**
+
+| Name       | Type   | Description                                                      |
+| ---------- | ------ | ---------------------------------------------------------------- |
+| `pluginId` | string | Plugin to instantiate (must declare ingress + `webhook:ingress`) |
+
+**Request body** — `CreateInstanceDto`
+
+| Field          | Type   | Required | Constraints                                 | Description                                                                                |
+| -------------- | ------ | -------- | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `instanceId`   | string | Yes      | `^[a-zA-Z0-9_-]{1,64}$`                     | Operator-chosen id, unique within the plugin; namespaces the ingress URL and the secret    |
+| `sessionScope` | string | No       | non-empty when present, ≤ 256 chars         | Session id the instance is bound to. Omit for all sessions                                 |
+| `verifyToken`  | string | No       | ≤ 512 chars                                 | Token echoed in the provider's verification handshake. Auto-generated when omitted         |
+| `secret`       | string | No       | 16–512 chars                                | Ingress HMAC secret shared with the provider. Omit to auto-generate a random 64-hex secret |
+| `config`       | object | No       | shape defined by the plugin's config schema | Per-instance config slice passed to the adapter                                            |
+
+```json
+{ "instanceId": "chatwoot-prod-1", "sessionScope": "8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a" }
+```
+
+**Response** `201` — the `InstanceView`, with the plaintext `secret` and `verifyToken` revealed
+**in this response only** — store them immediately.
+
+```json
+{
+  "id": "0e2f…",
+  "pluginId": "chatwoot",
+  "instanceId": "chatwoot-prod-1",
+  "sessionScope": "8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a",
+  "secret": "9f2c…64-hex…",
+  "verifyToken": "a1b2c3d4e5f6",
+  "config": { "inboxId": 42 },
+  "enabled": true,
+  "createdAt": "2026-08-01T10:00:00.000Z",
+  "updatedAt": "2026-08-01T10:00:00.000Z",
+  "ingressUrls": [
+    { "route": "events/message", "url": "https://wa.example.com/api/ingress/chatwoot/chatwoot-prod-1/events/message" }
+  ]
+}
+```
+
+`ingressUrls[].url` is absolute when `BASE_URL` is set, otherwise a relative path to prepend with
+the deployment's own host.
+
+**Errors:** `400` validation, or the plugin is not ingress-capable · `401` · `403` key role < ADMIN, or `sessionScope` outside the key's `allowedSessions` · `404` unknown plugin · `409` instance id already exists
+
+#### GET /api/integration/plugins/:pluginId/instances
+
+List the plugin's instances visible to the calling key (secrets masked).
+
+**Auth:** API key (ADMIN)
+
+**Response** `200` — bare array of `InstanceView`. An instance whose `sessionScope` is outside the
+key's `allowedSessions` is filtered out of the list.
+
+**Errors:** `401` · `403`
+
+#### GET /api/integration/plugins/:pluginId/instances/:instanceId
+
+Get one instance (secret masked).
+
+**Auth:** API key (ADMIN)
+
+**Path parameters**
+
+| Name         | Type   | Description |
+| ------------ | ------ | ----------- |
+| `pluginId`   | string | Plugin id   |
+| `instanceId` | string | Instance id |
+
+**Response** `200` — the `InstanceView`.
+
+**Errors:** `401` · `403` · `404` unknown instance, or one outside the key's `allowedSessions`
+
+#### PATCH /api/integration/plugins/:pluginId/instances/:instanceId
+
+Update an instance (secret masked in the response). Any subset of:
+
+| Field          | Type    | Description                                                                                                         |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `enabled`      | boolean | Whether ingress is accepted and dispatch is active                                                                  |
+| `sessionScope` | string  | Re-bind to another session (must be inside the key's `allowedSessions`; the old scope's binding is torn down first) |
+| `config`       | object  | Replace the per-instance config slice                                                                               |
+
+**Auth:** API key (ADMIN)
+
+**Response** `200` — the updated `InstanceView`.
+
+**Errors:** `400` validation · `401` · `403` key role < ADMIN, or the new `sessionScope` outside the key's `allowedSessions` · `404` unknown instance, or one outside the key's scope
+
+#### DELETE /api/integration/plugins/:pluginId/instances/:instanceId
+
+Delete the instance and tear down its session-scope binding.
+
+**Auth:** API key (ADMIN)
+
+**Response** `204`
+
+**Errors:** `401` · `403` · `404` unknown instance, or one outside the key's scope
+
+#### POST /api/integration/plugins/:pluginId/instances/:instanceId/regenerate-secret
+
+Rotate the instance's ingress HMAC secret.
+
+**Auth:** API key (ADMIN)
+
+**Response** `200` — the `InstanceView` with the **new** plaintext `secret` revealed in this
+response only; the `verifyToken` is also shown (unchanged).
+
+**Errors:** `401` · `403` · `404` unknown instance, or one outside the key's scope
+
+#### GET /api/ingress/:pluginId/:instanceId/:path
+
+#### POST /api/ingress/:pluginId/:instanceId/:path
+
+#### PUT /api/ingress/:pluginId/:instanceId/:path
+
+#### PATCH /api/ingress/:pluginId/:instanceId/:path
+
+#### DELETE /api/ingress/:pluginId/:instanceId/:path
+
+One route, any HTTP method: the inbound webhook endpoint an external provider delivers to. The
+trailing `:path` segment is the plugin-declared route (it may contain slashes, e.g.
+`events/message`); a delivery to a route the plugin did not claim is a `404`.
+
+**Auth:** **none** — `@Public` by design, because a provider cannot present an API key. What
+authenticates a delivery is the per-instance HMAC signature over the exact raw body bytes (the body
+is read raw, never DTO-bound, so the signed bytes reach the verifier unchanged). A `GET` here is
+the provider's verification handshake and answers only when its `verifyToken` matches.
+
+**Response** — the primary success path is `202`: the delivery is persisted and queued for async
+plugin processing. `200` means the `GET` verification-challenge echo, or a duplicate delivery
+already persisted (idempotent re-delivery). A route may shape the synchronous status/body/headers
+the provider sees via its declarative `ack` config (doc 25); the plugin itself always runs async.
+
+**Errors:** `401` signature verification failed (missing, stale, or wrong secret) · `403` `GET` verification challenge failed (`verifyToken` mismatch) · `404` unknown pluginId/instanceId, or no such claimed route · `413` body over the route's `maxBodyBytes` · `429` per-instance rate limit (`INGRESS_INSTANCE_LIMIT` per `INGRESS_INSTANCE_TTL`, on top of the global per-IP throttle)
+
 ## 6.5 Real-time API (WebSocket)
 
 Live events are delivered over a **Socket.IO** connection (not a raw WebSocket). The server mounts a single Socket.IO namespace, **`/events`**, on the same port as the REST API. There are no REST routes in this module.
@@ -6578,7 +6731,7 @@ These are the events OpenWA actually emits. A webhook is registered with an `eve
 | `message.revoked`                                 | A message is deleted/recalled                                                                                                                                                                                                         | `{ id, revokedId?, chatId, from, to, type: "revoked", body: "", timestamp }` — **reconcile on `revokedId`** (the original deleted message's id), falling back to `id`. On whatsapp-web.js `id` is the _revocation notification_ (a distinct message that won't match a stored id) and `revokedId` may be absent when the original isn't cached locally; on Baileys the two coincide                                                                                                                                                                                                      |
 | `message.reaction`                                | A reaction is added, changed, or removed                                                                                                                                                                                              | `{ messageId, chatId, reaction, senderId, reactions? }` — `reactions` is the post-apply `{ senderId: emoji }` snapshot, omitted when the gateway holds no stored copy of the message to compute it from (an ephemeral message, or one predating the session going live); treat it as unknown rather than empty and keep the map you already hold. `reaction` is empty when removed                                                                                                                                                                                                       |
 | `message.edited`                                  | A message body or media caption is edited                                                                                                                                                                                             | `{ messageId, chatId, body, senderId, from, to, fromMe, isGroup, type, hasMedia, author?, mentionedIds?, timestamp }` — `messageId` is the original message id, `body` is the latest text/caption, and `timestamp` is the edit occurrence time in epoch **seconds** (not the original creation time)                                                                                                                                                                                                                                                                                     |
-| `session.qr`                                      | A new pairing QR is generated                                                                                                                                                                                                         | `{ sessionId, qr }` — `qr` is a **PNG data URL** (`data:image/png;base64,…`), the same rendered value `GET /api/sessions/{id}/qr` returns as `qrCode`, not the raw `2@…` linking ref. Render it directly in an `<img src>`; the raw ref never leaves the engine adapter                                                                                                                                                                                                                                                                                                                  |
+| `session.qr`                                      | A new pairing QR is generated                                                                                                                                                                                                         | `{ sessionId, qr }` — `qr` is a **PNG data URL** (`data:image/png;base64,…`), the same rendered value `GET /api/sessions/{sessionId}/qr` returns as `qrCode`, not the raw `2@…` linking ref. Render it directly in an `<img src>`; the raw ref never leaves the engine adapter                                                                                                                                                                                                                                                                                                           |
 | `session.authenticated`                           | The session pairs and becomes ready                                                                                                                                                                                                   | `{ sessionId, phone, pushName }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `session.disconnected`                            | The session disconnects on the engine or WhatsApp side (drop, conflict, or a phone-initiated unlink). Not fired for API-initiated stop/logout/delete — those are acknowledged by the API response and the `session.status` transition | `{ sessionId, reason }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `session.reconnect_loop`                          | Every 5th consecutive reconnect attempt is scheduled (attempt 5, 10, 15, …) — the session is failing to come back up                                                                                                                  | `{ sessionId, attempts, nextDelayMs }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -6674,4 +6827,4 @@ When the queue is enabled, a non-2xx response, timeout (`WEBHOOK_TIMEOUT`, defau
 
 ### SSRF guard on registration
 
-Webhook URLs are validated at **registration time**, not just at delivery. When SSRF protection is enabled (the default), creating or updating a webhook with a URL that resolves to a private/internal/loopback address is rejected synchronously with `400 Bad Request` instead of failing silently later at delivery. The `SSRF_ALLOWED_HOSTS` escape-hatch applies equally to registration and delivery. Operator-supplied custom headers that target reserved names (`Content-Type` or any `X-OpenWA-*`) are stripped, so a webhook config cannot forge the signature, event, or idempotency headers.
+Webhook URLs are validated at **registration time**, not just at delivery. When SSRF protection is enabled (the default), creating or updating a webhook with a URL that resolves to a private/internal/loopback address is rejected synchronously with `400 Bad Request` instead of failing silently later at delivery. The `SSRF_ALLOWED_HOSTS` escape-hatch applies equally to registration and delivery. Independently of the SSRF flag, a URL embedding credentials (`https://user:pass@host/hook`) is rejected with `400` — such credentials would otherwise be persisted and echoed into delivery logs and dead-letter rows. Operator-supplied custom headers that target reserved names (`Content-Type` or any `X-OpenWA-*`) are stripped, so a webhook config cannot forge the signature, event, or idempotency headers.

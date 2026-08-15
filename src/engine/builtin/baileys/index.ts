@@ -4,10 +4,10 @@
  */
 
 import { PluginContext, PluginType, IEnginePlugin } from '../../../core/plugins';
-import { IWhatsAppEngine } from '../../../engine/interfaces/whatsapp-engine.interface';
-import { BaileysAdapter } from '../../../engine/adapters/baileys.adapter';
-import { BaileysMessageStore } from '../../../engine/types/baileys.types';
-import { LidMappingStore } from '../../../engine/identity/lid-mapping-store.service';
+import { IWhatsAppEngine } from '../../interfaces/whatsapp-engine.interface';
+import { BaileysAdapter } from '../../adapters/baileys.adapter';
+import { BaileysMessageStore } from '../../types/baileys.types';
+import { LidMappingStore } from '../../identity/lid-mapping-store.service';
 
 export class BaileysPlugin implements IEnginePlugin {
   type = PluginType.ENGINE as const;

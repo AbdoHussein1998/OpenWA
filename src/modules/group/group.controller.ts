@@ -50,7 +50,7 @@ const PARTICIPANT_ID_400 =
   'A participant does not name an individual. Pass a phone number, `<phone>@c.us` or `<lid>@lid`; ' +
   'a group id or free text is rejected.';
 
-// NOTE: the session→groups LIST lives on the SessionController at GET /sessions/:id/groups (it
+// NOTE: the session→groups LIST lives on the SessionController at GET /sessions/:sessionId/groups (it
 // registered first and owns the canonical narrow projection). A bare @Get() here would collide on
 // the same path pattern (/sessions/{x}/groups) and be shadowed, so this controller owns only the
 // group sub-resource routes (:groupId/...) under the same mount.

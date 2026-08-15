@@ -32,7 +32,7 @@ All five SDKs expose the same fluent resource surface:
 | `chats`     | list, markRead, markUnread, archive, pin, mute, clearMessages, delete, sendState, subscribePresence, getPresence                                                                                                                                                                           |
 | `labels`    | list, get, chats, forChat, upsert, delete, addToChat, removeFromChat _(WhatsApp Business)_                                                                                                                                                                                                 |
 | `channels`  | list, get, messages, create, delete, mute, subscribe, unsubscribe, demoteAdmin, transferOwnership _(Newsletters)_                                                                                                                                                                          |
-| `catalog`   | info, products, product, sendProduct, sendCatalog _(WhatsApp Business)_                                                                                                                                                                                                                    |
+| `catalog`   | info, products, product, sendProduct _(WhatsApp Business)_                                                                                                                                                                                                                                 |
 | `status`    | list, fromContact, media, sendText, sendImage, sendVideo, sendVoice, delete _(Stories)_                                                                                                                                                                                                    |
 | `search`    | search _(Operator)_                                                                                                                                                                                                                                                                        |
 | `templates` | list, get, create, update, delete                                                                                                                                                                                                                                                          |
@@ -52,6 +52,14 @@ All five SDKs expose the same fluent resource surface:
 > Everything else the gateway publishes is exposed. That sentence used to be an
 > unqualified "all user-facing resources are", which was false for the session
 > config routes and the two cross-session webhook reads until they were added.
+>
+> One entry in the list above is special: `mcp` is absent from the generated
+> `openapi.json` itself, not just from the SDKs — `POST /mcp` is mounted directly
+> on the Express adapter, outside the Nest `/api` routing the Swagger scanner
+> sees, so the exporter cannot emit it. Do not hand-add it to `openapi.json`
+> (`npm run openapi:check` regenerates the file and the diff fails); the route is
+> documented by hand in `docs/06-api-specification.md`, and the docs-contract
+> gate names `POST /mcp` as the one heading allowed outside the contract.
 
 ## JavaScript / TypeScript
 

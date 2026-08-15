@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BaileysAdapter } from './adapters/baileys.adapter';
 import { WhatsAppWebJsAdapter } from './adapters/whatsapp-web-js.adapter';
-import { ENGINE_CAPABILITY_MATRIX } from './engine-capability-matrix';
+import { CURATED_CAPABILITY_EXCEPTIONS, engineCapabilityMatrix } from './engine-capability-matrix';
 
 /**
  * Drift invariants for the engine capability matrix. Status and throw behaviour must agree exactly:
@@ -149,7 +149,8 @@ function liveThrows(adapter: AdapterCtor, method: string, engine: string): boole
 
 describe('engine capability matrix — drift invariants', () => {
   const methods = readInterfaceMethods();
-  const matrixKeys = Object.keys(ENGINE_CAPABILITY_MATRIX).sort();
+  const matrix = engineCapabilityMatrix();
+  const matrixKeys = Object.keys(matrix).sort();
 
   // Guard against a pattern that silently stops matching: an empty registry would make the widened
   // scan collapse back to the prototype-only one without a single test turning red.
@@ -186,14 +187,30 @@ describe('engine capability matrix — drift invariants', () => {
     expect(offenders).toEqual([]);
   });
 
+  // The matrix is a DERIVED value: engine-capability-matrix.ts walks this same interface file with
+  // its own copy of MEMBER_RE and merges the curated exceptions on top. This check is therefore the
+  // binding between the two readers — if the module's copy drifted from the spec's, the derived
+  // keys and the inventory read here would disagree and this test would fail.
   it('matrix keys exactly match the interface methods (no missing, no stale)', () => {
-    const missing = methods.filter(m => !(m in ENGINE_CAPABILITY_MATRIX));
+    const missing = methods.filter(m => !(m in matrix));
     const stale = matrixKeys.filter(k => !methods.includes(k));
     expect({ missing, stale }).toEqual({ missing: [], stale: [] });
   });
 
+  // The derivation reads an exception only for a name found on the interface, so a curated entry
+  // whose method was renamed or removed would otherwise vanish without a signal — exactly the
+  // silent drop this fence exists to prevent: the row's rootCause/evidence knowledge must be
+  // re-homed deliberately, not lost.
+  it('curated exceptions name interface methods (no stale curation)', () => {
+    const curated = Object.keys(CURATED_CAPABILITY_EXCEPTIONS);
+    // Non-vacuous: an emptied table passes the filter below trivially, while every not-available
+    // cell would quietly become the supported/supported default.
+    expect(curated.length).toBeGreaterThan(0);
+    expect(curated.filter(k => !methods.includes(k))).toEqual([]);
+  });
+
   it.each(methods)('%s: throws ⇔ not-available', method => {
-    const entry = ENGINE_CAPABILITY_MATRIX[method];
+    const entry = matrix[method];
     for (const [adapter, ctor] of ADAPTERS) {
       const throws = liveThrows(ctor, method, adapter);
       const status = entry[adapter].status;

@@ -250,13 +250,13 @@ Proxy egress (if WhatsApp is blocked on your network) is configured **per sessio
 unreachable proxy silently blocks the WhatsApp WebSocket (see the _No QR code appears, or `/start`
 returns `504`_ entry below).
 
-### Issue: No QR code appears, or `POST /api/sessions/:id/start` returns `504`
+### Issue: No QR code appears, or `POST /api/sessions/:sessionId/start` returns `504`
 
 **Symptoms:**
 
-- `POST /api/sessions/:id/start` returns `504 Gateway Timeout`
+- `POST /api/sessions/:sessionId/start` returns `504 Gateway Timeout`
   (`WhatsApp Web authentication timed out...`)
-- No QR code is ever produced — `GET /api/sessions/:id/qr` never has one
+- No QR code is ever produced — `GET /api/sessions/:sessionId/qr` never has one
 - Engine log shows `Session engine failed: auth timeout` after ~30s
 
 **Cause:** The session was created with a `proxyUrl` that doesn't resolve to a real, reachable proxy
@@ -281,7 +281,7 @@ curl -X POST "$BASE/api/sessions" -H "X-API-Key: $API_KEY" -H "Content-Type: app
 > **Engine:** This issue applies to the `whatsapp-web.js` engine only. If you are using `ENGINE_TYPE=baileys`, skip this section.
 
 **Symptoms:** After scanning the QR the phone links the device, but the session stays at
-`authenticating` indefinitely and never becomes `ready`. `GET /sessions/:id/qr` returns 400 while
+`authenticating` indefinitely and never becomes `ready`. `GET /sessions/:sessionId/qr` returns 400 while
 stuck. Often seen on ARM64 (e.g. Raspberry Pi) after upgrading to v0.2.x.
 
 **Cause:** whatsapp-web.js auto-selects a WhatsApp Web client version, and an incompatible version
@@ -528,8 +528,8 @@ onboarding_dialog_unrecognized`) carrying the dialog's heading and button labels
 > that warning, the page is gone and the stop → start below is required rather than optional.
 
 **Fix:** acknowledge the modal once (open WhatsApp Web in the account holder's own browser and click
-through the "What's new" screen), **then restart the session** (`POST /sessions/:id/stop` →
-`POST /sessions/:id/start`). Acknowledging alone does not return the session to `ready` — the status
+through the "What's new" screen), **then restart the session** (`POST /sessions/:sessionId/stop` →
+`POST /sessions/:sessionId/start`). Acknowledging alone does not return the session to `ready` — the status
 is deliberately sticky — but the restart re-drives the engine from the stored credentials, so no new
 QR scan is needed. If the modal never actually appeared (a false trip is possible but rare), the
 same stop → start clears it.

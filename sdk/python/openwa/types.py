@@ -1190,12 +1190,6 @@ class SendProductRequest(TypedDict, total=False):
     body: str
 
 
-# chatId required; body optional. See SendProductRequest note.
-class SendCatalogRequest(TypedDict, total=False):
-    chatId: Jid
-    body: str
-
-
 # ── Search ────────────────────────────────────────────────────────
 
 # `q` is required; the remaining fields are optional. `from` is a Python

@@ -55,27 +55,17 @@ describe('docs/06 matches the published contract', () => {
     );
 
   /**
-   * Operations documented outside docs/06, each naming the file that documents it. The backing check
-   * below reads that file, so an entry cannot become a silent exemption.
+   * Operations deliberately documented in another file carry an allowlist entry naming that file, and
+   * the gate reads the file to confirm the path is really there — otherwise "documented in docs/25"
+   * would be an unchecked claim, which is the exact failure this gate exists to prevent.
+   *
+   * The set is EMPTY today: every operation the contract publishes carries its own heading in
+   * docs/06 (the session-config routes and the integration instance/ingress family moved in from
+   * docs/05 and docs/25, which keep their design-level treatment). The mechanism stays for a future
+   * deliberate exception — an entry is honored only while the named file really contains the path
+   * and docs/06 has no heading for it, and the stale-entry test below retires it automatically.
    */
-  const DOCUMENTED_ELSEWHERE = new Map<string, string>([
-    ['GET /api/ingress/:pluginId/:instanceId/:path', 'docs/25-integration-fabric.md'],
-    ['POST /api/ingress/:pluginId/:instanceId/:path', 'docs/25-integration-fabric.md'],
-    ['PUT /api/ingress/:pluginId/:instanceId/:path', 'docs/25-integration-fabric.md'],
-    ['PATCH /api/ingress/:pluginId/:instanceId/:path', 'docs/25-integration-fabric.md'],
-    ['DELETE /api/ingress/:pluginId/:instanceId/:path', 'docs/25-integration-fabric.md'],
-    ['GET /api/integration/plugins/:pluginId/instances', 'docs/25-integration-fabric.md'],
-    ['POST /api/integration/plugins/:pluginId/instances', 'docs/25-integration-fabric.md'],
-    ['GET /api/integration/plugins/:pluginId/instances/:instanceId', 'docs/25-integration-fabric.md'],
-    ['PATCH /api/integration/plugins/:pluginId/instances/:instanceId', 'docs/25-integration-fabric.md'],
-    ['DELETE /api/integration/plugins/:pluginId/instances/:instanceId', 'docs/25-integration-fabric.md'],
-    [
-      'POST /api/integration/plugins/:pluginId/instances/:instanceId/regenerate-secret',
-      'docs/25-integration-fabric.md',
-    ],
-    ['GET /api/sessions/:id/config', 'docs/05-database-design.md'],
-    ['PATCH /api/sessions/:id/config', 'docs/05-database-design.md'],
-  ]);
+  const DOCUMENTED_ELSEWHERE = new Map<string, string>([]);
 
   /**
    * Headings with no contract operation, and why the contract cannot carry them. `POST /mcp` is
@@ -104,8 +94,6 @@ describe('docs/06 matches the published contract', () => {
   });
 
   it('every allowlisted operation is really documented in the file it names', () => {
-    expect(DOCUMENTED_ELSEWHERE.size).toBeGreaterThan(5);
-
     const unbacked = [...DOCUMENTED_ELSEWHERE]
       .filter(([operation, file]) => !backs(file, operation))
       .map(([operation, file]) => `${operation} claims ${file}, which does not contain that path`);

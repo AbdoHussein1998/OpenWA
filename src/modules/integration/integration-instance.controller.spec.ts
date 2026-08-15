@@ -5,12 +5,13 @@ import { PluginLoaderService } from '../../core/plugins/plugin-loader.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { AuditService } from '../audit/audit.service';
 import { ScopeBindingService } from './scope-binding.service';
-import { SessionService } from '../session/session.service';
+import { Repository } from 'typeorm';
+import { Session } from '../session/entities/session.entity';
 import { ApiKey } from '../auth/entities/api-key.entity';
 
 // ScopeBindingService reads session rows only for its boot-time "this scope matches no session"
 // warning; provisioning never reaches it, so these tests hand it a resolving stub.
-const sessions = { findOne: jest.fn().mockResolvedValue({ id: 'sess-1' }) } as unknown as SessionService;
+const sessions = { findOne: jest.fn().mockResolvedValue({ id: 'sess-1' }) } as unknown as Repository<Session>;
 
 // The provisioning bridge is what makes a minted instance's config reach the ingress worker: on
 // create/patch it mirrors the instance config into the plugin's per-session config and activates the

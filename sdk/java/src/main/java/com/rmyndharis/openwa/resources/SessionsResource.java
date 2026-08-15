@@ -70,7 +70,14 @@ public final class SessionsResource {
         return client.request(HttpMethod.POST, "/api/sessions/" + encodeSegment(id) + "/start", null, null, SessionResponse.class);
     }
 
-    /** Stop a session and disconnect gracefully. */
+    /**
+     * Stop a session and disconnect gracefully. Throws on HTTP {@code 502} with
+     * {@code code: 'SESSION_STOP_INCOMPLETE'} when the session was stopped locally but the engine
+     * teardown did not complete (the graceful disconnect and the force-destroy escalation both
+     * failed, so the engine process may still be running); the status is settled to
+     * {@code disconnected} and no success audit is written. Retry the stop; restart the node to
+     * reap a leaked process.
+     */
     public SessionResponse stop(String id) {
         return client.request(HttpMethod.POST, "/api/sessions/" + encodeSegment(id) + "/stop", null, null, SessionResponse.class);
     }

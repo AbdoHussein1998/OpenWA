@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, Not, IsNull, DataSource, FindManyOptions } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
+import { setTimeout } from 'node:timers/promises';
 import { Session, SessionStatus } from './entities/session.entity';
 import { CreateSessionDto, SessionConfigResponseDto, UpdateSessionConfigDto } from './dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
@@ -28,19 +29,8 @@ import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces
 import { createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
 
-// Re-exported so the existing spec import paths keep working after these moved out.
-export { clampReconnectDelay } from './reconnect-policy';
-export { ACK_RECONCILE_DELAY_MS } from './message-projector.service';
-export {
-  SESSION_WATCHDOG_INTERVAL_MS,
-  SESSION_WATCHDOG_PROBE_TIMEOUT_MS,
-  SESSION_WATCHDOG_MAX_FAILURES,
-} from './session-liveness-watchdog.service';
-export {
-  resolveReconnectConfig,
-  resolveMaxConcurrentSessions,
-  EngineInitTimeoutError,
-} from './session-engine-lifecycle.service';
+/** Pause between sequential auto-start launches so a burst of Chromium boots does not spike the host. */
+export const AUTOSTART_THROTTLE_MS = 2_000;
 
 /**
  * The session-record API: CRUD over the sessions table, aggregate stats, and the thin engine query
@@ -205,7 +195,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       }
       // Throttle between sequential Chromium launches; no need to wait after the last one.
       if (i < sessions.length - 1) {
-        await this.delay(2000);
+        await setTimeout(AUTOSTART_THROTTLE_MS);
       }
     }
   }
@@ -437,6 +427,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       if (this.ownership) await this.assertNotHeldElsewhere(id);
       session = await this.engineLifecycle.stop(id);
     } catch (error) {
+      // Deliberately no release here, unlike logout()/forceKill(): this catch also carries the
+      // foreign-node 409, where the claim is the peer's and a blanket release would delete it. The
+      // local-502 path keeps the claim, and only claims with a live engine are renewed — it lapses
+      // at lease TTL instead of pinning the session here.
       this.discardStopMarkForMissingSession(id, error);
       throw error;
     }
@@ -489,7 +483,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     const engine = this.engines.get(id);
 
     if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
+      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
     }
 
     const qrCode = engine.getQRCode();
@@ -516,7 +510,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     const engine = this.engines.get(id);
 
     if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
+      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
     }
     if (session.status === SessionStatus.READY) {
       throw new BadRequestException('Session is already authenticated, no pairing needed');
@@ -791,9 +785,5 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     sessionIds: string[],
   ): Promise<{ stopped: string[]; notRunning: string[]; failed: string[] }> {
     return this.engineLifecycle.stopOrphanEngines(sessionIds);
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

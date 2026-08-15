@@ -7,11 +7,13 @@
 # PostgreSQL dumps are staged for the explicit psql import printed at the end of the restore.
 #
 # Usage:
-#   ./scripts/restore.sh <backup-archive.tar.gz> [--strict]
+#   ./scripts/restore.sh <backup-archive.tar.gz> [--strict] [--force]
 # Options:
 #   --strict          refuse to restore an archive whose CONSISTENCY-WARNING marker reports
 #                     plain-copied (possibly torn) database snapshots; without it the restore
 #                     continues after a loud warning
+#   --force           overwrite databases that already hold a working install's data; without it
+#                     the restore refuses to touch a live target before changing anything
 # Environment:
 #   MAIN_DATABASE_NAME  restore target for the auth/audit DB (default: ./data/main.sqlite)
 #   DATABASE_NAME       restore target for the SQLite data store (default: ./data/openwa.sqlite)
@@ -31,25 +33,29 @@ set -euo pipefail
 umask 077
 
 STRICT=0
+FORCE=0
 ARCHIVE=""
 for arg in "$@"; do
   case "$arg" in
     --strict)
       STRICT=1
       ;;
+    --force)
+      FORCE=1
+      ;;
     -h | --help)
-      echo "Usage: $0 <backup-archive.tar.gz> [--strict]"
+      echo "Usage: $0 <backup-archive.tar.gz> [--strict] [--force]"
       exit 0
       ;;
     -*)
       echo "Unknown option: $arg" >&2
-      echo "Usage: $0 <backup-archive.tar.gz> [--strict]" >&2
+      echo "Usage: $0 <backup-archive.tar.gz> [--strict] [--force]" >&2
       exit 1
       ;;
     *)
       if [ -n "$ARCHIVE" ]; then
         echo "Unexpected extra argument: $arg" >&2
-        echo "Usage: $0 <backup-archive.tar.gz> [--strict]" >&2
+        echo "Usage: $0 <backup-archive.tar.gz> [--strict] [--force]" >&2
         exit 1
       fi
       ARCHIVE="$arg"
@@ -182,8 +188,25 @@ snapshot_external_db() {
   esac
 }
 
+# A restore target that already holds a working install's tables is LIVE: overwriting it destroys
+# real data, and the pre-restore snapshot is a convenience, not a recovery guarantee. Probe with
+# the same sqlite3 CLI backup.sh snapshots with, opened read-only so the guard itself cannot touch
+# the target it is guarding; a missing file — or one with no tables yet, as a
+# fresh install leaves behind — is safe to restore over. Without the CLI there is no way to prove
+# the file empty, so any non-empty target counts as live rather than guessed safe.
+db_appears_live() {
+  target="$1"
+  [ -f "$target" ] || return 1
+  if command -v sqlite3 >/dev/null 2>&1; then
+    tables="$(sqlite3 -readonly "$target" "SELECT count(*) FROM sqlite_master;" 2>/dev/null)" || return 0
+    [ "${tables:-0}" -gt 0 ]
+  else
+    [ -s "$target" ]
+  fi
+}
+
 if [ -z "$ARCHIVE" ] || [ ! -f "$ARCHIVE" ]; then
-  echo "Usage: $0 <backup-archive.tar.gz> [--strict]" >&2
+  echo "Usage: $0 <backup-archive.tar.gz> [--strict] [--force]" >&2
   exit 1
 fi
 
@@ -214,6 +237,24 @@ if [ -f "$STAGE/CONSISTENCY-WARNING" ]; then
     exit 1
   fi
   log "WARN: continuing anyway; verify data integrity after the restore (re-run with --strict to make this fatal)"
+fi
+
+# Refuse to overwrite a live database without --force, BEFORE any existing state is touched (the
+# same rule the --strict refusal above follows). Only the databases this archive actually carries
+# are checked — a target the archive omits is left alone either way.
+if [ "$FORCE" -ne 1 ]; then
+  LIVE_TARGETS=""
+  if [ -f "$STAGE/main.sqlite" ] && db_appears_live "$MAIN_DB"; then
+    LIVE_TARGETS="$LIVE_TARGETS $MAIN_DB"
+  fi
+  if [ -f "$STAGE/openwa.sqlite" ] && db_appears_live "$DATA_DB"; then
+    LIVE_TARGETS="$LIVE_TARGETS $DATA_DB"
+  fi
+  if [ -n "$LIVE_TARGETS" ]; then
+    echo "[restore] ERROR: database target(s) appear live:$LIVE_TARGETS" >&2
+    echo "[restore]        they already hold a working install's data — stop the app, then re-run with --force to overwrite them" >&2
+    exit 1
+  fi
 fi
 
 # Safety snapshot of whatever is there now.

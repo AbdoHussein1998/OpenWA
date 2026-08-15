@@ -13,9 +13,7 @@ import {
   PluginStatus,
   PluginType,
 } from './plugin.interfaces';
-import { MessageService } from '../../modules/message/message.service';
-import { SessionService } from '../../modules/session/session.service';
-import { ConversationMappingService } from '../../modules/integration/conversation-mapping.service';
+import { PLUGIN_CONVERSATION_MAPPING_PORT, PLUGIN_MESSAGE_PORT, PLUGIN_SESSION_PORT } from './plugin-host-ports';
 
 function makePlugin(
   sessions?: string[],
@@ -51,7 +49,7 @@ describe('PluginLoaderService capability facade — ctx.messages', () => {
     moduleRef = {
       get: jest
         .fn()
-        .mockImplementation((token: unknown) => (token === SessionService ? sessionService : messageService)),
+        .mockImplementation((token: unknown) => (token === PLUGIN_SESSION_PORT ? sessionService : messageService)),
     };
     const configService = { get: jest.fn().mockReturnValue(undefined) } as unknown as ConfigService;
     const pluginStorage = {
@@ -76,14 +74,14 @@ describe('PluginLoaderService capability facade — ctx.messages', () => {
   it('messages.sendText delegates to MessageService.sendText with a wrapped dto', async () => {
     const ctx = contextFor(makePlugin(['*']));
     await ctx.messages.sendText('sess-1', '628@c.us', 'hi');
-    expect(moduleRef.get).toHaveBeenCalledWith(MessageService, { strict: false });
+    expect(moduleRef.get).toHaveBeenCalledWith(PLUGIN_MESSAGE_PORT, { strict: false });
     expect(messageService.sendText).toHaveBeenCalledWith('sess-1', { chatId: '628@c.us', text: 'hi' });
   });
 
   it('messages.reply delegates to MessageService.reply', async () => {
     const ctx = contextFor(makePlugin(['*']));
     await ctx.messages.reply('sess-1', '628@c.us', 'quoted-id', 'pong');
-    expect(moduleRef.get).toHaveBeenCalledWith(MessageService, { strict: false });
+    expect(moduleRef.get).toHaveBeenCalledWith(PLUGIN_MESSAGE_PORT, { strict: false });
     expect(messageService.reply).toHaveBeenCalledWith('sess-1', {
       chatId: '628@c.us',
       quotedMessageId: 'quoted-id',
@@ -232,7 +230,7 @@ describe('PluginLoaderService capability facade — ctx.engine', () => {
     const { sessionService } = build(engine);
     const ctx = contextFor(makePlugin(['*']));
     await ctx.engine.getGroupInfo('sess-1', 'g@g.us');
-    expect(moduleRef.get).toHaveBeenCalledWith(SessionService, { strict: false });
+    expect(moduleRef.get).toHaveBeenCalledWith(PLUGIN_SESSION_PORT, { strict: false });
     expect(sessionService.getEngine).toHaveBeenCalledWith('sess-1');
     expect(engine.getGroupInfo).toHaveBeenCalledWith('g@g.us');
   });
@@ -352,7 +350,7 @@ describe('PluginLoaderService capability facade — ctx.conversations', () => {
       get: jest
         .fn()
         .mockImplementation((token: unknown) =>
-          token === ConversationMappingService ? mappingService : messageService,
+          token === PLUGIN_CONVERSATION_MAPPING_PORT ? mappingService : messageService,
         ),
     };
     const configService = { get: jest.fn().mockReturnValue(undefined) } as unknown as ConfigService;

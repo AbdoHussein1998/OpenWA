@@ -177,6 +177,7 @@ describe('validateApiKey entrypoint coverage', () => {
     ['common/security/bull-board-auth.middleware.ts', 'queue dashboard middleware'],
     ['modules/auth/guards/api-key.guard.ts', 'REST route guard'],
     ['modules/events/events.gateway.ts', 'websocket connect and per-subscribe re-validation'],
+    ['modules/health/health.controller.ts', 'version disclosure on the public health check'],
   ]);
 
   /** Where validateApiKey is declared, which is not a caller. */

@@ -98,6 +98,15 @@ export class ApiKeyCreatedResponseDto extends ApiKeyResponseDto {
   apiKey!: string;
 }
 
+/** Result of `POST /auth/validate` — the guard's verdict on the presented key. */
+export class ValidateApiKeyResponseDto {
+  @ApiProperty({ description: 'Whether the presented API key is valid.', example: true })
+  valid!: boolean;
+
+  @ApiPropertyOptional({ enum: ApiKeyRole, description: "The key's role; present only when valid." })
+  role?: ApiKeyRole;
+}
+
 export class UpdateApiKeyDto {
   @ApiPropertyOptional()
   @IsOptional()

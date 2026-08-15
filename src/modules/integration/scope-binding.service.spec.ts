@@ -1,9 +1,9 @@
-import { NotFoundException } from '@nestjs/common';
+import { Repository } from 'typeorm';
 import { ScopeBindingService } from './scope-binding.service';
 import { PluginInstanceService } from './plugin-instance.service';
 import { PluginLoaderService } from '../../core/plugins/plugin-loader.service';
 import { AuditService } from '../audit/audit.service';
-import { SessionService } from '../session/session.service';
+import { Session } from '../session/entities/session.entity';
 
 // The boot-time reconciler re-derives each ENABLED instance's runtime scope binding from the persisted
 // plugin_instances rows, so a binding lost at provisioning time (plugin momentarily unloaded) is
@@ -23,8 +23,8 @@ describe('ScopeBindingService.onApplicationBootstrap reconciliation', () => {
     } as unknown as PluginLoaderService;
     const audit = { logInfo: jest.fn(), logWarn: jest.fn() } as unknown as AuditService;
     // Default: every bound scope resolves to a real session row, so the missing-session warning stays
-    // quiet unless a test asks for it (SessionService.findOne throws NotFoundException for a gone row).
-    const sessions = { findOne: jest.fn().mockResolvedValue({ id: 'sess-1' }) } as unknown as SessionService;
+    // quiet unless a test asks for it (the repository findOne resolves null for a gone row).
+    const sessions = { findOne: jest.fn().mockResolvedValue({ id: 'sess-1' }) } as unknown as Repository<Session>;
     return { loader, audit, sessions, setPluginSessionConfig, setPluginSessions, updatePluginConfig };
   }
 
@@ -174,9 +174,7 @@ describe('ScopeBindingService.onApplicationBootstrap reconciliation', () => {
         ]),
       list: jest.fn().mockResolvedValue([]),
     } as unknown as PluginInstanceService;
-    const sessions = {
-      findOne: jest.fn().mockRejectedValue(new NotFoundException("Session with id 'gone-sess' not found")),
-    } as unknown as SessionService;
+    const sessions = { findOne: jest.fn().mockResolvedValue(null) } as unknown as Repository<Session>;
 
     const svc = new ScopeBindingService(instances, loader, audit, sessions);
     const warn = jest.spyOn(loggerOf(svc), 'warn').mockImplementation(() => undefined);
@@ -221,7 +219,7 @@ describe('ScopeBindingService.onApplicationBootstrap reconciliation', () => {
         ]),
       list: jest.fn().mockResolvedValue([]),
     } as unknown as PluginInstanceService;
-    const sessions = { findOne: jest.fn().mockRejectedValue(new Error('db down')) } as unknown as SessionService;
+    const sessions = { findOne: jest.fn().mockRejectedValue(new Error('db down')) } as unknown as Repository<Session>;
 
     const svc = new ScopeBindingService(instances, loader, audit, sessions);
     const warn = jest.spyOn(loggerOf(svc), 'warn').mockImplementation(() => undefined);
@@ -244,7 +242,7 @@ describe('ScopeBindingService.onApplicationBootstrap reconciliation', () => {
       updatePluginConfig: jest.fn(),
     } as unknown as PluginLoaderService;
     const audit = { logInfo: jest.fn(), logWarn: jest.fn() } as unknown as AuditService;
-    const sessionRows = { findOne: jest.fn().mockResolvedValue({ id: 'sess-1' }) } as unknown as SessionService;
+    const sessionRows = { findOne: jest.fn().mockResolvedValue({ id: 'sess-1' }) } as unknown as Repository<Session>;
 
     const wildcard = { pluginId: 'chatwoot', instanceId: 'wild', sessionScope: null, config: {}, enabled: true };
     const concrete = { pluginId: 'chatwoot', instanceId: 'conc', sessionScope: 'sess-1', config: {}, enabled: true };
@@ -287,7 +285,7 @@ describe('ScopeBindingService.applyScopeBinding retires an instance without leak
       updatePluginConfig: jest.fn(),
     } as unknown as PluginLoaderService;
     const audit = { logInfo: jest.fn(), logWarn: jest.fn() } as unknown as AuditService;
-    const sessions = { findOne: jest.fn().mockResolvedValue({ id: 'sess-1' }) } as unknown as SessionService;
+    const sessions = { findOne: jest.fn().mockResolvedValue({ id: 'sess-1' }) } as unknown as Repository<Session>;
     const svc = (rows: unknown[]): ScopeBindingService =>
       new ScopeBindingService(
         { list: jest.fn().mockResolvedValue(rows) } as unknown as PluginInstanceService,

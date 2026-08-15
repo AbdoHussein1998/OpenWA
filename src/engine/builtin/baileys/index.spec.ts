@@ -1,11 +1,11 @@
 import type { PluginContext } from '../../../core/plugins';
 
-jest.mock('../../../engine/adapters/baileys.adapter', () => ({
+jest.mock('../../adapters/baileys.adapter', () => ({
   BaileysAdapter: jest.fn().mockImplementation((config: unknown) => ({ config })),
 }));
 
 import { BaileysPlugin } from './index';
-import { BaileysAdapter } from '../../../engine/adapters/baileys.adapter';
+import { BaileysAdapter } from '../../adapters/baileys.adapter';
 
 describe('BaileysPlugin.createEngine (opaque config)', () => {
   beforeEach(() => jest.clearAllMocks());

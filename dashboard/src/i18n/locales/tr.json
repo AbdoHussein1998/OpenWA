@@ -157,7 +157,8 @@
       "markRead": "Sohbet okundu olarak işaretlenemedi",
       "send": "Mesaj gönderilemedi",
       "react": "Mesaja tepki verilemedi",
-      "delete": "Mesaj silinemedi"
+      "delete": "Mesaj silinemedi",
+      "fileTooLarge": "Dosya çok büyük (maks 18 MB)"
     },
     "loadMessagesError": "Mesajlar yüklenemedi. Sunucu kayıtlarını kontrol edin."
   },
@@ -826,6 +827,7 @@
     "installModal": {
       "title": "Bir eklenti yükle",
       "hint": ".zip olarak paketlenmiş (manifest.json içeren) bir eklenti yükleyin. Etkinleştirildiğinde yalıtılmış alanda (sandbox) çalışır.",
+      "trustWarning": "Eklentiler, ağ geçidinin tüm süreç yetkileriyle çalışır — yalıtılmış alan (sandbox) çökmeleri kontrol altına alır, kötü amaçlı kodu değil. Yalnızca güvendiğiniz eklentileri yükleyin.",
       "choose": "Bir .zip dosyası seçin…",
       "tooLarge": "Dosya 5 MB sınırını aşıyor.",
       "catalogHint": "Doğrudan OpenWA eklenti kataloğundan yükleyin. .zip dosyası SSRF koruması üzerinden sunucu tarafında çekilir, ardından doğrulanır ve korumalı alana alınır.",

@@ -1,9 +1,9 @@
-jest.mock('../../../engine/adapters/whatsapp-web-js.adapter', () => ({
+jest.mock('../../adapters/whatsapp-web-js.adapter', () => ({
   WhatsAppWebJsAdapter: jest.fn().mockImplementation((config: unknown) => ({ config })),
 }));
 
 import { WhatsAppWebJsPlugin } from './index';
-import { WhatsAppWebJsAdapter } from '../../../engine/adapters/whatsapp-web-js.adapter';
+import { WhatsAppWebJsAdapter } from '../../adapters/whatsapp-web-js.adapter';
 import { PluginContext } from '../../../core/plugins';
 
 describe('WhatsAppWebJsPlugin.createEngine (opaque config)', () => {

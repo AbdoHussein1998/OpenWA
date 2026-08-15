@@ -184,7 +184,7 @@ export class PluginSandboxBridge {
     // explicitly configured with scheme:none is unauthenticated and must never be labelled verified.
     // Missing/hot-swapped route metadata fails closed.
     const verified = route ? route.signature.scheme !== 'none' : false;
-    const instance = await this.hostServices.getPluginInstanceService().resolve(d.pluginId, d.instanceId);
+    const instance = await this.hostServices.getPluginInstancePort().resolve(d.pluginId, d.instanceId);
     // Three layers, most specific last: the base ('*') config, then the operator's per-session
     // override from PUT /plugins/:id/sessions/:sessionId/config, then THIS instance's own config.
     // The instance layer is what keeps two instances sharing one session scope apart — provisioning
@@ -256,7 +256,7 @@ export class PluginSandboxBridge {
   private async scopeHasAtMostOneInstance(pluginId: string, scope: string | undefined): Promise<boolean> {
     if (!scope) return false;
     try {
-      const rows = await this.hostServices.getPluginInstanceService().list(pluginId);
+      const rows = await this.hostServices.getPluginInstancePort().list(pluginId);
       return rows.filter(row => row.enabled && row.sessionScope === scope).length <= 1;
     } catch (error) {
       // Logged rather than swallowed: this drops the operator's per-session override for the
@@ -344,7 +344,7 @@ export class PluginSandboxBridge {
       // Drop a search provider registered mid-onEnable before the failure: without this, a plugin that
       // registers then throws leaves a dead provider as the ACTIVE registry entry in auto mode, so every
       // /search routes to a terminated worker → outage. Mirrors disablePlugin's cleanup.
-      unregisterPluginSearchProvider(this.hostServices.getSearchRegistry(), pluginId);
+      unregisterPluginSearchProvider(this.hostServices.getSearchRegistryPort(), pluginId);
       await host.terminate().catch(() => undefined);
       throw error;
     }
@@ -448,7 +448,7 @@ export class PluginSandboxBridge {
               const chatId = (hookCtx.data as { chatId?: string } | undefined)?.chatId;
               if (chatId && hookCtx.sessionId) {
                 const handover = await this.hostServices
-                  .getConversationMappingService()
+                  .getConversationMappingPort()
                   .findHandoverForChat(hookCtx.sessionId, chatId);
                 if (!shouldDispatchToPlugin(handover, pluginId)) return { continue: true };
               }
@@ -549,7 +549,7 @@ export class PluginSandboxBridge {
         label: `${plugin.manifest.name} (plugin)`,
         transport: liveHost,
         timeoutMs: SANDBOX_SEARCH_TIMEOUT_MS,
-        registry: this.hostServices.getSearchRegistry(),
+        registry: this.hostServices.getSearchRegistryPort(),
         mode: this.configService.get<string>('search.provider', 'auto'),
         hasPermission: (plugin.manifest.permissions ?? []).includes(PluginCapabilityPermission.SEARCH_PROVIDE),
         warn: (message, meta) => this.logger.warn(message, meta),
@@ -580,7 +580,7 @@ export class PluginSandboxBridge {
       // Always release the search-provider slot so the registry can fall back to builtin-fts. On a crash
       // this is the only cleanup; on a deliberate disable/enable-failure the explicit unregister already
       // ran, making this a harmless no-op.
-      unregisterPluginSearchProvider(this.hostServices.getSearchRegistry(), pluginId);
+      unregisterPluginSearchProvider(this.hostServices.getSearchRegistryPort(), pluginId);
       if (intentional) return; // routine disable/enable-failure already logged and expected
       // Unexpected crash after a successful enable: the worker is gone. Drop the dead host +
       // unregister the hook shims (so they don't keep dispatching into the dead worker) + mark the

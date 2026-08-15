@@ -74,7 +74,14 @@ export class SessionsResource {
     return this.client.request<SessionResponse>({ method: 'POST', path: `/api/sessions/${encodeSegment(id)}/start` });
   }
 
-  /** Stop a session and disconnect gracefully. */
+  /**
+   * Stop a session and disconnect gracefully. Rejects with HTTP `502` and
+   * `code: 'SESSION_STOP_INCOMPLETE'` when the session was stopped locally but the engine
+   * teardown did not complete (the graceful disconnect and the force-destroy escalation both
+   * failed, so the engine process may still be running); the status is settled to
+   * `disconnected` and no success audit is written. Retry the stop; restart the node to reap
+   * a leaked process.
+   */
   stop(id: string): Promise<SessionResponse> {
     return this.client.request<SessionResponse>({ method: 'POST', path: `/api/sessions/${encodeSegment(id)}/stop` });
   }

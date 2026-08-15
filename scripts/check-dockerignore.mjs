@@ -147,6 +147,9 @@ const mustKeep = [
   'scripts/patch-wwebjs-status.js',
   'scripts/patch-wwebjs-ready-sync.js',
   'scripts/wwebjs-201832.patch',
+  'scripts/backup.sh',
+  'scripts/restore.sh',
+  'scripts/lib-env.sh',
   'docker-entrypoint.sh',
   'docs/01-project-overview.md',
 ];
