@@ -1,14 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken } from '@nestjs/typeorm';
-import { ServiceUnavailableException } from '@nestjs/common';
+import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Request } from 'express';
 import { HealthController } from './health.controller';
 import { ShutdownService } from '../../common/services/shutdown.service';
+import { AuthService } from '../auth/auth.service';
 
 describe('HealthController', () => {
   let controller: HealthController;
   const mainQuery = jest.fn();
   const dataQuery = jest.fn();
   const isShuttingDown = jest.fn();
+  const validateApiKey = jest.fn();
+
+  const reqWith = (headers: Record<string, string> = {}): Request =>
+    ({ headers, socket: { remoteAddress: '127.0.0.1' } }) as unknown as Request;
 
   beforeEach(async () => {
     mainQuery.mockResolvedValue([{ '1': 1 }]);
@@ -21,6 +28,8 @@ describe('HealthController', () => {
         { provide: getDataSourceToken('main'), useValue: { query: mainQuery } },
         { provide: getDataSourceToken('data'), useValue: { query: dataQuery } },
         { provide: ShutdownService, useValue: { isShuttingDown } },
+        { provide: AuthService, useValue: { validateApiKey } },
+        { provide: ConfigService, useValue: { get: () => undefined } },
       ],
     }).compile();
 
@@ -31,19 +40,49 @@ describe('HealthController', () => {
     mainQuery.mockReset();
     dataQuery.mockReset();
     isShuttingDown.mockReset();
+    validateApiKey.mockReset();
   });
 
   describe('check', () => {
-    it('returns ok with a timestamp (static)', () => {
-      const result = controller.check();
+    it('returns ok with a timestamp (static)', async () => {
+      const result = await controller.check(reqWith());
       expect(result.status).toBe('ok');
       expect(result.timestamp).toBeDefined();
     });
 
-    it('reports the running version (from package.json) so the dashboard reads it live', () => {
+    it('omits the version for an unauthenticated caller and never touches the key store', async () => {
+      const result = await controller.check(reqWith());
+      expect(result).not.toHaveProperty('version');
+      expect(validateApiKey).not.toHaveBeenCalled();
+    });
+
+    it('omits the version when the presented key is invalid (the check itself still answers ok)', async () => {
+      validateApiKey.mockRejectedValue(new UnauthorizedException('Invalid API key'));
+
+      const result = await controller.check(reqWith({ 'x-api-key': 'wrong' }));
+
+      expect(result.status).toBe('ok');
+      expect(result).not.toHaveProperty('version');
+    });
+
+    it('reports the running version to a valid API key (X-API-Key header)', async () => {
+      validateApiKey.mockResolvedValue({ id: 'k1' });
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { version } = require('../../../package.json') as { version: string };
-      expect(controller.check().version).toBe(version);
+
+      const result = await controller.check(reqWith({ 'x-api-key': 'good-key' }));
+
+      expect(result.version).toBe(version);
+      expect(validateApiKey).toHaveBeenCalledWith('good-key', '127.0.0.1');
+    });
+
+    it('accepts a Bearer token the same way the guard does', async () => {
+      validateApiKey.mockResolvedValue({ id: 'k1' });
+
+      const result = await controller.check(reqWith({ authorization: 'Bearer good-key' }));
+
+      expect(result.version).toBeDefined();
+      expect(validateApiKey).toHaveBeenCalledWith('good-key', '127.0.0.1');
     });
   });
 

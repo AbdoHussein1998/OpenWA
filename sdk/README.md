@@ -22,24 +22,24 @@ hand-written resource methods.
 
 All five SDKs expose the same fluent resource surface:
 
-| Resource    | Methods                                                                                                                                                                                                                                          |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `sessions`  | list, get, create, delete, start, stop, logout, forceKill, getQrCode, requestPairingCode, stats                                                                                                                                                  |
-| `messages`  | list, sendText, sendImage/Video/Audio/Document/Sticker, sendLocation, sendContact, sendTemplate, sendPoll, reply, forward, react, delete, editMessage, history, reactions, media, pin, unpin, star, votePoll, sendBulk, batchStatus, cancelBatch |
-| `contacts`  | list, get, check, profilePicture, profilePictures, phone, upsert, delete, block, unblock                                                                                                                                                         |
-| `groups`    | list, get, create, joinGroup, joinInfo, add/remove/promote/demoteParticipants, setSubject, setDescription, get/updateGroupSettings, leave, getPicture, setPicture, deletePicture, inviteCode, revokeInviteCode                                   |
-| `webhooks`  | list, get, create, update, delete, test                                                                                                                                                                                                          |
-| `chats`     | list, markRead, markUnread, archive, clearMessages, delete, sendState, subscribePresence, getPresence                                                                                                                                            |
-| `labels`    | list, get, chats, forChat, upsert, delete, addToChat, removeFromChat _(WhatsApp Business)_                                                                                                                                                       |
-| `channels`  | list, get, messages, create, delete, mute, subscribe, unsubscribe _(Newsletters)_                                                                                                                                                                |
-| `catalog`   | info, products, product, sendProduct, sendCatalog _(WhatsApp Business)_                                                                                                                                                                          |
-| `status`    | list, fromContact, media, sendText, sendImage, sendVideo, sendVoice, delete _(Stories)_                                                                                                                                                          |
-| `search`    | search _(Operator)_                                                                                                                                                                                                                              |
-| `templates` | list, get, create, update, delete                                                                                                                                                                                                                |
-| `profile`   | setProfileName, setProfileStatus, setProfilePicture _(OPERATOR)_                                                                                                                                                                                 |
-| `calls`     | rejectCall _(OPERATOR)_                                                                                                                                                                                                                          |
-| `media`     | conversionStatus, convertVoice, convertVideo _(OPERATOR)_                                                                                                                                                                                        |
-| `health`    | check, live, ready                                                                                                                                                                                                                               |
+| Resource    | Methods                                                                                                                                                                                                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sessions`  | list, get, getConfig, updateConfig, create, delete, start, stop, logout, forceKill, getQrCode, requestPairingCode, setOnlinePresence, stats                                                                                                                                                |
+| `messages`  | list, sendText, sendImage/Video/Audio/Document/Sticker, sendLocation, sendContact, sendTemplate, sendPoll, reply, forward, react, delete, editMessage, history, reactions, media, pin, unpin, star, votePoll, sendBulk, batchStatus, cancelBatch                                           |
+| `contacts`  | list, get, check, profilePicture, profilePictures, phone, upsert, delete, block, unblock, listBlocked                                                                                                                                                                                      |
+| `groups`    | list, get, create, joinGroup, joinInfo, add/remove/promote/demoteParticipants, setSubject, setDescription, get/updateGroupSettings, leave, getPicture, setPicture, deletePicture, inviteCode, revokeInviteCode, getMembershipRequests, approveMembershipRequests, rejectMembershipRequests |
+| `webhooks`  | list, listAll, deliveryFailures, get, create, update, delete, test                                                                                                                                                                                                                         |
+| `chats`     | list, markRead, markUnread, archive, pin, mute, clearMessages, delete, sendState, subscribePresence, getPresence                                                                                                                                                                           |
+| `labels`    | list, get, chats, forChat, upsert, delete, addToChat, removeFromChat _(WhatsApp Business)_                                                                                                                                                                                                 |
+| `channels`  | list, get, messages, create, delete, mute, subscribe, unsubscribe, demoteAdmin, transferOwnership _(Newsletters)_                                                                                                                                                                          |
+| `catalog`   | info, products, product, sendProduct _(WhatsApp Business)_                                                                                                                                                                                                                                 |
+| `status`    | list, fromContact, media, sendText, sendImage, sendVideo, sendVoice, delete _(Stories)_                                                                                                                                                                                                    |
+| `search`    | search _(Operator)_                                                                                                                                                                                                                                                                        |
+| `templates` | list, get, create, update, delete                                                                                                                                                                                                                                                          |
+| `profile`   | setProfileName, setProfileStatus, setProfilePicture _(OPERATOR)_                                                                                                                                                                                                                           |
+| `calls`     | rejectCall, createLink _(OPERATOR)_                                                                                                                                                                                                                                                        |
+| `media`     | conversionStatus, convertVoice, convertVideo _(OPERATOR)_                                                                                                                                                                                                                                  |
+| `health`    | check, live, ready                                                                                                                                                                                                                                                                         |
 
 > ⚠️ Endpoints requiring an `OPERATOR`-level API key are noted in the inline
 > docs. Deliberately **not** exposed, matching `docs/18-sdk-design.md` exactly:
@@ -52,6 +52,14 @@ All five SDKs expose the same fluent resource surface:
 > Everything else the gateway publishes is exposed. That sentence used to be an
 > unqualified "all user-facing resources are", which was false for the session
 > config routes and the two cross-session webhook reads until they were added.
+>
+> One entry in the list above is special: `mcp` is absent from the generated
+> `openapi.json` itself, not just from the SDKs — `POST /mcp` is mounted directly
+> on the Express adapter, outside the Nest `/api` routing the Swagger scanner
+> sees, so the exporter cannot emit it. Do not hand-add it to `openapi.json`
+> (`npm run openapi:check` regenerates the file and the diff fails); the route is
+> documented by hand in `docs/06-api-specification.md`, and the docs-contract
+> gate names `POST /mcp` as the one heading allowed outside the contract.
 
 ## JavaScript / TypeScript
 

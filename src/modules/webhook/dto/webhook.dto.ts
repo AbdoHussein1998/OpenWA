@@ -61,8 +61,6 @@ export const WEBHOOK_EVENTS = [
   ...WEBHOOK_RESERVED_EVENTS,
 ] as const;
 
-export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number];
-
 export class CreateWebhookDto {
   @ApiProperty({
     description: 'Webhook URL to receive events',
@@ -105,7 +103,11 @@ export class CreateWebhookDto {
   @IsHeaderMap()
   headers?: Record<string, string>;
 
-  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE })
+  // `nullable` spelled out for the same reason lastTriggeredAt spells out its type: the field is
+  // STORED as null whenever a webhook is created without filters (`dto.filters ?? null`), and the
+  // description offers null as an input, so a schema without it rejects a value the route both
+  // sends and accepts.
+  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE, nullable: true })
   @IsOptional()
   @IsValidWebhookFilters()
   filters?: WebhookFilters | null;
@@ -154,7 +156,11 @@ export class UpdateWebhookDto {
   @IsHeaderMap()
   headers?: Record<string, string>;
 
-  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE })
+  // `nullable` spelled out for the same reason lastTriggeredAt spells out its type: the field is
+  // STORED as null whenever a webhook is created without filters (`dto.filters ?? null`), and the
+  // description offers null as an input, so a schema without it rejects a value the route both
+  // sends and accepts.
+  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE, nullable: true })
   @IsOptional()
   @IsValidWebhookFilters()
   filters?: WebhookFilters | null;
@@ -182,7 +188,8 @@ export class UpdateWebhookDto {
 /**
  * Public response shape for a webhook. Deliberately omits `secret` (the HMAC
  * signing key) and `headers` (which may carry receiver credentials) — these are
- * write-only and must never appear in any API response.
+ * write-only and never appear in a response built from this DTO. The backup route
+ * (`GET /api/infra/export-data`) also omits both from its webhook rows.
  *
  * `@Expose()` is required on every field: `fromEntity` maps with
  * `excludeExtraneousValues: true`, so only exposed fields are serialized and any
@@ -206,7 +213,11 @@ export class WebhookResponseDto {
   events!: string[];
 
   @Expose()
-  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE })
+  // `nullable` spelled out for the same reason lastTriggeredAt spells out its type: the field is
+  // STORED as null whenever a webhook is created without filters (`dto.filters ?? null`), and the
+  // description offers null as an input, so a schema without it rejects a value the route both
+  // sends and accepts.
+  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE, nullable: true })
   filters?: WebhookFilters | null;
 
   @Expose()
@@ -238,4 +249,61 @@ export class WebhookResponseDto {
   static fromEntities(entities: Webhook[]): WebhookResponseDto[] {
     return entities.map(entity => WebhookResponseDto.fromEntity(entity));
   }
+}
+
+/** A webhook delivery that exhausted every retry — the shape `GET /webhooks/delivery-failures` serves. */
+export class WebhookDeliveryFailureDto {
+  @ApiProperty({ example: '0a941dac-a965-45e7-b318-74ae8be134f0' })
+  id!: string;
+
+  @ApiProperty({ example: '0a941dac-a965-45e7-b318-74ae8be134f0' })
+  webhookId!: string;
+
+  @ApiProperty({ example: '0a941dac-a965-45e7-b318-74ae8be134f0' })
+  sessionId!: string;
+
+  @ApiProperty({ example: 'message.received' })
+  event!: string;
+
+  @ApiProperty({ example: 'https://receiver.example.com/hook' })
+  url!: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'The idempotency key the receiver would have deduped on.',
+  })
+  idempotencyKey?: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  deliveryId?: string | null;
+
+  @ApiProperty({ description: 'Total attempts made before giving up.', example: 5 })
+  attempts!: number;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    description: 'Last HTTP status when the failure was a non-2xx response; null for a network/timeout error.',
+    example: null,
+  })
+  lastStatusCode?: number | null;
+
+  @ApiProperty({ example: 'connect ECONNREFUSED 10.0.0.1:443' })
+  lastError!: string;
+
+  @ApiProperty({ type: String, format: 'date-time', description: 'When the delivery was finally abandoned.' })
+  createdAt!: Date;
+}
+
+/** Outcome of `POST /sessions/:sessionId/webhooks/:id/test`. */
+export class WebhookTestResponseDto {
+  @ApiProperty({ description: 'True when the receiver answered 2xx.', example: true })
+  success!: boolean;
+
+  @ApiPropertyOptional({ description: 'The HTTP status the receiver answered, when it answered.', example: 200 })
+  statusCode?: number;
+
+  @ApiPropertyOptional({ description: 'The delivery error, when the attempt failed.', example: 'timeout' })
+  error?: string;
 }

@@ -157,7 +157,8 @@
       "markRead": "Impossibile contrassegnare la chat come letta",
       "send": "Impossibile inviare il messaggio",
       "react": "Impossibile reagire al messaggio",
-      "delete": "Impossibile eliminare il messaggio"
+      "delete": "Impossibile eliminare il messaggio",
+      "fileTooLarge": "Il file è troppo grande (max 18 MB)"
     },
     "loadMessagesError": "Impossibile caricare i messaggi. Controlla i log del server."
   },
@@ -826,6 +827,7 @@
     "installModal": {
       "title": "Installa un plugin",
       "hint": "Carica un plugin pacchettizzato come file .zip (con un manifest.json). Viene eseguito in sandbox una volta abilitato.",
+      "trustWarning": "I plugin vengono eseguiti con i pieni privilegi del processo del gateway — la sandbox contiene gli arresti anomali, non il codice dannoso. Installa solo plugin di cui ti fidi.",
       "choose": "Scegli un file .zip…",
       "tooLarge": "Il file supera il limite di 5 MB.",
       "catalogHint": "Installa direttamente dal catalogo dei plugin di OpenWA. Lo .zip viene recuperato lato server tramite la protezione SSRF, quindi validato ed eseguito in sandbox.",

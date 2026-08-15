@@ -250,13 +250,13 @@ Proxy egress (if WhatsApp is blocked on your network) is configured **per sessio
 unreachable proxy silently blocks the WhatsApp WebSocket (see the _No QR code appears, or `/start`
 returns `504`_ entry below).
 
-### Issue: No QR code appears, or `POST /api/sessions/:id/start` returns `504`
+### Issue: No QR code appears, or `POST /api/sessions/:sessionId/start` returns `504`
 
 **Symptoms:**
 
-- `POST /api/sessions/:id/start` returns `504 Gateway Timeout`
+- `POST /api/sessions/:sessionId/start` returns `504 Gateway Timeout`
   (`WhatsApp Web authentication timed out...`)
-- No QR code is ever produced — `GET /api/sessions/:id/qr` never has one
+- No QR code is ever produced — `GET /api/sessions/:sessionId/qr` never has one
 - Engine log shows `Session engine failed: auth timeout` after ~30s
 
 **Cause:** The session was created with a `proxyUrl` that doesn't resolve to a real, reachable proxy
@@ -281,7 +281,7 @@ curl -X POST "$BASE/api/sessions" -H "X-API-Key: $API_KEY" -H "Content-Type: app
 > **Engine:** This issue applies to the `whatsapp-web.js` engine only. If you are using `ENGINE_TYPE=baileys`, skip this section.
 
 **Symptoms:** After scanning the QR the phone links the device, but the session stays at
-`authenticating` indefinitely and never becomes `ready`. `GET /sessions/:id/qr` returns 400 while
+`authenticating` indefinitely and never becomes `ready`. `GET /sessions/:sessionId/qr` returns 400 while
 stuck. Often seen on ARM64 (e.g. Raspberry Pi) after upgrading to v0.2.x.
 
 **Cause:** whatsapp-web.js auto-selects a WhatsApp Web client version, and an incompatible version
@@ -294,12 +294,14 @@ environment still hits a WA-Web compatibility hang, pin a known-good WA-Web vers
 `WWEBJS_WEB_VERSION`:
 
 ```bash
-# Optional workaround:
-WWEBJS_WEB_VERSION=2.3000.1040641150-alpha
+# Optional workaround — substitute a build that the registry currently serves:
+WWEBJS_WEB_VERSION=<a build from that registry's html/ folder>
 ```
 
-Restart the container after changing it. Browse newer versions at
-[wppconnect-team/wa-version](https://github.com/wppconnect-team/wa-version) (the `html/` folder). With
+Restart the container after changing it. Pick the build from
+[wppconnect-team/wa-version](https://github.com/wppconnect-team/wa-version) (the `html/` folder) — a
+build the registry no longer serves is fetched, missed, and silently ignored, leaving you on the
+default behaviour rather than the pin you asked for. With
 `WWEBJS_WEB_VERSION` unset, `latest`, or `auto` (the default), OpenWA auto-resolves a settled build
 from that registry and pins its HTML — note this HTML is fetched from a third-party repository and
 executed inside the `web.whatsapp.com` origin without an integrity check. Set
@@ -526,8 +528,8 @@ onboarding_dialog_unrecognized`) carrying the dialog's heading and button labels
 > that warning, the page is gone and the stop → start below is required rather than optional.
 
 **Fix:** acknowledge the modal once (open WhatsApp Web in the account holder's own browser and click
-through the "What's new" screen), **then restart the session** (`POST /sessions/:id/stop` →
-`POST /sessions/:id/start`). Acknowledging alone does not return the session to `ready` — the status
+through the "What's new" screen), **then restart the session** (`POST /sessions/:sessionId/stop` →
+`POST /sessions/:sessionId/start`). Acknowledging alone does not return the session to `ready` — the status
 is deliberately sticky — but the restart re-drives the engine from the stored credentials, so no new
 QR scan is needed. If the modal never actually appeared (a false trip is possible but rare), the
 same stop → start clears it.
@@ -769,6 +771,35 @@ variables:
 WEBHOOK_TIMEOUT=10000      # per-attempt HTTP timeout in ms (default 10000)
 WEBHOOK_RETRY_DELAY=5000   # base retry backoff in ms (default 5000)
 ```
+
+### Issue: An inbound sender arrives as an `@lid` id instead of a phone number
+
+**Symptoms:**
+
+- `message.received` carries `from` (or `author`, in a group) as `162878178984075@lid` rather than `628123456789@c.us`
+- The number cannot be matched against your own contact records, and replies have to be addressed by the `@lid` id
+- `contact.number` on the payload repeats the lid digits, so it is not the phone number either
+
+**Cause:** WhatsApp identifies some accounts by a privacy id (`@lid`) instead of their phone number,
+and the message itself carries no phone number to read. Mapping one back costs a lookup against the
+engine, so the gateway does not do it on every message unless you ask for it.
+
+**Solution:**
+
+```bash
+# Resolve a single id on demand — works whether or not the flag below is set
+curl -H "X-API-Key: $API_KEY" \
+  http://localhost:2785/api/sessions/{sessionId}/contacts/{contactId}/phone
+
+# Or have every inbound message carry it: adds `senderPhone` to the message.received webhook
+# and the websocket event. Set it in the `.env` next to docker-compose.yml (both compose files
+# already forward the variable), then restart the process — an env change is not picked up by a
+# session reload.
+RESOLVE_LID_TO_PHONE=true
+```
+
+`senderPhone` is `null` when the engine cannot map the id — an `@lid` the account has never seen has
+no mapping to return. Both engines support the lookup.
 
 ## 12.5 Performance Issues
 
@@ -1013,6 +1044,13 @@ docker exec openwa-api curl http://host.docker.internal:8080
 > - 8GB RAM: 15-20 sessions
 >
 > With `ENGINE_TYPE=baileys` (browser-free), RAM per session is significantly lower — you can run more sessions on the same hardware. Exact figures depend on message volume and group membership.
+
+**Q: Can I run 10+ sessions in one container? Will they get banned for sharing one IP?**
+
+> A: Yes — there is no hard session limit; the practical ceiling is RAM/CPU (see the table above). Sharing one IP across sessions is not itself a ban trigger: carrier NAT already puts hundreds of ordinary users on a single IP, so WhatsApp cannot treat a shared IP as a violation. Ten sessions on one residential IP behave like ten phones on one home WiFi. What actually matters:
+>
+> - **IP reputation** — cheap datacenter IPs are flagged more aggressively than residential ones. A residential proxy (per-session, via the proxy settings) can help; it is not a license to spam.
+> - **Sending behavior** — bans follow message patterns (volume, identical templates, cold reachouts), not session count. See "How to avoid getting banned?" below.
 
 **Q: Can I use WhatsApp Business account?**
 

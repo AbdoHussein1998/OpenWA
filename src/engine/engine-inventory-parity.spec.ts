@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ENGINE_CAPABILITY_MATRIX } from './engine-capability-matrix';
+import { engineCapabilityMatrix } from './engine-capability-matrix';
 
 /**
  * Drift invariants for the hand-maintained halves of docs/29-engine-capability-matrix.md.
@@ -16,12 +16,17 @@ import { ENGINE_CAPABILITY_MATRIX } from './engine-capability-matrix';
  * listener at all. Those are exactly the marks a reader triaging backlog work trusts most, so they
  * get a gate.
  *
- * What this gate CANNOT see, and why (do not read a green run as more than it is):
+ * The name-collision half of that is now closed: a second invariant requires the symbol to be
+ * reached THROUGH a library handle, so an adapter method of the same name no longer satisfies it.
+ * It found two rows that a name search had blessed for as long as they existed — Baileys `star`
+ * (`starMessage` goes through `chatModify`) and wwjs `sendSeen` (the `Chat` model method, not the
+ * `Client` one).
+ *
+ * What this gate still CANNOT see, and why (do not read a green run as more than it is):
  *   - Under-mapping. A ✅ row listing four interface methods when the symbol really serves eight
  *     still passes; the check is "the claim has code behind it", not "the claim is exhaustive".
- *   - A library symbol whose name collides with an adapter method of the same name (`logout`,
- *     `createGroup`, …). `this.lifecycle.logout()` is indistinguishable here from `sock.logout()`.
- *   - Direction. Mapping symbol A to interface method B instead of C passes as long as both exist.
+ *   - Direction. Mapping symbol A to interface method B instead of C passes as long as both exist,
+ *     because nothing here resolves a call site back to the interface method enclosing it.
  */
 const DOC = join(__dirname, '..', '..', 'docs', '29-engine-capability-matrix.md');
 const ADAPTER_DIR = join(__dirname, 'adapters');
@@ -161,12 +166,46 @@ describe('engine inventory (docs/29 §29.5) — drift invariants', () => {
       expect(unsupported).toEqual([]);
     });
 
+    /**
+     * The check above asks whether the NAME occurs in adapter code, which our own identically-named
+     * methods satisfy: `getChatLabels` was marked used while `Client.getChatLabels` was never
+     * called, because the adapter defines a method of that name. Two rows were wrong for exactly
+     * that reason — Baileys `star` (starMessage goes through `chatModify({ star })`) and wwjs
+     * `sendSeen` (the adapter calls the `Chat` model method, not the `Client` one).
+     *
+     * So this asks the stronger question: is the symbol reached THROUGH a library handle? The
+     * handle shapes are taken from what the adapters actually do — `this.sock()`/`this.client()`,
+     * `getSocket()`, and any socket/client-shaped local (`sock`, `sourceSock`, `client`) — and a
+     * member may be a reference rather than a call, since `updateMediaMessage` is passed as one.
+     * Casts are tolerated: `(this.client() as unknown as BusinessClient).getLabels()` is a real
+     * call, and so is computed dispatch, `this.client()[op](…)` with the name supplied as a literal.
+     */
+    it('every ✅/⚙️ exposure mark is reached through a library handle, not just named', () => {
+      const code = adapterSourcesWithStrings().replace(/\s+/g, ' ');
+      const handle =
+        engine === 'wwjs'
+          ? String.raw`(?:\bthis\.client\(\)|\b\w*[Cc]lient\b)`
+          : String.raw`(?:\bthis\.sock\(\)|\bgetSocket\(\)|\b\w*[Ss]ock\b)`;
+      const reached = (symbol: string): boolean => {
+        const s = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (new RegExp(`${handle}[^;{}]{0,90}?\\.\\s*${s}\\s*[(<.,)\\]]`).test(code)) return true;
+        // computed dispatch through the handle, with the method name supplied as a literal
+        return new RegExp(`${handle}\\s*\\[`).test(code) && new RegExp(`['"\`]${s}['"\`]`).test(code);
+      };
+
+      const marked = readInventory(engine).filter(r => r.exposure.startsWith('✅') || r.exposure.startsWith('⚙️'));
+      // Guard the selector: an empty or tiny set would make the assertion vacuous.
+      expect(marked.length).toBeGreaterThan(30);
+      expect(marked.filter(r => !reached(r.symbol)).map(r => r.symbol)).toEqual([]);
+    });
+
     it('every interface method named in a ✅ exposure cell is `supported` for this engine', () => {
+      const matrix = engineCapabilityMatrix();
       const offenders: string[] = [];
       for (const row of readInventory(engine)) {
         if (!row.exposure.startsWith('✅')) continue;
         for (const [, method] of row.exposure.matchAll(/`([a-zA-Z][a-zA-Z0-9]*)`/g)) {
-          const entry = ENGINE_CAPABILITY_MATRIX[method];
+          const entry = matrix[method];
           if (!entry) continue; // prose backtick, not an interface method
           if (entry[engine].status !== 'supported') offenders.push(`${row.symbol} → ${method}`);
         }

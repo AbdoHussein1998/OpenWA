@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { CatalogService } from './catalog.service';
-import { SendProductDto, SendCatalogDto, ProductQueryDto } from './dto/send-product.dto';
+import { SendProductDto, ProductQueryDto } from './dto/send-product.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import { CatalogDto, PaginatedProductsDto, ProductDto, ProductMessageResponseDto } from './dto/catalog-response.dto';
@@ -83,15 +83,5 @@ export class CatalogController {
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendProduct(@Param('sessionId') sessionId: string, @Body() dto: SendProductDto) {
     return this.catalogService.sendProduct(sessionId, dto.chatId, dto.productId, dto.body);
-  }
-
-  @Post('messages/send-catalog')
-  @RequireRole(ApiKeyRole.OPERATOR)
-  @ApiOperation({ summary: 'Send catalog link (not supported by any engine)' })
-  @ApiResponse({ status: 501, description: 'Not supported by the active engine: no engine can send catalog links.' })
-  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
-  @ApiResponse({ status: 404, description: SESSION_NOT_STARTED_404 })
-  async sendCatalog(@Param('sessionId') sessionId: string, @Body() dto: SendCatalogDto) {
-    return this.catalogService.sendCatalog(sessionId, dto.chatId, dto.body);
   }
 }

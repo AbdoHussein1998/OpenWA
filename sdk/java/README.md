@@ -67,7 +67,7 @@ and PHP SDKs:
 
 `sessions` · `messages` · `contacts` · `groups` · `webhooks` · `chats` ·
 `labels` · `channels` · `catalog` · `status` · `templates` · `health` · `search` ·
-`profile` · `calls`,
+`profile` · `calls` · `media`,
 plus `client.auth()`.
 
 Operator-only modules (`docker`, `metrics`, `infra`, `plugins`, `mcp`) are

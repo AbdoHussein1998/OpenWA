@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
@@ -7,16 +7,15 @@ import {
   Play,
   ExternalLink,
   Loader2,
-  X,
   Webhook as WebhookIcon,
   Check,
-  AlertTriangle,
   AlertCircle,
   Filter,
 } from 'lucide-react';
 import { webhookApi, type Webhook, type WebhookFilters, type WebhookFilterCondition } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useRole } from '../hooks/useRole';
+import { useToast } from '../hooks/useToast';
 import {
   useWebhooksQuery,
   useSessionsQuery,
@@ -138,7 +137,7 @@ export function Webhooks() {
     filters: WebhookFilters | null;
   }>({ url: '', events: ['message.received'], sessionId: '', filters: null });
   const [testingId, setTestingId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const toast = useToast();
 
   // Single source for the contact/group autocomplete in whichever modal is open.
   const activeSessionId = showEditModal ? (editWebhook?.sessionId ?? '') : newWebhook.sessionId;
@@ -148,13 +147,6 @@ export function Webhooks() {
     if (name === '*') return t('webhooks.eventDescriptions.all');
     return t(`webhooks.eventDescriptions.${name}`, { defaultValue: name });
   };
-
-  useEffect(() => {
-    if (toast) {
-      const timer = setTimeout(() => setToast(null), 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [toast]);
 
   const handleCreate = async () => {
     if (!newWebhook.url || !newWebhook.sessionId) return;
@@ -168,14 +160,13 @@ export function Webhooks() {
       });
       setShowCreateModal(false);
       setNewWebhook({ url: '', events: ['message.received'], sessionId: '', filters: null });
-      setToast({ type: 'success', message: t('webhooks.toasts.created') });
+      toast.success(t('webhooks.toasts.created'));
     } catch (err) {
-      setToast({
-        type: 'error',
-        message: t('webhooks.toasts.createFailed', {
+      toast.error(
+        t('webhooks.toasts.createFailed', {
           message: err instanceof Error ? err.message : t('common.unknownError'),
         }),
-      });
+      );
     }
   };
 
@@ -190,14 +181,13 @@ export function Webhooks() {
       await deleteMutation.mutateAsync({ sessionId: deleteTarget.sessionId, id: deleteTarget.id });
       setShowDeleteModal(false);
       setDeleteTarget(null);
-      setToast({ type: 'success', message: t('webhooks.toasts.deleted') });
+      toast.success(t('webhooks.toasts.deleted'));
     } catch (err) {
-      setToast({
-        type: 'error',
-        message: t('webhooks.toasts.deleteFailed', {
+      toast.error(
+        t('webhooks.toasts.deleteFailed', {
           message: err instanceof Error ? err.message : t('common.unknownError'),
         }),
-      });
+      );
     }
   };
 
@@ -206,20 +196,16 @@ export function Webhooks() {
     try {
       const result = await webhookApi.test(sessionId, id);
       if (result.success) {
-        setToast({ type: 'success', message: t('webhooks.toasts.testOk', { status: result.statusCode }) });
+        toast.success(t('webhooks.toasts.testOk', { status: result.statusCode }));
       } else {
-        setToast({
-          type: 'error',
-          message: t('webhooks.toasts.testFailed', { message: result.error || `Status ${result.statusCode}` }),
-        });
+        toast.error(t('webhooks.toasts.testFailed', { message: result.error || `Status ${result.statusCode}` }));
       }
     } catch (err) {
-      setToast({
-        type: 'error',
-        message: t('webhooks.toasts.testError', {
+      toast.error(
+        t('webhooks.toasts.testError', {
           message: err instanceof Error ? err.message : t('common.unknownError'),
         }),
-      });
+      );
     } finally {
       setTestingId(null);
     }
@@ -246,14 +232,13 @@ export function Webhooks() {
       });
       setShowEditModal(false);
       setEditWebhook(null);
-      setToast({ type: 'success', message: t('webhooks.toasts.updated') });
+      toast.success(t('webhooks.toasts.updated'));
     } catch (err) {
-      setToast({
-        type: 'error',
-        message: t('webhooks.toasts.updateFailed', {
+      toast.error(
+        t('webhooks.toasts.updateFailed', {
           message: err instanceof Error ? err.message : t('common.unknownError'),
         }),
-      });
+      );
     }
   };
 
@@ -287,16 +272,6 @@ export function Webhooks() {
 
   return (
     <div className="webhooks-page">
-      {toast && (
-        <div className={`toast ${toast.type}`}>
-          {toast.type === 'success' ? <Check size={18} /> : <AlertTriangle size={18} />}
-          <span>{toast.message}</span>
-          <button className="toast-close" onClick={() => setToast(null)}>
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
       <PageHeader
         title={t('webhooks.title')}
         subtitle={t('webhooks.subtitle')}

@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, Not, IsNull, DataSource, FindManyOptions } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
+import { setTimeout } from 'node:timers/promises';
 import { Session, SessionStatus } from './entities/session.entity';
 import { CreateSessionDto, SessionConfigResponseDto, UpdateSessionConfigDto } from './dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
@@ -28,19 +29,8 @@ import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces
 import { createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
 
-// Re-exported so the existing spec import paths keep working after these moved out.
-export { clampReconnectDelay } from './reconnect-policy';
-export { ACK_RECONCILE_DELAY_MS } from './message-projector.service';
-export {
-  SESSION_WATCHDOG_INTERVAL_MS,
-  SESSION_WATCHDOG_PROBE_TIMEOUT_MS,
-  SESSION_WATCHDOG_MAX_FAILURES,
-} from './session-liveness-watchdog.service';
-export {
-  resolveReconnectConfig,
-  resolveMaxConcurrentSessions,
-  EngineInitTimeoutError,
-} from './session-engine-lifecycle.service';
+/** Pause between sequential auto-start launches so a burst of Chromium boots does not spike the host. */
+export const AUTOSTART_THROTTLE_MS = 2_000;
 
 /**
  * The session-record API: CRUD over the sessions table, aggregate stats, and the thin engine query
@@ -60,6 +50,11 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   private get engines(): EngineRegistry {
     return this.engineRegistry;
   }
+
+  /** The detached auto-start run; see onApplicationBootstrap. Awaited by onModuleDestroy. */
+  private autoStartRun: Promise<void> = Promise.resolve();
+  /** Set at the top of onModuleDestroy so the detached run stops launching further sessions. */
+  private shuttingDown = false;
 
   constructor(
     @InjectRepository(Session, 'data')
@@ -115,7 +110,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     }
   }
 
-  async onApplicationBootstrap(): Promise<void> {
+  onApplicationBootstrap(): void {
     // Start the liveness watchdog FIRST: it must run even when auto-start is disabled (sessions can
     // be started via the API at any time), so it can't sit behind the auto-start early-return below.
     // The watchdog owns the probe cadence and failure counting; a session it proves dead comes
@@ -137,6 +132,29 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
     if (!resolveFeatureFlags(this.configService).autoStartSessions) return;
 
+    // DETACHED, deliberately. Nest binds the HTTP listener only after every onApplicationBootstrap
+    // hook has settled, and this loop's duration is unbounded: one engine initialization is at least
+    // 60s (resolveEngineInitTimeoutMs) and there is a 2s throttle between sessions, so a host with
+    // ten authenticated sessions kept the port CLOSED — not unhealthy, closed — for ten minutes.
+    // Every liveness probe in that window is a connection refusal, and no probe budget can cover a
+    // bound that scales with the session count: the chart's is ~50s and the Dockerfile HEALTHCHECK
+    // encodes the same expectation. Awaited on shutdown so a launch in flight is accounted for.
+    this.autoStartRun = this.autoStartSessions().catch((error: unknown) => {
+      // Previously this rejected out of the hook and aborted boot, so a transient database error
+      // during the session scan took the whole gateway down rather than the auto-start.
+      this.logger.error('Auto-start scan failed', error instanceof Error ? error.message : String(error), {
+        action: 'auto_start_scan_failed',
+      });
+    });
+  }
+
+  /**
+   * Launch every previously authenticated session this node may claim, one at a time.
+   *
+   * Sequential with a throttle by design — these are Chromium launches — which is exactly why it
+   * cannot run inside the bootstrap hook. See onApplicationBootstrap.
+   */
+  private async autoStartSessions(): Promise<void> {
     // Restricted to sessions this node may claim. Without it every replica scans the same rows and
     // races to launch the same engines, which is a WhatsApp account being opened twice, not merely
     // duplicated work.
@@ -153,6 +171,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     });
 
     for (let i = 0; i < sessions.length; i++) {
+      // A shutdown landing mid-run must not launch anything further: onModuleDestroy tears down what
+      // exists, and a browser launched after that point is never destroyed.
+      if (this.shuttingDown) {
+        this.logger.log(`Auto-start stopped at ${i} of ${sessions.length} session(s): shutting down`, {
+          action: 'auto_start_aborted',
+        });
+        return;
+      }
       const session = sessions[i];
       try {
         await this.start(session.id);
@@ -169,7 +195,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       }
       // Throttle between sequential Chromium launches; no need to wait after the last one.
       if (i < sessions.length - 1) {
-        await this.delay(2000);
+        await setTimeout(AUTOSTART_THROTTLE_MS);
       }
     }
   }
@@ -177,8 +203,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   async onModuleDestroy(): Promise<void> {
     // Stop the watchdog FIRST (before any teardown below can hang): no new probe/disconnect handling
     // may start mid-shutdown. stop() is idempotent, so a second onModuleDestroy call stays safe.
+    this.shuttingDown = true;
     this.watchdog.stop();
     this.ownership?.stopHeartbeat();
+    // A SIGTERM during boot can land while the detached auto-start is mid-launch. Let that one
+    // settle — the flag above stops the loop taking another — so the engine it registers is torn
+    // down below instead of outliving the process as an orphaned browser. Bounded by the launch
+    // already in flight, never by the whole run.
+    await this.autoStartRun;
     // Reconnect timers + engine teardown belong to the lifecycle owner.
     await this.engineLifecycle.shutdown();
     // Released only after the engines are actually down, so a peer never claims a session this
@@ -326,9 +358,28 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // COUNT, or delete()'s own requireSession — would let the mark land after that window. A mark
     // left behind when the fence refuses (409) is harmless and is cleared by the next start().
     this.engineLifecycle.markStopping(id);
-    if (this.ownership) await this.assertNotHeldElsewhere(id);
-    await this.engineLifecycle.delete(id);
-    await this.ownership?.release(id);
+    try {
+      if (this.ownership) await this.assertNotHeldElsewhere(id);
+      await this.engineLifecycle.delete(id);
+      await this.ownership?.release(id);
+    } catch (error) {
+      this.discardStopMarkForMissingSession(id, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reclaim the entry-time stop mark when the id turns out to have no session row.
+   *
+   * The mark is set synchronously, before the awaited existence check — deliberately, and the
+   * comments above say why. A mark left behind by a refusal is harmless because the next start()
+   * clears it, but that presupposes a row: start() and delete() both clear the mark only after
+   * their own requireSession, so for an id that never had one the entry is unreachable by every
+   * reclamation path and survives for the life of the process. A 404 also means there is no engine
+   * and no in-flight start() for the mark to guard, so dropping it is safe as well as necessary.
+   */
+  private discardStopMarkForMissingSession(id: string, error: unknown): void {
+    if (error instanceof NotFoundException) this.engineLifecycle.clearStopping(id);
   }
 
   /**
@@ -371,8 +422,18 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   async stop(id: string): Promise<Session> {
     // Synchronous stop-mark before the awaited fence — see delete() for why.
     this.engineLifecycle.markStopping(id);
-    if (this.ownership) await this.assertNotHeldElsewhere(id);
-    const session = await this.engineLifecycle.stop(id);
+    let session: Session;
+    try {
+      if (this.ownership) await this.assertNotHeldElsewhere(id);
+      session = await this.engineLifecycle.stop(id);
+    } catch (error) {
+      // Deliberately no release here, unlike logout()/forceKill(): this catch also carries the
+      // foreign-node 409, where the claim is the peer's and a blanket release would delete it. The
+      // local-502 path keeps the claim, and only claims with a live engine are renewed — it lapses
+      // at lease TTL instead of pinning the session here.
+      this.discardStopMarkForMissingSession(id, error);
+      throw error;
+    }
     // Handed back on the way out so a peer can pick it up immediately rather than waiting for the
     // lease to lapse. Stop is the deliberate end of this process's ownership — but a start() that
     // began before this stop and is still mid-launch owns the claim now, so the same
@@ -422,7 +483,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     const engine = this.engines.get(id);
 
     if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
+      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
     }
 
     const qrCode = engine.getQRCode();
@@ -449,7 +510,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     const engine = this.engines.get(id);
 
     if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
+      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
     }
     if (session.status === SessionStatus.READY) {
       throw new BadRequestException('Session is already authenticated, no pairing needed');
@@ -724,9 +785,5 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     sessionIds: string[],
   ): Promise<{ stopped: string[]; notRunning: string[]; failed: string[] }> {
     return this.engineLifecycle.stopOrphanEngines(sessionIds);
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

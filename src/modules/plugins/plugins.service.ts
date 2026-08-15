@@ -2,13 +2,13 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException, 
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PluginLoaderService, PluginStatus, resolvePluginMainPath } from '../../core/plugins';
+import { PluginLoaderService, PluginStatus, resolvePluginEntryPath } from '../../core/plugins';
 import { pluginUpdateBackupDirName, pluginUpdateStagingDirName } from '../../core/plugins';
 import type { PluginConfigSchema } from '../../core/plugins';
 import { PluginDto } from './dto/plugin.dto';
 import { redactSecretConfig, restoreSecretConfig } from './redact-config';
 import { parsePluginPackage } from './plugin-installer';
-import { assertDownloadSha256, fetchSafeBuffer } from './plugin-download';
+import { assertDownloadSha256, assertPluginInstallUrl, fetchSafeBuffer } from './plugin-download';
 import { annotateCatalog, CatalogEntry, CatalogPlugin } from './catalog';
 import { redactSsrfError } from '../../common/security/ssrf-guard';
 import { createLogger } from '../../common/services/logger.service';
@@ -281,10 +281,12 @@ export class PluginsService {
     if (!entry || typeof entry !== 'string') {
       throw new NotFoundException(`Plugin ${id} has no config UI`);
     }
-    const base = path.resolve(this.pluginLoader.getPluginsDir(), id);
+    // Anchored to the package's own directory: the plugin is loaded by this point, and a package
+    // found in the legacy plugins directory does not live under the configured root.
+    const base = path.resolve(this.pluginLoader.getPluginPackageDir(id));
     let file: string;
     try {
-      file = resolvePluginMainPath(this.pluginLoader.getPluginsDir(), id, entry);
+      file = resolvePluginEntryPath(base, entry);
     } catch {
       throw new NotFoundException(`Config UI entry not found for plugin ${id}`);
     }
@@ -372,7 +374,7 @@ export class PluginsService {
   }
 
   /**
-   * Install a plugin from an HTTPS URL: download the .zip through the SSRF guard (host validated,
+   * Install a plugin from a URL: download the .zip through the SSRF guard (host validated,
    * connection pinned, redirects followed with every hop re-validated through the guard and the
    * chain capped at 5 hops, size-capped), then run the exact same validate-write-load
    * pipeline as an uploaded package. The downloaded buffer is treated as untrusted, identical to an
@@ -381,6 +383,26 @@ export class PluginsService {
    * means the package was substituted in transit and the install fails closed.
    */
   async installFromUrl(url: string): Promise<PluginDto> {
+    const buffer = await this.downloadPackage(url);
+    // Peek the id (the SSRF download stays outside the lock) so the install — which writes the plugin
+    // directory — is serialized against any concurrent uninstall/update of the same id.
+    const { manifest } = parsePluginPackage(buffer);
+    return this.serialize(manifest.id, () => Promise.resolve(this.install({ buffer })));
+  }
+
+  /**
+   * The single funnel every URL-sourced package download passes through (install + update):
+   * enforce the transport rule (https, or plain http carrying a `#sha256=` content pin) BEFORE any
+   * fetch, download through the SSRF-guarded path, then verify a pinned digest against the bytes.
+   * The remote catalog is deliberately NOT routed through here — its URL is operator configuration
+   * and its JSON is data, not executable code.
+   */
+  private async downloadPackage(url: string): Promise<Buffer> {
+    try {
+      assertPluginInstallUrl(url);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : String(error));
+    }
     const maxBytes = this.configService.get<number>('plugins.downloadMaxBytes') ?? 5 * 1024 * 1024;
     let buffer: Buffer;
     try {
@@ -397,10 +419,7 @@ export class PluginsService {
         `Plugin download integrity check failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    // Peek the id (the SSRF download stays outside the lock) so the install — which writes the plugin
-    // directory — is serialized against any concurrent uninstall/update of the same id.
-    const { manifest } = parsePluginPackage(buffer);
-    return this.serialize(manifest.id, () => Promise.resolve(this.install({ buffer })));
+    return buffer;
   }
 
   /**
@@ -468,11 +487,15 @@ export class PluginsService {
     }
 
     const wasEnabled = plugin.status === PluginStatus.ENABLED;
-    const pluginsDir = this.pluginLoader.getPluginsDir();
-    const dir = path.join(pluginsDir, id);
-    // Dot-prefixed siblings inside pluginsDir: same filesystem (so the renames stay EXDEV-safe) but
-    // skipped by the loader's directory scan, so a crash mid-update can't leave them loaded as a
-    // duplicate. The loader's boot-time recovery keys off these exact names.
+    // The tree the package was loaded from, which is the legacy plugins directory for a host that
+    // has not migrated. Updating in the configured root instead renames a directory that is not
+    // there, after unloadPlugin has already dropped the plugin from the runtime.
+    const dir = this.pluginLoader.getPluginPackageDir(id);
+    const pluginsDir = path.dirname(dir);
+    // Dot-prefixed siblings inside that same directory: same filesystem (so the renames stay
+    // EXDEV-safe) but skipped by the loader's directory scan, so a crash mid-update can't leave them
+    // loaded as a duplicate. The loader's boot-time recovery runs per scanned directory and keys off
+    // these exact names, so it reconciles the legacy tree too.
     const backup = path.join(pluginsDir, pluginUpdateBackupDirName(id));
     const staging = path.join(pluginsDir, pluginUpdateStagingDirName(id));
 
@@ -590,22 +613,7 @@ export class PluginsService {
 
   /** Update an installed plugin by downloading the new package from a URL (SSRF-guarded), then in place. */
   async updateFromUrl(id: string, url: string): Promise<PluginDto> {
-    const maxBytes = this.configService.get<number>('plugins.downloadMaxBytes') ?? 5 * 1024 * 1024;
-    let buffer: Buffer;
-    try {
-      buffer = await fetchSafeBuffer(url, { maxBytes });
-    } catch (error) {
-      throw new BadRequestException(
-        `Failed to download plugin from URL: ${redactSsrfError(error, logger, 'plugin download')}`,
-      );
-    }
-    try {
-      assertDownloadSha256(url, buffer);
-    } catch (error) {
-      throw new BadRequestException(
-        `Plugin download integrity check failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    const buffer = await this.downloadPackage(url);
     return this.updatePackage(id, buffer);
   }
 

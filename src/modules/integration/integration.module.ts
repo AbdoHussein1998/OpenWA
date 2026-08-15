@@ -16,8 +16,9 @@ import { IntegrationRetentionService } from './integration-retention.service';
 import { IntegrationInstanceController } from './integration-instance.controller';
 import { ScopeBindingService } from './scope-binding.service';
 import { PluginLoaderService } from '../../core/plugins/plugin-loader.service';
-import { SessionModule } from '../session/session.module';
-import { SessionService } from '../session/session.service';
+import { PLUGIN_INSTANCE_PORT, type PluginInstancePort } from '../../core/plugins/plugin-host-ports';
+import { EngineRegistry } from '../../engine/engine-registry.service';
+import { Session } from '../session/entities/session.entity';
 import { createLogger } from '../../common/services/logger.service';
 
 /**
@@ -43,8 +44,7 @@ if (process.env.QUEUE_ENABLED === 'true') {
 
 @Module({
   imports: [
-    SessionModule,
-    TypeOrmModule.forFeature([PluginInstance, IngressEvent, IntegrationDeliveryFailure], 'data'),
+    TypeOrmModule.forFeature([PluginInstance, IngressEvent, IntegrationDeliveryFailure, Session], 'data'),
     ...queueModules,
   ],
   controllers: [IngressController, RedriveController, IntegrationInstanceController],
@@ -56,6 +56,13 @@ if (process.env.QUEUE_ENABLED === 'true') {
     RedriveService,
     ScopeBindingService,
     IntegrationRetentionService,
+    // Binds the core-owned plugin capability port to this module's service; resolved lazily by the
+    // plugin runtime (PluginHostServices) so its provider cycle stays broken.
+    {
+      provide: PLUGIN_INSTANCE_PORT,
+      useFactory: (instances: PluginInstanceService): PluginInstancePort => instances,
+      inject: [PluginInstanceService],
+    },
     {
       provide: IngressService,
       inject: [
@@ -64,7 +71,7 @@ if (process.env.QUEUE_ENABLED === 'true') {
         PluginLoaderService,
         IngressEnqueueService,
         getRepositoryToken(IntegrationDeliveryFailure, 'data'),
-        SessionService,
+        EngineRegistry,
       ],
       useFactory: (
         instances: PluginInstanceService,
@@ -72,7 +79,7 @@ if (process.env.QUEUE_ENABLED === 'true') {
         loader: PluginLoaderService,
         ingressEnqueue: IngressEnqueueService,
         failures: Repository<IntegrationDeliveryFailure>,
-        sessions: SessionService,
+        registry: EngineRegistry,
       ) => {
         const dlqLogger = createLogger('IngressEnqueue');
         const ingressLogger = createLogger('Ingress');
@@ -84,7 +91,7 @@ if (process.env.QUEUE_ENABLED === 'true') {
           // O(1) in-memory liveness probe for the `session-alive` preflight: a Map read + a field read.
           // MUST stay cheap — never call engine.initialize() here (that is the slow/blocking path bounded
           // separately by the #667/#696 init-timeout). Undefined = no live engine (stopped/deleted).
-          sessionStatus: (scope: string) => sessions.getEngine(scope)?.getStatus(),
+          sessionStatus: (scope: string) => registry.get(scope)?.getStatus(),
           // Audit sink for preflight rejections (they leave no dedup/DLQ row). The Prometheus counter is
           // a separate follow-up (see plan notes); the structured log is the MVP audit surface.
           log: (event, meta) => ingressLogger.warn(event, meta),

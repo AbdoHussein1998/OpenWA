@@ -157,7 +157,8 @@
       "markRead": "Erro ao marcar o chat como lido",
       "send": "Erro ao enviar a mensagem",
       "react": "Erro ao reagir à mensagem",
-      "delete": "Erro ao excluir a mensagem"
+      "delete": "Erro ao excluir a mensagem",
+      "fileTooLarge": "O arquivo é muito grande (máx. 18 MB)"
     },
     "loadMessagesError": "Não foi possível carregar as mensagens. Verifique os registros do servidor."
   },
@@ -826,6 +827,7 @@
     "installModal": {
       "title": "Instalar um plugin",
       "hint": "Envie um plugin empacotado como .zip (com um manifest.json). É executado em modo isolado quando habilitado.",
+      "trustWarning": "Plugins são executados com todos os privilégios do processo do gateway — o modo isolado contém falhas, não código malicioso. Instale apenas plugins em que você confia.",
       "choose": "Escolha um arquivo .zip…",
       "tooLarge": "O arquivo excede o limite de 5 MB.",
       "catalogHint": "Instale diretamente do catálogo de plugins do OpenWA. O .zip é baixado no servidor através da proteção SSRF, depois validado e executado em sandbox.",

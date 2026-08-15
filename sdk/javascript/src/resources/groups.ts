@@ -11,6 +11,7 @@ import type {
   CreateGroupRequest,
   GroupInfo,
   GroupJoinInfo,
+  GroupMembershipRequest,
   GroupSettingsResponse,
   GroupSummary,
   InviteCodeResponse,
@@ -205,6 +206,42 @@ export class GroupsResource {
     return this.client.request<InviteCodeResponse>({
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/invite-code/revoke`,
+    });
+  }
+
+  /**
+   * List a group's pending join requests. Requires the account to be a group admin.
+   *
+   * Only `participantId` is guaranteed — the rest of each entry is reported by the engine when it
+   * has it, so treat `addedById`, `method` and `requestedAt` as absent rather than assuming a shape.
+   */
+  getMembershipRequests(sessionId: string, groupId: string): Promise<GroupMembershipRequest[]> {
+    return this.client.request<GroupMembershipRequest[]>({
+      method: 'GET',
+      path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/membership-requests`,
+    });
+  }
+
+  /**
+   * Approve pending join requests. Omit `participants` to approve every pending request.
+   *
+   * A partial refusal answers 200 and reports it per participant in `results`, so `success` alone
+   * does not mean everyone was let in.
+   */
+  approveMembershipRequests(sessionId: string, groupId: string, participants?: string[]): Promise<ParticipantsResult> {
+    return this.client.request<ParticipantsResult>({
+      method: 'POST',
+      path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/membership-requests/approve`,
+      body: participants === undefined ? {} : { participants },
+    });
+  }
+
+  /** Reject pending join requests. Omit `participants` to reject every pending request. */
+  rejectMembershipRequests(sessionId: string, groupId: string, participants?: string[]): Promise<ParticipantsResult> {
+    return this.client.request<ParticipantsResult>({
+      method: 'POST',
+      path: `/api/sessions/${encodeSegment(sessionId)}/groups/${encodeSegment(groupId)}/membership-requests/reject`,
+      body: participants === undefined ? {} : { participants },
     });
   }
 }

@@ -139,6 +139,34 @@ describe('openapi.json structural invariants', () => {
     expect(bare).toEqual([]);
   });
 
+  it('declares nullability on every property whose description offers null', () => {
+    const doc = snapshot();
+    // A property documented as carrying null must publish it, or a client generated from the
+    // contract rejects a value the gateway both sends and accepts. `lastTriggeredAt` was fixed that
+    // way; `filters` — stored as `dto.filters ?? null` for every webhook created without one — was
+    // the sibling left behind, which is why this is an invariant rather than three more spellings.
+    //
+    // A container satisfies it through its members: `pictures` is never null, but its values are,
+    // and it declares that on additionalProperties.
+    const scanned: string[] = [];
+    const undeclared: string[] = [];
+
+    type Spec = { description?: string; nullable?: boolean; items?: Spec; additionalProperties?: Spec | boolean };
+    for (const [name, schema] of Object.entries(doc.components?.schemas ?? {})) {
+      const properties = (schema as { properties?: Record<string, Spec> }).properties ?? {};
+      for (const [property, spec] of Object.entries(properties)) {
+        if (!/\bnull\b/i.test(spec.description ?? '')) continue;
+        scanned.push(`${name}.${property}`);
+        const member = typeof spec.additionalProperties === 'object' ? spec.additionalProperties : spec.items;
+        if (spec.nullable !== true && member?.nullable !== true) undeclared.push(`${name}.${property}`);
+      }
+    }
+
+    // Guard the selector: a description reworded away from the word would scan nothing and pass.
+    expect(scanned.length).toBeGreaterThan(15);
+    expect(undeclared).toEqual([]);
+  });
+
   it('gives each route exactly one path key, whatever its parameters are named', () => {
     const doc = snapshot();
     // A path template variable is positional: `/x/{id}` and `/x/{sessionId}` are the same URL. Two
@@ -182,5 +210,40 @@ describe('both OpenAPI producers apply the same passes', () => {
       expect(order[0]).toBeGreaterThan(-1);
       expect(order[1]).toBeGreaterThan(order[0]);
     }
+  });
+});
+
+/**
+ * A request body must publish a SCHEMA, not a primitive.
+ *
+ * `@ApiBody({ description })` with no `type:` publishes `{"type":"string"}` — the decorator has no
+ * way to infer the DTO — so the published contract told every generated client the body was a bare
+ * string while the handler took an object. `openapi:check` passes on it happily: the snapshot is
+ * self-consistent, just wrong. One of the document's application/json bodies was in that state.
+ */
+describe('every JSON request body publishes an object schema', () => {
+  const jsonBodies = (): Array<{ op: string; schema: Record<string, unknown> }> => {
+    const out: Array<{ op: string; schema: Record<string, unknown> }> = [];
+    for (const [path, item] of Object.entries(snapshot().paths as unknown as Record<string, Record<string, unknown>>)) {
+      for (const [method, op] of Object.entries(item)) {
+        const body = (op as { requestBody?: { content?: Record<string, { schema?: Record<string, unknown> }> } })
+          .requestBody;
+        const schema = body?.content?.['application/json']?.schema;
+        if (schema) out.push({ op: `${method.toUpperCase()} ${path}`, schema });
+      }
+    }
+    return out;
+  };
+
+  // Guards the assertion below: an extractor that found nothing would pass it vacuously.
+  it('finds the document’s JSON request bodies', () => {
+    expect(jsonBodies().length).toBeGreaterThan(50);
+  });
+
+  it('publishes none of them as a bare primitive', () => {
+    const primitives = jsonBodies()
+      .filter(({ schema }) => !schema.$ref && !schema.properties && schema.type !== 'object')
+      .map(({ op, schema }) => `${op} -> ${JSON.stringify(schema)}`);
+    expect(primitives).toEqual([]);
   });
 });

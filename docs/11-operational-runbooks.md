@@ -496,8 +496,9 @@ git checkout v<old-version>
 docker compose build openwa-api
 
 # 3. Restore from the pre-upgrade backup (both DBs + sessions) — the archive step 2 produced is
-#    "$BACKUP_DIR/openwa-backup-<timestamp>.tar.gz"
-./scripts/restore.sh "$BACKUP_DIR/openwa-backup-<timestamp>.tar.gz"
+#    "$BACKUP_DIR/openwa-backup-<timestamp>.tar.gz". The databases in place still hold the failed
+#    upgrade's data, so the restore refuses to touch them without --force
+./scripts/restore.sh "$BACKUP_DIR/openwa-backup-<timestamp>.tar.gz" --force
 
 # 4. Start with old version
 docker compose up -d
@@ -604,7 +605,9 @@ docker compose down
 # 2. Restore from an archive produced by scripts/backup.sh
 #    (databases land on MAIN_DATABASE_NAME / DATABASE_NAME, default ./data/... — the same paths
 #    the app reads; non-DB state follows OPENWA_DATA_DIR. Pass --strict to refuse an archive
-#    whose CONSISTENCY-WARNING marker reports plain-copied, possibly-torn database snapshots)
+#    whose CONSISTENCY-WARNING marker reports plain-copied, possibly-torn database snapshots.
+#    Restoring over an existing install's live databases requires --force; without it the script
+#    refuses to overwrite them)
 ./scripts/restore.sh ./backups/openwa-backup-<timestamp>.tar.gz
 
 # 3. (Postgres only) the archive contains database.sql — import it manually:

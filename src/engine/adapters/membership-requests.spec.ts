@@ -123,6 +123,26 @@ describe('WwebjsGroups membership requests', () => {
     ]);
   });
 
+  it.each([
+    ['approve', 'approveGroupMembershipRequests' as const],
+    ['reject', 'rejectGroupMembershipRequests' as const],
+  ])('%ss a bare phone number after qualifying it, like every other participant write', async (_action, method) => {
+    // GroupService.assertAddressableParticipants blesses a bare number, and the three other
+    // participant paths in this file qualify it before the engine sees it. Unqualified it reaches
+    // the page's `requesterIds.map(createWid)` (Injected/Utils.js:1540-1542), which upstream never
+    // does itself — Client.js appends '@c.us' before its own createWid calls — so the caller got an
+    // undiagnosable 500 on whatsapp-web.js for input that succeeds on Baileys.
+    const { groups, client } = makeWwebjsGroups();
+    client[method].mockResolvedValue([{ requesterId: '628123456789@c.us', message: 'done' }]);
+
+    await groups[method]('120363@g.us', ['628123456789', '628222@c.us']);
+
+    expect(client[method]).toHaveBeenCalledWith('120363@g.us', {
+      requesterIds: ['628123456789@c.us', '628222@c.us'],
+      sleep: [250, 500],
+    });
+  });
+
   it('reports the code-less ServerStatusCodeError entry as a FAILURE, not a success', async () => {
     // The page util's non-success RPC branch pushes {requesterId, message: 'ServerStatusCodeError'}
     // with NO error code (Injected/Utils.js:1637-1648) — reading "no error field" as success would

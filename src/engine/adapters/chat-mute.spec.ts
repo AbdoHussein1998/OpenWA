@@ -33,11 +33,17 @@ describe('WwebjsChats.muteChat', () => {
     const client = {
       muteChat: jest.fn().mockResolvedValue({ isMuted: true, muteExpiration: MUTE_UNTIL }),
       unmuteChat: jest.fn().mockResolvedValue({ isMuted: false, muteExpiration: 0 }),
+      getChatById: jest.fn().mockResolvedValue({ id: { _serialized: '628123@c.us' } }),
     };
     const host = {
       ensureReady: jest.fn(),
       getClient: () => client as unknown as Client,
       logger,
+      // Both are declared on WwebjsEngineHost and called unguarded by every operation in this
+      // adapter; a stub that omits them is a host shape production never has, and it hid which
+      // failures this file classifies as transport.
+      isPageTransportError: () => false,
+      reportIfPageTransportError: jest.fn(),
     } as unknown as WwebjsEngineHost;
     return { chats: new WwebjsChats(host, {} as unknown as WwebjsMessaging), client };
   }
@@ -64,6 +70,90 @@ describe('WwebjsChats.muteChat', () => {
     const { chats, client } = makeChats();
     client.muteChat.mockRejectedValue(new Error('page died'));
     await expect(chats.muteChat('628123@c.us', MUTE_UNTIL)).rejects.toThrow('page died');
+  });
+
+  /**
+   * Live against a real session, muting a chat the page could not resolve rejected from inside
+   * `Client._muteUnmuteChat`'s evaluate with `TypeError: this.findImpl is not a function`, which
+   * NestJS turns into a bare 500 — a status this route never declares, while its own 400 already
+   * reads "an invalid chatId". The same call against a real chat succeeded, so the capability was
+   * never the problem; only the unresolvable-chat path was.
+   */
+  describe.each([
+    ['the page resolves no such chat', (c: { [k: string]: jest.Mock }) => c.getChatById.mockResolvedValue(undefined)],
+    [
+      'the page rejects the lookup',
+      (c: { [k: string]: jest.Mock }) => c.getChatById.mockRejectedValue(new Error('No LID for user')),
+    ],
+  ])('an unknown chat is bad input, not a server fault — %s', (_label, arrange) => {
+    it('rejects with a 400 and never reaches the mute call', async () => {
+      const { chats, client } = makeChats();
+      arrange(client);
+      await expect(chats.muteChat('628123@c.us', MUTE_UNTIL)).rejects.toMatchObject({ status: 400 });
+      expect(client.muteChat).not.toHaveBeenCalled();
+    });
+
+    it('guards the unmute direction too', async () => {
+      const { chats, client } = makeChats();
+      arrange(client);
+      await expect(chats.muteChat('628123@c.us', null)).rejects.toMatchObject({ status: 400 });
+      expect(client.unmuteChat).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The other half of the same fix, and the reason the guard resolves the chat instead of wrapping
+   * the mute call: a page-side rejection for a chat that DOES exist is exactly what a renamed page
+   * internal produces, and that is how `createGroup` was caught. Demoting it to 400 would relabel a
+   * dead capability as the caller's bad input.
+   */
+  it('a page failure on a chat that DOES resolve stays a server error, not a 400', async () => {
+    const { chats, client } = makeChats();
+    client.muteChat.mockRejectedValue(new TypeError('this.findImpl is not a function'));
+    await expect(chats.muteChat('628123@c.us', MUTE_UNTIL)).rejects.toThrow('findImpl');
+    await expect(chats.muteChat('628123@c.us', MUTE_UNTIL)).rejects.not.toMatchObject({ status: 400 });
+  });
+
+  /**
+   * The chat resolution swallowed EVERY rejection into "no such chat", so a dead page — the state
+   * where nothing can be resolved — was reported to the caller as a 400 naming their chatId. Five
+   * other operations in this adapter split that case out and answer 503; leaving these two behind
+   * made the same file answer a dead page two different ways, and told a caller to fix a request
+   * that was never the problem.
+   */
+  describe.each([
+    ['muteChat', (c: WwebjsChats) => c.muteChat('628123@c.us', MUTE_UNTIL)],
+    ['pinChat', (c: WwebjsChats) => c.pinChat('628123@c.us', true)],
+  ])('%s reports a dead page as transport, not as a bad chatId', (_name, call) => {
+    it('rethrows EngineTransportError', async () => {
+      const dead = new Error('Execution context was destroyed');
+      const client = {
+        getChatById: jest.fn().mockRejectedValue(dead),
+        muteChat: jest.fn(),
+        unmuteChat: jest.fn(),
+        pinChat: jest.fn(),
+        unpinChat: jest.fn(),
+      };
+      const reportIfPageTransportError = jest.fn();
+      const host = {
+        ensureReady: jest.fn(),
+        getClient: () => client as unknown as Client,
+        logger,
+        isPageTransportError: (error: unknown) => error === dead,
+        reportIfPageTransportError,
+      } as unknown as WwebjsEngineHost;
+      const chats = new WwebjsChats(host, {} as unknown as WwebjsMessaging);
+
+      await expect(call(chats)).rejects.toBeInstanceOf(EngineTransportError);
+      expect(reportIfPageTransportError).toHaveBeenCalled();
+    });
+  });
+
+  // Negative twin: an ordinary unresolvable chat must still be the 400 the routes document.
+  it('still answers 400 when the page simply does not know the chat', async () => {
+    const { chats, client } = makeChats();
+    client.getChatById.mockResolvedValue(undefined);
+    await expect(chats.muteChat('628999@c.us', MUTE_UNTIL)).rejects.toMatchObject({ status: 400 });
   });
 });
 

@@ -152,6 +152,39 @@ describe('OpenWAClient', () => {
     );
   });
 
+  // A stock production gateway runs the ValidationPipe with `disableErrorMessages`, so NestJS omits
+  // `error` and answers `{ statusCode, message }`. Every case above sends the three-key development
+  // shape, which is why the suite stayed green while this body rendered as "[object Object]".
+  it('parses the envelope a production gateway actually sends, with no `error` key', async () => {
+    const t = new MockTransport().on('POST', '/api/sessions', {
+      status: 400,
+      body: { message: 'Bad Request', statusCode: 400 },
+    });
+    const err = await client(t)
+      .sessions.create({ name: 'x' })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(OpenWAApiError);
+    expect((err as OpenWAApiError).message).toContain('Bad Request');
+    expect((err as OpenWAApiError).message).not.toContain('[object Object]');
+    expect((err as OpenWAApiError).status).toBe(400);
+    // No `error` key was sent, so there is no kind to report — undefined, not a stringified object.
+    expect((err as OpenWAApiError).errorKind).toBeUndefined();
+  });
+
+  it('still reads `error` as the kind when the gateway sends one', async () => {
+    const t = new MockTransport().on('POST', '/api/sessions', {
+      status: 400,
+      body: { message: ['name must be a string'], error: 'Bad Request', statusCode: 400 },
+    });
+    const err = await client(t)
+      .sessions.create({ name: 'x' })
+      .catch((e: unknown) => e);
+
+    expect((err as OpenWAApiError).errorKind).toBe('Bad Request');
+    expect((err as OpenWAApiError).message).toContain('name must be a string');
+  });
+
   it('maps each status code to its typed error subclass', async () => {
     const cases: Array<[number, new (...a: never[]) => OpenWAApiError]> = [
       [401, OpenWAAuthError],

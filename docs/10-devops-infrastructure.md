@@ -300,16 +300,16 @@ an illustrative design sketch; the chart is the authoritative artifact.
 SHA image tags to GHCR; `latest` is deliberately not set there and moves only through the separate,
 boot-smoke-gated release workflow.
 
-| Job             | Needs                                       | What it runs                                                                                                                                                                                      |
-| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`          | —                                           | ESLint, `tsc --noEmit -p tsconfig.json` (full program, so spec files are type-checked too), `format:check`, `check:versions`, `check:dockerignore`, `openapi:check`                               |
-| `audit`         | —                                           | `npm audit --audit-level=high`, split out of `lint` so a newly published advisory can't abort the code-quality gates                                                                              |
-| `test`          | —                                           | `npm test -- --coverage`, `test:scripts`, `test:e2e` (a `redis:7-alpine` service backs the queue-on e2e suite), coverage upload                                                                   |
-| `test-postgres` | —                                           | `npm run build`, then `test:pg-smoke` (migrations + uuid-default) and the Postgres FTS migration spec against a `postgres:16-alpine` service                                                      |
-| `dashboard`     | —                                           | In `dashboard/`: `lint`, `typecheck`, `i18n:check`, `build`, `test:unit`                                                                                                                          |
-| `scripts-smoke` | —                                           | `shellcheck` plus the backup/restore smoke test for `scripts/backup.sh` and `scripts/restore.sh`                                                                                                  |
-| `build`         | lint, audit, test, dashboard, scripts-smoke | `npm run build`, uploads the `dist` artifact                                                                                                                                                      |
-| `docker`        | build, test-postgres                        | Buildx multi-arch build (`linux/amd64,linux/arm64`) with provenance + SBOM attestations; pushes to `ghcr.io/<owner>/<repo>` on push events (fork PRs build both architectures without publishing) |
+| Job             | Needs                                       | What it runs                                                                                                                                                                                                 |
+| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lint`          | —                                           | ESLint, `tsc --noEmit -p tsconfig.json` (full program, so spec files are type-checked too), `format:check`, `check:versions`, `check:dockerignore`, `openapi:check`                                          |
+| `audit`         | —                                           | `npm run check:audit` (root, high/critical with a per-advisory allowlist) + `npm audit --audit-level=high` (dashboard), split out of `lint` so a newly published advisory can't abort the code-quality gates |
+| `test`          | —                                           | `npm test -- --coverage`, `test:scripts`, `test:e2e` (a `redis:7-alpine` service backs the queue-on e2e suite), coverage upload                                                                              |
+| `test-postgres` | —                                           | `npm run build`, then `test:pg-smoke` (migrations + uuid-default) and the Postgres FTS migration spec against a `postgres:16-alpine` service                                                                 |
+| `dashboard`     | —                                           | In `dashboard/`: `lint`, `typecheck`, `i18n:check`, `build`, `test:unit`                                                                                                                                     |
+| `scripts-smoke` | —                                           | `shellcheck` plus the backup/restore smoke test for `scripts/backup.sh` and `scripts/restore.sh`                                                                                                             |
+| `build`         | lint, audit, test, dashboard, scripts-smoke | `npm run build`, uploads the `dist` artifact                                                                                                                                                                 |
+| `docker`        | build, test-postgres                        | Buildx multi-arch build (`linux/amd64,linux/arm64`) with provenance + SBOM attestations; pushes to `ghcr.io/<owner>/<repo>` on push events (fork PRs build both architectures without publishing)            |
 
 Rollout is left to the operator — the repo has no SSH deploy step, no staging/production
 environments and no auto-deploy on merge.
@@ -884,7 +884,9 @@ export class MetricsService {
   ) {}
 
   async render(): Promise<string> {
-    const overview = await this.statsService.getOverview();
+    // Guarded: an unreachable data database must cost the DB-derived series, not the whole scrape.
+    // `overview` is null on failure, which is what openwa_stats_available reports.
+    const overview = await this.readOverviewOrNull();
     const mem = process.memoryUsage();
     const lines: string[] = [];
     // ... gauge() helper pushes `# HELP` / `# TYPE` / value lines ...
@@ -892,11 +894,17 @@ export class MetricsService {
     gauge('openwa_process_uptime_seconds', '...', Math.round(process.uptime()));
     gauge('openwa_process_resident_memory_bytes', '...', mem.rss);
     gauge('openwa_process_heap_used_bytes', '...', mem.heapUsed);
-    gauge('openwa_sessions_total', '...', overview.sessions.total);
-    gauge('openwa_sessions_active', '...', overview.sessions.active);
-    // openwa_sessions{status="..."} — one line per status
-    // openwa_messages_total{direction="outgoing"|"incoming"}
-    // openwa_messages_failed_total
+    gauge('openwa_stats_available', '...', overview ? 1 : 0);
+    if (overview) {
+      gauge('openwa_sessions_total', '...', overview.sessions.total);
+      gauge('openwa_sessions_active', '...', overview.sessions.active);
+      // openwa_sessions{status="..."} — one line per status
+      // openwa_messages_total{direction="outgoing"|"incoming"}
+      // openwa_messages_failed_total
+    }
+    // ... then the process-start counters (webhook delivery failures, session reconnect attempts
+    // and loop alerts), openwa_sessions_restricted, and the pacing refusals — see the table below
+    // for the full list. The real method also memoizes this string for METRICS_RENDER_TTL_MS.
     return lines.join('\n') + '\n';
   }
 }
@@ -904,17 +912,49 @@ export class MetricsService {
 
 **Exported metric names** (the complete set — nothing else is emitted):
 
-| Metric                                 | Type  | Labels                              | Meaning                              |
-| -------------------------------------- | ----- | ----------------------------------- | ------------------------------------ |
-| `openwa_up`                            | gauge | —                                   | Always `1` when scraped              |
-| `openwa_process_uptime_seconds`        | gauge | —                                   | Process uptime                       |
-| `openwa_process_resident_memory_bytes` | gauge | —                                   | RSS                                  |
-| `openwa_process_heap_used_bytes`       | gauge | —                                   | V8 heap used                         |
-| `openwa_sessions_total`                | gauge | —                                   | Configured sessions                  |
-| `openwa_sessions_active`               | gauge | —                                   | READY (active) sessions              |
-| `openwa_sessions`                      | gauge | `status`                            | Session count per status             |
-| `openwa_messages_total`                | gauge | `direction` (`incoming`/`outgoing`) | Current stored messages by direction |
-| `openwa_messages_failed_total`         | gauge | —                                   | Current messages in FAILED state     |
+| Metric                                       | Type      | Labels                              | Meaning                                                                                      |
+| -------------------------------------------- | --------- | ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| `openwa_up`                                  | gauge     | —                                   | Always `1` when scraped                                                                      |
+| `openwa_process_uptime_seconds`              | gauge     | —                                   | Process uptime                                                                               |
+| `openwa_process_resident_memory_bytes`       | gauge     | —                                   | RSS                                                                                          |
+| `openwa_process_heap_used_bytes`             | gauge     | —                                   | V8 heap used                                                                                 |
+| `openwa_stats_available`                     | gauge     | —                                   | 1 when the database-derived series below could be read on this scrape, 0 when they could not |
+| `openwa_sessions_total`                      | gauge     | —                                   | Configured sessions                                                                          |
+| `openwa_sessions_active`                     | gauge     | —                                   | READY (active) sessions                                                                      |
+| `openwa_sessions`                            | gauge     | `status`                            | Session count per status                                                                     |
+| `openwa_messages_total`                      | gauge     | `direction` (`incoming`/`outgoing`) | Current stored messages by direction                                                         |
+| `openwa_messages_failed_total`               | gauge     | —                                   | Current messages in FAILED state                                                             |
+| `openwa_webhook_delivery_failures_total`     | counter   | —                                   | Webhook deliveries that terminally failed (all retries exhausted) since process start        |
+| `openwa_session_reconnect_attempts_total`    | counter   | —                                   | Reconnect attempts scheduled across all sessions since process start                         |
+| `openwa_session_reconnect_loop_alerts_total` | counter   | —                                   | Reconnect-loop alerts emitted since process start                                            |
+| `openwa_sessions_restricted`                 | gauge     | —                                   | Sessions whose account WhatsApp is currently restricting                                     |
+| `openwa_send_pacing_refusals_total`          | counter   | `reason`                            | Sends refused by the pacing governor since process start                                     |
+| `http_requests_total`                        | counter   | `method`, `route`, `status`         | HTTP requests served, by method, route and status                                            |
+| `http_request_duration_seconds`              | histogram | `method`, `route`                   | HTTP request duration (`_bucket` / `_sum` / `_count`)                                        |
+
+The last two are deliberately **unprefixed** so a generic RED dashboard or alert rule matches them
+without knowing anything about OpenWA. They come from `src/common/metrics/request-metrics.ts`, which
+`render()` splices into the same output.
+
+Not every row appears on every scrape, and the difference matters when you write alerts. The
+database-derived series (`openwa_sessions*`, `openwa_messages*`) are **omitted entirely** when the
+overview cannot be read — `openwa_stats_available` is what tells the two cases apart, so alert on it
+rather than reading a missing series as zero. `openwa_send_pacing_refusals_total` appears only once
+the governor has refused something. For these, `absent()` is the correct alerting primitive.
+
+`src/common/docs-metrics-list.spec.ts` compares this table against the metric names declared in
+`metrics.service.ts` and `request-metrics.ts`, and checks that every helper `render()` splices in is
+one of the files it reads. A series added to either file without a row here fails CI; one emitted
+from a module that is neither — and not spliced through `lines.push(...renderX())` — would not be
+seen, so keep new renderers on that composition.
+
+> **The database-derived series can be absent.** `openwa_sessions_*`, `openwa_messages_*` and the per-status
+> breakdown are read from the data database on each scrape. If that read fails — an outage, a statement
+> timeout, pool exhaustion, a `SQLITE_BUSY` under load — they are OMITTED rather than reported as zero, and
+> `openwa_stats_available` goes to 0. The process, HTTP and webhook series keep being served, so `up` stays 1
+> and still means "the process is alive". Alert on `openwa_stats_available == 0` for the degradation itself;
+> an alert written as `openwa_sessions_active == 0` would never fire for it, and one written with `absent()`
+> would.
 
 ### Grafana Dashboard Definition
 

@@ -5,7 +5,7 @@ import type { Session } from './entities/session.entity';
 import type { SessionService } from './session.service';
 import type { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
-import { BadGatewayException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, ConflictException } from '@nestjs/common';
 
 // POST /sessions declared a SessionResponseDto in its Swagger metadata but returned the raw
 // TypeORM entity, leaking internal columns (config, proxyUrl, proxyType) and the entity-only
@@ -95,7 +95,7 @@ describe('SessionController — create() response contract', () => {
   });
 });
 
-// POST /sessions/:id/logout audits SESSION_LOGGED_OUT only after the service resolves — an
+// POST /sessions/:sessionId/logout audits SESSION_LOGGED_OUT only after the service resolves — an
 // incomplete engine-backed attempt (502 SESSION_LOGOUT_INCOMPLETE) must NOT record a success
 // audit row, and the service's structured rejection must be forwarded verbatim.
 describe('SessionController — logout() audit + error forwarding contract', () => {
@@ -154,6 +154,121 @@ describe('SessionController — logout() audit + error forwarding contract', () 
     sessionService.logout.mockRejectedValue(incomplete);
 
     await expect(controller.logout('sess-uuid-1')).rejects.toBe(incomplete);
+    expect(auditService.logInfo).not.toHaveBeenCalled();
+  });
+});
+
+// POST /sessions/:sessionId/start and /stop are thin, but they carry two contracts worth pinning: the
+// success audit row is written ONLY after the service resolves (a refused lifecycle change — the
+// engine-not-started 400, the foreign-node 409 — must leave no audit trace), and `engineLoaded`
+// in the response comes from the live engine map, not from the row's status column.
+describe('SessionController — start/stop lifecycle', () => {
+  const runningEntity: Session = {
+    id: 'sess-uuid-1',
+    name: 'test-session',
+    status: SessionStatus.READY,
+    phone: '628123',
+    pushName: null,
+    config: {},
+    proxyUrl: null,
+    proxyType: null,
+    connectedAt: new Date('2026-01-01T01:00:00Z'),
+    lastActiveAt: null,
+    nodeId: null,
+    claimedAt: null,
+    nodeUrl: null,
+    leaseExpiresAt: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T01:00:00Z'),
+  };
+
+  let sessionService: { start: jest.Mock; stop: jest.Mock; forceKill: jest.Mock; isActive: jest.Mock };
+  let auditService: { logInfo: jest.Mock };
+  let controller: SessionController;
+
+  beforeEach(() => {
+    sessionService = {
+      start: jest.fn(),
+      stop: jest.fn(),
+      forceKill: jest.fn(),
+      isActive: jest.fn().mockReturnValue(false),
+    };
+    auditService = { logInfo: jest.fn().mockResolvedValue(undefined) };
+    controller = new SessionControllerClass(
+      sessionService as unknown as SessionService,
+      auditService as unknown as AuditService,
+    );
+  });
+
+  it('start returns the session with engineLoaded read from the live engine map', async () => {
+    sessionService.start.mockResolvedValue({ ...runningEntity });
+    sessionService.isActive.mockReturnValue(true);
+
+    const result = await controller.start('sess-uuid-1');
+
+    expect(result.status).toBe(SessionStatus.READY);
+    expect(result.engineLoaded).toBe(true);
+    expect(sessionService.isActive).toHaveBeenCalledWith('sess-uuid-1');
+  });
+
+  it('start audits SESSION_STARTED once the service has resolved', async () => {
+    sessionService.start.mockResolvedValue({ ...runningEntity });
+
+    await controller.start('sess-uuid-1');
+
+    expect(auditService.logInfo).toHaveBeenCalledTimes(1);
+    expect(auditService.logInfo).toHaveBeenCalledWith(
+      AuditAction.SESSION_STARTED,
+      expect.objectContaining({ sessionId: runningEntity.id, sessionName: runningEntity.name }),
+    );
+  });
+
+  it('start forwards the service’s 400 verbatim and writes no audit row when the engine cannot start', async () => {
+    const notStarted = new BadRequestException('Session is not started');
+    sessionService.start.mockRejectedValue(notStarted);
+
+    await expect(controller.start('sess-uuid-1')).rejects.toBe(notStarted);
+    expect(auditService.logInfo).not.toHaveBeenCalled();
+  });
+
+  it('stop returns the stopped session (engineLoaded:false) and audits SESSION_STOPPED', async () => {
+    sessionService.stop.mockResolvedValue({ ...runningEntity, status: SessionStatus.DISCONNECTED });
+
+    const result = await controller.stop('sess-uuid-1');
+
+    expect(result.status).toBe(SessionStatus.DISCONNECTED);
+    expect(result.engineLoaded).toBe(false);
+    expect(auditService.logInfo).toHaveBeenCalledWith(
+      AuditAction.SESSION_STOPPED,
+      expect.objectContaining({ sessionId: runningEntity.id, sessionName: runningEntity.name }),
+    );
+  });
+
+  it('stop forwards a refusal verbatim and writes no audit row', async () => {
+    const refused = new ConflictException('Another node holds this session');
+    sessionService.stop.mockRejectedValue(refused);
+
+    await expect(controller.stop('sess-uuid-1')).rejects.toBe(refused);
+    expect(auditService.logInfo).not.toHaveBeenCalled();
+  });
+
+  it('forceKill audits SESSION_FORCE_KILLED after the teardown resolves', async () => {
+    sessionService.forceKill.mockResolvedValue({ ...runningEntity, status: SessionStatus.DISCONNECTED });
+
+    const result = await controller.forceKill('sess-uuid-1');
+
+    expect(result.engineLoaded).toBe(false);
+    expect(auditService.logInfo).toHaveBeenCalledWith(
+      AuditAction.SESSION_FORCE_KILLED,
+      expect.objectContaining({ sessionId: runningEntity.id, sessionName: runningEntity.name }),
+    );
+  });
+
+  it('forceKill forwards the not-started 400 verbatim and writes no audit row', async () => {
+    const notStarted = new BadRequestException('Session is not started');
+    sessionService.forceKill.mockRejectedValue(notStarted);
+
+    await expect(controller.forceKill('sess-uuid-1')).rejects.toBe(notStarted);
     expect(auditService.logInfo).not.toHaveBeenCalled();
   });
 });

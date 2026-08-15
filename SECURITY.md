@@ -6,13 +6,13 @@ socket. Security matters here, and we appreciate responsible disclosure.
 
 ## Supported versions
 
-Security fixes land on the latest minor release (currently 0.15.x). Older minor
+Security fixes land on the latest minor release (currently 0.18.x). Older minor
 lines receive no backports — please upgrade older deployments.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.15.x  | :white_check_mark: |
-| < 0.15  | :x:                |
+| 0.18.x  | :white_check_mark: |
+| < 0.18  | :x:                |
 
 ## Reporting a vulnerability
 
@@ -98,7 +98,7 @@ deployment rather than on a single session:
   and per-session config remain available, scoped to the sessions the key
   allows)
 - Cross-session statistics (`GET /api/stats/overview`, `GET /api/stats/messages`)
-- Application settings (`GET` / `PUT /api/settings`)
+- Application settings (`GET /api/settings`)
 - Session creation (`POST /api/sessions`)
 - The queue dashboard (`/api/admin/queues`)
 

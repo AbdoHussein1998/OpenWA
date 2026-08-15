@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
  * Response shapes for the health routes — the raw handler value, no envelope.
@@ -13,8 +13,11 @@ export class HealthCheckResponseDto {
   @ApiProperty({ description: 'ISO-8601 timestamp of the reply.', example: '2026-08-07T12:00:00.000Z' })
   timestamp!: string;
 
-  @ApiProperty({ description: 'Running application version.', example: '0.14.4' })
-  version!: string;
+  @ApiPropertyOptional({
+    description: 'Running application version. Included only when the request carries a valid API key.',
+    example: '0.14.4',
+  })
+  version?: string;
 }
 
 export class LivenessResponseDto {

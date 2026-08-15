@@ -195,3 +195,56 @@ func (s *GroupsService) RevokeInviteCode(ctx context.Context, sessionID, groupID
 	}
 	return &out, nil
 }
+
+// GetMembershipRequests lists a group's pending join requests. Requires the account to be a group
+// admin. Only ParticipantID is guaranteed on each entry — the engine reports the rest when it has it.
+func (s *GroupsService) GetMembershipRequests(
+	ctx context.Context, sessionID, groupID string,
+) ([]GroupMembershipRequest, error) {
+	var out []GroupMembershipRequest
+	err := s.client.do(ctx, "GET", s.base(sessionID)+"/"+pathEscape(groupID)+"/membership-requests", nil, nil, &out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ApproveMembershipRequests approves pending join requests. Pass a nil slice to approve every
+// pending request.
+//
+// A partial refusal answers 200 and reports it per participant in Results, so Success alone does
+// not mean everyone was let in.
+func (s *GroupsService) ApproveMembershipRequests(
+	ctx context.Context, sessionID, groupID string, participants []string,
+) (*ParticipantsResult, error) {
+	return s.membershipRequestAction(ctx, sessionID, groupID, "approve", participants)
+}
+
+// RejectMembershipRequests rejects pending join requests. Pass a nil slice to reject every pending
+// request.
+func (s *GroupsService) RejectMembershipRequests(
+	ctx context.Context, sessionID, groupID string, participants []string,
+) (*ParticipantsResult, error) {
+	return s.membershipRequestAction(ctx, sessionID, groupID, "reject", participants)
+}
+
+func (s *GroupsService) membershipRequestAction(
+	ctx context.Context, sessionID, groupID, verb string, participants []string,
+) (*ParticipantsResult, error) {
+	// A nil slice means "every pending request", which the gateway reads from the ABSENCE of the
+	// key — `null` is not absence there, so the bodyless case sends an empty object rather than the
+	// struct. A non-nil slice always sends the key, empty included, so naming nobody stays a 400
+	// instead of collapsing into naming everybody.
+	var body any = struct{}{}
+	if participants != nil {
+		body = MembershipRequestActionRequest{Participants: participants}
+	}
+	var out ParticipantsResult
+	err := s.client.do(
+		ctx, "POST", s.base(sessionID)+"/"+pathEscape(groupID)+"/membership-requests/"+verb, nil, body, &out,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

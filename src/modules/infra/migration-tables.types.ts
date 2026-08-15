@@ -19,8 +19,10 @@ export interface WebhookRow {
   sessionId: string;
   url: string;
   events: string | string[];
-  secret: string | null;
-  headers: string | Record<string, string>;
+  // Credentials. export-data omits both (see exportData), so an exported row may not carry them;
+  // the importer restores them as null/{} in that case.
+  secret?: string | null;
+  headers?: string | Record<string, string>;
   filters: string | Record<string, unknown> | null;
   active: boolean | number;
   retryCount: number;

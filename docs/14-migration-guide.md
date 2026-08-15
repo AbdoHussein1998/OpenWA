@@ -230,6 +230,12 @@ REDIS_USERNAME=optional
 REDIS_PASSWORD=optional
 ```
 
+> Setting `REDIS_BUILTIN` in `.env` **pins** it: the env value wins, so the dashboard's built-in
+> Redis toggle can no longer switch the container back on. That is the right trade for a deployment
+> whose configuration lives in `.env` — but if you manage datastores from the dashboard, leave the
+> key unset (as the shipped templates do) and set only the connection details above. The same holds
+> for `POSTGRES_BUILTIN` and `MINIO_BUILTIN`.
+
 | Scenario                  | Support | Notes                                      |
 | ------------------------- | ------- | ------------------------------------------ |
 | Built-in → External Redis | ✅      | Config change only                         |
@@ -562,9 +568,9 @@ Baileys — BAILEYS_AUTH_DIR, default ./data/baileys
 
 > [!IMPORTANT]
 > **Directories are keyed by session NAME, not by the REST id.** The API addresses a session by its
-> UUID (`/api/sessions/{id}`), but the engine receives `session.name` as its client id, so the on-disk
+> UUID (`/api/sessions/{sessionId}`), but the engine receives `session.name` as its client id, so the on-disk
 > profile is `session-<name>` (whatsapp-web.js) or `<name>` (Baileys). Resolve the name via
-> `GET /api/sessions/{id}` before copying anything.
+> `GET /api/sessions/{sessionId}` before copying anything.
 
 ### Transfer Methods
 
@@ -579,7 +585,7 @@ Under the shipped compose the data directory lives in a named Docker volume
 (`openwa-data:/app/data`), not a host bind mount, so the profile is copied through the container
 with `docker compose cp` rather than straight off the host filesystem. `APP_DIR` is the directory
 holding `docker-compose.yml` on each server; `SESSION_NAME` is the session `name` (resolve it via
-`GET /api/sessions/{id}` — the on-disk directory is keyed by name, not by the REST id).
+`GET /api/sessions/{sessionId}` — the on-disk directory is keyed by name, not by the REST id).
 
 ```bash
 APP_DIR=/srv/openwa            # docker compose project directory on both hosts

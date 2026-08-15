@@ -26,6 +26,10 @@ type SendTextRequest struct {
 	// fetched, so it works even for a URL the gateway cannot reach. Baileys only — whatsapp-web.js
 	// takes a boolean and answers 501. Cannot be combined with LinkPreview=false.
 	CustomLinkPreview *CustomLinkPreview `json:"customLinkPreview,omitempty"`
+	// QuotedMessageID quotes an earlier message, turning this send into a reply. Engine-specific:
+	// whatsapp-web.js matches the serialized message id, Baileys the raw key id of a message it has
+	// already stored. Omitted when empty, so an ordinary send carries no quote key.
+	QuotedMessageID string `json:"quotedMessageId,omitempty"`
 }
 
 // SendMediaRequest sends image/video/document/sticker media. Provide exactly
@@ -37,6 +41,10 @@ type SendMediaRequest struct {
 	Mimetype string `json:"mimetype,omitempty"`
 	Filename string `json:"filename,omitempty"`
 	Caption  string `json:"caption,omitempty"`
+	// QuotedMessageID quotes an earlier message, turning this send into a reply. Engine-specific:
+	// whatsapp-web.js matches the serialized message id, Baileys the raw key id of a message it has
+	// already stored. Omitted when empty, so an ordinary send carries no quote key.
+	QuotedMessageID string `json:"quotedMessageId,omitempty"`
 }
 
 // SendAudioRequest sends audio. PTT sends as a voice note. Server only accepts
@@ -49,6 +57,10 @@ type SendAudioRequest struct {
 	Filename string `json:"filename,omitempty"`
 	Caption  string `json:"caption,omitempty"`
 	PTT      *bool  `json:"ptt,omitempty"`
+	// QuotedMessageID quotes an earlier message, turning this send into a reply. Engine-specific:
+	// whatsapp-web.js matches the serialized message id, Baileys the raw key id of a message it has
+	// already stored. Omitted when empty, so an ordinary send carries no quote key.
+	QuotedMessageID string `json:"quotedMessageId,omitempty"`
 }
 
 // SendLocationRequest sends a location pin. ChatID/Latitude/Longitude required.
@@ -58,6 +70,10 @@ type SendLocationRequest struct {
 	Longitude   float64 `json:"longitude"`
 	Description string  `json:"description,omitempty"`
 	Address     string  `json:"address,omitempty"`
+	// QuotedMessageID quotes an earlier message, turning this send into a reply. Engine-specific:
+	// whatsapp-web.js matches the serialized message id, Baileys the raw key id of a message it has
+	// already stored. Omitted when empty, so an ordinary send carries no quote key.
+	QuotedMessageID string `json:"quotedMessageId,omitempty"`
 }
 
 // SendContactRequest sends a contact card.
@@ -65,6 +81,10 @@ type SendContactRequest struct {
 	ChatID        string `json:"chatId"`
 	ContactName   string `json:"contactName"`
 	ContactNumber string `json:"contactNumber"`
+	// QuotedMessageID quotes an earlier message, turning this send into a reply. Engine-specific:
+	// whatsapp-web.js matches the serialized message id, Baileys the raw key id of a message it has
+	// already stored. Omitted when empty, so an ordinary send carries no quote key.
+	QuotedMessageID string `json:"quotedMessageId,omitempty"`
 }
 
 // SendTemplateRequest sends a stored template. Provide exactly one of
@@ -85,6 +105,10 @@ type SendPollRequest struct {
 	Options []string `json:"options"`
 	// AllowMultipleAnswers lets voters pick several options (default single choice).
 	AllowMultipleAnswers *bool `json:"allowMultipleAnswers,omitempty"`
+	// QuotedMessageID quotes an earlier message, turning this send into a reply. Engine-specific:
+	// whatsapp-web.js matches the serialized message id, Baileys the raw key id of a message it has
+	// already stored. Omitted when empty, so an ordinary send carries no quote key.
+	QuotedMessageID string `json:"quotedMessageId,omitempty"`
 }
 
 // ReplyMessageRequest replies to a quoted message.
@@ -206,24 +230,57 @@ type MessageLocation struct {
 // ChatHistoryMessage is a message read live from WhatsApp by Messages.History —
 // the richer engine payload, differently shaped from MessageRecord.
 type ChatHistoryMessage struct {
-	ID                string            `json:"id"`
-	From              string            `json:"from"`
-	To                string            `json:"to"`
-	ChatID            string            `json:"chatId"`
-	Body              string            `json:"body,omitempty"`
-	Type              string            `json:"type"`
-	Timestamp         int64             `json:"timestamp"`
-	FromMe            bool              `json:"fromMe"`
-	IsGroup           bool              `json:"isGroup"`
-	IsStatusBroadcast bool              `json:"isStatusBroadcast"`
-	Kind              string            `json:"kind"`
-	Author            string            `json:"author,omitempty"`
-	MentionedIDs      []string          `json:"mentionedIds,omitempty"`
-	IsLidSender       bool              `json:"isLidSender,omitempty"`
-	SenderPhone       *string           `json:"senderPhone,omitempty"`
-	Media             *ChatHistoryMedia `json:"media,omitempty"`
-	QuotedMessage     *QuotedMessage    `json:"quotedMessage,omitempty"`
-	Location          *MessageLocation  `json:"location,omitempty"`
+	ID                string          `json:"id"`
+	From              string          `json:"from"`
+	To                string          `json:"to"`
+	ChatID            string          `json:"chatId"`
+	Body              string          `json:"body,omitempty"`
+	Type              string          `json:"type"`
+	Timestamp         int64           `json:"timestamp"`
+	FromMe            bool            `json:"fromMe"`
+	IsGroup           bool            `json:"isGroup"`
+	IsStatusBroadcast bool            `json:"isStatusBroadcast"`
+	Kind              string          `json:"kind"`
+	EphemeralDuration int             `json:"ephemeralDuration,omitempty"`
+	Author            string          `json:"author,omitempty"`
+	MentionedIDs      []string        `json:"mentionedIds,omitempty"`
+	Call              *MessageCall    `json:"call,omitempty"`
+	IsLidSender       bool            `json:"isLidSender,omitempty"`
+	SenderPhone       *string         `json:"senderPhone,omitempty"`
+	Contact           *MessageContact `json:"contact,omitempty"`
+	BackgroundColor   string          `json:"backgroundColor,omitempty"`
+	// Pointer because font index 0 is a real style, so a value type could not tell it from absent.
+	// Matches StatusRecord.Font, which carries the same wire field.
+	Font          *int              `json:"font,omitempty"`
+	Media         *ChatHistoryMedia `json:"media,omitempty"`
+	QuotedMessage *QuotedMessage    `json:"quotedMessage,omitempty"`
+	Location      *MessageLocation  `json:"location,omitempty"`
+}
+
+// MessageCall is the call block on a live history message, present on call messages only.
+type MessageCall struct {
+	Video  bool `json:"video"`
+	Missed bool `json:"missed"`
+}
+
+// MessageContact is the sender contact block on a live history message. History carries PushName
+// only; the richer fields arrive on message.received when WEBHOOK_CONTACT_DETAILS is enabled.
+type MessageContact struct {
+	ID           string `json:"id,omitempty"`
+	Number       string `json:"number,omitempty"`
+	Name         string `json:"name,omitempty"`
+	PushName     string `json:"pushName,omitempty"`
+	ShortName    string `json:"shortName,omitempty"`
+	Type         string `json:"type,omitempty"`
+	IsMyContact  bool   `json:"isMyContact,omitempty"`
+	IsWAContact  bool   `json:"isWAContact,omitempty"`
+	IsBusiness   bool   `json:"isBusiness,omitempty"`
+	IsEnterprise bool   `json:"isEnterprise,omitempty"`
+	VerifiedName string `json:"verifiedName,omitempty"`
+	// Pointer for the same reason as Font: level 0 (unverified) is a real value, not "absent".
+	VerifiedLevel *int     `json:"verifiedLevel,omitempty"`
+	IsBlocked     bool     `json:"isBlocked,omitempty"`
+	Labels        []string `json:"labels,omitempty"`
 }
 
 // ReactionSender is one sender within a ReactionRecord.

@@ -61,6 +61,37 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ STORAGE_TYPE: 's3' })).not.toThrow();
   });
 
+  // Every production hardening in the repo compares NODE_ENV against the exact string 'production',
+  // so an unrecognised value silently selects the permissive branch of each one — including the
+  // ALLOW_DEV_API_KEY rejection that stops the public `dev-admin-key` being seeded as an ADMIN
+  // credential. A typo must fail the boot, not downgrade it.
+  // The knob that raises the message-list media budget parses with parseInt, so `8MiB` silently
+  // means 8 BYTES — every payload omitted — exactly the trap its sibling
+  // EXPORT_INLINE_MEDIA_BUDGET_BYTES is boot-checked for.
+  it('rejects a non-integer message-list media budget', () => {
+    expect(() => validateEnv({ MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES: '8MiB' })).toThrow(
+      /MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES/,
+    );
+    expect(() => validateEnv({ MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES: '8388608' })).not.toThrow();
+    expect(() => validateEnv({ MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES: '0' })).not.toThrow();
+  });
+
+  it('rejects a NODE_ENV typo instead of silently selecting the permissive branch', () => {
+    expect(() => validateEnv({ NODE_ENV: 'prod' })).toThrow(/NODE_ENV/);
+    expect(() => validateEnv({ NODE_ENV: 'staging' })).toThrow(/NODE_ENV/);
+    expect(() => validateEnv({ NODE_ENV: 'Production' })).toThrow(/NODE_ENV/);
+    // Padded values must fail too: every reader compares the RAW `process.env.NODE_ENV` against
+    // 'production', so a value that only matches after trimming validates clean and then selects the
+    // permissive branch anyway — the exact silent downgrade this check exists to stop.
+    expect(() => validateEnv({ NODE_ENV: ' production ' })).toThrow(/NODE_ENV/);
+    expect(() => validateEnv({ NODE_ENV: 'production' })).not.toThrow();
+    expect(() => validateEnv({ NODE_ENV: 'development' })).not.toThrow();
+    expect(() => validateEnv({ NODE_ENV: 'test' })).not.toThrow();
+    // Unset stays legal: it is the standard Node default and every shipped deployment sets it
+    // explicitly (Dockerfile, both compose files, the Helm chart, .env.example).
+    expect(() => validateEnv({})).not.toThrow();
+  });
+
   it('rejects a non-integer rate-limit / webhook / pool-size / redis-timeout / session-cap value', () => {
     expect(() => validateEnv({ RATE_LIMIT_SHORT_LIMIT: 'abc' })).toThrow(/RATE_LIMIT_SHORT_LIMIT/);
     expect(() => validateEnv({ WEBHOOK_TIMEOUT: '10s' })).toThrow(/WEBHOOK_TIMEOUT/);
@@ -105,6 +136,17 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ WEBHOOK_MEDIA_INLINE_MAX_BYTES: 'abc' })).toThrow(/WEBHOOK_MEDIA_INLINE_MAX_BYTES/);
     // 0 is meaningful for both: unlimited registrations / never inline media.
     expect(() => validateEnv({ WEBHOOK_MAX_PER_SESSION: '0', WEBHOOK_MEDIA_INLINE_MAX_BYTES: '0' })).not.toThrow();
+  });
+
+  it('rejects a non-integer audit retention but accepts every value documented as "disable"', () => {
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: 'ninety' })).toThrow(/AUDIT_RETENTION_DAYS/);
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '90.5' })).toThrow(/AUDIT_RETENTION_DAYS/);
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '30d' })).toThrow(/AUDIT_RETENTION_DAYS/);
+    // audit.service.ts and docs/05 both document `<= 0` as the off switch, so BOTH spellings must
+    // boot. Requiring non-negative here would refuse to start on a configuration the docs advertise.
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '0' })).not.toThrow();
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '-1' })).not.toThrow();
+    expect(() => validateEnv({ AUDIT_RETENTION_DAYS: '90' })).not.toThrow();
   });
 
   it('rejects a non-positive / non-integer WEBHOOK_MAX_PAYLOAD_BYTES (0 would reject every dispatch)', () => {

@@ -12,6 +12,19 @@ import { defineTool, type AnyToolDescriptor } from '../tool-descriptor';
 
 const sessionId = z.string().min(1).describe('Session UUID (the session id, not the name)');
 
+/**
+ * Mirrors the REST `quotedMessageId` field so an agent can reply with media, a location, a contact
+ * card or a poll — the same capability, on the same endpoints, through the MCP surface.
+ */
+const quotedMessageIdSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    'Quote an earlier message, making this send a reply. Engine-specific: whatsapp-web.js takes ' +
+      'the serialized message id, Baileys the raw key id of a message it has already stored.',
+  );
+
 export function messageTools(message: MessageService): AnyToolDescriptor[] {
   return [
     defineTool({
@@ -86,12 +99,14 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
             'Set false to suppress the URL preview. Guaranteed only in that direction — leaving it ' +
               'unset means the engine default, and the engines differ.',
           ),
+        quotedMessageId: quotedMessageIdSchema,
       }),
       handler: input =>
         message.sendText(input.sessionId, {
           chatId: input.chatId,
           text: input.text,
           ...(input.linkPreview === undefined ? {} : { linkPreview: input.linkPreview }),
+          quotedMessageId: input.quotedMessageId,
         }),
     }),
     defineTool({
@@ -108,6 +123,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         mimetype: z.string().optional().describe('MIME type (required when using base64)'),
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
+        quotedMessageId: quotedMessageIdSchema,
       }),
       handler: input =>
         message.sendImage(input.sessionId, {
@@ -117,6 +133,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           mimetype: input.mimetype,
           filename: input.filename,
           caption: input.caption,
+          quotedMessageId: input.quotedMessageId,
         }),
     }),
     defineTool({
@@ -133,6 +150,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         mimetype: z.string().optional().describe('MIME type (required when using base64)'),
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
+        quotedMessageId: quotedMessageIdSchema,
       }),
       handler: input =>
         message.sendVideo(input.sessionId, {
@@ -142,6 +160,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           mimetype: input.mimetype,
           filename: input.filename,
           caption: input.caption,
+          quotedMessageId: input.quotedMessageId,
         }),
     }),
     defineTool({
@@ -159,6 +178,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
         ptt: z.boolean().optional().describe('Send as a WhatsApp voice note (PTT)'),
+        quotedMessageId: quotedMessageIdSchema,
       }),
       handler: input =>
         message.sendAudio(input.sessionId, {
@@ -169,6 +189,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           filename: input.filename,
           caption: input.caption,
           ptt: input.ptt,
+          quotedMessageId: input.quotedMessageId,
         }),
     }),
     defineTool({
@@ -185,6 +206,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         mimetype: z.string().optional().describe('MIME type (required when using base64)'),
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
+        quotedMessageId: quotedMessageIdSchema,
       }),
       handler: input =>
         message.sendDocument(input.sessionId, {
@@ -194,6 +216,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           mimetype: input.mimetype,
           filename: input.filename,
           caption: input.caption,
+          quotedMessageId: input.quotedMessageId,
         }),
     }),
     defineTool({
@@ -209,6 +232,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         longitude: z.number().min(-180).max(180).describe('Longitude coordinate'),
         description: z.string().max(LOCATION_TEXT_MAX_LENGTH).optional().describe('Location label/description'),
         address: z.string().max(LOCATION_TEXT_MAX_LENGTH).optional().describe('Street address'),
+        quotedMessageId: quotedMessageIdSchema,
       }),
       handler: input =>
         message.sendLocation(input.sessionId, {
@@ -217,6 +241,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           longitude: input.longitude,
           description: input.description,
           address: input.address,
+          quotedMessageId: input.quotedMessageId,
         }),
     }),
     defineTool({
@@ -234,12 +259,14 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           .min(1)
           .max(CONTACT_NUMBER_MAX_LENGTH)
           .describe('Phone number of the contact to share'),
+        quotedMessageId: quotedMessageIdSchema,
       }),
       handler: input =>
         message.sendContact(input.sessionId, {
           chatId: input.chatId,
           contactName: input.contactName,
           contactNumber: input.contactNumber,
+          quotedMessageId: input.quotedMessageId,
         }),
     }),
     defineTool({
@@ -256,6 +283,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         mimetype: z.string().optional().describe('MIME type (required when using base64)'),
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
+        quotedMessageId: quotedMessageIdSchema,
       }),
       handler: input =>
         message.sendSticker(input.sessionId, {
@@ -265,6 +293,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           mimetype: input.mimetype,
           filename: input.filename,
           caption: input.caption,
+          quotedMessageId: input.quotedMessageId,
         }),
     }),
     defineTool({

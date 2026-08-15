@@ -2,8 +2,9 @@
  * Typed error hierarchy for the OpenWA SDK.
  *
  * The OpenWA API returns NestJS-default errors of the shape:
- *   `{ statusCode: number, message: string | string[], error: string }`
- * This module maps that to a typed, ergonomic error tree so callers can
+ *   `{ statusCode: number, message: string | string[], error?: string }`
+ * `error` is absent whenever the exception carried no explicit message, so it is never required to
+ * recognise the envelope. This module maps that to a typed, ergonomic error tree so callers can
  * `instanceof`-check or branch on `.status`.
  *
  * @packageDocumentation
@@ -123,15 +124,22 @@ export function classifyApiError(status: number, message: string, body: unknown,
   }
 }
 
-/** Narrow the NestJS error envelope shape: `{ statusCode, message, error }`. */
+/**
+ * Narrow the NestJS error envelope shape: `{ statusCode, message, error }`.
+ *
+ * `error` is optional. NestJS omits it whenever the exception was constructed without an explicit
+ * message — which is what the global ValidationPipe does under `disableErrorMessages`, the default
+ * when `NODE_ENV=production` and `VALIDATION_ERROR_DETAIL` is unset. Every rejected request in a
+ * stock production deployment therefore answers `{ statusCode, message }` and nothing else.
+ */
 interface NestErrorEnvelope {
   statusCode: number;
   message: string | string[];
-  error: string;
+  error?: string;
 }
 
 function isNestEnvelope(body: unknown): body is NestErrorEnvelope {
-  return typeof body === 'object' && body !== null && 'statusCode' in body && 'message' in body && 'error' in body;
+  return typeof body === 'object' && body !== null && 'statusCode' in body && 'message' in body;
 }
 
 function describeMessage(message: string | string[] | unknown): string {

@@ -296,6 +296,11 @@ describe('ChatMediaArchiveService', () => {
       }
     }
 
+    // Explicit timeout: this is the one case in the file that seeds four figures of rows and drives
+    // them through real SQLite and a real temp filesystem, so it is genuinely slow rather than
+    // waiting on anything. Jest's 5s default left no headroom for that work once the rest of the
+    // suite was running beside it, and it timed out on every full-suite run while passing whenever
+    // the file was run alone — a failure that reported itself as a product bug and was not one.
     it('drains a backlog spanning many batches, and never exceeds the batch size in one statement', async () => {
       // The archive's default TTL is 0, so the first run after an operator sets a retention can
       // face an unbounded backlog. Unbatched, the single UPDATE ... WHERE id IN (...) blows past
@@ -314,7 +319,7 @@ describe('ChatMediaArchiveService', () => {
       // The message rows themselves survive retention — only the archived blob expires.
       expect(await repository.count()).toBe(1250);
       update.mockRestore();
-    });
+    }, 30_000);
 
     it('stops instead of spinning when every delete in a batch fails', async () => {
       await seedExpired(3);

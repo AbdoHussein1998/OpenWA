@@ -38,6 +38,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+          # Both trees are installed in this job (the dashboard audit below), so both lockfiles
+          # belong in the cache key.
+          cache-dependency-path: |
+            package-lock.json
+            dashboard/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -58,9 +63,21 @@ jobs:
           echo "Tag $TAG matches package.json $PKG_VERSION"
 
       - name: Security audit
-        # Matches ci.yml's threshold: high (not critical). The release gate must not be laxer than the
-        # PR gate, or a HIGH advisory blocked on every PR would still sail through at tag time.
-        run: npm audit --audit-level=high
+        # Matches ci.yml exactly, including its per-advisory allowlist. The release gate must not be
+        # laxer than the PR gate, or a HIGH advisory blocked on every PR would still sail through at
+        # tag time — and it must not be STRICTER either, or a tag fails on something main has already
+        # accepted, which is how a release stalls with nothing actionable to fix.
+        run: npm run check:audit
+
+      # Second tree, same rule. The dashboard's runtime deps are bundled into dashboard/dist and the
+      # published image serves them to every operator's browser, so the tag path must scan them for
+      # the same reason ci.yml's audit job now does — otherwise this gate is laxer than the PR gate
+      # for exactly the dependencies that reach a user.
+      - name: Install dashboard dependencies
+        run: cd dashboard && npm ci
+
+      - name: Security audit (dashboard)
+        run: cd dashboard && npm audit --audit-level=high
 
       - name: Run ESLint
         run: npm run lint
@@ -84,11 +101,21 @@ jobs:
       - name: Check OpenAPI snapshot is up to date
         run: npm run openapi:check
 
-      # The same gate ci.yml runs. Its comment there notes this workflow never ran it, which is the
-      # gap: a tag pushed with `--follow-tags` starts both workflows, and only the branch one could
-      # see an SDK left behind by a contract change. The release path has to stand on its own.
+      # The same gates ci.yml runs. Its comment there notes this workflow never ran them, which is
+      # the gap: a tag pushed with `--follow-tags` starts both workflows, and only the branch one
+      # could see an SDK left behind by a contract change. The release path has to stand on its own,
+      # and it is the path that actually publishes the image and the GitHub Release.
       - name: Check SDK routes against the contract
         run: npm run check:sdk-routes
+
+      - name: Check the contract is covered by every SDK
+        run: npm run check:sdk-coverage
+
+      - name: Check SDK webhook events against the contract
+        run: npm run check:sdk-events
+
+      - name: Check SDK docs cover the shipped client surface
+        run: npm run check:sdk-docs
 
   test:
     name: Test
@@ -177,10 +204,11 @@ jobs:
           DATABASE_NAME: openwa
 
       # Runtime-proves BuiltInFtsProvider on Postgres (websearch_to_tsquery + ts_headline against the
-      # STORED body_ts tsvector). The spec self-skips unless DATABASE_TYPE=postgres, so it is a no-op
-      # in the default test job and only executes here against the postgres:16 service.
-      - name: Postgres FTS provider spec
-        run: npx jest src/database/migrations/__tests__/1782400000000-AddMessagesFts.pg.spec.ts
+      # STORED body_ts tsvector) and the boot-migration advisory lock (two concurrent migrators on
+      # one database). Both specs self-skip unless DATABASE_TYPE=postgres, so they are a no-op
+      # in the default test job and only execute here against the postgres:16 service.
+      - name: Postgres specs (FTS provider + boot-migration lock)
+        run: npx jest src/database/migrations/__tests__/1782400000000-AddMessagesFts.pg.spec.ts src/database/migrations/__tests__/pg-boot-migrations.pg.spec.ts
         env:
           DATABASE_TYPE: postgres
           DATABASE_HOST: localhost
@@ -254,6 +282,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # For the behaviour check below. No `npm ci`: it imports only node: builtins, so pinning the
+      # runtime is the whole dependency — without this the step would silently take whatever Node the
+      # runner image happens to ship.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: helm lint
         run: docker run --rm -v "$PWD/charts:/charts:ro" alpine/helm:4.2.3 lint /charts/openwa
 
@@ -276,6 +311,14 @@ jobs:
         run: |
           docker run --rm -v "$PWD/rendered:/w:ro" ghcr.io/yannh/kubeconform:v0.8.0 \
             -strict -ignore-missing-schemas -summary /w/default.yaml /w/toggled.yaml
+
+      # What the rendered chart would DO in a cluster, which neither helm lint nor kubeconform can
+      # see: config changes roll the pods, the startup budget exceeds the liveness budget, the
+      # metrics selector names one Service. Nothing here publishes the chart — operators install it
+      # from this ref — so the tag is the last gate it passes, and a chart that renders validly but
+      # misbehaves must not get past it.
+      - name: Check chart behaviour
+        run: npm run check:chart
 
       - name: actionlint
         run: docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.12 -color
@@ -447,6 +490,11 @@ jobs:
       packages: read
     needs: [docker]
     steps:
+      # Required by the non-root check below, which runs a script from the repo. Without it the
+      # step exits 127 and this job — the only gate between a root image and `latest` — fails on
+      # every tag instead of guarding anything.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
@@ -466,6 +514,15 @@ jobs:
         env:
           REPO: ${{ github.repository }}
         run: echo "ref=ghcr.io/${REPO,,}:smoke-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+
+      # The tag path is the one that promotes to `latest`, so it must not be laxer than the PR gate —
+      # the same rule this workflow's own audit step states. ci.yml verifies the root→openwa drop on
+      # the built image; without it here, a change leaving Node on uid 0 reaches `latest` through the
+      # only path that publishes it.
+      - name: Verify the image drops from root to the openwa user
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: OPENWA_SMOKE_IMAGE="$IMAGE" ./scripts/smoke-test-non-root.sh
 
       - name: Boot + liveness check on each architecture
         env:

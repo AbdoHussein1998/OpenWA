@@ -140,4 +140,14 @@ export class InstanceView {
   ingressUrls!: IngressUrl[];
 }
 
-export type MintedInstance = InstanceView; // identical shape; `secret` carries the plaintext once
+/** Outcome of one redrive batch over an instance's dead-lettered ingress deliveries. */
+export class RedriveResultDto {
+  @ApiProperty({ description: 'Deliveries re-dispatched by this call.', example: 25 })
+  redriven!: number;
+
+  @ApiProperty({ description: 'Dead-lettered deliveries still retained after this batch.', example: 75 })
+  remaining!: number;
+
+  @ApiProperty({ description: 'The bounded batch size this call processed.', example: 25 })
+  batchSize!: number;
+}

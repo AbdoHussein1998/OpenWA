@@ -171,14 +171,14 @@ OpenWA serves plain HTTP on its port; terminate **TLS at your reverse proxy / lo
 
 > **There is currently no application-level encryption at rest.** API keys are stored **hashed** (one-way), but other sensitive values are stored as plaintext in the database / on disk and are protected by filesystem and database permissions, not by encryption. Encryption at rest for these fields is a roadmap item, not a shipped feature — do not assume it.
 
-| Data                                      | At rest                                                                       | How it is protected                                                                                              |
-| ----------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| API keys                                  | **Hashed** — SHA-256 with an optional `API_KEY_PEPPER` HMAC; never reversible | A database leak alone cannot recover the keys; with a pepper set, hashes can't be precomputed offline. See §4.2. |
-| Session auth state (WhatsApp credentials) | Plaintext on disk (the engine's auth store under the data volume)             | Filesystem permissions on the data volume — keep it private.                                                     |
-| Webhook secrets                           | Plaintext — `webhooks.secret` (`varchar`)                                     | Database access control; never returned by any API response (write-only response DTO).                           |
-| Proxy credentials                         | Plaintext — `sessions.proxyUrl` may embed `user:pass`                         | Database access control; never returned by the session read DTOs.                                                |
-| Generated config (`data/.env.generated`)  | Plaintext file, written `0600`                                                | Owner-only file permissions.                                                                                     |
-| Message content                           | Plaintext in the `messages` table                                             | Database access control.                                                                                         |
+| Data                                      | At rest                                                                       | How it is protected                                                                                                                       |
+| ----------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| API keys                                  | **Hashed** — SHA-256 with an optional `API_KEY_PEPPER` HMAC; never reversible | A database leak alone cannot recover the keys; with a pepper set, hashes can't be precomputed offline. See §4.2.                          |
+| Session auth state (WhatsApp credentials) | Plaintext on disk (the engine's auth store under the data volume)             | Filesystem permissions on the data volume — keep it private.                                                                              |
+| Webhook secrets                           | Plaintext — `webhooks.secret` (`varchar`)                                     | Database access control; never returned by the webhook read DTOs (write-only) and omitted from `GET /api/infra/export-data` webhook rows. |
+| Proxy credentials                         | Plaintext — `sessions.proxyUrl` may embed `user:pass`                         | Database access control; never returned by the session read DTOs.                                                                         |
+| Generated config (`data/.env.generated`)  | Plaintext file, written `0600`                                                | Owner-only file permissions.                                                                                                              |
+| Message content                           | Plaintext in the `messages` table                                             | Database access control.                                                                                                                  |
 
 **Hardening you can apply today:** set `API_KEY_PEPPER`; restrict the data volume and database to the app's user; and encrypt at the infrastructure layer (LUKS / cloud-provider encrypted volumes / an encrypted managed Postgres) rather than relying on application-level field encryption, which is not implemented.
 
@@ -516,14 +516,14 @@ flowchart TB
 
 ### Secrets Inventory
 
-| Secret                            | Storage                                             | Rotation guidance                               |
-| --------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
-| Database credentials              | Environment variable                                | 90 days                                         |
-| Redis password                    | Environment variable                                | 90 days                                         |
-| API master key (`API_MASTER_KEY`) | Environment variable                                | 180 days                                        |
-| API key pepper (`API_KEY_PEPPER`) | Environment variable                                | Rotating it invalidates all existing key hashes |
-| Webhook secrets                   | Database — **plaintext**; never returned by the API | Per webhook                                     |
-| Session auth state                | File system (data volume) — **not encrypted**       | Never (tied to the WA session)                  |
+| Secret                            | Storage                                                                                                            | Rotation guidance                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| Database credentials              | Environment variable                                                                                               | 90 days                                         |
+| Redis password                    | Environment variable                                                                                               | 90 days                                         |
+| API master key (`API_MASTER_KEY`) | Environment variable                                                                                               | 180 days                                        |
+| API key pepper (`API_KEY_PEPPER`) | Environment variable                                                                                               | Rotating it invalidates all existing key hashes |
+| Webhook secrets                   | Database — **plaintext**; not in the webhook read DTOs, and omitted from `GET /api/infra/export-data` webhook rows | Per webhook                                     |
+| Session auth state                | File system (data volume) — **not encrypted**                                                                      | Never (tied to the WA session)                  |
 
 > There is no application `ENCRYPTION_KEY` — OpenWA does not encrypt data at rest (see §4.4). The rotation cadences above are operational recommendations, not enforced by the app.
 
@@ -678,7 +678,7 @@ documented inline.
 
 ### Security Scanning in CI
 
-> **Aspirational template — not in the repo.** There is no `security.yml`, no Snyk, and no CodeQL workflow today. The actual dependency check is a dedicated `audit` job ("Security audit") in `ci.yml`, running `npm audit --audit-level=high` on push/PR — not on a schedule. It is deliberately its own job rather than a step inside Lint: an advisory published against an unrelated dependency would otherwise abort the job before ESLint, the type-check and the drift gates ever ran. The threshold is `high` rather than `critical` because the `overrides` in `package.json` clear the root tree's existing HIGH advisories, so it now fences regressions. The workflow below is a recommended setup to add if you want scheduled scanning and SAST.
+> **Aspirational template — not in the repo.** There is no `security.yml`, no Snyk, and no CodeQL workflow today. The actual dependency check is a dedicated `audit` job ("Security audit") in `ci.yml`, on push/PR — not on a schedule. It is deliberately its own job rather than a step inside Lint: an advisory published against an unrelated dependency would otherwise abort the job before ESLint, the type-check and the drift gates ever ran. It runs `npm run check:audit` over the root tree and `npm audit --audit-level=high` over `dashboard/`. Both fence `high` rather than `critical`, because the `overrides` in `package.json` clear the root tree's existing HIGH advisories, so the threshold fences regressions. `check:audit` applies that threshold per advisory instead of all-or-nothing: an advisory with no patched version can be excused by id in `scripts/check-audit.mjs`, with its reason and its removal condition recorded beside it, rather than dropping the whole job to `critical` — and an allowlist entry whose advisory has since gone fails the job too, so an exception cannot outlive its cause. The dashboard keeps the plain form: it has nothing to excuse and stays the stricter of the two. The workflow below is a recommended setup to add if you want scheduled scanning and SAST.
 
 ```yaml
 # .github/workflows/security.yml

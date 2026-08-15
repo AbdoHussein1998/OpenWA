@@ -9,7 +9,10 @@
 # minifier) optional dependency fails to install ("Cannot find module lightningcss.linux-arm64-gnu.node").
 # The per-arch runtime deps are installed natively in the target-platform production stage below.
 # NOTE: $BUILDPLATFORM requires BuildKit (CI uses buildx; modern `docker build`/compose default to it).
-FROM --platform=$BUILDPLATFORM docker.io/node:22-slim AS builder
+# The digest pins the multi-arch node:22-slim index, so every build starts from the same immutable
+# base; dependabot's docker ecosystem proposes the new digest when the tag moves. Update tag and
+# digest together.
+FROM --platform=$BUILDPLATFORM docker.io/node:22-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS builder
 
 WORKDIR /app
 
@@ -52,7 +55,15 @@ COPY . .
 RUN npm run build && npm run dashboard:ci -- --include=dev && npm run dashboard:build && rm -f dist/*.tsbuildinfo
 
 # ===== Stage 2: Production =====
-FROM docker.io/node:22-slim AS production
+# Same digest-pinned node:22-slim base as the builder stage.
+FROM docker.io/node:22-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS production
+
+# Run the app with production defaults from the first boot: an unset NODE_ENV selects the
+# development branch of the CORS/Swagger/DTO-error-detail/default-secret hardening (main.ts
+# warns about exactly this case). Both compose files and the Helm chart already set it; a plain
+# `docker run` of this image did not. The npm installs below pin --omit=dev explicitly, so this
+# changes nothing about which dependencies land in the image.
+ENV NODE_ENV=production
 
 # Chrome for Testing has no linux-arm64 build, and Puppeteer's chromium snapshot
 # is x86_64-only on Linux too. So: amd64 uses Chrome for Testing (downloaded below)
@@ -117,22 +128,33 @@ COPY package*.json ./
 # Backport upstream whatsapp-web.js#201832 (id._serialized -> id.$1 normalization,
 # broken by WA Web 2.3000.x ~2026-07-14) into the installed dep at build time.
 # The patcher self-disables once whatsapp-web.js ships the fix upstream.
-# scripts/postinstall.js rides along: `npm ci` below runs the hook, which fails
-# when the file is missing. With the patcher present the hook applies it in
-# --best-effort mode; the explicit fatal run right after is the real gate.
-COPY scripts/postinstall.js scripts/patch-wwebjs-201832.js scripts/wwebjs-201832.patch scripts/patch-wwebjs-newsletter-preview.js scripts/patch-wwebjs-status.js scripts/patch-wwebjs-ready-sync.js scripts/patch-baileys-appstate.js ./scripts/
+# scripts/postinstall.js rides along so a bare local `npm ci` keeps working, but the
+# --ignore-scripts install below skips the hook here: the explicit fatal run right
+# after is the sole (and stricter) applier for the image.
+COPY scripts/postinstall.js scripts/patch-wwebjs-201832.js scripts/wwebjs-201832.patch scripts/patch-wwebjs-newsletter-preview.js scripts/patch-wwebjs-status.js scripts/patch-wwebjs-ready-sync.js scripts/patch-wwebjs-participant-arity.js scripts/patch-baileys-appstate.js scripts/patch-baileys-newsletter-create.js ./scripts/
 
 # Install production dependencies only, then apply the backports. The status patcher runs after
 # the two patchers it depends on: its transforms were written against the tree they leave behind.
 # scripts/dockerfile-patchers.spec.js derives this list from scripts/patch-*.js and fails if a
 # patcher is added without being copied AND run here — a hand-written list loses one silently, and
 # the Baileys one shipped in postinstall for a whole release without ever reaching the image.
-RUN npm ci --omit=dev \
+#
+# --ignore-scripts: this stage has no compiler toolchain, and npm still auto-runs
+# `node-gyp rebuild` for any package shipping a binding.gyp without its own install
+# script (better-sqlite3's major bump ships N-API prebuilds inside the package, so
+# its runtime loader picks prebuilds/<platform>-<arch>.node — compiling here would
+# fail on the missing python). The other native optionals (cpu-features,
+# msgpackr-extract) are optional=true with runtime fallbacks. The patchers that DO
+# need to run are the explicit fatal invocations below; baileys' preinstall is only
+# a node-version check that the engines field enforces anyway.
+RUN npm ci --omit=dev --ignore-scripts \
     && node scripts/patch-wwebjs-201832.js \
     && node scripts/patch-wwebjs-newsletter-preview.js \
     && node scripts/patch-wwebjs-status.js \
     && node scripts/patch-wwebjs-ready-sync.js \
+    && node scripts/patch-wwebjs-participant-arity.js \
     && node scripts/patch-baileys-appstate.js \
+    && node scripts/patch-baileys-newsletter-create.js \
     && npm cache clean --force
 
 # Replace the npm the base image bundles. npm is not on the request path — the entrypoint runs
@@ -141,8 +163,9 @@ RUN npm ci --omit=dev \
 # what the release image scan reports. node:22-slim currently ships npm 10.9.8, whose bundle
 # carries a critical node-tar advisory plus sigstore/picomatch ones; npm 12 fixes all three.
 # Deliberately AFTER `npm ci`, so the application tree is still resolved by the npm the lockfile
-# was generated with and only the global CLI is swapped.
-RUN npm install -g npm@12 && npm cache clean --force
+# was generated with and only the global CLI is swapped. Pinned to the exact patch release —
+# a floating npm@12 would make the image's bundled npm tree depend on when the build happened.
+RUN npm install -g npm@12.0.2 && npm cache clean --force
 
 # amd64: download Chrome for Testing via Puppeteer and symlink it.
 # arm64: use Debian's chromium installed above (CfT has no linux-arm64 build).
@@ -184,6 +207,13 @@ RUN mkdir -p ./data/sessions ./data/media ./data/plugins && \
 ENV HOME=/app/data
 ENV XDG_CONFIG_HOME=/tmp/.config
 ENV XDG_CACHE_HOME=/tmp/.cache
+
+# Operator backup/restore scripts. docs/11-operational-runbooks.md drives them in-container
+# (`docker exec` against the named-volume mount at /app/data), and the sqlite3 CLI installed above
+# is there for backup.sh's online-consistent snapshots — but the scripts themselves were never
+# copied into the image. lib-env.sh is sourced by both, never executed. backup.sh/restore.sh carry
+# the exec bit in the repo and COPY preserves it, so no chmod is needed.
+COPY scripts/backup.sh scripts/restore.sh scripts/lib-env.sh ./scripts/
 
 # Copy entrypoint: runs as root to fix named-volume ownership, then drops to openwa via gosu
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

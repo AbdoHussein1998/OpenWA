@@ -312,7 +312,7 @@ Dependencies (`whatsapp-web.js`, Puppeteer, NestJS, etc.) may have vulnerabiliti
 
 **Mitigation Strategies:**
 
-> **Current state:** the real dependency check is a dedicated `audit` job in `ci.yml` running `npm audit --audit-level=high` (on push / PR — not on a daily schedule); it is deliberately split out of the `Lint` job so a newly published advisory cannot abort the other quality gates. `release.yml` repeats the same `npm audit --audit-level=high` and additionally runs a Trivy image scan (`CRITICAL,HIGH`, `ignore-unfixed`) against an explicit `.trivyignore` before the release tags are promoted. Dependabot PRs cover npm for `/` and `/dashboard` (weekly), GitHub Actions (monthly) and Docker base/compose images (weekly), with version-pinned ignores for `typescript >=7` and `better-sqlite3 >=13`. There is **no** standalone `security.yml` and **no** Snyk integration. The workflow below is a recommended enhancement to add scheduled scanning.
+> **Current state:** the real dependency check is a dedicated `audit` job in `ci.yml` running `npm run check:audit` over the root tree and `npm audit --audit-level=high` over `dashboard/` (on push / PR — not on a daily schedule); it is deliberately split out of the `Lint` job so a newly published advisory cannot abort the other quality gates. `check:audit` keeps the `high` threshold but applies it per advisory, so one with no patched version can be excused by id in `scripts/check-audit.mjs` — with its reason and removal condition recorded, and a stale entry failing the job — instead of lowering the bar for everything. `release.yml` repeats both and additionally runs a Trivy image scan (`CRITICAL,HIGH`, `ignore-unfixed`) against an explicit `.trivyignore` before the release tags are promoted. Dependabot PRs cover npm for `/` and `/dashboard` (weekly), GitHub Actions (monthly) and Docker base/compose images (weekly), with version-pinned ignores for `typescript >=7` and `better-sqlite3 >=13`. There is **no** standalone `security.yml` and **no** Snyk integration. The workflow below is a recommended enhancement to add scheduled scanning.
 
 ```yaml
 # .github/workflows/security.yml
@@ -341,15 +341,15 @@ jobs:
 
 **Dependency Management Policy:**
 
-| Action                                                        | Frequency                |
-| ------------------------------------------------------------- | ------------------------ |
-| npm audit (`--audit-level=high`, dedicated `audit` job in CI) | Every push / PR          |
-| Trivy image scan (`CRITICAL,HIGH`, `.trivyignore`)            | Every release            |
-| Snyk scan                                                     | Not configured (planned) |
-| Dependabot PRs (npm: `/` and `/dashboard`; docker)            | Weekly                   |
-| Dependabot PRs (github-actions)                               | Monthly                  |
-| Major updates                                                 | Reviewed manually        |
-| Security patches                                              | Immediate                |
+| Action                                                                                    | Frequency                |
+| ----------------------------------------------------------------------------------------- | ------------------------ |
+| npm audit (`high`, per-advisory allowlist via `check:audit`; dedicated `audit` job in CI) | Every push / PR          |
+| Trivy image scan (`CRITICAL,HIGH`, `.trivyignore`)                                        | Every release            |
+| Snyk scan                                                                                 | Not configured (planned) |
+| Dependabot PRs (npm: `/` and `/dashboard`; docker)                                        | Weekly                   |
+| Dependabot PRs (github-actions)                                                           | Monthly                  |
+| Major updates                                                                             | Reviewed manually        |
+| Security patches                                                                          | Immediate                |
 
 ---
 

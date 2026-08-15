@@ -69,7 +69,12 @@ func (s *SessionsService) Start(ctx context.Context, sessionID string) (*Session
 	return &out, nil
 }
 
-// Stop disconnects a session gracefully.
+// Stop disconnects a session gracefully. Returns an HTTP 502 error with
+// code 'SESSION_STOP_INCOMPLETE' when the session was stopped locally but the engine
+// teardown did not complete (the graceful disconnect and the force-destroy escalation
+// both failed, so the engine process may still be running); the status is settled to
+// disconnected and no success audit is written. Retry the stop; restart the node to
+// reap a leaked process.
 func (s *SessionsService) Stop(ctx context.Context, sessionID string) (*SessionResponse, error) {
 	var out SessionResponse
 	err := s.client.do(ctx, "POST", "/api/sessions/"+pathEscape(sessionID)+"/stop", nil, nil, &out)
@@ -131,6 +136,22 @@ func (s *SessionsService) RequestPairingCode(ctx context.Context, sessionID stri
 func (s *SessionsService) Stats(ctx context.Context) (*SessionStatsOverview, error) {
 	var out SessionStatsOverview
 	err := s.client.do(ctx, "GET", "/api/sessions/stats/overview", nil, nil, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetOnlinePresence sets the account's own global presence — appear online, or offline.
+//
+// Available=false hands notifications back to the phone: a linked device that stays online
+// suppresses the phone's own alerts. This is the ACCOUNT's presence, not a chat's — see
+// ChatsService.SendState for per-chat typing/recording states.
+func (s *SessionsService) SetOnlinePresence(
+	ctx context.Context, sessionID string, body SetOwnPresenceRequest,
+) (*SuccessResult, error) {
+	var out SuccessResult
+	err := s.client.do(ctx, "PUT", "/api/sessions/"+pathEscape(sessionID)+"/presence", nil, body, &out)
 	if err != nil {
 		return nil, err
 	}

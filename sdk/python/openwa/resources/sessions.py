@@ -17,6 +17,8 @@ from ..types import (
     RequestPairingCodeRequest,
     SessionResponse,
     SessionStatsOverview,
+    SetOwnPresenceRequest,
+    SuccessResult,
 )
 
 if TYPE_CHECKING:
@@ -68,7 +70,15 @@ class SessionsResource:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/start")
 
     def stop(self, session_id: str) -> SessionResponse:
-        """Disconnect a session gracefully."""
+        """Disconnect a session gracefully.
+
+        Raises on HTTP 502 with ``code: 'SESSION_STOP_INCOMPLETE'`` when the
+        session was stopped locally but the engine teardown did not complete
+        (the graceful disconnect and the force-destroy escalation both failed,
+        so the engine process may still be running); the status is settled to
+        ``disconnected`` and no success audit is written. Retry the stop;
+        restart the node to reap a leaked process.
+        """
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/stop")
 
     def logout(self, session_id: str) -> SessionResponse:
@@ -104,3 +114,14 @@ class SessionsResource:
     def stats(self) -> SessionStatsOverview:
         """Return the aggregate session stats overview."""
         return self._http.request("GET", "/api/sessions/stats/overview")
+
+    def set_online_presence(self, session_id: str, body: SetOwnPresenceRequest) -> SuccessResult:
+        """Set the account's own global presence — appear online, or offline.
+
+        ``available: False`` hands notifications back to the phone: a linked device that stays
+        online suppresses the phone's own alerts. This is the ACCOUNT's presence, not a chat's —
+        see the chats resource for per-chat typing/recording states.
+        """
+        return self._http.request(
+            "PUT", f"/api/sessions/{quote_segment(session_id)}/presence", body=body
+        )

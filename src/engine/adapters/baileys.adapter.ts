@@ -11,6 +11,7 @@ import { BaileysLifecycle } from './baileys-lifecycle';
 import { BaileysMessaging } from './baileys-messaging';
 import { BaileysStatus } from './baileys-status';
 import {
+  CallLinkType,
   ChatState,
   Channel,
   ChannelMessage,
@@ -60,12 +61,14 @@ export class BaileysAdapter implements IWhatsAppEngine {
   private readonly logger = createLogger('BaileysAdapter');
   // Bound concurrent inbound media downloads: each materialises a full decrypted buffer in heap, so an
   // unbounded fire-and-forget loop lets a sender flood the gateway with N parallel multi-MB allocations.
-  private readonly inboundLimiter = new ConcurrencyLimiter(
-    inboundMediaConcurrency(),
-    // Queue cap == active slots: beyond (active + queued) concurrent media messages, reject instead of
-    // parking, so a burst can't grow heap without bound (each parked closure holds the message).
-    inboundMediaConcurrency(),
-  );
+  //
+  // The QUEUE is deliberately unbounded. handleMessagesUpsert submits a whole upsert synchronously,
+  // so admission is decided before any download finishes: a queue capped at the active slots admitted
+  // a constant 2n regardless of batch size, and everything past it was re-processed with skipMedia —
+  // a 40-message upsert lost the media of 32. A parked closure holds the message, not the file, and
+  // inbound-media-cap.ts bounds what any one download may allocate, so capping the queue again needs
+  // a threshold an ordinary burst does not reach. That is its own question.
+  private readonly inboundLimiter = new ConcurrencyLimiter(inboundMediaConcurrency());
   private readonly authPath: string;
   private readonly sessionStore: BaileysSessionStore;
   private readonly groups: BaileysGroups;
@@ -188,6 +191,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
     this.channels = new BaileysChannels({
       ensureReady: () => this.ensureReady(),
       getSocket: () => this.sock!,
+      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
     });
     this.catalog = new BaileysCatalog({
       ensureReady: () => this.ensureReady(),
@@ -511,6 +515,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.contacts.setProfileStatus(status);
   }
 
+  async deleteProfilePicture(): Promise<void> {
+    return this.contacts.deleteProfilePicture();
+  }
+
   async setProfilePicture(media: MediaInput): Promise<void> {
     return this.contacts.setProfilePicture(media);
   }
@@ -681,6 +689,14 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.channels.muteChannel(channelId, mute);
   }
 
+  demoteChannelAdmin(channelId: string, userId: string): Promise<void> {
+    return this.channels.demoteChannelAdmin(channelId, userId);
+  }
+
+  transferChannelOwnership(channelId: string, newOwnerId: string): Promise<void> {
+    return this.channels.transferChannelOwnership(channelId, newOwnerId);
+  }
+
   getSubscribedChannels(): Promise<Channel[]> {
     return this.unsupported('getSubscribedChannels');
   }
@@ -749,6 +765,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
   /* eslint-enable @typescript-eslint/no-unused-vars */
 
   // ----- Events -----
+
+  createCallLink(type: CallLinkType, startTime: number): Promise<string> {
+    return this.messaging.createCallLink(type, startTime);
+  }
 
   async rejectCall(callId: string): Promise<void> {
     return this.events.rejectCall(callId);
