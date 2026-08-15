@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ENGINE_CAPABILITY_MATRIX } from './engine-capability-matrix';
+import { engineCapabilityMatrix } from './engine-capability-matrix';
 
 /**
  * `docs/29` states the same three figures in ten places — the intro, the architecture prose, a
@@ -21,7 +21,7 @@ describe('docs/29 counts match the capability matrix', () => {
    * line-oriented parse could.
    */
   const recount = () => {
-    const rows = Object.values(ENGINE_CAPABILITY_MATRIX).map(entry => ({
+    const rows = Object.values(engineCapabilityMatrix()).map(entry => ({
       wwjs: entry.wwjs.status,
       baileys: entry.baileys.status,
     }));

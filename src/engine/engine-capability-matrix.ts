@@ -5,8 +5,8 @@
  *
  * DERIVED — membership and the default. The method list is not hand-maintained: it is read from
  * `interfaces/whatsapp-engine.interface.ts` with the same member regex the parity gate
- * (`engine-parity.spec.ts`) applies, so a method added to the interface appears in
- * ENGINE_CAPABILITY_MATRIX the moment it compiles and a removed one drops out. A method with no
+ * (`engine-parity.spec.ts`) applies, so a method added to the interface appears in the derived
+ * matrix the moment it compiles and a removed one drops out. A method with no
  * curated entry defaults to `{wwjs: supported, baileys: supported}` — "plainly works on both" is
  * the common case and costs no line here.
  *
@@ -442,11 +442,12 @@ export const CURATED_CAPABILITY_EXCEPTIONS: Record<string, MethodCapability> = {
 const MEMBER_RE = /^\s{2}([a-zA-Z][a-zA-Z0-9]*)\??\s*\(/;
 
 function readInterfaceMethods(): string[] {
-  // The interface SOURCE is the inventory's source of truth, so it is read from disk at module
-  // load. Two layouts resolve it: this file among its sources (ts-jest / ts-node), and this file
-  // compiled into dist inside a checkout (dist/engine → ../../src/engine). A deployment image that
-  // ships only dist cannot read it — but every consumer of the matrix is a spec or docs gate, none
-  // runtime, so the read never happens there; if one ever appears, this error names the fix.
+  // The interface SOURCE is the inventory's source of truth, so it is read from disk when the
+  // matrix is first derived — lazily, on the first engineCapabilityMatrix() call, never at import.
+  // Two layouts resolve it: this file among its sources (ts-jest / ts-node), and this file compiled
+  // into dist inside a checkout (dist/engine → ../../src/engine). A deployment image that ships
+  // only dist cannot read it — a dist-only runtime consumer would still fail at CALL time with the
+  // error below; making the matrix a build-time artifact is the fix if such a consumer ever appears.
   const candidates = [
     join(__dirname, 'interfaces', 'whatsapp-engine.interface.ts'),
     join(__dirname, '..', '..', 'src', 'engine', 'interfaces', 'whatsapp-engine.interface.ts'),
@@ -454,7 +455,7 @@ function readInterfaceMethods(): string[] {
   const path = candidates.find(p => existsSync(p));
   if (!path) {
     throw new Error(
-      `Cannot derive ENGINE_CAPABILITY_MATRIX: the interface source was not found (tried ${candidates.join(', ')}). ` +
+      `Cannot derive the engine capability matrix: the interface source was not found (tried ${candidates.join(', ')}). ` +
         'The matrix is derived from src/engine/interfaces/whatsapp-engine.interface.ts, which must be present.',
     );
   }
@@ -496,4 +497,19 @@ function copyCapability(entry: MethodCapability): MethodCapability {
   return copy;
 }
 
-export const ENGINE_CAPABILITY_MATRIX: Record<string, MethodCapability> = deriveEngineCapabilityMatrix();
+/**
+ * The derived matrix, produced on FIRST CALL and memoized. Deriving at module load meant importing
+ * this module read `whatsapp-engine.interface.ts` from disk at import time — harmless for the spec
+ * and docs gates that are its only consumers today, but a runtime import from a dist-only
+ * deployment image would have crashed at import. Lazy derivation moves that failure to CALL time,
+ * where the loud named error in readInterfaceMethods still names the fix; if a dist-only runtime
+ * consumer ever appears for real, making the matrix a build-time artifact is the fix, not this
+ * cache. The memoized object is shared across callers exactly like the const it replaced, and
+ * derivation copies each row, so no caller can alias CURATED_CAPABILITY_EXCEPTIONS.
+ */
+let cachedMatrix: Record<string, MethodCapability> | undefined;
+
+export function engineCapabilityMatrix(): Record<string, MethodCapability> {
+  cachedMatrix ??= deriveEngineCapabilityMatrix();
+  return cachedMatrix;
+}
