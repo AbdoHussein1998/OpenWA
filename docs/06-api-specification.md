@@ -4060,7 +4060,7 @@ Stream a stored status's media bytes (the file behind a `mediaUrl` returned abov
 | sessionId | string | WhatsApp session identifier                          |
 | statusId  | string | The status `id` (e.g. from a `GET /status` response) |
 
-**Response** `200` — the raw media bytes as the response body, with `Content-Type` set to the stored mimetype (e.g. `image/jpeg`, `video/mp4`). Streamed via `StreamableFile` from whatever backs `StorageService` (local disk or S3 — the route does not care which).
+**Response** `200` — the raw media bytes as the response body, served as an **attachment** (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`). `Content-Type` is the stored mimetype when it belongs to the image/video/audio families — except `image/svg+xml` in any parameterized or whitespace-padded form, which is scriptable despite the `image/` prefix — and `application/octet-stream` otherwise, so no stored status media is ever served as active content on the API origin. Streamed via `StreamableFile` from whatever backs `StorageService` (local disk or S3 — the route does not care which).
 
 **Errors:** `401` missing/invalid API key, or key not scoped to this session · `404` `Status media not found or expired` — the status is text-only, its media was omitted (e.g. over the configured size cap), or the 24h TTL has since purged the row
 
