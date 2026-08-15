@@ -406,26 +406,35 @@ test('the pending-restart note survives a successful save', async () => {
   assert.ok(screen.queryByText(PENDING_RESTART_NOTE), 'the pending-restart note must not vanish once a save succeeds');
 });
 
-test('the engine radio seeds from the saved engine when ENGINE_TYPE is pinned', async () => {
+test('the engine radio seeds from the effective engine when ENGINE_TYPE is pinned', async () => {
   const { screen, waitFor } = rtl;
   resetFetchCalls();
-  overrides = { status: PINNED_STATUS, saved: SAVED_BAILEYS };
+  // Under a pin, /config reports the pinned (effective) engine — the value /status also reports —
+  // so the stock fixtures (both whatsapp-web.js) model the honest pinned response. The radio must
+  // show what actually runs, with the pin note explaining why a save here cannot change it (#1313).
+  overrides = { status: PINNED_STATUS };
   const { container } = renderInfrastructure();
 
   await screen.findByText('Database Configuration');
   await awaitConfigHydrated(container);
 
-  // The running engine is the PINNED value, not a choice the operator made, so showing it would
-  // present the pin as their selection.
   await waitFor(() =>
-    assert.equal(engineRadios(container)[1].checked, true, 'expected the saved engine (baileys) to be selected'),
+    assert.equal(engineRadios(container)[0].checked, true, 'expected the pinned engine (whatsapp-web.js) to be selected'),
+  );
+  assert.ok(
+    screen.getByText(/Pinned by the environment variable ENGINE_TYPE/, { exact: false }),
+    'the pin note must explain why the radio cannot take effect',
   );
 });
 
-test('saving while ENGINE_TYPE is pinned does not write the running engine over the saved one', async () => {
+test('saving while ENGINE_TYPE is pinned omits engine.type so the stored choice survives', async () => {
   const { screen, waitFor, fireEvent } = rtl;
   resetFetchCalls();
-  overrides = { status: PINNED_STATUS, saved: SAVED_BAILEYS };
+  // The stored ENGINE_TYPE in data/.env.generated is invisible to the dashboard while the pin
+  // holds (/config reports the effective engine). The operator never touched the radio here, so
+  // the payload must OMIT type: sending the pinned seed would bake the pin over the stored choice,
+  // and unsetting the variable later could not restore it (#1082).
+  overrides = { status: PINNED_STATUS };
   const { container } = renderInfrastructure();
 
   await screen.findByText('Database Configuration');
@@ -433,8 +442,29 @@ test('saving while ENGINE_TYPE is pinned does not write the running engine over 
 
   fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
 
-  // The operator never touched the engine here. Persisting the pinned value would destroy the choice
-  // held in data/.env.generated, so unsetting the variable later could not restore it.
+  await waitFor(() => {
+    const call = findFetchCall('PUT', '/api/infra/config');
+    assert.ok(call, 'expected a PUT to /infra/config');
+    const body = call!.body as { engine?: { type?: string } };
+    assert.equal(body.engine?.type, undefined, 'an untouched pinned seed must not be persisted');
+  });
+});
+
+test('an operator engine pick under a pin is deliberate and still saved', async () => {
+  const { screen, waitFor, fireEvent } = rtl;
+  resetFetchCalls();
+  // The pin note says dashboard changes won't APPLY until the variable is unset — it does not say
+  // the choice cannot be stored. Clicking a radio is an explicit selection (engineTouched), so it
+  // must reach the payload and replace the stored intent for the post-unpin boot.
+  overrides = { status: PINNED_STATUS };
+  const { container } = renderInfrastructure();
+
+  await screen.findByText('Database Configuration');
+  await awaitConfigHydrated(container);
+
+  fireEvent.click(engineRadios(container)[1]);
+  fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
   await waitFor(() => {
     const call = findFetchCall('PUT', '/api/infra/config');
     assert.ok(call, 'expected a PUT to /infra/config');

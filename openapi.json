@@ -4048,7 +4048,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Saved configuration (secrets omitted)",
+            "description": "Effective configuration (secrets omitted)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4058,7 +4058,7 @@
             }
           }
         },
-        "summary": "Read the saved infrastructure configuration for the dashboard form",
+        "summary": "Read the effective infrastructure configuration for the dashboard form",
         "tags": [
           "infrastructure"
         ]

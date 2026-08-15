@@ -5189,7 +5189,7 @@ Get the currently active engine type.
 
 #### GET /api/infra/config
 
-Read the saved infrastructure config from `data/.env.generated` (used to hydrate the dashboard form). **Secrets are never returned** — only `*Set`/`*CredentialsSet` booleans indicate that a secret is stored.
+Read the effective infrastructure config used to hydrate the dashboard form. Each field resolves with the boot precedence: a value pinned by the host environment (e.g. Compose `environment:`) or the project `.env` wins over `data/.env.generated`, while a key that only ever lived in the saved file reports the freshly-saved value even before a restart applies it ("saved, pending restart"). **Secrets are never returned** — only `*Set`/`*CredentialsSet` booleans indicate that a secret is stored.
 
 **Auth:** API key (ADMIN)
 
@@ -5230,7 +5230,7 @@ Read the saved infrastructure config from `data/.env.generated` (used to hydrate
 }
 ```
 
-When `data/.env.generated` does not exist, empty-string/default values are returned (`schema='public'`, `poolSize=10`, `sslRejectUnauthorized=true`, `engine.type='whatsapp-web.js'`, `headless=true`).
+When nothing supplies a key — no pinned environment value and the file absent or silent about it — empty-string/default values are returned (`schema='public'`, `poolSize=10`, `sslRejectUnauthorized=true`, `engine.type='whatsapp-web.js'`, `headless=true`).
 
 **Errors:** `401` · `403`
 
