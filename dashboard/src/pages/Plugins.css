@@ -100,6 +100,43 @@
   color: var(--text-muted);
 }
 
+/* Newer-version chip on an installed plugin's card. Clickable: opens the Install drawer's
+   catalog tab pre-filtered to this plugin, where the actual Update button lives. */
+.plugins-page .plugin-update-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  padding: 0.0625rem 0.4375rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--primary, #25d366);
+  background: color-mix(in srgb, var(--primary, #25d366) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary, #25d366) 35%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.plugins-page .plugin-update-chip:hover {
+  background: color-mix(in srgb, var(--primary, #25d366) 20%, transparent);
+}
+
+/* Pending-update counter on the Install button, so updates are visible without opening it. */
+.plugins-page .install-update-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.3125rem;
+  margin-left: 6px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--primary, #25d366);
+  background: color-mix(in srgb, var(--primary, #25d366) 18%, transparent);
+  border-radius: 999px;
+}
+
 .plugins-page .plugin-builtin-badge {
   padding: 0.1875rem 0.5rem;
   background: var(--bg-light);

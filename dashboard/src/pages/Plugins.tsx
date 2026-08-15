@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { localizePlugin } from '../utils/localizePlugin';
 import { configUiSafeConfig, missingRequiredConfig, sparseSessionOverride } from '../utils/pluginConfigRules';
@@ -24,6 +24,7 @@ import {
   Download,
   Plus,
   Search,
+  ArrowUpCircle,
 } from 'lucide-react';
 import { pluginsApi } from '../services/api';
 import type { Plugin, CatalogPlugin, PluginConfigField } from '../services/api';
@@ -675,13 +676,17 @@ export default function Plugins() {
     }
   };
 
-  const loadCatalog = async () => {
+  const loadCatalog = async (silent = false) => {
     setCatalogLoading(true);
     setCatalogError(null);
     try {
       setCatalog(await pluginsApi.catalog());
     } catch (err) {
-      setCatalogError(err instanceof Error ? err.message : String(err));
+      // Silent mode is the page-mount prefetch that powers the update chips: a catalog that
+      // cannot be reached just means no chips, so the failure is not surfaced here — the
+      // drawer's own lazy-load effect (which skips while an error is set) retries loudly
+      // when the user actually opens the Catalog tab.
+      if (!silent) setCatalogError(err instanceof Error ? err.message : String(err));
     } finally {
       setCatalogLoading(false);
     }
@@ -694,6 +699,19 @@ export default function Plugins() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showInstallModal, installMode]);
+
+  // Prefetch once on mount so installed-plugin cards can flag newer catalog versions without the
+  // user having to open the Install drawer first. Silent: an unreachable catalog hides the chips.
+  useEffect(() => {
+    void loadCatalog(true);
+  }, []);
+
+  // Catalog entries with a strictly newer version than the installed one, keyed by plugin id —
+  // drives both the per-card update chip and the counter on the Install button.
+  const updatesById = useMemo(
+    () => new Map(catalog.filter(entry => entry.updateAvailable).map(entry => [entry.id, entry])),
+    [catalog],
+  );
 
   const handleInstallFromCatalog = async (entry: CatalogPlugin) => {
     if (!entry.download) {
@@ -782,6 +800,11 @@ export default function Plugins() {
             <button className="btn-primary" onClick={() => setShowInstallModal(true)}>
               <Upload size={16} />
               {t('plugins.install', 'Install plugin')}
+              {updatesById.size > 0 && (
+                <span className="install-update-count" title={t('plugins.catalog.updateAvailable', 'Update available')}>
+                  {updatesById.size}
+                </span>
+              )}
             </button>
           </>
         }
@@ -842,6 +865,23 @@ export default function Plugins() {
                       <div>
                         <h3 className="plugin-name">{lz.name}</h3>
                         <span className="plugin-version">v{plugin.version}</span>
+                        {updatesById.has(plugin.id) && (
+                          <button
+                            type="button"
+                            className="plugin-update-chip"
+                            title={`${t('plugins.catalog.updateAvailable', 'Update available')} (v${plugin.version} → v${updatesById.get(plugin.id)!.version})`}
+                            aria-label={t('plugins.catalog.updateAvailable', 'Update available')}
+                            onClick={() => {
+                              // Land the user directly on this plugin's catalog entry, where the
+                              // existing Update button (and its confirmation flow) lives.
+                              setInstallMode('catalog');
+                              setCatalogSearch(plugin.id);
+                              setShowInstallModal(true);
+                            }}
+                          >
+                            <ArrowUpCircle size={12} />v{updatesById.get(plugin.id)!.version}
+                          </button>
+                        )}
                       </div>
                     </div>
                     {plugin.builtIn && <span className="plugin-builtin-badge">{t('plugins.builtIn')}</span>}
