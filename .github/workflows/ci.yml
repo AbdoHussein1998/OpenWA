@@ -231,7 +231,10 @@ jobs:
       # one database). Both specs self-skip unless DATABASE_TYPE=postgres, so they are a no-op
       # in the default test job and only execute here against the postgres:16 service.
       - name: Postgres specs (FTS provider + boot-migration lock)
-        run: npx jest src/database/migrations/__tests__/1782400000000-AddMessagesFts.pg.spec.ts src/database/migrations/__tests__/pg-boot-migrations.pg.spec.ts
+        # --runInBand: both specs issue DDL against the one shared service database, and jest's
+        # default file-parallelism races their catalog writes (pg_type duplicate-key). The lock
+        # spec's own two-migrator race is in-file (Promise.all) and unaffected by runInBand.
+        run: npx jest --runInBand src/database/migrations/__tests__/1782400000000-AddMessagesFts.pg.spec.ts src/database/migrations/__tests__/pg-boot-migrations.pg.spec.ts
         env:
           DATABASE_TYPE: postgres
           DATABASE_HOST: localhost
