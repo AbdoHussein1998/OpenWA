@@ -15,9 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GET /api/infra/export-data` no longer exports webhook `secret` and `headers`; redacted archives restore as unsigned webhooks.
 - Webhook registration rejects URLs embedding credentials (`user:pass@host`) with a `400`, on create and update.
 - Boot now warns when `NODE_ENV` is unset on a publicly bound listener, and the MCP fallback body parser carries a size limit.
-- The webhook SSRF guard classifies addresses with `net.BlockList` subnet math and now blocks the entire reserved space below the global-unicast range (`::/3`, including literals the old prefix list missed); embedded-IPv6 forms (NAT64, 6to4, mapped) still deliver when the inner address is public, and unrecognized literals still block.
+- The webhook SSRF guard classifies addresses with `net.BlockList` subnet math and now blocks every IPv6 literal outside the global-unicast range (`2000::/3` — the reserved space below it, multicast, and the blocks above it that the old prefix list never matched); embedded-IPv6 forms (NAT64, 6to4, mapped) still deliver when the inner address is public, and unrecognized literals still block.
 - The last-admin guard runs inside the same statement as the write, so demoting, deleting or revoking the last usable admin key is refused even when the requests arrive through different processes.
 - The dependency audit now gates per advisory (`npm run check:audit`); `GHSA-jmr9-qjv8-65gv` (`extract-zip`, via `puppeteer-core` ← `whatsapp-web.js`, no patched release, reachable only at image-build time) is allowlisted by id, and the entry fails closed once the advisory disappears.
+
+### Added
+
+- Dashboard, Plugins page: installed plugins whose catalog lists a strictly newer version now carry an update chip on their card, and the Install button shows a pending-update count — both driven by a silent on-mount catalog fetch, so an update is visible without opening the Install drawer. The chip opens the drawer's catalog tab pre-filtered to that plugin, where the update flow lives.
 
 ### Fixed
 
@@ -38,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The runtime image sets `NODE_ENV=production`; it previously ran unset, which several code paths treat as development.
+- The runtime image sets `NODE_ENV=production`; it previously ran unset, which several code paths treat as development. The production install step also skips package install scripts and consumes native prebuilds at runtime, leaving the stage toolchain-free and the image roughly 900 MB smaller.
 - Base image is digest-pinned (`node:22-slim`) with `npm@12` pinned, `@types/node` moved to `^22`, `whatsapp-web.js` pinned exactly, and the backup/restore scripts now ship in the image.
 - The session routes' path parameter is uniformly `{sessionId}` (22 routes previously mixed `{id}`). The URLs are unchanged — OpenAPI path templates, reference tables and Prometheus route labels respell only.
 - Major dependency bumps, each landed separately behind the full suite plus a live-Redis queue run: bullmq 6 (with `@nestjs/bullmq` 11.0.5), ioredis 6 (RESP3 connections by default — no configuration change required), better-sqlite3 13 (N-API prebuilds ship in the package), and https-proxy-agent 9 / socks-proxy-agent 10 for the Baileys proxy path.
@@ -51,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 
 - Coverage floors ratcheted; new specs for the message send endpoints, catalog, label delegation and session lifecycle edges; e2e wall-clock waits replaced with poll-for-condition.
-- `npm test` now runs the unit lane only: the 21 repo-file drift-gate specs moved to `npm run test:docs`, which CI runs as its own step — both lanes together are the former suite. The automation-rule controller gained a direct route spec, and per-scope coverage floors were re-derived around the split.
+- `npm test` now runs the unit lane only: the 22 repo-file drift-gate specs moved to `npm run test:docs`, which CI runs as its own step — both lanes together are the former suite, and a gate spec keeps the two lane lists identical. The automation-rule controller gained a direct route spec, and per-scope coverage floors were re-derived around the split.
 
 ## [0.18.0] - 2026-08-13
 
