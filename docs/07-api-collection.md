@@ -1385,7 +1385,7 @@ curl "$BASE/api/infra/engines/current" \
 
 #### GET /api/infra/config
 
-Read saved infrastructure config (secrets omitted).
+Read effective infrastructure config (secrets omitted) — each field resolves with the boot precedence (environment / `.env` over `data/.env.generated`).
 
 ```bash
 curl "$BASE/api/infra/config" \

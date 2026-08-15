@@ -207,17 +207,15 @@ export function useInfraConfigForm(
     if (infraStatus && savedConfig) formHydrated.current = true;
   }, [infraStatus, savedConfig]);
 
-  // Seed the radio from the SAVED engine, once, and never after the operator has touched it (#735).
+  // Seed the radio once from /config, and never after the operator has touched it (#735).
   //
-  // Not from the running engine, which this used to do: the gateway resolves ENGINE_TYPE once at boot,
-  // so the running value is stale from the moment a change is saved until the server restarts, and it
-  // is the pinned value outright when an environment variable supplies one. Either way it is a value
-  // nobody chose here, and because `buildSavePayload` always sends `type` once the radio has seeded,
-  // the next save of ANY field on this page wrote it back over the operator's saved engine — losing a
-  // choice that unsetting the variable, or restarting, was supposed to reveal (#1082).
-  //
-  // The saved file is the intent; what is actually running is reported by the card badge and, when the
-  // two differ, named by the card's own notice.
+  // /config reports the EFFECTIVE engine: the saved file value while nothing pins ENGINE_TYPE, the
+  // pinned value outright when an environment variable supplies one (#1313). Either way the seeded
+  // value may be one nobody chose here — the running one is stale from the moment a change is saved
+  // until the server restarts — so the seed is display-only: buildSavePayload omits `type` for an
+  // untouched seed under a pin, and only an operator click (engineTouched) persists a selection. What
+  // is actually running is reported by the card badge and, when the two differ, named by the card's
+  // own notice.
   useEffect(() => {
     const seed = savedConfig?.engine.type;
     if (!seed || engineHydrated.current || engineTouched.current) return;
@@ -257,11 +255,22 @@ export function useInfraConfigForm(
     },
     queue: { enabled: queueEnabled },
     storage: { ...storageConfig },
-    // Only send `type` once we actually know it — either the radio seeded from the running engine
-    // or the operator picked one. If /engines/current never resolved (endpoint down), engineConfig.type
-    // still holds its useState default, and sending that would persist ENGINE_TYPE and silently flip
-    // the engine on the next restart. The backend treats an absent `type` as "leave ENGINE_TYPE alone".
-    engine: engineTypeKnown() ? { ...engineConfig } : { ...engineConfig, type: undefined },
+    // Only send `type` once we actually know it — either the radio seeded from /config or the
+    // operator picked one. If /config never resolved, engineConfig.type still holds its useState
+    // default, and sending that would persist ENGINE_TYPE and silently flip the engine on the next
+    // restart. The backend treats an absent `type` as "leave ENGINE_TYPE alone".
+    //
+    // An untouched seed under a PINNED ENGINE_TYPE counts as unknown too: /config reports the
+    // effective (pinned) engine, so the seeded value is the pin, not a choice made here — sending
+    // it would bake the pin into data/.env.generated over the operator's stored choice, which
+    // unsetting the variable was supposed to reveal (#1082). Pin-ness is read HERE, at save time,
+    // not at seed time: the two queries settle independently and the save click always sees the
+    // latest /status. An operator click (engineTouched) is a deliberate choice and always sends.
+    engine:
+      engineTypeKnown() &&
+      !(engineHydrated.current && !engineTouched.current && infraStatus?.envPinned?.includes('ENGINE_TYPE'))
+        ? { ...engineConfig }
+        : { ...engineConfig, type: undefined },
   });
 
   return {

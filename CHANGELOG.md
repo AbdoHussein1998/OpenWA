@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `GET /infra/config` now resolves each field with the boot precedence (host environment, then project `.env`, then `data/.env.generated`) instead of reporting only the dashboard-saved file: a deployment setting `ENGINE_TYPE`/`DATABASE_TYPE`/`REDIS_ENABLED` via Compose `environment:` no longer reads back `whatsapp-web.js`/`sqlite`/disabled defaults that contradict the running process (#1313). Values that only ever lived in the saved file still hydrate the form as before, so the "saved, pending restart" state is unchanged, and the dashboard now omits `engine.type` from a save when the seeded value is an environment pin the operator never chose — the stored engine selection survives until the variable is unset (#1082).
+
 ### Security
 
 - `GET /sessions/:sessionId/status/:statusId/media` now serves `image/svg+xml` status media as an inert download (`application/octet-stream` plus `Content-Disposition: attachment`), matching the chat-media route: SVG is scriptable despite the `image/` prefix, and serving it with its declared Content-Type made the endpoint stored-XSS material on the API origin.
