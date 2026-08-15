@@ -11,6 +11,7 @@ import { createLogger } from '../common/services/logger.service';
 import { BaileysMessageStoreService } from './adapters/baileys-message-store.service';
 import { LidMappingStoreService } from './identity/lid-mapping-store.service';
 import { isSafeSessionName } from '../common/utils/path-safety';
+import { ensurePrivateDir } from '../common/utils/private-dir.util';
 
 export interface EngineCreateOptions {
   /** Session NAME — the on-disk auth-directory key (matches the dirs purgeSessionData removes). */
@@ -102,6 +103,14 @@ export class EngineFactory implements OnModuleInit {
     if (!isSafeSessionName(options.sessionId)) {
       throw new Error(`Refusing to create an engine for an unsafe session name: ${JSON.stringify(options.sessionId)}`);
     }
+
+    // Both engine shapes' credential dirs are made owner-only up front, whichever engine this
+    // session runs and whichever construction path serves it (plugin or fallback): a whatsapp-web.js
+    // profile and a baileys creds.json each hold everything needed to take over the linked account,
+    // so read access to the data volume must not be enough. Mirrors purgeSessionData, which removes
+    // BOTH shapes for the same engine-switch-residue reason.
+    ensurePrivateDir(this.wwjsAuthDir(options.sessionId));
+    ensurePrivateDir(this.baileysAuthDir(options.sessionId));
 
     // Try to get engine from plugin system
     const enginePlugin = this.pluginLoader.getPlugin(this.engineType);

@@ -52,7 +52,15 @@ export class StatusController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const { buffer, mimetype } = await this.statusService.getStatusMedia(sessionId, statusId);
-    res.set({ 'Content-Type': mimetype, 'X-Content-Type-Options': 'nosniff' });
+    // attachment + nosniff together, mirroring the chat-media route: the mimetype is already
+    // reduced to an inert set by the service, and forcing a download means even a mistake there
+    // cannot render as active content on the API origin. The dashboard fetches status media as a
+    // blob (fetch ignores Content-Disposition), so nothing depends on inline display here.
+    res.set({
+      'Content-Type': mimetype,
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'attachment',
+    });
     return new StreamableFile(buffer);
   }
 
