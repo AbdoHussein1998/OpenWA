@@ -77,6 +77,12 @@ jobs:
       - name: Check SDK docs cover the shipped client surface
         run: npm run check:sdk-docs
 
+      # The shape half of the client contract gates above: routes/events/methods say WHICH
+      # endpoints exist, this says the hand-written SDK/dashboard types mirror the DTO schemas
+      # they carry — the verification none of the other gates provide.
+      - name: Client wire-shape contract check
+        run: npm run check:contract-shapes
+
   # Deliberately its own job rather than a step inside Lint. `npm audit` reports against the
   # advisory database, not against the diff, so a newly published advisory turns red on unrelated
   # PRs. While it lived as the first step of Lint, that failure aborted the job before ESLint, the
