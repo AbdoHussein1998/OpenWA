@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-15
+
 ### Security
 
 - ⚠️ **Breaking (config).** Production boot now refuses a set `API_MASTER_KEY` shorter than 32 characters; unset stays allowed (first boot generates one). Action required: strengthen a short key before upgrading — the boot error names the fix.
@@ -17,7 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Boot now warns when `NODE_ENV` is unset on a publicly bound listener, and the MCP fallback body parser carries a size limit.
 - The webhook SSRF guard classifies addresses with `net.BlockList` subnet math and now blocks every IPv6 literal outside the global-unicast range (`2000::/3` — the reserved space below it, multicast, and the blocks above it that the old prefix list never matched); embedded-IPv6 forms (NAT64, 6to4, mapped) still deliver when the inner address is public, and unrecognized literals still block.
 - The last-admin guard runs inside the same statement as the write, so demoting, deleting or revoking the last usable admin key is refused even when the requests arrive through different processes.
-- The dependency audit now gates per advisory (`npm run check:audit`); `GHSA-jmr9-qjv8-65gv` (`extract-zip`, via `puppeteer-core` ← `whatsapp-web.js`, no patched release, reachable only at image-build time) is allowlisted by id, and the entry fails closed once the advisory disappears.
 
 ### Added
 
@@ -87,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GET /sessions/:sessionId/messages` and the MCP `MessageList` tool bound inline media via `MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES` (8 MiB default); past the budget a payload becomes an `{omitted:true, sizeBytes}` marker, still fetchable per message, and the newest payload always passes. The dashboard placeholder downloads on click.
 - Bulk send caps rendered template output at `TEMPLATE_RENDER_MAX_CHARS` (64 KiB), matching single-send; an over-cap item fails by name instead of inflating heap without bound.
 - The published image's drop to the `openwa` user is now verified in CI — the smoke test previously ran in no workflow.
+- The root tree's dependency audit applies its `high` threshold per advisory (`npm run check:audit`) instead of all-or-nothing; `GHSA-jmr9-qjv8-65gv` (`extract-zip`, via `puppeteer-core` ← `whatsapp-web.js` — no patched release, reachable only at image-build time) is allowlisted by id, and an entry whose advisory has disappeared fails the job.
 - The dashboard's dependency tree is now audited on the PR and tag paths; `socket.io-parser` and `brace-expansion` are overridden to patched releases.
 - `.env.example` no longer ships uncommented the five keys the Infrastructure dashboard owns (they pinned the running value while the dashboard reported success); `.env.minimal` unpins the built-in datastore toggles too.
 - ⚠️ **Breaking (behavior).** Two enabled instances of one integration plugin sharing a session scope no longer collapse onto a single config; per-session overrides now apply only with a single enabled instance. Action required: move shared keys onto each instance when provisioning a second one on the same session. Retiring an instance clears that scope's slice, so the survivor falls back to the plugin defaults.
