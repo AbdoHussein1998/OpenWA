@@ -267,7 +267,8 @@ export function useInfraConfigForm(
     // not at seed time: the two queries settle independently and the save click always sees the
     // latest /status. An operator click (engineTouched) is a deliberate choice and always sends.
     engine:
-      engineTypeKnown() && !(engineHydrated.current && !engineTouched.current && infraStatus?.envPinned?.includes('ENGINE_TYPE'))
+      engineTypeKnown() &&
+      !(engineHydrated.current && !engineTouched.current && infraStatus?.envPinned?.includes('ENGINE_TYPE'))
         ? { ...engineConfig }
         : { ...engineConfig, type: undefined },
   });

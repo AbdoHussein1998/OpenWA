@@ -419,7 +419,11 @@ test('the engine radio seeds from the effective engine when ENGINE_TYPE is pinne
   await awaitConfigHydrated(container);
 
   await waitFor(() =>
-    assert.equal(engineRadios(container)[0].checked, true, 'expected the pinned engine (whatsapp-web.js) to be selected'),
+    assert.equal(
+      engineRadios(container)[0].checked,
+      true,
+      'expected the pinned engine (whatsapp-web.js) to be selected',
+    ),
   );
   assert.ok(
     screen.getByText(/Pinned by the environment variable ENGINE_TYPE/, { exact: false }),
