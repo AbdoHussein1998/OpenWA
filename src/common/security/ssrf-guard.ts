@@ -103,6 +103,13 @@ for (const [subnet, prefix] of BLOCKED_V4_RANGES) BLOCKED_V4.addSubnet(subnet, p
 const BLOCKED_V6 = new BlockList();
 for (const [subnet, prefix] of BLOCKED_V6_RANGES) BLOCKED_V6.addSubnet(subnet, prefix, 'ipv6');
 
+// The single IPv6 ALLOW: RFC 4291's global-unicast 2000::/3. The fallthrough in isBlockedAddress
+// allows only this range — everything outside it that no earlier branch classified (IPv6 multicast
+// ff00::/8, the reserved blocks above 3fff:: — 4000::/3, 5f00::/16, 8000::/3, c000::/3, e000::/3)
+// blocks, mirroring the IPv4 posture where multicast 224.0.0.0/4 and reserved 240.0.0.0/4 block.
+const GLOBAL_UNICAST_V6 = new BlockList();
+GLOBAL_UNICAST_V6.addSubnet('2000::', 3, 'ipv6');
+
 /** Two 16-bit hextets → dotted IPv4 string (for IPv4-in-IPv6 embeddings like ::ffff:, 6to4, NAT64). */
 function hextetsToV4(hi: number, lo: number): string {
   return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
@@ -213,9 +220,11 @@ export function isBlockedAddress(ip: string): boolean {
 
     // Reserved-range membership (unspecified, loopback, ULA, link-local, deprecated site-local,
     // IETF-reserved 0000::/3) via the stdlib BlockList — numeric, so compressed and fully-expanded
-    // spellings of the same address answer alike. Embedded forms already returned above (public
-    // embeddings, NAT64 included, stay allowed — only the ladder decides those).
-    return BLOCKED_V6.check(lower, 'ipv6');
+    // spellings of the same address answer alike — and beyond that only RFC 4291 global unicast
+    // (2000::/3) is allowed: IPv6 multicast (ff00::/8) and the reserved blocks above 3fff:: block
+    // too, the same fail-closed posture as IPv4's multicast/reserved ranges. Embedded forms already
+    // returned above (public embeddings, NAT64 included, stay allowed — only the ladder decides those).
+    return BLOCKED_V6.check(lower, 'ipv6') || !GLOBAL_UNICAST_V6.check(lower, 'ipv6');
   }
 
   // Not a valid IP literal — cannot verify, so block.
