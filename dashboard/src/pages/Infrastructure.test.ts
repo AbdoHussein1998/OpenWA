@@ -228,7 +228,7 @@ afterEach(() => {
   overrides = {};
 });
 
-function renderInfrastructure(): { container: HTMLElement } {
+function renderInfrastructure() {
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 1_000 } } });
   return rtl.render(
     createElement(
