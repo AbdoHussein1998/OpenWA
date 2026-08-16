@@ -48,6 +48,11 @@ from disk is untrusted and sandboxed.
   runaway **hook** handler (e.g. an infinite synchronous loop) is skipped on the hook timeout so it can't
   stall the host's hook chain, but the worker keeps running it (pegging a core) until the plugin is
   reloaded or hits the heap cap — it is contained to its own thread, not instantly force-killed.
+- **Memory-kind boundary.** The heap cap bounds the V8 heap only. `Buffer`/`ArrayBuffer` allocations
+  are native memory outside `maxOldGenerationSizeMb`, and worker threads share the host's address
+  space, so a plugin that accumulates Buffers grows host RSS until the container's memory limit
+  (the bundled compose `mem_limit`, default 2g) kills the whole container, not just the worker.
+  Buffer-heavy plugin workloads need that outer limit sized deliberately.
 
 ## What the sandbox does NOT guarantee
 
@@ -108,10 +113,10 @@ Built-in plugins were unaffected and still run in-process.
 
 ## Configuration
 
-| Constant                                                   | Value   | Purpose                                                 |
-| ---------------------------------------------------------- | ------- | ------------------------------------------------------- |
-| `SANDBOX_MAX_OLD_GEN_MB` (worker `maxOldGenerationSizeMb`) | 256     | per-plugin heap cap; OOM kills the worker, not the host |
-| `SANDBOX_HOOK_TIMEOUT_MS`                                  | 5000 ms | budget before a sandboxed hook handler is skipped       |
+| Constant                                                   | Value   | Purpose                                                                                                                                    |
+| ---------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SANDBOX_MAX_OLD_GEN_MB` (worker `maxOldGenerationSizeMb`) | 256     | per-plugin V8-heap cap; a heap OOM kills the worker, not the host (native/Buffer memory is outside it, see the memory-kind boundary above) |
+| `SANDBOX_HOOK_TIMEOUT_MS`                                  | 5000 ms | budget before a sandboxed hook handler is skipped                                                                                          |
 
 Both are hardcoded constants in the plugin loader — **neither is an environment variable**, so
 changing either requires a code change.
