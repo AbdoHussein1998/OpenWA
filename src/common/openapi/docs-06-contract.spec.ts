@@ -118,6 +118,52 @@ describe('docs/06 matches the published contract', () => {
     expect(stale).toEqual([]);
   });
 
+  /**
+   * Route-specific status codes must be restated per operation, not left to §6.2's generic table.
+   * `400`/`401`/`403`/`404` are universal (every route can answer them via validation, auth, role
+   * and existence guards) and stay covered by the General Error Codes table; the codes below only
+   * appear on routes that deliberately declare them, so a consumer reading the section for retry
+   * and engine-support logic must see them there. This closed a drift where 409 was missing from
+   * 82 sections, 503 from 47 and 501 from 16 while the contract declared all of them.
+   */
+  const ROUTE_SPECIFIC_CODES = new Set(['409', '413', '415', '422', '429', '501', '502', '503']);
+
+  it('documents every route-specific status code the contract declares for the operation', () => {
+    const spec = JSON.parse(read('openapi.json')) as {
+      paths: Record<string, Record<string, { responses?: Record<string, unknown> }>>;
+    };
+    const doc = read('docs', '06-api-specification.md');
+
+    // Slice the document into per-heading sections so each Errors line is matched to its operation.
+    const headings = [...doc.matchAll(/^#### (GET|POST|PUT|PATCH|DELETE) (\S+)$/gm)];
+    const errorsOf = new Map<string, string>();
+    for (let i = 0; i < headings.length; i++) {
+      const key = `${headings[i][1]} ${normalise(headings[i][2])}`;
+      const body = doc.slice(headings[i].index, (headings[i + 1] ?? { index: doc.length }).index);
+      const line = body.match(/^\*\*Errors:\*\*.*$/m)?.[0] ?? '';
+      errorsOf.set(key, [...line.matchAll(/`(\d{3})`/g)].map(match => match[1]).join(','));
+    }
+
+    const missing: string[] = [];
+    let checked = 0;
+    for (const [path, item] of Object.entries(spec.paths)) {
+      for (const method of METHODS) {
+        if (!item[method]) continue;
+        const key = `${method.toUpperCase()} ${normalise(path)}`;
+        const declared = Object.keys(item[method].responses ?? {}).filter(code => ROUTE_SPECIFIC_CODES.has(code));
+        if (declared.length === 0) continue;
+        checked++;
+        const documented = errorsOf.get(key) ?? '';
+        for (const code of declared) {
+          if (!documented.includes(code)) missing.push(`${key} misses ${code}`);
+        }
+      }
+    }
+    // Non-vacuity: the contract declares route-specific codes on a large share of the surface.
+    expect(checked).toBeGreaterThan(80);
+    expect(missing).toEqual([]);
+  });
+
   // The gate's own controls. Without these, a matcher that silently stops working is
   // indistinguishable from a document that is correct.
   describe('the checks themselves can fail', () => {

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- docs/06 documents every route-specific status code the contract declares (409/413/415/422/429/501/502/503; 153 missing code mentions across ~90 sections), corrects the catalog routes to Baileys-implements, the profile refusals to 403, scope violations to 401, and the phantom channel 422; a spec now derives the required codes from openapi.json.
 - docs/30 states the plugin sandbox's memory-kind boundary: the worker heap cap does not cover Buffer/native allocations, which grow host RSS up to the container limit.
 - docs/25 documents the known wildcard-instance config residue: per-instance isolation covers ingress dispatch only; wildcard/null siblings still merge into the plugin base config.
 - docs/14's Known Upgrade Hazards table covers every breaking change since 0.12.0 (15 missing rows across 0.14-0.20, including both v0.20.0 config opt-outs); the Redis switch steps now name the real queues.
