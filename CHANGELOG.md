@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Both bundled Compose files forward every documented runtime knob; `WEBHOOK_SSRF_REDIRECTS`, `PLUGIN_INSTALL_REQUIRE_PIN` and ~75 other `.env` settings were unreachable in the container. A spec now derives the required list from `.env.example`.
 - One precise unique-violation predicate (`23505`, `SQLITE_CONSTRAINT_UNIQUE`/`_PRIMARYKEY`): the old prefix match treated every SQLite constraint failure (FK/NOT NULL/CHECK) as a duplicate, swallowing genuine persistence failures and answering misleading 409s.
 
 ### Security
