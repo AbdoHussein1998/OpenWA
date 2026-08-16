@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-16
+
 ### Fixed
 
 - The OpenAPI contract now describes the webhook `filters` shape on all three DTOs — `conditions` with its 1..20 bounds — instead of a bare object schema. Runtime validation is unchanged.
@@ -16,9 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Status media is served as an inert download: `image/svg+xml` in any form becomes `application/octet-stream` with `Content-Disposition: attachment`, matching the chat-media route.
 - Session credential directories (engine profiles, Baileys auth state) are created `0o700` and re-tightened on every start.
-- Webhook HMAC secrets require 16+ characters when set; ingress event payloads persist credential and signature headers redacted; delivery-failure errors redact host:port; the ingress reflections answer `text/plain`.
-- The SSRF opt-out no longer follows redirects silently (`WEBHOOK_SSRF_REDIRECTS=true` opts in), and `SSRF_ALLOWED_HOSTS` entries are pinned to their resolved addresses.
-- Plugin installs from a URL require a `#sha256=` pin in production (`PLUGIN_INSTALL_REQUIRE_PIN`); SECURITY.md now documents the plugin trust model.
+- Webhook HMAC secrets require 16+ characters when set (existing secrets keep working; re-saving a short one fails); ingress event payloads persist credential and signature headers redacted; delivery-failure errors redact host:port; the ingress reflections answer `text/plain`.
+- ⚠️ **Breaking (config).** With `WEBHOOK_SSRF_PROTECT=false`, deliveries no longer follow redirects — set `WEBHOOK_SSRF_REDIRECTS=true` for a receiver behind a 3xx; `SSRF_ALLOWED_HOSTS` entries are now pinned to their resolved addresses (and must resolve at registration time).
+- ⚠️ **Breaking (config).** Plugin installs from a URL require a `#sha256=<64 hex>` pin when `NODE_ENV=production` (the compose default). Action required: catalog installs without a pin fragment now fail — pin the URL or set `PLUGIN_INSTALL_REQUIRE_PIN=false`; SECURITY.md documents the plugin trust model.
 
 ### Added
 
