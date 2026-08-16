@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A one-time warning fires when a proxied request arrives with an empty `TRUSTED_PROXIES`: every client then shares one rate-limit bucket keyed on the proxy. The nginx FAQ recipe now tells operators to set it.
+
 ### Security
 
 - `PUT /sessions/{sessionId}/webhooks/{id}` now enforces the same 16-character webhook-secret floor as create; an empty string still clears signing.

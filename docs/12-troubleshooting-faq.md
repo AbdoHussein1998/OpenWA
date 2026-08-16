@@ -1135,6 +1135,16 @@ server {
 }
 ```
 
+**Then set `TRUSTED_PROXIES` in your `.env`.** With it empty, OpenWA correctly refuses to trust the
+spoofable `X-Forwarded-For` header, which has a side effect worth knowing: every client appears as
+the proxy's address, so ALL traffic shares one rate-limit bucket (a single abuser rate-limits
+everyone) and per-key IP allowlists (`allowedIps`) evaluate the proxy for every caller. Name the
+proxy to key limits per client. For the bundled compose (whose published port traverses Docker's
+NAT, so the container sees the bridge gateway, not 127.0.0.1) use the compose network subnet, e.g.
+`TRUSTED_PROXIES=172.18.0.0/16`; a bare-metal nginx talking to the process directly can name
+`127.0.0.1`. OpenWA logs a one-time warning at the first proxied request when the header is present
+but the list is empty.
+
 **Q: How to run behind Traefik / Coolify?**
 
 Traefik forwards WebSocket upgrades automatically, so OpenWA's single-port Socket.IO channel works with a normal HTTP router. Two things keep a public deployment stable:
