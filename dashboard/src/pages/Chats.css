@@ -541,6 +541,16 @@
   color: #e9edef;
 }
 
+/* System-dark twin: the default 'system' theme removes data-theme entirely, so the explicit rule
+   above never matches on a dark OS. :not([data-theme='light']) keeps an explicit light choice in
+   control (same pattern as Webhooks.css). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .chats-page .message-bubble.outgoing {
+    background: #005c4b;
+    color: #e9edef;
+  }
+}
+
 .chats-page .message-text {
   word-break: break-word;
   white-space: pre-wrap;
@@ -959,6 +969,13 @@
   border-color: #2f3b43;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .chats-page .chat-document-media {
+    background: #202c33;
+    border-color: #2f3b43;
+  }
+}
+
 .chats-page .message-bubble.media-type {
   padding: 0.5rem;
 }
@@ -1127,6 +1144,12 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .chats-page .message-quote-box {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
 .chats-page .quote-body {
   white-space: nowrap;
   overflow: hidden;
@@ -1198,6 +1221,15 @@
 [data-theme='dark'] .chats-page .message-reactions-badge {
   background: #202c33;
   border-color: #2f3b43;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .chats-page .message-actions-menu,
+  :root:not([data-theme='light']) .chats-page .reaction-quick-popover,
+  :root:not([data-theme='light']) .chats-page .message-reactions-badge {
+    background: #202c33;
+    border-color: #2f3b43;
+  }
 }
 
 /* Inline code inside a message body. */
