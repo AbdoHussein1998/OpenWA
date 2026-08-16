@@ -6767,6 +6767,8 @@ Webhook delivery is **at-least-once**. A consumer can legitimately receive the s
 - The underlying WhatsApp engine can re-fire an event for a single message.
 - A failed delivery (non-2xx response, timeout, or network error) is retried.
 
+**Crash boundary.** With the queue off (the default), dispatch is fire-and-forget from memory: a hard crash (SIGKILL, OOM) loses deliveries that were in flight or parked at that moment, and no failure row is written for them (the table records exhausted retries, plus over-budget, dispatch-capacity-exceeded, and shutdown-rejected deliveries with attempts 0). Enabling the queue (`QUEUE_ENABLED=true`, needs Redis) makes the dispatch durable from the enqueue onward. In both modes, a graceful shutdown drains in-flight deliveries first: the queued path waits for each worker's current job, and the direct path waits up to `WEBHOOK_SHUTDOWN_DRAIN_MS` (default 5s; raise it to at least `WEBHOOK_TIMEOUT`, default 10s, if a slow receiver must finish).
+
 **Design your handler to be idempotent**, keyed on the `X-OpenWA-Idempotency-Key` header (see below). As a server-side safety net, OpenWA de-duplicates inbound `message.received` before dispatch (a re-fired event for an already-persisted message is dropped), so one webhook normally sees each inbound message once — but this is best-effort defense-in-depth and does not remove the need for consumer-side idempotency.
 
 ### HMAC signature

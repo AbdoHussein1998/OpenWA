@@ -73,7 +73,7 @@ Web interface to manage OpenWA without using the API directly. Built with React 
 
 ### Dead Letter Queue (DLQ)
 
-The durable record of deliveries abandoned after every retry. In OpenWA it is a **database table**, not a Redis queue: `webhook_delivery_failures` for outbound webhooks and `integration_delivery_failures` for plugin ingress. Used for debugging and manual redrive.
+The durable record of deliveries abandoned after every retry. In OpenWA it is a **database table**, not a Redis queue: `webhook_delivery_failures` for outbound webhooks and `integration_delivery_failures` for plugin ingress. Used for debugging; **redrive exists for plugin ingress only** (`POST /api/integration/instances/:pluginId/:instanceId/redrive`); an outbound-webhook failure row is a record, not a replay source, so recovery means the provider or your own tooling re-sending the event.
 
 ### Docker
 
