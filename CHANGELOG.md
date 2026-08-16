@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The SQLite database files are tightened to owner-only (`0600`, plus `-wal`/`-shm`/`-journal`) on every boot; they hold plaintext webhook/plugin secrets and were group/world-readable while sibling secret files were `0600`.
 - `PUT /sessions/{sessionId}/webhooks/{id}` now enforces the same 16-character webhook-secret floor as create; an empty string still clears signing.
 
 ## [0.20.0] - 2026-08-16
