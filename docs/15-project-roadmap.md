@@ -790,26 +790,26 @@ a no-op for OpenWA itself.
 
 ### Phase 2 Success Criteria
 
-| Metric                | Target       | Actual                                               | Type     |
-| --------------------- | ------------ | ---------------------------------------------------- | -------- |
-| Multi-session support | 10+ sessions | ✅ Achieved                                          | Internal |
-| Dashboard functional  | All features | ✅ Achieved                                          | Internal |
-| PostgreSQL stable     | ✅           | ✅ Achieved                                          | Internal |
-| Webhook delivery rate | > 99%        | ✅ Achieved                                          | Internal |
-| Test coverage         | > 70%        | ⚠️ 66.87% line coverage; 80% improvement plan active | Internal |
-| GitHub stars          | 100+         | 📋 Pending                                           | External |
+| Metric                | Target       | Actual                                                                                          | Type     |
+| --------------------- | ------------ | ----------------------------------------------------------------------------------------------- | -------- |
+| Multi-session support | 10+ sessions | ✅ Achieved                                                                                     | Internal |
+| Dashboard functional  | All features | ✅ Achieved                                                                                     | Internal |
+| PostgreSQL stable     | ✅           | ✅ Achieved                                                                                     | Internal |
+| Webhook delivery rate | > 99%        | ✅ Achieved                                                                                     | Internal |
+| Test coverage         | > 70%        | ⚠️ line coverage sits well above the ratchet floors — `npm run test:cov` is the source of truth | Internal |
+| GitHub stars          | 100+         | 📋 Pending                                                                                      | External |
 
 ### Phase 3 Success Criteria
 
-| Metric                        | Target  | Actual                               | Type     |
-| ----------------------------- | ------- | ------------------------------------ | -------- |
-| Feature parity with WAHA Plus | 90%+    | ✅ Achieved                          | Internal |
-| API response time (p95)       | < 200ms | ✅ Achieved                          | Internal |
-| Test coverage                 | > 80%   | ⚠️ 66.87% line coverage; in progress | Internal |
-| Documentation coverage        | 100%    | ✅ 95%+                              | Internal |
-| Production users              | 50+     | 📋 Pending                           | External |
-| GitHub stars                  | 500+    | 📋 Pending                           | External |
-| Community contributors        | 5+      | 📋 Pending                           | External |
+| Metric                        | Target  | Actual                                                      | Type     |
+| ----------------------------- | ------- | ----------------------------------------------------------- | -------- |
+| Feature parity with WAHA Plus | 90%+    | ✅ Achieved                                                 | Internal |
+| API response time (p95)       | < 200ms | ✅ Achieved                                                 | Internal |
+| Test coverage                 | > 80%   | ⚠️ above the per-directory ratchet floors; see docs/09 §9.5 | Internal |
+| Documentation coverage        | 100%    | ✅ 95%+                                                     | Internal |
+| Production users              | 50+     | 📋 Pending                                                  | External |
+| GitHub stars                  | 500+    | 📋 Pending                                                  | External |
+| Community contributors        | 5+      | 📋 Pending                                                  | External |
 
 ---
 
