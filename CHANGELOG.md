@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- docs/10 refreshed: the CI table lists the chart job and the full lint/test lanes, the illustrative Dockerfile no longer models the full-/app chown and missing USER the real image rejects, and the scaling note matches the implemented claim/lease design.
 - `message.received` / `message.sent` WebSocket events shed inline media over `WEBHOOK_MEDIA_INLINE_MAX_BYTES` with the same omitted marker as webhooks; a large blob was broadcast in full to every subscribed socket (and across Redis pub/sub in multi-node).
 - The chat-media orphan sweep's `mediaPath IN (...)` lookup is served by a new partial index (`WHERE mediaPath IS NOT NULL`); it was a full messages-table scan per chunk.
 - `GET /api/health` audits a presented-but-invalid API key (`API_KEY_AUTH_FAILED`) like every other key-validation surface, rate-bounded per IP; probing through the unthrottled health route was invisible to the audit log.
