@@ -1,5 +1,5 @@
 import { validate } from 'class-validator';
-import { CreateWebhookDto } from './webhook.dto';
+import { CreateWebhookDto, UpdateWebhookDto } from './webhook.dto';
 
 /**
  * The HMAC secret signs every delivery this webhook fires. A short secret is recoverable
@@ -33,5 +33,38 @@ describe('CreateWebhookDto secret entropy', () => {
     function errorsOf(errs: { property: string }[]): number {
       return errs.filter(e => e.property === 'secret').length;
     }
+  });
+});
+
+describe('UpdateWebhookDto secret entropy', () => {
+  const dtoWithSecret = (secret: unknown) => {
+    const dto = new UpdateWebhookDto();
+    dto.secret = secret as string | undefined;
+    return dto;
+  };
+
+  it('rejects rotating to a secret shorter than 16 characters', async () => {
+    const errors = await validate(dtoWithSecret('short'));
+    expect(errors.some(e => e.property === 'secret')).toBe(true);
+  });
+
+  it('accepts rotating to a 16+ character secret', async () => {
+    const errors = await validate(dtoWithSecret('a-fully-entropic-secret'));
+    expect(errors.some(e => e.property === 'secret')).toBe(false);
+  });
+
+  it('still accepts an empty string, which this route treats as clearing the secret', async () => {
+    const errors = await validate(dtoWithSecret(''));
+    expect(errors.some(e => e.property === 'secret')).toBe(false);
+  });
+
+  it('still allows leaving the secret out of the patch entirely', async () => {
+    const errors = await validate(new UpdateWebhookDto());
+    expect(errors.some(e => e.property === 'secret')).toBe(false);
+  });
+
+  it('still rejects a non-string value', async () => {
+    const errors = await validate(dtoWithSecret(42));
+    expect(errors.some(e => e.property === 'secret')).toBe(true);
   });
 });
