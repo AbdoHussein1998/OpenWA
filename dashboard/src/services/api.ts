@@ -284,14 +284,54 @@ export interface EngineHistoryMessage {
   from: string;
   to: string;
   body: string;
-  type: string;
+  type: MessageType;
+  /** Unix timestamp in seconds. */
   timestamp: number;
-  fromMe?: boolean;
-  media?: { mimetype: string; filename?: string; data?: string };
+  fromMe: boolean;
+  isGroup: boolean;
+  isStatusBroadcast?: boolean;
+  kind: ChatKind;
+  /** Disappearing-messages timer on the chat, in seconds. Absent when the chat has none set. */
+  ephemeralDuration?: number;
   /** Sender in a group: `from` is the group JID, so this participant WID is the real poster. */
   author?: string;
-  /** Best-effort sender contact (sync cache); its name labels the poster in a group thread. */
-  contact?: { id?: string; name?: string; pushName?: string };
+  mentionedIds?: string[];
+  /** Present on `call` messages only. */
+  call?: { video: boolean; missed: boolean };
+  isLidSender?: boolean;
+  senderPhone?: string | null;
+  /**
+   * Sender contact info, best-effort from the engine's cache. History carries `pushName` only;
+   * the richer fields arrive on `message.received` when `WEBHOOK_CONTACT_DETAILS=true`.
+   */
+  contact?: {
+    id?: string;
+    number?: string;
+    name?: string;
+    pushName?: string;
+    shortName?: string;
+    type?: string;
+    isMyContact?: boolean;
+    isWAContact?: boolean;
+    isBusiness?: boolean;
+    isEnterprise?: boolean;
+    verifiedName?: string;
+    verifiedLevel?: number;
+    isBlocked?: boolean;
+    labels?: string[];
+  };
+  /** Status/story styling. Declared by the engine payload; this route never sets either. */
+  backgroundColor?: string;
+  font?: number;
+  media?: {
+    mimetype: string;
+    filename?: string;
+    data?: string;
+    omitted?: boolean;
+    sizeBytes?: number;
+  };
+  quotedMessage?: { id: string; body: string };
+  location?: { latitude: number; longitude: number; description?: string; address?: string; url?: string };
 }
 
 // Mirrors the backend engine Channel / ChannelMessage (GET /sessions/:id/channels[/:id/messages]).
