@@ -12,6 +12,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { Expose, plainToInstance } from 'class-transformer';
 import { Webhook } from '../entities/webhook.entity';
@@ -192,6 +193,11 @@ export class UpdateWebhookDto {
   @ApiPropertyOptional({ description: 'Secret key for HMAC signature' })
   @IsOptional()
   @IsString()
+  // Same floor as create: a short secret is brute-forcible from one observed signature. The
+  // floor is skipped only for the empty string, which this route treats as "clear the secret"
+  // (the service stores null for it); a non-string value is still rejected by @IsString.
+  @ValidateIf((o: UpdateWebhookDto) => o.secret !== '')
+  @MinLength(16)
   @MaxLength(255)
   secret?: string;
 
