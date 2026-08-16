@@ -729,6 +729,8 @@ class GroupInfo(TypedDict):
     ephemeralSeconds: NotRequired[int]
     locked: NotRequired[bool]
     memberAddMode: NotRequired[Literal["all", "admins"]]
+
+
 class CreateGroupRequest(TypedDict):
     name: str
     participants: list[Jid]

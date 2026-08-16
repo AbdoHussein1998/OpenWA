@@ -12,6 +12,12 @@
  * which is worse than no gate at all. Comparing parsed declarations against JSON schemas is
  * deterministic, and it is the same mechanism the other check-* gates trust.
  *
+ * Known blind spots, so nobody reads a green run as more than it is: TypeScript type-ALIASED
+ * enums (e.g. `status: SessionStatus`) resolve to their alias name and are compared by presence
+ * and optionality only — the literal sets themselves are ungated on the TS clients; and Java
+ * enums (record components typed as enum classes) are likewise presence-only. Python Literals and
+ * Go const-block enums DO compare literally.
+ *
  * What one comparison covers, per mapped pair: field-name sets in both directions, required vs
  * optional (hand `?` vs the schema's `required` array), and — for fields whose both sides reduce
  * to a simple token (primitive, enum literal set, array of those, null union) — the token itself,
@@ -29,6 +35,12 @@
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// Resolve from the script's own location, not process.cwd() — same reason check-sdk-coverage.mjs
+// does: the gate must run identically from any directory (npm run pins cwd, direct invocation
+// does not).
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /** hand file -> { handTypeName: schemaName } */
 const MAPPINGS = {
@@ -692,7 +704,7 @@ export function parseJavaTypes(sources) {
 
 const isDirectRun = process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop());
 if (isDirectRun) {
-  const openapi = JSON.parse(readFileSync('openapi.json', 'utf8'));
+  const openapi = JSON.parse(readFileSync(`${REPO_ROOT}openapi.json`, 'utf8'));
   const schemas = openapi.components.schemas;
 
   /**
@@ -705,18 +717,18 @@ if (isDirectRun) {
    * reference is nullable), so those pairs verify field presence and type tokens only.
    */
   const goSources = () =>
-    readdirSync('sdk/go')
+    readdirSync(`${REPO_ROOT}sdk/go`)
       .filter(f => f.endsWith('.go') && !f.endsWith('_test.go'))
-      .map(f => readFileSync(`sdk/go/${f}`, 'utf8'));
+      .map(f => readFileSync(`${REPO_ROOT}sdk/go/${f}`, 'utf8'));
   const javaSources = () =>
-    readdirSync('sdk/java/src/main/java/com/rmyndharis/openwa/model')
+    readdirSync(`${REPO_ROOT}sdk/java/src/main/java/com/rmyndharis/openwa/model`)
       .filter(f => f.endsWith('.java'))
-      .map(f => readFileSync(`sdk/java/src/main/java/com/rmyndharis/openwa/model/${f}`, 'utf8'));
+      .map(f => readFileSync(`${REPO_ROOT}sdk/java/src/main/java/com/rmyndharis/openwa/model/${f}`, 'utf8'));
 
   const CLIENTS = [
     ...Object.entries(MAPPINGS).map(([file, mapping]) => ({
       label: file,
-      load: () => parseHandTypes(readFileSync(file, 'utf8')),
+      load: () => parseHandTypes(readFileSync(`${REPO_ROOT}${file}`, 'utf8')),
       mapping,
       excluded: EXCLUDED[file] ?? {},
       floor: MINIMUM_MAPPED[file],
@@ -724,7 +736,7 @@ if (isDirectRun) {
     })),
     {
       label: 'sdk/python/openwa/types.py',
-      load: () => parsePythonTypes(readFileSync('sdk/python/openwa/types.py', 'utf8')),
+      load: () => parsePythonTypes(readFileSync(`${REPO_ROOT}sdk/python/openwa/types.py`, 'utf8')),
       mapping: PYTHON_MAPPING,
       excluded: EXCLUDED['sdk/python/openwa/types.py'] ?? {},
       floor: MINIMUM_MAPPED['sdk/python/openwa/types.py'],
