@@ -9,6 +9,9 @@ import { Public } from '../auth/decorators/auth.decorators';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ShutdownService } from '../../common/services/shutdown.service';
 import { AuthService } from '../auth/auth.service';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
+import { SlidingWindowLimiter } from '../events/ws-rate-limit';
 import { resolveClientIp } from '../../common/utils/ip';
 
 interface DependencyStatus {
@@ -40,7 +43,15 @@ export class HealthController {
     private readonly shutdownService: ShutdownService,
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
-  ) {}
+    private readonly auditService: AuditService,
+  ) {
+    // Bounds the audit rows one source IP can write per minute through this deliberately
+    // unthrottled route: the health probes themselves must never be rate-limited, but without a
+    // cap a key-probing flood would turn the audit trail into the flood's storage.
+    this.authFailureAuditLimiter = new SlidingWindowLimiter(10, 60_000);
+  }
+
+  private readonly authFailureAuditLimiter: SlidingWindowLimiter;
 
   @Get()
   @ApiOperation({ summary: 'Basic health check' })
@@ -71,10 +82,23 @@ export class HealthController {
       (typeof xApiKey === 'string' && xApiKey) || (authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined);
     if (!rawKey) return false;
     try {
-      const trustedProxies = this.configService.get<string[]>('security.trustedProxies') ?? [];
-      await this.authService.validateApiKey(rawKey, resolveClientIp(req, trustedProxies));
+      const clientIp = resolveClientIp(req, this.configService.get<string[]>('security.trustedProxies') ?? []);
+      await this.authService.validateApiKey(rawKey, clientIp);
       return true;
-    } catch {
+    } catch (err) {
+      // A PRESENTED key that failed validation is a credential probe against an endpoint every
+      // other key-validation surface audits (REST guard, WebSocket, MCP mount, Bull Board). This
+      // route was the one blind spot: the failure only withheld the version, invisibly. Fire-and-
+      // forget and rate-bounded per IP (constructor): audit logging must never fail the probe.
+      const failureIp = resolveClientIp(req, this.configService.get<string[]>('security.trustedProxies') ?? []);
+      if (this.authFailureAuditLimiter.allow(failureIp)) {
+        void this.auditService.logWarn(AuditAction.API_KEY_AUTH_FAILED, {
+          ipAddress: failureIp,
+          method: req.method,
+          path: req.path,
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
+      }
       return false;
     }
   }
