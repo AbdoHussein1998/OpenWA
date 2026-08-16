@@ -5,10 +5,10 @@ import "net/url"
 // GroupParticipant is a group member.
 type GroupParticipant struct {
 	ID           string `json:"id"`
-	Number       string `json:"number,omitempty"`
+	Number       string `json:"number"`
 	Name         string `json:"name,omitempty"`
-	IsAdmin      bool   `json:"isAdmin,omitempty"`
-	IsSuperAdmin bool   `json:"isSuperAdmin,omitempty"`
+	IsAdmin      bool   `json:"isAdmin"`
+	IsSuperAdmin bool   `json:"isSuperAdmin"`
 }
 
 // GroupSummary is the slim group shape from the list endpoint. Note that
@@ -49,16 +49,31 @@ type MembershipRequestActionRequest struct {
 }
 
 // GroupInfo is the full group detail.
+// MemberAddMode is who may add participants to a group.
+type MemberAddMode string
+
+const (
+	MemberAddAll    MemberAddMode = "all"
+	MemberAddAdmins MemberAddMode = "admins"
+)
+
 type GroupInfo struct {
-	ID              string             `json:"id"`
-	Name            string             `json:"name"`
-	Description     *string            `json:"description,omitempty"`
-	Owner           *string            `json:"owner,omitempty"`
-	CreatedAt       int64              `json:"createdAt,omitempty"`
-	Participants    []GroupParticipant `json:"participants,omitempty"`
-	IsReadOnly      bool               `json:"isReadOnly,omitempty"`
-	IsAnnounce      bool               `json:"isAnnounce,omitempty"`
-	LinkedParentJID *string            `json:"linkedParentJID,omitempty"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description,omitempty"`
+	Owner        string             `json:"owner,omitempty"`
+	CreatedAt    int64              `json:"createdAt,omitempty"`
+	Participants []GroupParticipant `json:"participants"`
+	// Announce: only admins may send. Locked: only admins may edit info. EphemeralSeconds:
+	// disappearing-message timer (0/absent = off). Optional non-null scalars stay pointers — Go
+	// cannot omit a false/0 non-pointer without dropping the zero value itself.
+	Announce         *bool          `json:"announce,omitempty"`
+	EphemeralSeconds *int           `json:"ephemeralSeconds,omitempty"`
+	Locked           *bool          `json:"locked,omitempty"`
+	MemberAddMode    *MemberAddMode `json:"memberAddMode,omitempty"`
+	IsReadOnly       bool           `json:"isReadOnly,omitempty"`
+	IsAnnounce       bool           `json:"isAnnounce,omitempty"`
+	LinkedParentJID  *string        `json:"linkedParentJID,omitempty"`
 }
 
 // CreateGroupRequest creates a group with initial participants.

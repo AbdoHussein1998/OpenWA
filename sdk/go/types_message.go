@@ -234,13 +234,13 @@ type ChatHistoryMessage struct {
 	From              string          `json:"from"`
 	To                string          `json:"to"`
 	ChatID            string          `json:"chatId"`
-	Body              string          `json:"body,omitempty"`
-	Type              string          `json:"type"`
+	Body              string          `json:"body"`
+	Type              MessageType     `json:"type"`
 	Timestamp         int64           `json:"timestamp"`
 	FromMe            bool            `json:"fromMe"`
 	IsGroup           bool            `json:"isGroup"`
-	IsStatusBroadcast bool            `json:"isStatusBroadcast"`
-	Kind              string          `json:"kind"`
+	IsStatusBroadcast bool            `json:"isStatusBroadcast,omitempty"`
+	Kind              ChatKind        `json:"kind"`
 	EphemeralDuration int             `json:"ephemeralDuration,omitempty"`
 	Author            string          `json:"author,omitempty"`
 	MentionedIDs      []string        `json:"mentionedIds,omitempty"`
@@ -326,7 +326,7 @@ type BulkMessageContent struct {
 // video, audio, document.
 type BulkMessageItem struct {
 	ChatID    string             `json:"chatId"`
-	Type      string             `json:"type"`
+	Type      BulkMessageType    `json:"type"`
 	Content   BulkMessageContent `json:"content"`
 	Variables map[string]string  `json:"variables,omitempty"`
 }
@@ -350,7 +350,7 @@ type BulkMessageResponse struct {
 	BatchID                 string `json:"batchId"`
 	Status                  string `json:"status"`
 	TotalMessages           int    `json:"totalMessages"`
-	EstimatedCompletionTime string `json:"estimatedCompletionTime"`
+	EstimatedCompletionTime string `json:"estimatedCompletionTime,omitempty"`
 	StatusURL               string `json:"statusUrl"`
 }
 
@@ -360,13 +360,85 @@ type BatchError struct {
 	Message string `json:"message,omitempty"`
 }
 
+// BatchMessageStatus is one recipient's send outcome inside a batch.
+type BatchMessageStatus string
+
+const (
+	BatchPending   BatchMessageStatus = "pending"
+	BatchSent      BatchMessageStatus = "sent"
+	BatchFailed    BatchMessageStatus = "failed"
+	BatchCancelled BatchMessageStatus = "cancelled"
+)
+
+// BatchLifecycleStatus is the lifecycle of a whole batch.
+type BatchLifecycleStatus string
+
+const (
+	BatchLifecyclePending    BatchLifecycleStatus = "pending"
+	BatchLifecycleProcessing BatchLifecycleStatus = "processing"
+	BatchLifecycleCompleted  BatchLifecycleStatus = "completed"
+	BatchLifecycleFailed     BatchLifecycleStatus = "failed"
+	BatchLifecycleCancelled  BatchLifecycleStatus = "cancelled"
+)
+
+// MessageType is the engine-normalized message kind.
+type MessageType string
+
+const (
+	MsgText     MessageType = "text"
+	MsgImage    MessageType = "image"
+	MsgVideo    MessageType = "video"
+	MsgAudio    MessageType = "audio"
+	MsgVoice    MessageType = "voice"
+	MsgDocument MessageType = "document"
+	MsgSticker  MessageType = "sticker"
+	MsgLocation MessageType = "location"
+	MsgContact  MessageType = "contact"
+	MsgPoll     MessageType = "poll"
+	MsgCall     MessageType = "call"
+	MsgRevoked  MessageType = "revoked"
+	MsgMasked   MessageType = "masked"
+	MsgUnknown  MessageType = "unknown"
+)
+
+// BulkMessageType is the media kind a bulk item may carry.
+type BulkMessageType string
+
+const (
+	BulkText     BulkMessageType = "text"
+	BulkImage    BulkMessageType = "image"
+	BulkVideo    BulkMessageType = "video"
+	BulkAudio    BulkMessageType = "audio"
+	BulkDocument BulkMessageType = "document"
+)
+
+// ChatKind is the conversation kind a chat/message belongs to.
+type ChatKind string
+
+const (
+	KindIndividual ChatKind = "individual"
+	KindGroup      ChatKind = "group"
+	KindChannel    ChatKind = "channel"
+	KindStatus     ChatKind = "status"
+	KindBroadcast  ChatKind = "broadcast"
+	KindUnknown    ChatKind = "unknown"
+)
+
+// MessageDirection is which way a search hit traveled.
+type MessageDirection string
+
+const (
+	DirectionIncoming MessageDirection = "incoming"
+	DirectionOutgoing MessageDirection = "outgoing"
+)
+
 // BatchMessageResult is one message's outcome within a batch.
 type BatchMessageResult struct {
-	ChatID    string      `json:"chatId"`
-	Status    string      `json:"status"`
-	MessageID string      `json:"messageId,omitempty"`
-	SentAt    string      `json:"sentAt,omitempty"`
-	Error     *BatchError `json:"error,omitempty"`
+	ChatID    string             `json:"chatId"`
+	Status    BatchMessageStatus `json:"status"`
+	MessageID string             `json:"messageId,omitempty"`
+	SentAt    string             `json:"sentAt,omitempty"`
+	Error     *BatchError        `json:"error,omitempty"`
 }
 
 // BatchProgress is the aggregate progress of a batch.
@@ -381,11 +453,11 @@ type BatchProgress struct {
 // BatchStatusResponse is the response from the batch status / cancel endpoints.
 type BatchStatusResponse struct {
 	BatchID     string               `json:"batchId"`
-	Status      string               `json:"status"`
+	Status      BatchLifecycleStatus `json:"status"`
 	Progress    BatchProgress        `json:"progress"`
-	Results     []BatchMessageResult `json:"results,omitempty"`
-	StartedAt   string               `json:"startedAt,omitempty"`
-	CompletedAt string               `json:"completedAt,omitempty"`
+	Results     []BatchMessageResult `json:"results"`
+	StartedAt   *string              `json:"startedAt,omitempty"`
+	CompletedAt *string              `json:"completedAt,omitempty"`
 }
 
 // MessageMedia is a message's stored media: the raw bytes plus the served

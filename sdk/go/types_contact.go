@@ -26,7 +26,7 @@ type CheckNumberResponse struct {
 
 // ProfilePictureResponse carries a contact's profile picture URL.
 type ProfilePictureResponse struct {
-	URL *string `json:"url,omitempty"`
+	URL *string `json:"url"`
 }
 
 // ProfilePicturesResponse is a batch profile-picture lookup: a map of contact

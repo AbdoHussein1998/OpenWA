@@ -28,7 +28,7 @@
  * under-describes reality, fix the backend DTO decorator, regenerate, and un-exclude).
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 /** hand file -> { handTypeName: schemaName } */
 const MAPPINGS = {
@@ -91,6 +91,9 @@ const MAPPINGS = {
 const MINIMUM_MAPPED = {
   'sdk/javascript/src/types.ts': 24,
   'dashboard/src/services/api.ts': 20,
+  'sdk/python/openwa/types.py': 22,
+  'sdk/go': 24,
+  'sdk/java': 24,
 };
 
 /** Known drift, deliberately not gated yet — each line is a to-adjudicate follow-up. */
@@ -99,6 +102,88 @@ const EXCLUDED = {
     Session:
       'BY DESIGN, not drift: the wire always carries engineLoaded, but this client clears it to "unknown" after a websocket status event so the action helpers fall back to the status set — the type models client state, not the wire',
   },
+};
+
+/** Python client pairs (TypedDict classes in openwa/types.py). */
+const PYTHON_MAPPING = {
+  AccountRestriction: 'AccountRestrictionDto',
+  BatchMessageResult: 'BatchMessageResultDto',
+  BatchProgress: 'BatchProgressDto',
+  BatchStatusResponse: 'BatchStatusResponseDto',
+  BulkMessageContent: 'BulkMessageContentDto',
+  BulkMessageItem: 'BulkMessageItemDto',
+  BulkMessageResponse: 'BulkMessageResponseDto',
+  CallLinkResponse: 'CallLinkResponseDto',
+  ChatSummary: 'ChatSummaryDto',
+  GroupInfo: 'GroupInfoDto',
+  GroupJoinInfo: 'GroupJoinInfoDto',
+  GroupParticipant: 'GroupParticipantDto',
+  GroupSummary: 'GroupSummaryDto',
+  MessageListResponse: 'MessageListResponseDto',
+  MessageResponse: 'MessageResponseDto',
+  PairingCodeResponse: 'PairingCodeResponseDto',
+  ParticipantPresence: 'ParticipantPresenceDto',
+  ProfilePictureResponse: 'ProfilePictureResponseDto',
+  ProfilePicturesResponse: 'ProfilePicturesResponseDto',
+  SessionResponse: 'SessionResponseDto',
+  StatusResult: 'StatusResultDto',
+  WebhookResponse: 'WebhookResponseDto',
+};
+
+/** Go client pairs (wire structs across types_*.go). */
+const GO_MAPPING = {
+  AccountRestriction: 'AccountRestrictionDto',
+  BatchMessageResult: 'BatchMessageResultDto',
+  BatchProgress: 'BatchProgressDto',
+  BatchStatusResponse: 'BatchStatusResponseDto',
+  BulkMessageContent: 'BulkMessageContentDto',
+  BulkMessageItem: 'BulkMessageItemDto',
+  BulkMessageResponse: 'BulkMessageResponseDto',
+  CallLinkResponse: 'CallLinkResponseDto',
+  ChatHistoryMessage: 'ChatHistoryMessageDto',
+  ChatSummary: 'ChatSummaryDto',
+  GroupInfo: 'GroupInfoDto',
+  GroupJoinInfo: 'GroupJoinInfoDto',
+  GroupParticipant: 'GroupParticipantDto',
+  GroupSummary: 'GroupSummaryDto',
+  MessageListResponse: 'MessageListResponseDto',
+  MessageResponse: 'MessageResponseDto',
+  PairingCodeResponse: 'PairingCodeResponseDto',
+  ParticipantPresence: 'ParticipantPresenceDto',
+  ProfilePictureResponse: 'ProfilePictureResponseDto',
+  ProfilePicturesResponse: 'ProfilePicturesResponseDto',
+  SearchHit: 'SearchHitDto',
+  SessionResponse: 'SessionResponseDto',
+  StatusResult: 'StatusResultDto',
+  WebhookResponse: 'WebhookResponseDto',
+};
+
+/** Java client pairs (record components in model/*.java). */
+const JAVA_MAPPING = {
+  AccountRestriction: 'AccountRestrictionDto',
+  BatchMessageResult: 'BatchMessageResultDto',
+  BatchProgress: 'BatchProgressDto',
+  BatchStatusResponse: 'BatchStatusResponseDto',
+  BulkMessageContent: 'BulkMessageContentDto',
+  BulkMessageItem: 'BulkMessageItemDto',
+  BulkMessageResponse: 'BulkMessageResponseDto',
+  CallLinkResponse: 'CallLinkResponseDto',
+  ChatHistoryMessage: 'ChatHistoryMessageDto',
+  ChatSummary: 'ChatSummaryDto',
+  GroupInfo: 'GroupInfoDto',
+  GroupJoinInfo: 'GroupJoinInfoDto',
+  GroupParticipant: 'GroupParticipantDto',
+  GroupSummary: 'GroupSummaryDto',
+  MessageListResponse: 'MessageListResponseDto',
+  MessageResponse: 'MessageResponseDto',
+  PairingCodeResponse: 'PairingCodeResponseDto',
+  ParticipantPresence: 'ParticipantPresenceDto',
+  ProfilePictureResponse: 'ProfilePictureResponseDto',
+  ProfilePicturesResponse: 'ProfilePicturesResponseDto',
+  SearchHit: 'SearchHitDto',
+  SessionResponse: 'SessionResponseDto',
+  StatusResult: 'StatusResultDto',
+  WebhookResponse: 'WebhookResponseDto',
 };
 
 // ── hand-type parsing (declarations follow the regular formatting of the two files) ──
@@ -275,7 +360,7 @@ function isSimpleToken(token) {
  * Compares one hand type against one schema. Returns an array of human-readable diff lines —
  * empty when the pair conforms. Exported for the spec; the CLI loop below is a thin driver.
  */
-export function comparePair(handName, handMembers, schemaName, schema, schemas) {
+export function comparePair(handName, handMembers, schemaName, schema, schemas, compareOptionality = true) {
   const diffs = [];
   const schemaFields = parseObjectToken(schemaToken(schema, schemas));
   for (const [field, handInfo] of Object.entries(handMembers)) {
@@ -284,16 +369,27 @@ export function comparePair(handName, handMembers, schemaName, schema, schemas) 
       diffs.push(`hand has "${field}" — contract does not`);
       continue;
     }
-    if (handInfo.optional !== sField.optional) {
+    if (compareOptionality && handInfo.optional !== sField.optional) {
       diffs.push(
         `"${field}": hand ${handInfo.optional ? 'optional' : 'required'}, contract ${sField.optional ? 'optional' : 'required'}`,
       );
       continue;
     }
     if (isSimpleToken(sField.token)) {
-      const hand = handToken(handInfo.token, { [handName]: handMembers });
-      if (hand !== sField.token && isSimpleToken(hand))
-        diffs.push(`"${field}": hand ${hand}, contract ${sField.token}`);
+      let hand = isSimpleToken(handInfo.token)
+        ? handInfo.token
+        : handToken(handInfo.token, { [handName]: handMembers });
+      let contract = sField.token;
+      if (!compareOptionality) {
+        // Java (the only such client) cannot express non-null references — strip null arms on
+        // BOTH sides so nullability does not read as drift there; enums and kinds still compare.
+        hand = hand.replace(/\|null$/, '');
+        contract = contract.replace(/\|null$/, '');
+      }
+      const absorbs = handInfo.absorbsNull && contract === `${hand}|null`;
+      if (hand !== contract && !absorbs && isSimpleToken(hand)) {
+        diffs.push(`"${field}": hand ${hand}, contract ${contract}`);
+      }
     }
   }
   for (const field of Object.keys(schemaFields)) {
@@ -302,28 +398,370 @@ export function comparePair(handName, handMembers, schemaName, schema, schemas) 
   return diffs;
 }
 
+// ── per-language hand parsers (same member-map contract as parseHandTypes) ──
+
+/**
+ * Python (sdk/python/openwa/types.py): TypedDict classes with `total=False` optionality,
+ * `Optional[X]`/`X | None` null unions, `List[X]`, inline and aliased `Literal[...]` enums, and
+ * TypedDict inheritance (the parent's own total flag governs its members).
+ */
+export function parsePythonTypes(source) {
+  // Join continuation lines inside unclosed brackets so multi-line Literal[...] aliases and
+  // annotations parse as one token (a truncated `Literal[` is worse than no token).
+  const joined = [];
+  let carry = '';
+  for (const line of source.split('\n')) {
+    carry = carry ? carry + ' ' + line.trim() : line;
+    let depth = 0;
+    for (const ch of carry) {
+      if (ch === '[' || ch === '{' || ch === '(') depth++;
+      else if (ch === ']' || ch === '}' || ch === ')') depth--;
+    }
+    if (depth <= 0) {
+      joined.push(carry);
+      carry = '';
+    }
+  }
+  if (carry) joined.push(carry);
+  source = joined.join('\n');
+  const dicts = {};
+  const parents = {};
+  const optionalAll = new Set();
+  const blocks = [...source.matchAll(/class (\w+)\(([^)]*)\):\n([\s\S]*?)(?=\nclass |\n[A-Z]\w+ = |\n*$)/g)];
+  // A subclass never re-mentions TypedDict — accept any class whose base chain reaches one
+  // (fixpoint: a class is rooted when a base is itself a rooted class).
+  const basesOf = Object.fromEntries(
+    blocks.map(([, n, b]) => [
+      n,
+      b
+        .split(',')
+        .map(x => x.trim())
+        .filter(x => x && x !== 'TypedDict' && !x.includes('=')),
+    ]),
+  );
+  let rooted = new Set(blocks.filter(([, , b]) => /(^|\W)TypedDict(\W|$)/.test(b)).map(([, n]) => n));
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const name of Object.keys(basesOf)) {
+      if (rooted.has(name)) continue;
+      if (basesOf[name].some(b => rooted.has(b))) {
+        rooted.add(name);
+        grew = true;
+      }
+    }
+  }
+  for (const [, name, bases, body] of blocks) {
+    if (!rooted.has(name)) continue;
+    if (/total=False/.test(bases)) optionalAll.add(name);
+    if (basesOf[name].length) parents[name] = basesOf[name];
+    dicts[name] = parsePythonMembers(body);
+  }
+
+  const aliases = {};
+  for (const [, name, rhs] of source.matchAll(/^([A-Z]\w+) = (.+)$/gm)) aliases[name] = rhs.trim();
+  const resolve = (name, depth = 0) => {
+    if (depth >= 4) return 'object';
+    if (dicts[name]) return pythonObjectToken(dicts[name], resolve, depth);
+    if (aliases[name] !== undefined) return pythonToken(aliases[name], resolve, depth);
+    return name;
+  };
+  const merged = {};
+  for (const name of Object.keys(dicts)) {
+    merged[name] = {};
+    for (const base of parents[name] ?? []) Object.assign(merged[name], dicts[base] ?? {});
+    Object.assign(merged[name], dicts[name]);
+  }
+  // total=False marks the class's OWN members optional; inherited members keep the parent's flag.
+  for (const [name, members] of Object.entries(merged)) {
+    for (const [field, info] of Object.entries(members)) {
+      if (dicts[name] && dicts[name][field] && dicts[name][field].__py) {
+        if (optionalAll.has(name)) info.optional = true;
+        info.token = pythonToken(info.token, resolve);
+      }
+    }
+  }
+  return merged;
+}
+
+function parsePythonMembers(body) {
+  const members = {};
+  let inDoc = false;
+  for (const rawLine of body.split('\n')) {
+    const t = rawLine.trim();
+    const quotes = (rawLine.match(/"""/g) ?? []).length;
+    if (quotes >= 2 && !inDoc) continue; // one-line docstring
+    if (quotes === 1) {
+      inDoc = !inDoc;
+      continue;
+    }
+    if (inDoc || !t || t.startsWith('#')) continue;
+    const m = t.match(/^(\w+)\s*:\s*(.+)$/);
+    if (!m) continue;
+    let optional = false;
+    let typeText = m[2];
+    const notReq = typeText.match(/^NotRequired\[(.+)\]$/s);
+    if (notReq) {
+      optional = true;
+      typeText = notReq[1];
+    }
+    members[m[1]] = { optional, token: typeText.replace(/,$/, '').trim(), __py: true };
+  }
+  return members;
+}
+
+function pythonObjectToken(members, resolve, depth) {
+  const parts = [];
+  for (const [f, v] of Object.entries(members)) {
+    parts.push(`${f}${v.optional ? '?' : ''}:${pythonToken(v.token, resolve, depth + 1)}`);
+  }
+  return `object(${parts.sort().join(',')})`;
+}
+
+function pythonToken(text, resolve, depth = 0) {
+  let t = text.trim();
+  if (t.endsWith(',')) t = t.slice(0, -1).trim();
+  if (depth >= 4) return 'object';
+  let nullable = false;
+  if (/\|\s*None$/.test(t) || /^Optional\[/.test(t)) {
+    nullable = true;
+    t = t
+      .replace(/^Optional\[/, '')
+      .replace(/\s*\|\s*None$/, '')
+      .replace(/\]$/, '')
+      .trim();
+  }
+  const base = (() => {
+    if (t === 'str') return 'string';
+    if (t === 'int' || t === 'float') return 'number';
+    if (t === 'bool') return 'boolean';
+    if (t === 'Any') return 'any';
+    const lit = t.match(/^Literal\[(.+)\]$/s);
+    if (lit) {
+      const vals = [...lit[1].matchAll(/["']([^"']+)["']/g)].map(m => m[1]);
+      if (vals.length) return `enum(${vals.slice().sort().join(',')})`;
+    }
+    const lst = t.match(/^(?:List|list)\[(.+)\]$/s);
+    if (lst) return `array<${pythonToken(lst[1], resolve, depth + 1)}>`;
+    if (/^(?:Dict|dict)\[/.test(t)) return 'dict';
+    if (/^(?:Union|union)\[/.test(t)) {
+      const inner = t.slice(t.indexOf('[') + 1, -1);
+      const parts = inner
+        .split(',')
+        .map(x => pythonToken(x, resolve, depth + 1))
+        .sort();
+      return `union(${parts.join(',')})`;
+    }
+    if (/^[A-Z]\w*$/.test(t)) return resolve ? resolve(t, depth) : t;
+    return t;
+  })();
+  return nullable ? `${base}|null` : base;
+}
+
+/**
+ * Go (sdk/go/types_*.go): struct fields with json tags — pointer/omitempty/slice ⇒ optional,
+ * pointer ⇒ token|null; scalar defined types resolve to their underlying kind, and const blocks
+ * grouped per defined type produce enum tokens.
+ */
+export function parseGoTypes(sources) {
+  const structs = {};
+  const scalarAliases = {};
+  const constGroups = {};
+  const kindMap = { string: 'string', int: 'number', int64: 'number', float64: 'number', bool: 'boolean', any: 'any' };
+
+  for (const source of sources) {
+    for (const [, name, underlying] of source.matchAll(/^type (\w+) (string|int|int64|float64|bool|any)$/gm)) {
+      scalarAliases[name] = kindMap[underlying];
+    }
+    for (const block of source.matchAll(/type (\w+) struct \{([\s\S]*?)\n\}/g)) {
+      const members = {};
+      for (const line of block[2].split('\n')) {
+        const m = line.match(/^\s*[A-Z]\w*\s+([\w[\]*.]+)\s+`json:"([^"]+)"`/);
+        if (!m) continue;
+        const json = m[2].split(',');
+        const field = json[0];
+        if (!field || field === '-') continue;
+        const fullType = m[1];
+        const omitempty = json.includes('omitempty');
+        const ptr = fullType.startsWith('*');
+        // omitempty is what drops a key on the wire — THAT is optionality. A bare pointer (no
+        // omitempty) serializes null: a REQUIRED nullable field, not an optional one. A bare
+        // []T is a required array (slices are nil-able in Go but not absent on the wire).
+        members[field] = { optional: omitempty, token: '', __struct: fullType, __ptr: ptr, __omit: omitempty };
+      }
+      structs[block[1]] = members;
+    }
+    for (const cblock of source.matchAll(/const \(([\s\S]*?)\n\)/g)) {
+      for (const line of cblock[1].split('\n')) {
+        // gofmt pads name/type with multiple spaces — \s+ on both sides of the type.
+        const m = line.match(/^\s*\w+\s+(\w+)\s+=\s+["']([^"']+)["']/);
+        if (m) (constGroups[m[1]] ??= []).push(m[2]);
+      }
+    }
+  }
+
+  // defined scalar types whose consts exist become enums
+  for (const [tname, vals] of Object.entries(constGroups)) {
+    if (scalarAliases[tname]) scalarAliases[tname] = `enum(${[...new Set(vals)].sort().join(',')})`;
+  }
+
+  const expand = (typeText, depth = 0) => {
+    if (depth >= 4) return 'object';
+    if (typeText.startsWith('map[')) return 'dict';
+    if (typeText.startsWith('[]')) return `array<${expand(typeText.slice(2), depth + 1)}>`;
+    if (typeText.startsWith('*')) return `${expand(typeText.slice(1), depth + 1)}|null`;
+    if (structs[typeText]) {
+      const parts = Object.entries(structs[typeText]).map(([f, v]) => `${f}${v.optional ? '?' : ''}:${v.token}`);
+      return `object(${parts.sort().join(',')})`;
+    }
+    return scalarAliases[typeText] ?? kindMap[typeText] ?? typeText;
+  };
+
+  for (const members of Object.values(structs)) {
+    for (const v of Object.values(members)) {
+      v.token = expand(v.__struct);
+      // pointer+omitempty is "absent-dominant": JSON null and a missing key are indistinguishable
+      // through *T with omitempty, so the null arm is dropped and the field flagged absorbsNull —
+      // a nil *T covers both an absent key and an explicit null, so it also conforms to an
+      // optional-nullable contract, which Go cannot spell distinctly.
+      if (v.__ptr && v.__omit) {
+        v.token = v.token.replace(/\|null$/, '');
+        v.absorbsNull = true;
+      }
+    }
+  }
+  return structs;
+}
+
+/**
+ * Java (sdk/java/.../model/*.java): record components — the object model cannot express
+ * requiredness (every reference is nullable), so these pairs compare presence + type tokens only
+ * (the client config sets compareOptionality=false).
+ */
+export function parseJavaTypes(sources) {
+  const records = {};
+  const primMap = {
+    String: 'string',
+    int: 'number',
+    long: 'number',
+    double: 'number',
+    float: 'number',
+    boolean: 'boolean',
+    Integer: 'number',
+    Long: 'number',
+    Boolean: 'boolean',
+    JsonObject: 'any',
+    Object: 'any',
+    BigDecimal: 'number',
+    Instant: 'string',
+    LocalDate: 'string',
+  };
+  for (const raw of sources) {
+    // Javadoc BETWEEN record components breaks comma-splitting — strip comments first.
+    const source = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const m of source.matchAll(/record (\w+)\(([^)]*)\)/g)) {
+      const members = {};
+      for (const comp of m[2].split(',')) {
+        const cm = comp.trim().match(/^(?:final\s+)?([\w<>,.\[\]\s]+?)\s+(\w+)$/);
+        if (!cm) continue;
+        members[cm[2]] = { optional: true, token: cm[1].trim(), __java: cm[1].trim() };
+      }
+      records[m[1]] = members;
+    }
+  }
+  const expand = (t, depth = 0) => {
+    if (depth >= 4) return 'object';
+    const lst = t.match(/^List<(.+)>$/);
+    if (lst) return `array<${expand(lst[1], depth + 1)}>`;
+    if (/^Map</.test(t)) return 'dict';
+    if (primMap[t]) return primMap[t];
+    const short = t.split('.').pop();
+    if (records[short]) {
+      const parts = Object.entries(records[short]).map(([f, v]) => `${f}:${expand(v.__java, depth + 1)}`);
+      return `object(${parts.sort().join(',')})`;
+    }
+    return t;
+  };
+  for (const members of Object.values(records)) {
+    for (const v of Object.values(members)) v.token = expand(v.__java);
+  }
+  return records;
+}
+
 // ── CLI driver ──
 
 const isDirectRun = process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop());
 if (isDirectRun) {
   const openapi = JSON.parse(readFileSync('openapi.json', 'utf8'));
   const schemas = openapi.components.schemas;
+
+  /**
+   * Five HTTP clients, one gate. The two TypeScript trees parse with parseHandTypes; Python, Go
+   * and Java each get the parser for their declaration style. PHP is deliberately absent: its
+   * client returns untyped array<string,mixed> throughout — there is no types layer to conform
+   * (the same reason check-sdk-events exempts it).
+   *
+   * Java sets compareOptionality=false: record components cannot express requiredness (every
+   * reference is nullable), so those pairs verify field presence and type tokens only.
+   */
+  const goSources = () =>
+    readdirSync('sdk/go')
+      .filter(f => f.endsWith('.go') && !f.endsWith('_test.go'))
+      .map(f => readFileSync(`sdk/go/${f}`, 'utf8'));
+  const javaSources = () =>
+    readdirSync('sdk/java/src/main/java/com/rmyndharis/openwa/model')
+      .filter(f => f.endsWith('.java'))
+      .map(f => readFileSync(`sdk/java/src/main/java/com/rmyndharis/openwa/model/${f}`, 'utf8'));
+
+  const CLIENTS = [
+    ...Object.entries(MAPPINGS).map(([file, mapping]) => ({
+      label: file,
+      load: () => parseHandTypes(readFileSync(file, 'utf8')),
+      mapping,
+      excluded: EXCLUDED[file] ?? {},
+      floor: MINIMUM_MAPPED[file],
+      compareOptionality: true,
+    })),
+    {
+      label: 'sdk/python/openwa/types.py',
+      load: () => parsePythonTypes(readFileSync('sdk/python/openwa/types.py', 'utf8')),
+      mapping: PYTHON_MAPPING,
+      excluded: EXCLUDED['sdk/python/openwa/types.py'] ?? {},
+      floor: MINIMUM_MAPPED['sdk/python/openwa/types.py'],
+      compareOptionality: true,
+    },
+    {
+      label: 'sdk/go (types_*.go)',
+      load: () => parseGoTypes(goSources()),
+      mapping: GO_MAPPING,
+      excluded: EXCLUDED['sdk/go'] ?? {},
+      floor: MINIMUM_MAPPED['sdk/go'],
+      compareOptionality: true,
+    },
+    {
+      label: 'sdk/java (model/*.java)',
+      load: () => parseJavaTypes(javaSources()),
+      mapping: JAVA_MAPPING,
+      excluded: EXCLUDED['sdk/java'] ?? {},
+      floor: MINIMUM_MAPPED['sdk/java'],
+      compareOptionality: false,
+    },
+  ];
+
   let failures = 0;
   let compared = 0;
 
-  for (const [file, mapping] of Object.entries(MAPPINGS)) {
-    const source = readFileSync(file, 'utf8');
-    const handTypes = parseHandTypes(source);
-    const excluded = EXCLUDED[file] ?? {};
+  for (const client of CLIENTS) {
+    const handTypes = client.load();
     let fileCompared = 0;
     const fileResults = [];
 
-    for (const [handName, schemaName] of Object.entries(mapping)) {
-      if (excluded[handName]) continue;
+    for (const [handName, schemaName] of Object.entries(client.mapping)) {
+      if (client.excluded[handName]) continue;
       const hand = handTypes[handName];
       const schema = schemas[schemaName];
       if (!hand) {
-        fileResults.push(`  MISSING hand type ${handName} (declared in mapping but not found in ${file})`);
+        fileResults.push(`  MISSING hand type ${handName} (declared in mapping but not found in ${client.label})`);
         failures++;
         continue;
       }
@@ -334,26 +772,26 @@ if (isDirectRun) {
       }
       fileCompared++;
       compared++;
-      const diffs = comparePair(handName, hand, schemaName, schema, schemas);
+      const diffs = comparePair(handName, hand, schemaName, schema, schemas, client.compareOptionality);
       if (diffs.length) {
         fileResults.push(`  ${handName} ↔ ${schemaName}:`, ...diffs.map(d => `    ${d}`));
         failures++;
       }
     }
 
-    if (Object.keys(mapping).length < MINIMUM_MAPPED[file]) {
+    if (Object.keys(client.mapping).length < client.floor) {
       fileResults.push(
-        `  only ${Object.keys(mapping).length} mapped pairs for ${file} (floor ${MINIMUM_MAPPED[file]}) — entries were dropped`,
+        `  only ${Object.keys(client.mapping).length} mapped pairs for ${client.label} (floor ${client.floor}) — entries were dropped`,
       );
       failures++;
     }
     if (fileCompared < 8) {
-      fileResults.push(`  only ${fileCompared} pairs compared for ${file} — vacuous-pass guard`);
+      fileResults.push(`  only ${fileCompared} pairs compared for ${client.label} — vacuous-pass guard`);
       failures++;
     }
-    console.log(`${file}: ${fileCompared} pairs compared, ${fileResults.length ? 'FAILURES' : 'all conform'}`);
+    console.log(`${client.label}: ${fileCompared} pairs compared, ${fileResults.length ? 'FAILURES' : 'all conform'}`);
     for (const line of fileResults) console.log(line);
-    const excludedCount = Object.keys(excluded).length;
+    const excludedCount = Object.keys(client.excluded).length;
     if (excludedCount) {
       console.log(`  (${excludedCount} excluded pair(s) with recorded reasons — see EXCLUDED in this script)`);
     }

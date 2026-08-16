@@ -73,11 +73,45 @@ type UpsertLabelRequest struct {
 }
 
 // ParticipantPresence is one participant's presence within a chat.
+// SessionStatus is the session lifecycle state reported by the gateway.
+type SessionStatus string
+
+const (
+	SessionStatusCreated        SessionStatus = "created"
+	SessionStatusInitializing   SessionStatus = "initializing"
+	SessionStatusQrReady        SessionStatus = "qr_ready"
+	SessionStatusAuthenticating SessionStatus = "authenticating"
+	SessionStatusReady          SessionStatus = "ready"
+	SessionStatusDisconnected   SessionStatus = "disconnected"
+	SessionStatusActionRequired SessionStatus = "action_required"
+	SessionStatusFailed         SessionStatus = "failed"
+)
+
+// AccountRestrictionKind is the class of a WhatsApp-side account restriction.
+type AccountRestrictionKind string
+
+const (
+	RestrictionReachoutTimelock AccountRestrictionKind = "reachout_timelock"
+	RestrictionTosBlock         AccountRestrictionKind = "tos_block"
+	RestrictionProxyBlock       AccountRestrictionKind = "proxy_block"
+)
+
+// PresenceState is a subscribed contact's presence.
+type PresenceState string
+
+const (
+	PresenceAvailable   PresenceState = "available"
+	PresenceUnavailable PresenceState = "unavailable"
+	PresenceComposing   PresenceState = "composing"
+	PresenceRecording   PresenceState = "recording"
+	PresencePaused      PresenceState = "paused"
+)
+
 type ParticipantPresence struct {
 	ID string `json:"id"`
 	// State is one of: available, unavailable, composing, recording, paused. "composing" and
 	// "recording" mean actively typing or recording; "paused" means they stopped.
-	State string `json:"state"`
+	State PresenceState `json:"state"`
 	// LastSeen is Unix SECONDS. Nil whenever the contact's privacy settings hide last-seen — the
 	// common case, not an error.
 	LastSeen *int64 `json:"lastSeen,omitempty"`
@@ -100,7 +134,7 @@ type ChatPresence struct {
 // therefore cannot coexist with a "ready" status.
 type AccountRestriction struct {
 	// Kind is one of: reachout_timelock, tos_block, proxy_block.
-	Kind string `json:"kind"`
+	Kind AccountRestrictionKind `json:"kind"`
 	// Code is the engine's own token for the cause, verbatim (TOS_BLOCK, BIZ_QUALITY, ...).
 	Code string `json:"code"`
 	// ExpiresAt is an ISO timestamp for the end of enforcement, when WhatsApp states one.
@@ -111,16 +145,16 @@ type AccountRestriction struct {
 // initializing, qr_ready, authenticating, ready, disconnected, action_required,
 // failed.
 type SessionResponse struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Status      string  `json:"status"`
-	Phone       *string `json:"phone,omitempty"`
-	PushName    *string `json:"pushName,omitempty"`
-	ConnectedAt *string `json:"connectedAt,omitempty"`
-	LastActive  *string `json:"lastActive,omitempty"`
-	CreatedAt   string  `json:"createdAt,omitempty"`
-	UpdatedAt   string  `json:"updatedAt,omitempty"`
-	LastError   *string `json:"lastError,omitempty"`
+	ID          string        `json:"id"`
+	Name        string        `json:"name"`
+	Status      SessionStatus `json:"status"`
+	Phone       *string       `json:"phone,omitempty"`
+	PushName    *string       `json:"pushName,omitempty"`
+	ConnectedAt *string       `json:"connectedAt,omitempty"`
+	LastActive  *string       `json:"lastActive,omitempty"`
+	CreatedAt   string        `json:"createdAt"`
+	UpdatedAt   string        `json:"updatedAt"`
+	LastError   *string       `json:"lastError,omitempty"`
 	// Restriction reports a limit WhatsApp itself has placed on the account, or nil when there is
 	// none. Distinct from LastError, which describes a fault on the gateway's side.
 	Restriction *AccountRestriction `json:"restriction,omitempty"`
@@ -128,7 +162,7 @@ type SessionResponse struct {
 	// precondition stop/logout/force-kill require and start refuses. Not derivable from Status:
 	// "disconnected" covers both a session mid automatic-reconnect (engine present) and one stopped
 	// with no engine. Nil from a gateway that predates the field.
-	EngineLoaded *bool `json:"engineLoaded,omitempty"`
+	EngineLoaded bool `json:"engineLoaded"`
 }
 
 // CreateSessionRequest is the body for creating a session. ProxyType is one of:
@@ -142,8 +176,8 @@ type CreateSessionRequest struct {
 
 // QrCodeResponse carries the current QR code for a session awaiting scan.
 type QrCodeResponse struct {
-	QrCode string `json:"qrCode"`
-	Status string `json:"status"`
+	QrCode string        `json:"qrCode"`
+	Status SessionStatus `json:"status"`
 }
 
 // PairingCodeResponse carries a phone-pairing code.
