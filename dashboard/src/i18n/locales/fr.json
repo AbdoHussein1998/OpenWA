@@ -566,7 +566,9 @@
     },
     "empty": {
       "title": "Aucun journal trouvé",
-      "description": "Les journaux d'audit apparaîtront ici au fur et à mesure des actions"
+      "description": "Les journaux d'audit apparaîtront ici au fur et à mesure des actions",
+      "filteredTitle": "Aucune correspondance sur cette page",
+      "filteredDescription": "La recherche ne filtre que la page actuelle. Effacez-la, naviguez entre les pages ou utilisez le filtre de sévérité côté serveur."
     }
   },
   "messageTester": {

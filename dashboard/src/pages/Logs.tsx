@@ -34,6 +34,10 @@ export function Logs() {
   });
 
   const totalPages = Math.ceil(total / limit);
+  // Distinguish "filters matched nothing on this page" from "there are no logs at all": the search
+  // box only filters the fetched page (the API has no text search), so a non-match here must not
+  // read as "no such event exists" while more pages may hold it.
+  const hasActiveFilter = searchQuery.trim() !== '' || severityFilter !== 'all';
 
   const formatTimestamp = (date: string) => new Date(date).toLocaleString();
 
@@ -139,7 +143,11 @@ export function Logs() {
             type="text"
             placeholder={t('logs.searchPlaceholder')}
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={e => {
+              setSearchQuery(e.target.value);
+              // A new query invalidates the current page position, like the severity filter below.
+              setPage(1);
+            }}
           />
         </div>
 
@@ -174,8 +182,17 @@ export function Logs() {
           {filteredLogs.length === 0 ? (
             <div className="empty-table-state">
               <FileText size={48} strokeWidth={1} />
-              <h3>{t('logs.empty.title')}</h3>
-              <p>{t('logs.empty.description')}</p>
+              {hasActiveFilter ? (
+                <>
+                  <h3>{t('logs.empty.filteredTitle')}</h3>
+                  <p>{t('logs.empty.filteredDescription')}</p>
+                </>
+              ) : (
+                <>
+                  <h3>{t('logs.empty.title')}</h3>
+                  <p>{t('logs.empty.description')}</p>
+                </>
+              )}
             </div>
           ) : (
             filteredLogs.map(log => (
