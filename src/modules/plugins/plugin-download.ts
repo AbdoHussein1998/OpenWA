@@ -66,11 +66,30 @@ export function assertPluginInstallUrl(url: string): void {
   } catch {
     return; // not a parseable URL — resolveSafeFetchTarget rejects it with the clearer error
   }
-  if (parsed.protocol !== 'http:') return; // https unaffected; other schemes are the SSRF guard's call
-  // expectedSha256FromUrl throws on a malformed marker, so an explicit-but-unusable pin fails
-  // closed here rather than silently degrading to "no pin".
-  if (expectedSha256FromUrl(url) === null) {
+  // expectedSha256FromUrl throws on a malformed marker. On http that surfaces here (fail-closed
+  // at the transport gate); on https it is left for the post-download integrity check to report,
+  // preserving that error's wording — either way an explicit-but-unusable pin never degrades to
+  // "no pin".
+  let pinned = false;
+  try {
+    pinned = expectedSha256FromUrl(url) !== null;
+  } catch (error) {
+    if (parsed.protocol === 'http:') throw error;
+  }
+  if (parsed.protocol === 'http:' && !pinned) {
     throw new Error('plain http is only accepted with a content pin: append #sha256=<64 hex> to the URL, or use https');
+  }
+  // Installing a plugin is executing third-party code on the host. HTTPS authenticates the
+  // CHANNEL, not the bytes-as-reviewed — a compromised release host or a hijacked catalog still
+  // ships whatever it likes. In production (or wherever PLUGIN_INSTALL_REQUIRE_PIN says so) an
+  // install from a URL therefore requires the pin; dev keeps the lighter default.
+  const requirePin =
+    process.env.PLUGIN_INSTALL_REQUIRE_PIN === 'true' ||
+    (process.env.PLUGIN_INSTALL_REQUIRE_PIN !== 'false' && process.env.NODE_ENV === 'production');
+  if (requirePin && !pinned) {
+    throw new Error(
+      'installing from a URL requires an integrity pin in this deployment: append #sha256=<64 hex> to the URL (PLUGIN_INSTALL_REQUIRE_PIN=false disables this)',
+    );
   }
 }
 
