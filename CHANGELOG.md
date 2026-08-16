@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Weekly scheduled security scan (`.github/workflows/security-scan.yml`): the merge-time audit gates re-run against the current dependency trees, and the release image scan re-runs against the published `latest` image on both architectures — a newly published advisory surfaces within days instead of at the next push or release. Also dispatchable on demand.
-- Client wire-shape contract gate (`check:contract-shapes`, in the CI lint job): the JavaScript SDK's and the dashboard's hand-written wire types are now checked field-by-field against the OpenAPI schemas — presence, required-vs-optional, and type drift for simple fields — closing the gap where every existing gate verified which routes exist but none verified the body shapes they carry. 21 pairs conform today; 23 known-drifting pairs are excluded inline with recorded reasons and shrink as each is adjudicated.
+- Client wire-shape contract gate (`check:contract-shapes`, in the CI lint job): the JavaScript SDK's and the dashboard's hand-written wire types are now checked field-by-field against the OpenAPI schemas — presence, required-vs-optional, and type drift for simple fields — closing the gap where every existing gate verified which routes exist but none verified the body shapes they carry. 33 pairs conform today; the 7 remaining exclusions are recorded inline with reasons — one is deliberate (the dashboard's tri-state `engineLoaded` client model), the rest are a field-by-field adjudication backlog.
 
 ## [0.19.0] - 2026-08-15
 

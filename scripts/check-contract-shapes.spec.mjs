@@ -102,3 +102,26 @@ test('handToken reduces enums, null unions and arrays deterministically', () => 
   assert.equal(handToken('number | null', types), 'number|null');
   assert.equal(handToken('string[]', types), 'array<string>');
 });
+
+test('schemaToken honors the OpenAPI 3.0 sibling nullable flag', () => {
+  // Regression: nullable is a sibling flag, not a type member — dropping it turned every honest
+  // `string | null` hand type into a false mismatch against a plain `string` schema.
+  const nullableSchema = { type: 'string', nullable: true };
+  assert.equal(schemaToken(nullableSchema, {}), 'string|null');
+  assert.equal(schemaToken({ type: 'string' }, {}), 'string');
+  assert.equal(schemaToken({ type: 'integer', nullable: true }, {}), 'number|null');
+});
+
+test('parseHandTypes resolves `extends` — inherited fields are not "missing"', () => {
+  // Regression: CreatedApiKey extends ApiKey read as a bare { apiKey } shape and could never
+  // conform to the schema that actually includes every inherited member.
+  const types = parseHandTypes(`
+export interface Base {
+  id: string;
+}
+export interface Child extends Base {
+  apiKey: string;
+}
+`);
+  assert.deepEqual(Object.keys(types.Child), ['id', 'apiKey']);
+});

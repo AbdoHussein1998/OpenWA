@@ -49,11 +49,14 @@ export interface Session {
    * Whether the gateway holds a live engine for this session right now. The precondition the
    * lifecycle routes enforce, and not derivable from `status`: `disconnected` covers both a session
    * mid automatic-reconnect (engine present, start 400s) and one stopped through stop() (no engine).
-   * Optional only because a dashboard can be served by a gateway that predates the field.
+   * Optional BY DESIGN, not drift: the wire always carries it, but this client's state model
+   * clears it to "unknown" after a websocket status event until the row refreshes, so the action
+   * helpers fall back to the historical status set instead of trusting a stale value.
    */
   engineLoaded?: boolean;
   phone?: string | null;
   pushName?: string | null;
+  connectedAt?: string | null;
   lastActive?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -130,7 +133,9 @@ export interface Webhook {
   events: string[];
   filters?: WebhookFilters | null;
   active: boolean;
-  secret?: string;
+  retryCount: number;
+  /** Null until the first delivery attempt. */
+  lastTriggeredAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -165,22 +170,30 @@ export interface ApiKey {
   lastUsedAt?: string;
   usageCount: number;
   createdAt: string;
-  apiKey?: string; // Only returned on creation
+}
+
+/** The creation response: every list/detail field plus the plaintext key, shown exactly once. */
+export interface CreatedApiKey extends ApiKey {
+  apiKey: string;
 }
 
 export interface AuditLog {
   id: string;
   action: string;
   severity: 'info' | 'warn' | 'error';
-  apiKeyId?: string;
-  apiKeyName?: string;
-  sessionId?: string;
-  sessionName?: string;
-  ipAddress?: string;
-  method?: string;
-  path?: string;
-  statusCode?: number;
-  errorMessage?: string;
+  apiKeyId: string | null;
+  apiKeyName: string | null;
+  sessionId: string | null;
+  sessionName: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  method: string | null;
+  path: string | null;
+  statusCode: number | null;
+  /** Null when the action succeeded. */
+  errorMessage: string | null;
+  /** Free-form context whose shape varies per action. */
+  metadata: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -285,9 +298,12 @@ export interface EngineHistoryMessage {
 export interface Channel {
   id: string;
   name: string;
-  subscriberCount?: number;
+  description?: string;
   inviteCode?: string;
+  subscriberCount?: number;
+  picture?: string;
   verified?: boolean;
+  createdAt?: number;
 }
 
 export interface ChannelMessage {
@@ -323,7 +339,12 @@ export interface Contact {
   id: string;
   name?: string;
   pushName?: string;
-  number?: string;
+  /** MSISDN digits without separators — always present in the response. */
+  number: string;
+  isMyContact: boolean;
+  isBlocked: boolean;
+  /** Absent when the contact has none or privacy hides it. */
+  profilePicUrl?: string;
 }
 
 export interface SendMediaPayload {
@@ -429,9 +450,10 @@ export interface BatchStatusResponse {
   batchId: string;
   status: BatchStatus;
   progress: BatchProgress;
-  results?: BatchMessageResult[];
-  startedAt?: string;
-  completedAt?: string;
+  /** One entry per recipient already attempted — empty until the first send resolves. */
+  results: BatchMessageResult[];
+  startedAt?: string | null;
+  completedAt?: string | null;
 }
 
 export interface HealthStatus {
@@ -576,7 +598,7 @@ export interface SearchHit {
   /** Epoch-seconds (mirrors the persisted messages.timestamp column). */
   timestamp: number;
   type: string;
-  direction: string;
+  direction: 'incoming' | 'outgoing';
   from: string;
   score?: number;
 }
@@ -874,7 +896,7 @@ export const apiKeyApi = {
     allowedSessions?: string[];
     expiresAt?: string;
   }) =>
-    request<ApiKey>('/auth/api-keys', {
+    request<CreatedApiKey>('/auth/api-keys', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
