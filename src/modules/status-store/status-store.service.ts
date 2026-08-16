@@ -8,7 +8,7 @@ import type { IncomingStatus } from './incoming-status';
 import type { Status } from '../../engine/interfaces/whatsapp-engine.interface';
 import { StorageService } from '../../common/storage/storage.service';
 import { sweepOrphanedFiles } from '../../common/storage/orphan-sweep';
-import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
+import { isUniqueViolation } from '../../common/utils/db-errors';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { userPart } from '../../engine/identity/wa-id';
 import { createLogger } from '../../common/services/logger.service';
@@ -137,7 +137,7 @@ export class StatusStoreService implements OnModuleInit, OnModuleDestroy {
       // written at this point (row-first ordering), so unlike a file-first ingest there is nothing
       // to reap here — the winner's own call owns its file write.
       const winner = await this.repository.findOne({ where: { sessionId, waStatusId: s.waStatusId } });
-      if (winner && isUniqueConstraintError(error)) return { row: winner, created: false };
+      if (winner && isUniqueViolation(error)) return { row: winner, created: false };
       throw error;
     }
 

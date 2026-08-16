@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Both bundled Compose files forward every documented runtime knob; `WEBHOOK_SSRF_REDIRECTS`, `PLUGIN_INSTALL_REQUIRE_PIN` and ~75 other `.env` settings were unreachable in the container. A spec now derives the required list from `.env.example`.
+- Ingress delivery ids BullMQ refuses at enqueue (numeric, `redrive:<uuid>`, `0:`-led) are hashed to a legal job id, namespaced by plugin/instance; the old refusal read as a Redis failure and silently degraded the delivery to inline dispatch with no retry.
+- One precise unique-violation predicate (`23505`, `SQLITE_CONSTRAINT_UNIQUE`/`_PRIMARYKEY`): the old prefix match treated every SQLite constraint failure (FK/NOT NULL/CHECK) as a duplicate, swallowing genuine persistence failures and answering misleading 409s.
+
 ### Security
 
 - The SQLite database files are tightened to owner-only (`0600`, plus `-wal`/`-shm`/`-journal`) on every boot; they hold plaintext webhook/plugin secrets and were group/world-readable while sibling secret files were `0600`.
