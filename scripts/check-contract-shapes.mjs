@@ -34,6 +34,7 @@ import { readFileSync } from 'node:fs';
 const MAPPINGS = {
   'sdk/javascript/src/types.ts': {
     AccountRestriction: 'AccountRestrictionDto',
+    BatchMessageResult: 'BatchMessageResultDto',
     BatchProgress: 'BatchProgressDto',
     BatchStatusResponse: 'BatchStatusResponseDto',
     BulkMessageContent: 'BulkMessageContentDto',
@@ -60,10 +61,13 @@ const MAPPINGS = {
   'dashboard/src/services/api.ts': {
     AccountRestriction: 'AccountRestrictionDto',
     AuditLog: 'AuditLogDto',
+    BatchMessageResult: 'BatchMessageResultDto',
     BatchProgress: 'BatchProgressDto',
     BatchStatusResponse: 'BatchStatusResponseDto',
+    BulkMessageItem: 'BulkMessageItemDto',
     Channel: 'ChannelDto',
     ChannelMessage: 'ChannelMessageDto',
+    Chat: 'ChatSummaryDto',
     ChatPresence: 'ChatPresenceResponseDto',
     Contact: 'ContactDto',
     CreatedApiKey: 'ApiKeyCreatedResponseDto',
@@ -72,9 +76,21 @@ const MAPPINGS = {
     ParticipantPresence: 'ParticipantPresenceDto',
     ProfilePictureResponse: 'ProfilePictureResponseDto',
     SearchHit: 'SearchHitDto',
+    Session: 'SessionResponseDto',
     SessionConfig: 'SessionConfigResponseDto',
     Webhook: 'WebhookResponseDto',
   },
+};
+
+/**
+ * Floor on the mapping SIZE per client. The per-file compared-pairs guard above cannot see a
+ * rewrite that silently DROPS entries (protection shrinks while everything stays green — observed
+ * in review: a from-memory rewrite lost four conforming pairs and the run still passed). Raising
+ * these floors as pairs are added makes the shrink loud.
+ */
+const MINIMUM_MAPPED = {
+  'sdk/javascript/src/types.ts': 24,
+  'dashboard/src/services/api.ts': 20,
 };
 
 /** Known drift, deliberately not gated yet — each line is a to-adjudicate follow-up. */
@@ -327,6 +343,12 @@ if (isDirectRun) {
       }
     }
 
+    if (Object.keys(mapping).length < MINIMUM_MAPPED[file]) {
+      fileResults.push(
+        `  only ${Object.keys(mapping).length} mapped pairs for ${file} (floor ${MINIMUM_MAPPED[file]}) — entries were dropped`,
+      );
+      failures++;
+    }
     if (fileCompared < 8) {
       fileResults.push(`  only ${fileCompared} pairs compared for ${file} — vacuous-pass guard`);
       failures++;
