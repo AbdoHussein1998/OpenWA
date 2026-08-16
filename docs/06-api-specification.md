@@ -5041,20 +5041,20 @@ Notes: raw return of an in-memory `Settings` object built once in the controller
 
 #### GET /api/audit
 
-List audit-log entries, newest first. Every API-key lifecycle change, session/message/webhook event and ADMIN infra operation lands here.
+List audit-log entries, newest first. API-key lifecycle changes, session lifecycle events and ADMIN infra operations land here. **Message and webhook events deliberately do not**: message sends and webhook deliveries are tracked in their own tables (`messages`, `webhook_delivery_failures`), so filtering for `message_sent`, `message_failed`, `webhook_created`, `webhook_deleted`, `webhook_triggered` or `webhook_failed` returns zero rows by design.
 
 **Auth:** API key (ADMIN) · **Scope:** rows are confined to the calling key's `allowedSessions` — the `sessionId` query may only narrow within that list, never widen it
 
 **Query parameters**
 
-| Name        | Type                          | Required | Default | Description                                                                                                                   |
-| ----------- | ----------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `action`    | string                        | No       | —       | Filter by `AuditAction` (e.g. `api_key_created`, `session_started`, `message_sent`, `webhook_failed`, `infra_data_imported`). |
-| `severity`  | `'info' \| 'warn' \| 'error'` | No       | —       | Filter by `AuditSeverity`.                                                                                                    |
-| `sessionId` | string                        | No       | —       | Narrow to one session. A value outside the key's `allowedSessions` returns `{ "data": [], "total": 0 }`.                      |
-| `apiKeyId`  | string                        | No       | —       | Filter by the acting key's id.                                                                                                |
-| `limit`     | integer                       | No       | `50`    | Page size, clamped to a maximum of `200`.                                                                                     |
-| `offset`    | integer                       | No       | `0`     | Rows to skip; a negative value resolves to `0`.                                                                               |
+| Name        | Type                          | Required | Default | Description                                                                                                                                        |
+| ----------- | ----------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `action`    | string                        | No       | —       | Filter by `AuditAction` (e.g. `api_key_created`, `session_started`, `infra_data_imported`). Message/webhook actions are never emitted (see above). |
+| `severity`  | `'info' \| 'warn' \| 'error'` | No       | —       | Filter by `AuditSeverity`.                                                                                                                         |
+| `sessionId` | string                        | No       | —       | Narrow to one session. A value outside the key's `allowedSessions` returns `{ "data": [], "total": 0 }`.                                           |
+| `apiKeyId`  | string                        | No       | —       | Filter by the acting key's id.                                                                                                                     |
+| `limit`     | integer                       | No       | `50`    | Page size, clamped to a maximum of `200`.                                                                                                          |
+| `offset`    | integer                       | No       | `0`     | Rows to skip; a negative value resolves to `0`.                                                                                                    |
 
 **Response** `200`
 
@@ -5070,10 +5070,10 @@ List audit-log entries, newest first. Every API-key lifecycle change, session/me
       "sessionId": "9f1c…",
       "sessionName": "support-line",
       "ipAddress": "203.0.113.7",
-      "userAgent": "curl/8.4.0",
-      "method": "POST",
-      "path": "/api/sessions/9f1c…/start",
-      "statusCode": 200,
+      "userAgent": null,
+      "method": null,
+      "path": null,
+      "statusCode": null,
       "metadata": null,
       "errorMessage": null,
       "createdAt": "2026-06-25T11:42:07.000Z"
@@ -5083,7 +5083,7 @@ List audit-log entries, newest first. Every API-key lifecycle change, session/me
 }
 ```
 
-Unlike the other list routes this one is **not** a bare array: `data` is the page and `total` the unpaginated match count. Nullable columns (`apiKeyId`, `sessionId`, `metadata`, `errorMessage`, …) are `null` when the event has no such dimension.
+Unlike the other list routes this one is **not** a bare array: `data` is the page and `total` the unpaginated match count. Nullable columns (`apiKeyId`, `sessionId`, `metadata`, `errorMessage`, …) are `null` when the event has no such dimension. `userAgent`, `method`, `path` and `statusCode` are reserved columns: the request-actor context does not populate them today, so rows carry `null` (the sample above shows a `session_started` row as it is actually written).
 
 **Errors:** `401` missing/invalid API key · `403` key role below ADMIN
 

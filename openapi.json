@@ -9566,7 +9566,7 @@
           "action": {
             "type": "string",
             "description": "What happened.",
-            "example": "session.create"
+            "example": "session_started"
           },
           "severity": {
             "type": "string",
