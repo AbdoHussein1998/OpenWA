@@ -11,9 +11,9 @@ openwa/
 │   ├── config/                    # Runtime config, env validation, bootstrap security, Swagger
 │   ├── core/                      # Hook and plugin framework
 │   ├── database/                  # TypeORM data sources and migrations
-│   ├── engine/                    # WhatsApp engine abstraction, adapters, identity mapping
+│   ├── engine/                    # WhatsApp engine abstraction, adapters, identity mapping,
+│   │                              # and the built-in engine plugins (engine/builtin/)
 │   ├── modules/                   # API feature modules
-│   └── plugins/                   # Built-in engine and extension plugins
 ├── test/                          # E2E smoke tests and mocks
 ├── dashboard/                     # React/Vite dashboard
 ├── sdk/                           # Client SDKs: go, java, javascript, php, python

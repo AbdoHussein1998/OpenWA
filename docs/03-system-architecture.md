@@ -389,7 +389,7 @@ Trimmed to the load-bearing directories — `src/modules/` holds 31 feature modu
 is common to all of them; the rest of the shape varies. Most pair a `*.controller.ts` with a
 `*.service.ts`, but `events/` is a WebSocket gateway, `mcp/` an MCP server and `queue/` pure BullMQ
 wiring (none of the three has either); `docker/` and `status-store/` are service-only; `health/`,
-`infra/` and `settings/` are controller-only; and 8 modules own an `entities/` directory:
+`health/` and `settings/` are controller-only (`infra/` gained `infra-data.service.ts`); and 9 modules own an `entities/` directory:
 
 ```
 src/
@@ -411,13 +411,11 @@ src/
 │   ├── hooks/
 │   └── agent-tools/
 │
-├── plugins/
-│   └── engines/                # Built-in whatsapp-web.js + baileys engine plugins
-│
 ├── engine/                     # WhatsApp engine abstraction
 │   ├── engine.module.ts
 │   ├── engine.factory.ts
 │   ├── adapters/               # whatsapp-web-js.adapter.ts, baileys.adapter.ts, mappers, stores
+│   ├── builtin/                # Built-in engine plugins: baileys/, whatsapp-web-js/
 │   ├── identity/               # Neutral WhatsApp id helpers + lid-mapping store
 │   ├── interfaces/             # whatsapp-engine.interface.ts
 │   └── types/

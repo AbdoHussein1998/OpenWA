@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - docs/30 states the plugin sandbox's memory-kind boundary: the worker heap cap does not cover Buffer/native allocations, which grow host RSS up to the container limit.
 - docs/25 documents the known wildcard-instance config residue: per-instance isolation covers ingress dispatch only; wildcard/null siblings still merge into the plugin base config.
+- docs/14's Known Upgrade Hazards table covers every breaking change since 0.12.0 (15 missing rows across 0.14-0.20, including both v0.20.0 config opt-outs); the Redis switch steps now name the real queues.
 - docs/10 refreshed: the CI table lists the chart job and the full lint/test lanes, the illustrative Dockerfile no longer models the full-/app chown and missing USER the real image rejects, and the scaling note matches the implemented claim/lease design.
 - `message.received` / `message.sent` WebSocket events shed inline media over `WEBHOOK_MEDIA_INLINE_MAX_BYTES` with the same omitted marker as webhooks; a large blob was broadcast in full to every subscribed socket (and across Redis pub/sub in multi-node).
 - The chat-media orphan sweep's `mediaPath IN (...)` lookup is served by a new partial index (`WHERE mediaPath IS NOT NULL`); it was a full messages-table scan per chunk.
