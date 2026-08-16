@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
+import { executableLines } from './workflow-lines';
 
 /**
  * The published image has no `USER` directive by design: docker-entrypoint.sh starts as root to fix
@@ -21,27 +22,6 @@ type Workflow = { jobs?: Record<string, { steps?: Step[] }> };
 
 function workflowOf(file: string): Workflow {
   return yaml.load(fs.readFileSync(path.join(workflowDir, file), 'utf8')) as Workflow;
-}
-
-/**
- * A `run:` block with its shell comments removed.
- *
- * The gate below exists because the script's only appearance in ci.yml was once inside a comment,
- * and a substring match cannot tell a command from a mention — so `# ./scripts/x.sh disabled` would
- * have satisfied the very check written to catch that. Only executable lines count.
- */
-export function executableLines(run: string): string {
-  return run
-    .split('\n')
-    .map(line => {
-      const hash = line.indexOf('#');
-      if (hash === -1) return line;
-      // A '#' inside quotes is data, not a comment — keep the line whole rather than truncating it.
-      const before = line.slice(0, hash);
-      const quotes = (before.match(/["']/g) ?? []).length;
-      return quotes % 2 === 1 ? line : before;
-    })
-    .join('\n');
 }
 
 function runCommandsOf(file: string): string[] {
