@@ -68,8 +68,17 @@ function ChatSidebar({
     return (
       <div
         key={chat.id}
+        role="button"
+        tabIndex={0}
+        aria-current={isActive ? 'true' : undefined}
         className={`chat-item-card ${isActive ? 'active' : ''}`}
         onClick={() => chatsTab.onSelectChat(chat)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            chatsTab.onSelectChat(chat);
+          }
+        }}
       >
         <ChatAvatar pictureUrl={chatsTab.pictures?.[chat.id]} kind={chat.kind} />
 
@@ -208,8 +217,17 @@ function ChatSidebar({
             channelsTab.channels.map(ch => (
               <div
                 key={ch.id}
+                role="button"
+                tabIndex={0}
+                aria-current={channelsTab.activeChannelId === ch.id ? 'true' : undefined}
                 className={`chat-item-card ${channelsTab.activeChannelId === ch.id ? 'active' : ''}`}
                 onClick={() => channelsTab.onSelectChannel(ch)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    channelsTab.onSelectChannel(ch);
+                  }
+                }}
               >
                 <div className="chat-avatar">
                   <Megaphone size={20} />
@@ -253,8 +271,17 @@ function ChatSidebar({
             statusTab.groups.map(group => (
               <div
                 key={group.contact.id}
+                role="button"
+                tabIndex={0}
+                aria-current={statusTab.activeContactId === group.contact.id ? 'true' : undefined}
                 className={`chat-item-card ${statusTab.activeContactId === group.contact.id ? 'active' : ''}`}
                 onClick={() => statusTab.onSelectContact(group.contact.id)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    statusTab.onSelectContact(group.contact.id);
+                  }
+                }}
               >
                 <div className="chat-avatar">
                   <CircleDashed size={20} />

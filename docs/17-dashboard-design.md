@@ -44,7 +44,11 @@ backed by `localStorage` — there is no Zustand store.
 1. **Minimalist** - Clean, uncluttered interface
 2. **Responsive** - Works on desktop and mobile
 3. **Real-time** - Live updates via WebSocket
-4. **Accessible** - WCAG 2.1 AA compliant
+4. **Accessible** - built to WCAG 2.1 AA as the target. Shipped: full keyboard reachability of
+   the chat/channel/status lists (role, focus, Enter/Space activation) and focus-visible styling.
+   Known gaps being worked down: most form labels are not yet associated with their controls via
+   `htmlFor`/`id`, and a handful of muted/primary color pairs still measure below the AA contrast
+   ratio; both are tracked for remediation. Treat the claim as directional, not certified.
 5. **Dark mode** - Support for light/dark themes
 
 ## 17.2 Information Architecture
