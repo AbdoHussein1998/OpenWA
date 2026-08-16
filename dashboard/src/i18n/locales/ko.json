@@ -566,7 +566,9 @@
     },
     "empty": {
       "title": "로그가 없습니다",
-      "description": "작업이 수행되면 감사 로그가 여기에 표시됩니다"
+      "description": "작업이 수행되면 감사 로그가 여기에 표시됩니다",
+      "filteredTitle": "이 페이지에 일치하는 항목이 없습니다",
+      "filteredDescription": "검색은 현재 페이지만 필터링합니다. 지우거나 페이지를 이동하거나 서버 측 심각도 필터를 사용하세요."
     }
   },
   "messageTester": {

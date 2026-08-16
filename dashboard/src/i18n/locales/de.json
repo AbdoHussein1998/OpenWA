@@ -566,7 +566,9 @@
     },
     "empty": {
       "title": "Keine Protokolle gefunden",
-      "description": "Audit-Protokolle werden hier angezeigt, sobald Aktionen ausgeführt werden"
+      "description": "Audit-Protokolle werden hier angezeigt, sobald Aktionen ausgeführt werden",
+      "filteredTitle": "Keine Treffer auf dieser Seite",
+      "filteredDescription": "Die Suche filtert nur die aktuelle Seite. Leere sie, blättere weiter oder grenze serverseitig über den Severity-Filter ein."
     }
   },
   "messageTester": {
