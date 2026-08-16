@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Both bundled Compose files forward every documented runtime knob; `WEBHOOK_SSRF_REDIRECTS`, `PLUGIN_INSTALL_REQUIRE_PIN` and ~75 other `.env` settings were unreachable in the container. A spec now derives the required list from `.env.example`.
+
 ### Security
 
 - `PUT /sessions/{sessionId}/webhooks/{id}` now enforces the same 16-character webhook-secret floor as create; an empty string still clears signing.
