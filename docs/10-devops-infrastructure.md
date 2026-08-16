@@ -99,24 +99,26 @@ RUN mkdir -p /opt/puppeteer && \
     ln -s "$chrome_path" /usr/local/bin/puppeteer-chrome
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/puppeteer-chrome
 
-# Copy build output
-COPY --from=build /app/dist ./dist
+# Copy build output (the stage above is named "builder")
+COPY --from=builder /app/dist ./dist
 
-# Create non-root user
+# Create the unprivileged user the entrypoint drops to. The real image deliberately has NO
+# `USER openwa` directive and no `chown -R openwa /app /opt/puppeteer`: a full /app chown walks
+# every production dependency (issue #1045: ~35 minutes on a small VPS), and the container itself
+# is the Chromium confinement boundary (cap_drop ALL, read_only rootfs). Instead the image starts
+# as root, the entrypoint chowns ONLY the writable ./data volume and then drops privileges via
+# `exec gosu openwa node dist/main.js` (no-new-privileges blocks any setuid path back up).
 RUN groupadd -r openwa && useradd -r -g openwa openwa
-RUN chown -R openwa:openwa /app /opt/puppeteer
-USER openwa
-
 
 # Expose port
 EXPOSE 2785
 
 # Health check (global API prefix is 'api'; readiness probes both databases)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:2785/api/health/ready || exit 1
 
-# Start app
-CMD ["node", "dist/main.js"]
+# Start app through the privilege-dropping entrypoint
+CMD ["docker-entrypoint.sh", "node", "dist/main.js"]
 ```
 
 ### Docker Compose (Development)
@@ -264,14 +266,14 @@ volumes:
 ```
 
 > [!IMPORTANT]
-> **Keep `replicas: 1`.** OpenWA is a single-process application: live engine state lives in an
-> in-memory `Map` in `EngineRegistry` (`src/engine/engine-registry.service.ts`), written solely by
-> `SessionEngineLifecycle`. Multi-replica is
-> **not** a supported topology — running two replicas against a shared `SESSION_DATA_PATH` makes two
-> browsers write the same WhatsApp LocalAuth directory and **corrupts the session** (forced logout /
-> ban). Shared storage and sticky sessions do **not** make multi-replica safe. See
-> [13 - Horizontal Scaling Guide](./13-horizontal-scaling.md) for the `replicas: 1` stance and the
-> (unimplemented) session-claim design that would be required first.
+> **Keep `replicas: 1` unless you follow [13 - Horizontal Scaling Guide](./13-horizontal-scaling.md)
+> end to end.** Session ownership is now claim/lease-based (`nodeId` owner + `leaseExpiresAt`, per
+> docs/13): two replicas no longer race to start the same session, so the old "two browsers corrupt
+> one WhatsApp LocalAuth directory" failure this warning used to describe can no longer happen.
+> Multi-node still carries real requirements (`NODE_ID`/`NODE_URL` per replica, Redis for queue,
+> cache and cross-replica WebSocket fan-out, Postgres for the data DB, `AUTO_START_SESSIONS=false`)
+> and buys engine capacity, not shared engine state: live engine handles still live in exactly one
+> process's `EngineRegistry` (`src/engine/engine-registry.service.ts`).
 
 ### Helm Chart (Kubernetes)
 
@@ -300,16 +302,17 @@ an illustrative design sketch; the chart is the authoritative artifact.
 SHA image tags to GHCR; `latest` is deliberately not set there and moves only through the separate,
 boot-smoke-gated release workflow.
 
-| Job             | Needs                                       | What it runs                                                                                                                                                                                                 |
-| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `lint`          | —                                           | ESLint, `tsc --noEmit -p tsconfig.json` (full program, so spec files are type-checked too), `format:check`, `check:versions`, `check:dockerignore`, `openapi:check`                                          |
-| `audit`         | —                                           | `npm run check:audit` (root, high/critical with a per-advisory allowlist) + `npm audit --audit-level=high` (dashboard), split out of `lint` so a newly published advisory can't abort the code-quality gates |
-| `test`          | —                                           | `npm test -- --coverage`, `test:scripts`, `test:e2e` (a `redis:7-alpine` service backs the queue-on e2e suite), coverage upload                                                                              |
-| `test-postgres` | —                                           | `npm run build`, then `test:pg-smoke` (migrations + uuid-default) and the Postgres FTS migration spec against a `postgres:16-alpine` service                                                                 |
-| `dashboard`     | —                                           | In `dashboard/`: `lint`, `typecheck`, `i18n:check`, `build`, `test:unit`                                                                                                                                     |
-| `scripts-smoke` | —                                           | `shellcheck` plus the backup/restore smoke test for `scripts/backup.sh` and `scripts/restore.sh`                                                                                                             |
-| `build`         | lint, audit, test, dashboard, scripts-smoke | `npm run build`, uploads the `dist` artifact                                                                                                                                                                 |
-| `docker`        | build, test-postgres                        | Buildx multi-arch build (`linux/amd64,linux/arm64`) with provenance + SBOM attestations; pushes to `ghcr.io/<owner>/<repo>` on push events (fork PRs build both architectures without publishing)            |
+| Job             | Needs                                              | What it runs                                                                                                                                                                                                                                                                 |
+| --------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`          | —                                                  | ESLint, `tsc --noEmit -p tsconfig.json` (full program, so spec files are type-checked too), `format:check`, `check:versions`, `check:dockerignore`, `openapi:check`, `check:sdk-routes`, `check:sdk-coverage`, `check:sdk-events`, `check:sdk-docs`, `check:contract-shapes` |
+| `audit`         | —                                                  | `npm run check:audit` (root, high/critical with a per-advisory allowlist) + `npm audit --audit-level=high` (dashboard), split out of `lint` so a newly published advisory can't abort the code-quality gates                                                                 |
+| `test`          | —                                                  | `npm test -- --coverage`, `test:docs` (repo-file drift specs), `test:scripts`, `test:e2e` (a `redis:7-alpine` service backs the queue-on e2e suite), coverage upload                                                                                                         |
+| `test-postgres` | —                                                  | `npm run build`, then `test:pg-smoke` (migrations + uuid-default) and the Postgres FTS migration spec against a `postgres:16-alpine` service                                                                                                                                 |
+| `dashboard`     | —                                                  | In `dashboard/`: `lint`, `typecheck`, `i18n:check`, `build`, `test:unit`                                                                                                                                                                                                     |
+| `scripts-smoke` | —                                                  | `shellcheck` plus the backup/restore smoke test for `scripts/backup.sh` and `scripts/restore.sh`                                                                                                                                                                             |
+| `chart`         | —                                                  | `helm lint` + template rendering of `charts/openwa`, `actionlint` for the workflows, and a behaviour check on the chart's values (`check:chart`)                                                                                                                             |
+| `build`         | lint, audit, test, dashboard, scripts-smoke, chart | `npm run build`, uploads the `dist` artifact                                                                                                                                                                                                                                 |
+| `docker`        | build, test-postgres                               | Buildx multi-arch build (`linux/amd64,linux/arm64`) with provenance + SBOM attestations, then the non-root drop smoke (`scripts/smoke-test-non-root.sh`); pushes to `ghcr.io/<owner>/<repo>` on push events (fork PRs build both architectures without publishing)           |
 
 Rollout is left to the operator — the repo has no SSH deploy step, no staging/production
 environments and no auto-deploy on merge.
