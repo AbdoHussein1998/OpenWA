@@ -566,7 +566,9 @@
     },
     "empty": {
       "title": "未找到日志",
-      "description": "执行操作后，审计日志将显示在这里"
+      "description": "执行操作后，审计日志将显示在这里",
+      "filteredTitle": "本页无匹配项",
+      "filteredDescription": "搜索仅过滤当前页。请清除搜索、翻页，或使用严重级别筛选在服务端收窄。"
     }
   },
   "messageTester": {

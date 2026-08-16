@@ -566,7 +566,9 @@
     },
     "empty": {
       "title": "Nessun log trovato",
-      "description": "I log di audit appariranno qui man mano che verranno eseguite le azioni"
+      "description": "I log di audit appariranno qui man mano che verranno eseguite le azioni",
+      "filteredTitle": "Nessuna corrispondenza in questa pagina",
+      "filteredDescription": "La ricerca filtra solo la pagina corrente. Cancellala, sfoglia le pagine o usa il filtro severità lato server."
     }
   },
   "messageTester": {

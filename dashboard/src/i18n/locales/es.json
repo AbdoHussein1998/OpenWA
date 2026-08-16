@@ -521,7 +521,9 @@
     },
     "empty": {
       "title": "No se encontraron registros",
-      "description": "Los registros de auditoría aparecerán aquí cuando se realicen acciones"
+      "description": "Los registros de auditoría aparecerán aquí cuando se realicen acciones",
+      "filteredTitle": "Sin coincidencias en esta página",
+      "filteredDescription": "La búsqueda filtra solo la página actual. Bórrala, navega entre páginas o usa el filtro de severidad para acotar en el servidor."
     }
   },
   "messageTester": {
