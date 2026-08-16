@@ -315,6 +315,7 @@ export function MessageTester() {
           batchId: batch.batchId,
           status: 'pending',
           progress: { total: batch.totalMessages, sent: 0, failed: 0, pending: batch.totalMessages, cancelled: 0 },
+          results: [],
         });
         startBatchPolling(session, batch.batchId);
         return;

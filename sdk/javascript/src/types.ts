@@ -595,7 +595,7 @@ export interface BulkMessageResponse {
   batchId: string;
   status: string;
   totalMessages: number;
-  estimatedCompletionTime: string;
+  estimatedCompletionTime?: string;
   statusUrl: string;
 }
 
@@ -610,12 +610,15 @@ export interface BatchProgress {
 
 /** Per-message outcome within a batch result list. */
 export interface BatchMessageResult {
-  chatId?: Jid;
-  status?: string;
+  chatId: Jid;
+  status: BatchMessageStatus;
   messageId?: string;
   sentAt?: string;
   error?: { code: string; message: string };
 }
+
+/** Lifecycle of one recipient's send inside a batch — the `status` of {@link BatchMessageResult}. */
+export type BatchMessageStatus = 'pending' | 'sent' | 'failed' | 'cancelled';
 
 /**
  * Response from `GET /messages/batch/:batchId` (batch status polling) and
@@ -624,12 +627,15 @@ export interface BatchMessageResult {
  */
 export interface BatchStatusResponse {
   batchId: string;
-  status: string;
-  progress?: BatchProgress;
-  results?: BatchMessageResult[];
-  startedAt?: string;
-  completedAt?: string;
+  status: BatchLifecycleStatus;
+  progress: BatchProgress;
+  results: BatchMessageResult[];
+  startedAt?: string | null;
+  completedAt?: string | null;
 }
+
+/** Lifecycle of a whole batch — the `status` of {@link BatchStatusResponse}. */
+export type BatchLifecycleStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 // ── Contact ───────────────────────────────────────────────────────
 

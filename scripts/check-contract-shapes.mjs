@@ -38,6 +38,7 @@ const MAPPINGS = {
     BatchStatusResponse: 'BatchStatusResponseDto',
     BulkMessageContent: 'BulkMessageContentDto',
     BulkMessageItem: 'BulkMessageItemDto',
+    BulkMessageResponse: 'BulkMessageResponseDto',
     CallLinkResponse: 'CallLinkResponseDto',
     ChatHistoryMessage: 'ChatHistoryMessageDto',
     ChatSummary: 'ChatSummaryDto',
@@ -58,23 +59,19 @@ const MAPPINGS = {
   },
   'dashboard/src/services/api.ts': {
     AccountRestriction: 'AccountRestrictionDto',
-    ApiKey: 'ApiKeyResponseDto',
-    BatchMessageResult: 'BatchMessageResultDto',
-    Chat: 'ChatSummaryDto',
     AuditLog: 'AuditLogDto',
     BatchProgress: 'BatchProgressDto',
     BatchStatusResponse: 'BatchStatusResponseDto',
-    BulkMessageItem: 'BulkMessageItemDto',
     Channel: 'ChannelDto',
     ChannelMessage: 'ChannelMessageDto',
     ChatPresence: 'ChatPresenceResponseDto',
     Contact: 'ContactDto',
+    CreatedApiKey: 'ApiKeyCreatedResponseDto',
     EngineHistoryMessage: 'ChatHistoryMessageDto',
     MessageResponse: 'MessageResponseDto',
     ParticipantPresence: 'ParticipantPresenceDto',
     ProfilePictureResponse: 'ProfilePictureResponseDto',
     SearchHit: 'SearchHitDto',
-    Session: 'SessionResponseDto',
     SessionConfig: 'SessionConfigResponseDto',
     Webhook: 'WebhookResponseDto',
   },
@@ -83,13 +80,6 @@ const MAPPINGS = {
 /** Known drift, deliberately not gated yet — each line is a to-adjudicate follow-up. */
 const EXCLUDED = {
   'sdk/javascript/src/types.ts': {
-    AccountRestriction:
-      'hand types expiresAt as string|null; contract declares string — adjudicate which side reflects the runtime',
-    GroupSummary: 'hand types linkedParentJID as string|null; contract declares string — adjudicate',
-    ProfilePictureResponse: 'hand types url as string|null; contract declares string — adjudicate',
-    BatchMessageResult: 'hand marks chatId/status optional; contract declares them required with a status enum',
-    BulkMessageResponse: 'hand requires estimatedCompletionTime; contract declares it optional',
-    BatchStatusResponse: 'hand marks results optional; contract requires it',
     ChatHistoryMessage: 'field-level differences across the 20+-field history shape; adjudicate pair-by-pair',
     ChatSummary:
       'hand marks every field optional and widens timestamp to string|number; contract requires them, timestamp a number',
@@ -99,22 +89,10 @@ const EXCLUDED = {
       'CONTRACT GAP: response schema declares filters as Record<string, never>; fix the backend DTO decorator, then pin',
   },
   'dashboard/src/services/api.ts': {
-    AccountRestriction:
-      'hand types expiresAt as string|null; contract declares string — adjudicate which side reflects the runtime',
-    ProfilePictureResponse: 'hand types url as string|null; contract declares string — adjudicate',
-    SearchHit: 'hand widens direction to string; contract narrows to enum(incoming,outgoing) — narrow the hand type',
-    SessionConfig: 'hand types maxReconnectAttempts as number|null; contract declares number — adjudicate',
-    ApiKey:
-      'hand declares an apiKey field the response never carries (the plaintext is shown once at creation); drop it from the type',
-    AuditLog:
-      'hand marks apiKeyId/apiKeyName/sessionId/sessionName and the action fields optional; contract requires them, and adds metadata/userAgent',
-    BatchStatusResponse: 'hand marks results optional; contract requires it',
-    Channel: 'hand lacks createdAt/description/picture the response carries',
-    Contact: 'hand marks number optional; contract requires it, and hand lacks isBlocked/isMyContact/profilePicUrl',
+    Session:
+      'BY DESIGN, not drift: the wire always carries engineLoaded, but this client clears it to "unknown" after a websocket status event so the action helpers fall back to the status set — the type models client state, not the wire',
     EngineHistoryMessage:
       'hand models a subset of the history shape (13 contract fields missing, fromMe optional); mirror the full shape',
-    Session: 'hand marks engineLoaded optional and lacks connectedAt; contract requires both',
-    Webhook: 'hand declares secret (never returned) and lacks lastTriggeredAt/retryCount',
   },
 };
 
@@ -122,8 +100,18 @@ const EXCLUDED = {
 
 export function parseHandTypes(source) {
   const types = {};
-  const iface = /export interface (\w+)(?: extends \w+)? \{([\s\S]*?)\n\}/g;
-  for (const [, name, body] of source.matchAll(iface)) types[name] = parseMembers(body);
+  const parents = {};
+  const iface = /export interface (\w+)(?: extends (\w+))? \{([\s\S]*?)\n\}/g;
+  for (const [, name, parent, body] of source.matchAll(iface)) {
+    types[name] = parseMembers(body);
+    if (parent) parents[name] = parent;
+  }
+  // An `extends` adds the parent's members underneath the child's own (child wins on collision) —
+  // without this, every inherited field reads as "missing" and response types like the dashboard's
+  // CreatedApiKey (extends ApiKey) can never conform.
+  for (const [name, parent] of Object.entries(parents)) {
+    if (types[parent]) types[name] = { ...types[parent], ...types[name] };
+  }
   return types;
 }
 
@@ -203,6 +191,13 @@ export function handToken(text, types, depth = 0) {
 }
 
 export function schemaToken(node, schemas, depth = 0) {
+  const token = baseSchemaToken(node, schemas, depth);
+  // OpenAPI 3.0 nullability is a SIBLING flag on the node (`nullable: true`), not a type member —
+  // dropping it silently downgraded every honest `string | null` hand type to a false mismatch.
+  return node?.nullable === true && !token.endsWith('|null') ? `${token}|null` : token;
+}
+
+function baseSchemaToken(node, schemas, depth = 0) {
   if (!node || typeof node !== 'object') return 'any';
   if (node.$ref) {
     const target = schemas[node.$ref.split('/').pop()];
