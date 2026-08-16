@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `message.received` / `message.sent` WebSocket events shed inline media over `WEBHOOK_MEDIA_INLINE_MAX_BYTES` with the same omitted marker as webhooks; a large blob was broadcast in full to every subscribed socket (and across Redis pub/sub in multi-node).
+- The chat-media orphan sweep's `mediaPath IN (...)` lookup is served by a new partial index (`WHERE mediaPath IS NOT NULL`); it was a full messages-table scan per chunk.
+- `GET /api/health` audits a presented-but-invalid API key (`API_KEY_AUTH_FAILED`) like every other key-validation surface, rate-bounded per IP; probing through the unthrottled health route was invisible to the audit log.
+- PHP SDK: an empty `headers` map (webhook create/update), an empty `vars` map (send-template), and empty per-item `variables` (send-bulk) encode as JSON `{}`; they serialized as `[]`, which the gateway rejects for map-typed fields.
+- JS SDK: the exports map carries per-condition `types` entries, so a CommonJS TypeScript project under `node16`-family resolution resolves the CJS declarations instead of failing with TS1479.
 - The release (tag) workflow runs `check:contract-shapes` and `test:docs` like the branch CI, and a spec locks every ci.yml lint/test gate command into the release path; both ran only on branches.
 - Both bundled Compose files forward every documented runtime knob; `WEBHOOK_SSRF_REDIRECTS`, `PLUGIN_INSTALL_REQUIRE_PIN` and ~75 other `.env` settings were unreachable in the container. A spec now derives the required list from `.env.example`.
 - Ingress delivery ids BullMQ refuses at enqueue (numeric, `redrive:<uuid>`, `0:`-led) are hashed to a legal job id, namespaced by plugin/instance; the old refusal read as a Redis failure and silently degraded the delivery to inline dispatch with no retry.
