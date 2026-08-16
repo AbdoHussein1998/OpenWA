@@ -13,13 +13,13 @@ public record ChatHistoryMessage(
     String to,
     String chatId,
     String body,
-    String type,
+    MessageType type,
     /** Unix timestamp in seconds. */
     long timestamp,
     boolean fromMe,
     boolean isGroup,
     Boolean isStatusBroadcast,
-    String kind,
+    ChatKind kind,
     /** Disappearing-messages timer on the chat, in seconds; {@code null} when the chat has none. */
     Integer ephemeralDuration,
     /** For group messages, the participant who sent it ({@code from} is the group JID). */

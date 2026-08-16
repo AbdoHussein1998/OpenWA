@@ -10,7 +10,16 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHandTypes, parseObjectToken, schemaToken, comparePair, handToken } from './check-contract-shapes.mjs';
+import {
+  comparePair,
+  handToken,
+  parseGoTypes,
+  parseHandTypes,
+  parseJavaTypes,
+  parseObjectToken,
+  parsePythonTypes,
+  schemaToken,
+} from './check-contract-shapes.mjs';
 
 const handSource = `
 export interface Sample {
@@ -124,4 +133,61 @@ export interface Child extends Base {
 }
 `);
   assert.deepEqual(Object.keys(types.Child), ['id', 'apiKey']);
+});
+
+test('parsePythonTypes: TypedDict totals, NotRequired, aliased Literal enums, inheritance', () => {
+  const src = [
+    'SessionStatus = Literal[',
+    '    "created",',
+    '    "ready",',
+    ']',
+    '',
+    'class Base(TypedDict, total=False):',
+    '    id: str',
+    '',
+    'class Session(Base):',
+    '    name: str',
+    '    status: SessionStatus',
+    '    lastError: NotRequired[str | None]',
+  ].join('\n');
+  const types = parsePythonTypes(src);
+  assert.equal(types.Session.id.optional, true, 'inherited total=False member stays optional');
+  assert.equal(types.Session.name.optional, false);
+  assert.equal(types.Session.status.token, 'enum(created,ready)');
+  assert.equal(types.Session.lastError.optional, true);
+  assert.equal(types.Session.lastError.token, 'string|null');
+});
+
+test('parseGoTypes: omitempty optionality, pointer nullability, const-block enums, required slices', () => {
+  const src = [
+    'type Kind string',
+    '',
+    'const (',
+    '\tKindOne Kind = "one"',
+    '\tKindTwo Kind = "two"',
+    ')',
+    '',
+    'type Sample struct {',
+    '\tName    string   `json:"name,omitempty"`',
+    '\tKind    Kind     `json:"kind"`',
+    '\tItems   []string `json:"items"`',
+    '\tManaged *string  `json:"managed"`',
+    '}',
+  ].join('\n');
+  // Member maps key by JSON tag (the wire name), not the Go identifier.
+  const s = parseGoTypes([src]).Sample;
+  assert.equal(s.name.optional, true);
+  assert.equal(s.kind.token, 'enum(one,two)');
+  assert.equal(s.kind.optional, false);
+  assert.equal(s.items.token, 'array<string>');
+  assert.equal(s.items.optional, false, 'bare slice is a REQUIRED array');
+  assert.equal(s.managed.optional, false, 'pointer without omitempty is required-nullable');
+  assert.equal(s.managed.token, 'string|null');
+});
+
+test('parseJavaTypes: javadoc between components must not drop fields', () => {
+  const src = 'public record Sample(\n    String id,\n    /** documented */\n    Long count) {}\n';
+  const types = parseJavaTypes([src]);
+  assert.deepEqual(Object.keys(types.Sample), ['id', 'count']);
+  assert.equal(types.Sample.count.token, 'number');
 });

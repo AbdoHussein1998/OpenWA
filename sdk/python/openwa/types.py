@@ -10,7 +10,13 @@ Field names mirror the backend DTOs exactly (camelCase JSON).
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, Optional, TypedDict
+
+if TYPE_CHECKING:
+    # Annotations are lazy (`from __future__ import annotations`), so NotRequired — which typing
+    # only ships from 3.11 — is needed exclusively where type checkers look, never at runtime.
+    # typing_extensions rides along with mypy; the runtime dependency set stays httpx-only.
+    from typing_extensions import NotRequired
 
 Jid = str
 SessionStatus = Literal[
@@ -27,6 +33,9 @@ ChatState = Literal["typing", "recording", "paused"]
 MessageDirection = Literal["incoming", "outgoing"]
 DeliveryStatus = Literal["pending", "sent", "delivered", "read", "failed"]
 BulkMessageType = Literal["text", "image", "video", "audio", "document"]
+BatchMessageStatus = Literal["pending", "sent", "failed", "cancelled"]
+BatchLifecycleStatus = Literal["pending", "processing", "completed", "failed", "cancelled"]
+ChatKind = Literal["individual", "group", "channel", "status", "broadcast", "unknown"]
 WebhookEvent = Literal[
     "message.received", "message.sent", "message.ack", "message.failed", "message.revoked",
     "message.reaction", "message.edited", "session.status", "session.qr", "session.authenticated",
@@ -107,14 +116,14 @@ class ParticipantsResult(SuccessResult):
     results: list[ParticipantResult]
 
 
-class ParticipantPresence(TypedDict, total=False):
+class ParticipantPresence(TypedDict):
     """One participant's presence within a chat."""
 
     id: str
     # 'composing'/'recording' mean actively typing or recording; 'paused' means they stopped.
     state: Literal["available", "unavailable", "composing", "recording", "paused"]
     # Unix SECONDS. Absent whenever the contact's privacy settings hide last-seen -- the common case.
-    lastSeen: int
+    lastSeen: NotRequired[int]
 
 
 class ChatPresence(TypedDict, total=False):
@@ -152,7 +161,7 @@ class MuteChannelRequest(TypedDict):
     mute: bool
 
 
-class GroupJoinInfo(TypedDict, total=False):
+class GroupJoinInfo(TypedDict):
     """What an invite code discloses about a group before joining.
 
     Not GroupInfo: a non-member has no participant list, only a count, and only when WhatsApp
@@ -161,11 +170,11 @@ class GroupJoinInfo(TypedDict, total=False):
 
     id: str
     name: str
-    description: str
-    owner: str
+    description: NotRequired[str]
+    owner: NotRequired[str]
     # Unix seconds.
-    createdAt: int
-    participantCount: int
+    createdAt: NotRequired[int]
+    participantCount: NotRequired[int]
 
 
 class CustomLinkPreview(TypedDict, total=False):
@@ -180,7 +189,7 @@ class CustomLinkPreview(TypedDict, total=False):
 # ── Session ───────────────────────────────────────────────────────
 
 
-class AccountRestriction(TypedDict, total=False):
+class AccountRestriction(TypedDict):
     """A restriction WhatsApp has in force on a session's account.
 
     'reachout_timelock' leaves the session connected and existing chats working -- only starting new
@@ -192,23 +201,23 @@ class AccountRestriction(TypedDict, total=False):
     # The engine's own token for the cause, verbatim (TOS_BLOCK, BIZ_QUALITY, ...).
     code: str
     # ISO timestamp when enforcement ends, when WhatsApp states one.
-    expiresAt: str | None
+    expiresAt: NotRequired[str | None]
 
 
-class SessionResponse(TypedDict, total=False):
+class SessionResponse(TypedDict):
     id: str
     name: str
     status: SessionStatus
-    phone: str | None
-    pushName: str | None
-    connectedAt: str | None
-    lastActive: str | None
+    phone: NotRequired[str | None]
+    pushName: NotRequired[str | None]
+    connectedAt: NotRequired[str | None]
+    lastActive: NotRequired[str | None]
     createdAt: str
     updatedAt: str
-    lastError: str | None
+    lastError: NotRequired[str | None]
     # A limit WhatsApp itself has placed on the account, or None when there is none. Distinct from
     # lastError, which describes a fault on the gateway's side.
-    restriction: AccountRestriction | None
+    restriction: NotRequired[AccountRestriction | None]
     # Whether the gateway holds a live engine for this session -- the precondition stop/logout/
     # force-kill require and start refuses. Not derivable from status: 'disconnected' covers both a
     # session mid automatic-reconnect (engine present) and one stopped with no engine. Absent from a
@@ -558,12 +567,12 @@ class BulkMessageContent(TypedDict, total=False):
     caption: str
 
 
-class BulkMessageItem(TypedDict, total=False):
+class BulkMessageItem(TypedDict):
     # chatId/type/content required; variables optional.
     chatId: Jid
     type: BulkMessageType
     content: BulkMessageContent
-    variables: dict[str, str]
+    variables: NotRequired[dict[str, str]]
 
 
 class BulkOptions(TypedDict, total=False):
@@ -586,7 +595,7 @@ class BulkMessageResponse(TypedDict):
     batchId: str
     status: str
     totalMessages: int
-    estimatedCompletionTime: str
+    estimatedCompletionTime: NotRequired[str]
     statusUrl: str
 
 
@@ -595,15 +604,15 @@ class BatchError(TypedDict, total=False):
     message: str
 
 
-class BatchMessageResult(TypedDict, total=False):
+class BatchMessageResult(TypedDict):
     chatId: Jid
-    status: str
-    messageId: str
-    sentAt: str
-    error: BatchError
+    status: BatchMessageStatus
+    messageId: NotRequired[str]
+    sentAt: NotRequired[str]
+    error: NotRequired[BatchError]
 
 
-class BatchProgress(TypedDict, total=False):
+class BatchProgress(TypedDict):
     total: int
     sent: int
     failed: int
@@ -611,18 +620,18 @@ class BatchProgress(TypedDict, total=False):
     cancelled: int
 
 
-class BatchStatusResponse(TypedDict, total=False):
+class BatchStatusResponse(TypedDict):
     """Response from ``GET /messages/batch/:batchId`` and the cancel endpoint.
 
     Distinct from :class:`BulkMessageResponse` (the send-bulk acknowledgement).
     """
 
     batchId: str
-    status: str
+    status: BatchLifecycleStatus
     progress: BatchProgress
     results: list[BatchMessageResult]
-    startedAt: str
-    completedAt: str
+    startedAt: NotRequired[str | None]
+    completedAt: NotRequired[str | None]
 
 
 # ── Contact ───────────────────────────────────────────────────────
@@ -668,22 +677,22 @@ class ContactPhoneResponse(TypedDict):
 # ── Group ─────────────────────────────────────────────────────────
 
 
-class GroupParticipant(TypedDict, total=False):
+class GroupParticipant(TypedDict):
     id: Jid
     number: str
-    name: str
+    name: NotRequired[str]
     isAdmin: bool
     isSuperAdmin: bool
 
 
-class GroupSummary(TypedDict, total=False):
+class GroupSummary(TypedDict):
     """Item returned by ``GET /sessions/:id/groups`` (the slim list shape)."""
 
     id: Jid
     name: str
-    participantsCount: int
-    isAdmin: bool
-    linkedParentJID: str | None
+    participantsCount: NotRequired[int]
+    isAdmin: NotRequired[bool]
+    linkedParentJID: NotRequired[str | None]
 
 
 GroupMembershipRequestMethod = Literal["invite_link", "non_admin_add", "linked_group_join"]
@@ -702,20 +711,24 @@ class GroupMembershipRequest(TypedDict, total=False):
     requestedAt: float
 
 
-class GroupInfo(TypedDict, total=False):
+class GroupInfo(TypedDict):
     """Full detail returned by ``GET /sessions/:id/groups/:groupId``."""
 
     id: Jid
     name: str
-    description: str | None
-    owner: Jid | None
-    createdAt: int
+    description: NotRequired[str]
+    owner: NotRequired[Jid]
+    createdAt: NotRequired[int]
     participants: list[GroupParticipant]
-    isReadOnly: bool
-    isAnnounce: bool
-    linkedParentJID: str | None
+    isReadOnly: NotRequired[bool]
+    isAnnounce: NotRequired[bool]
+    linkedParentJID: NotRequired[str | None]
 
 
+    announce: NotRequired[bool]
+    ephemeralSeconds: NotRequired[int]
+    locked: NotRequired[bool]
+    memberAddMode: NotRequired[Literal["all", "admins"]]
 class CreateGroupRequest(TypedDict):
     name: str
     participants: list[Jid]
@@ -803,16 +816,16 @@ class UpdateWebhookRequest(CreateWebhookRequest, total=False):
     active: bool
 
 
-class WebhookResponse(TypedDict, total=False):
+class WebhookResponse(TypedDict):
     id: str
     sessionId: str
     url: str
     events: list[WebhookEvent]
     active: bool
-    filters: WebhookFilters | None
+    filters: NotRequired[WebhookFilters | None]
     retryCount: int
     # ISO timestamp of the last delivery attempt, or None if never triggered.
-    lastTriggeredAt: str | None
+    lastTriggeredAt: NotRequired[str | None]
     createdAt: str
     updatedAt: str
     # NOTE: the server deliberately omits ``secret`` and ``headers`` from reads.
@@ -827,15 +840,15 @@ class WebhookTestResult(TypedDict, total=False):
 # ── Chat ──────────────────────────────────────────────────────────
 
 
-class ChatSummary(TypedDict, total=False):
+class ChatSummary(TypedDict):
     id: Jid
-    name: str | None
+    name: str
     isGroup: bool
     unreadCount: int
     # Server returns a plain preview string, not a message object.
-    lastMessage: str
+    lastMessage: NotRequired[str]
     timestamp: str | int
-    kind: str
+    kind: ChatKind
 
 
 class MarkChatRequest(TypedDict):
@@ -881,7 +894,7 @@ class StatusRecord(TypedDict, total=False):
 # Result of a status POST (``send-text``/``send-image``/``send-video``/``send-voice``). Mirrors the backend
 # ``StatusResult``, which is deliberately NOT ``Status``: the acknowledgement carries the id and
 # timing only, with no contact or media. ``statusId`` is the handle ``delete()`` takes.
-class StatusResult(TypedDict, total=False):
+class StatusResult(TypedDict):
     statusId: str
     # ISO 8601 timestamp of the post.
     timestamp: str

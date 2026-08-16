@@ -147,7 +147,7 @@ type WebhookResponse struct {
 	Events          []string        `json:"events"`
 	Active          bool            `json:"active"`
 	Filters         *WebhookFilters `json:"filters,omitempty"`
-	RetryCount      int             `json:"retryCount,omitempty"`
+	RetryCount      int             `json:"retryCount"`
 	LastTriggeredAt *string         `json:"lastTriggeredAt,omitempty"`
 	CreatedAt       string          `json:"createdAt"`
 	UpdatedAt       string          `json:"updatedAt"`

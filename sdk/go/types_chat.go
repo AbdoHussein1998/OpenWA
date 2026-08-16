@@ -4,13 +4,13 @@ import "net/url"
 
 // ChatSummary is a chat-list entry.
 type ChatSummary struct {
-	ID          string  `json:"id"`
-	Name        *string `json:"name,omitempty"`
-	IsGroup     bool    `json:"isGroup"`
-	UnreadCount int     `json:"unreadCount"`
-	LastMessage string  `json:"lastMessage,omitempty"`
-	Timestamp   any     `json:"timestamp,omitempty"`
-	Kind        string  `json:"kind"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	IsGroup     bool     `json:"isGroup"`
+	UnreadCount int      `json:"unreadCount"`
+	LastMessage string   `json:"lastMessage,omitempty"`
+	Timestamp   int64    `json:"timestamp"`
+	Kind        ChatKind `json:"kind"`
 }
 
 // SetOwnPresenceRequest is the body for SessionsService.SetOnlinePresence. Available reports
