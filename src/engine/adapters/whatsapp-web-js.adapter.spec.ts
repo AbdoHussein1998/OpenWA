@@ -39,6 +39,18 @@ import { LabelNotFoundError } from '../../common/errors/label-not-found.error';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { fetch as undiciFetch } from 'undici';
 
+// Allowlisted hosts are PINNED to their DNS answer (ssrf-guard pins allowlisted hosts to their DNS answers), so the specs that exercise
+// the SSRF_ALLOWED_HOSTS escape-hatch need a deterministic resolver. Default answers are PUBLIC
+// addresses — the non-allowlisted paths keep behaving exactly as they did with the real resolver.
+jest.mock('dns/promises', () => {
+  const actual = jest.requireActual<typeof import('dns/promises')>('dns/promises');
+  return {
+    __esModule: true,
+    ...actual,
+    lookup: jest.fn(() => Promise.resolve([{ address: '93.184.216.34', family: 4 }])),
+  };
+});
+
 // loadRemoteMedia now fetches bytes through the SSRF-pinned path (undici fetch), then builds the
 // MessageMedia locally — so mock undici fetch, not MessageMedia.fromUrl.
 jest.mock('undici', () => {

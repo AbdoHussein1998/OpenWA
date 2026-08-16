@@ -128,6 +128,7 @@ describe('assertSafeFetchUrl — SSRF_ALLOWED_HOSTS escape-hatch', () => {
 
   it('allows an internal host that is explicitly allowlisted (case-insensitive)', async () => {
     process.env.SSRF_ALLOWED_HOSTS = 'Localhost, minio';
+    (dnsPromises.lookup as jest.Mock).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
     await expect(assertSafeFetchUrl('http://localhost:9000/bucket/x.png')).resolves.toBeUndefined();
     await expect(assertSafeFetchUrl('http://minio:9000/x.png')).resolves.toBeUndefined();
   });
@@ -200,9 +201,15 @@ describe('resolveSafeFetchTarget', () => {
     await expect(resolveSafeFetchTarget('https://8.8.8.8/hook')).resolves.toBeNull();
   });
 
-  it('returns null for an allowlisted host (trusted, no pin needed)', async () => {
+  it('pins an allowlisted host to its resolved addresses (exemption from the BLOCK check, not from pinning)', async () => {
+    // The rebinding window: validation resolves the name, then fetch re-resolves — and a rebind
+    // flips the second answer. Allowlisted hosts now return their resolved addresses so the
+    // connection is pinned to exactly what was vetted, like every other DNS name.
     process.env.SSRF_ALLOWED_HOSTS = 'minio';
-    await expect(resolveSafeFetchTarget('http://minio:9000/x.png')).resolves.toBeNull();
+    (dnsPromises.lookup as jest.Mock).mockResolvedValueOnce([{ address: '10.0.0.9', family: 4 }]);
+    await expect(resolveSafeFetchTarget('http://minio:9000/x.png')).resolves.toEqual([
+      { address: '10.0.0.9', family: 4 },
+    ]);
   });
 
   it('throws for a blocked literal address', async () => {
@@ -291,8 +298,22 @@ describe('withSafeFetch (guarded + pinned fetch)', () => {
 
     expect(result).toBe('ok');
     const [, init] = (undiciFetch as jest.Mock).mock.calls[0] as [string, { redirect: string; dispatcher: unknown }];
-    expect(init.redirect).toBe('follow');
+    // disabling SSRF protection is not opting into redirect-chasing — fail loudly instead.
+    expect(init.redirect).toBe('error');
     expect(init.dispatcher).toBeUndefined();
+  });
+
+  it('an unguarded fetch follows redirects ONLY with WEBHOOK_SSRF_REDIRECTS=true', async () => {
+    (undiciFetch as jest.Mock).mockResolvedValue({ status: 200, type: 'basic' });
+    const use = jest.fn(() => 'ok');
+    process.env.WEBHOOK_SSRF_REDIRECTS = 'true';
+    try {
+      await withSafeFetch('http://10.0.0.5/hook', {}, use, { guard: false });
+      const [, init] = (undiciFetch as jest.Mock).mock.calls[0] as [string, { redirect: string }];
+      expect(init.redirect).toBe('follow');
+    } finally {
+      delete process.env.WEBHOOK_SSRF_REDIRECTS;
+    }
   });
 
   it('follows redirects hop-by-hop, re-validating each target and delivering the final 200 (download path)', async () => {

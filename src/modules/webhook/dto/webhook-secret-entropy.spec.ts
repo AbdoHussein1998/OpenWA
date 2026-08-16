@@ -2,7 +2,7 @@ import { validate } from 'class-validator';
 import { CreateWebhookDto } from './webhook.dto';
 
 /**
- * the HMAC secret signs every delivery this webhook fires. A short secret is recoverable
+ * The HMAC secret signs every delivery this webhook fires. A short secret is recoverable
  * from one observed signature, which turns the signature from an integrity check into a forging
  * tool — 16 characters is the floor, not a recommendation.
  */
