@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Ingress delivery ids BullMQ refuses at enqueue (numeric, `redrive:<uuid>`, `0:`-led) are hashed to a legal job id, namespaced by plugin/instance; the old refusal read as a Redis failure and silently degraded the delivery to inline dispatch with no retry.
+
 ### Security
 
 - `PUT /sessions/{sessionId}/webhooks/{id}` now enforces the same 16-character webhook-secret floor as create; an empty string still clears signing.
