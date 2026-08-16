@@ -1,4 +1,4 @@
-import { expectedSha256FromUrl, assertDownloadSha256, assertPluginInstallUrl } from './plugin-download';
+import { assertDownloadSha256, assertPluginInstallUrl, expectedSha256FromUrl } from './plugin-download';
 import { createHash } from 'crypto';
 
 /**
@@ -82,5 +82,43 @@ describe('assertPluginInstallUrl', () => {
   it('leaves unparseable URLs and other schemes to the SSRF guard (no duplicate rejection here)', () => {
     expect(() => assertPluginInstallUrl('not a url')).not.toThrow();
     expect(() => assertPluginInstallUrl('ftp://h/pkg.zip')).not.toThrow();
+  });
+});
+
+// a URL install EXECUTES third-party code — https authenticates the channel, not the bytes.
+// In production (or wherever PLUGIN_INSTALL_REQUIRE_PIN says so) the pin is mandatory.
+describe('assertPluginInstallUrl — pin required in production', () => {
+  const env = { ...process.env };
+  afterEach(() => {
+    process.env = { ...env };
+  });
+
+  it('rejects an unpinned https URL when NODE_ENV=production', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.PLUGIN_INSTALL_REQUIRE_PIN;
+    expect(() => assertPluginInstallUrl('https://release.example.com/pkg.zip')).toThrow(/integrity pin/);
+  });
+
+  it('accepts the same URL with a pin', () => {
+    process.env.NODE_ENV = 'production';
+    expect(() => assertPluginInstallUrl('https://release.example.com/pkg.zip#sha256=' + 'a'.repeat(64))).not.toThrow();
+  });
+
+  it('keeps the lighter default outside production', () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.PLUGIN_INSTALL_REQUIRE_PIN;
+    expect(() => assertPluginInstallUrl('https://release.example.com/pkg.zip')).not.toThrow();
+  });
+
+  it('PLUGIN_INSTALL_REQUIRE_PIN=true enforces the pin regardless of NODE_ENV', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.PLUGIN_INSTALL_REQUIRE_PIN = 'true';
+    expect(() => assertPluginInstallUrl('https://release.example.com/pkg.zip')).toThrow(/integrity pin/);
+  });
+
+  it('PLUGIN_INSTALL_REQUIRE_PIN=false lifts the requirement even in production (operator opt-out)', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.PLUGIN_INSTALL_REQUIRE_PIN = 'false';
+    expect(() => assertPluginInstallUrl('https://release.example.com/pkg.zip')).not.toThrow();
   });
 });
