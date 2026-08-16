@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The dashboard's manual WebSocket retry re-registers the message handler on the fresh socket; the handler effect only re-ran on events changes, so a reconnect left the new socket silent while reporting connected.
+- The Chats page honours the system dark theme: four dark-palette rules (outgoing bubble, document media, quote box, action menus) only matched an explicit data-theme and left the default 'system' theme rendering light popups inside a dark thread.
 - The Logs page resets to page 1 on a new search and its empty state distinguishes "no matches on this page" (search filters the fetched page only) from "no logs yet".
 - docs/06 documents every route-specific status code the contract declares (409/413/415/422/429/501/502/503; 153 missing code mentions across ~90 sections), corrects the catalog routes to Baileys-implements, the profile refusals to 403, scope violations to 401, and the phantom channel 422; a spec now derives the required codes from openapi.json.
 - docs/06 scopes the audit log honestly: message/webhook actions are never emitted (their tables own that data), the request-actor columns are documented as null, and the OpenAPI example uses a real snake_case action.

@@ -152,6 +152,11 @@ export function useWebSocket(events: WebSocketEvents = {}) {
   // `reconnect_failed` never fires). Lets the UI show a "connection lost" indicator + a manual
   // retry instead of silently going stale.
   const [connectionFailed, setConnectionFailed] = useState(false);
+  // Bumped every time connect() creates a NEW socket instance. The envelope-handler effect below
+  // captures socketRef.current when it runs; without this epoch in its deps, a manual reconnect()
+  // (which swaps in a fresh socket) leaves the new socket with NO 'message' listener while
+  // isConnected still reports true - realtime events stop arriving with no signal anywhere.
+  const [socketEpoch, setSocketEpoch] = useState(0);
 
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return;
@@ -164,6 +169,7 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       return;
     }
 
+    setSocketEpoch(epoch => epoch + 1);
     socketRef.current = io(`${SOCKET_URL}/events`, {
       autoConnect: true,
       reconnection: true,
@@ -355,7 +361,9 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     return () => {
       socket.off('message', handleIncomingMessage);
     };
-  }, [events]);
+    // socketEpoch re-runs this effect for the socket a manual reconnect() swapped in; the cleanup
+    // above detaches the handler from the dead instance first.
+  }, [events, socketEpoch]);
 
   return { isConnected, connectionFailed, reconnect, subscribe, unsubscribe };
 }
