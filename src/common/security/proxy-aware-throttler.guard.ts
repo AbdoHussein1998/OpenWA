@@ -1,6 +1,9 @@
 import { ExecutionContext, Injectable } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { resolveClientIp, RequestLike } from '../utils/ip';
+import { createLogger } from '../services/logger.service';
+
+const logger = createLogger('ProxyAwareThrottlerGuard');
 
 /**
  * The single metadata key a bare `@SkipThrottle()` writes.
@@ -25,11 +28,35 @@ const LIBRARY_DEFAULT_SKIP_KEY = 'THROTTLER:SKIPdefault';
  */
 @Injectable()
 export class ProxyAwareThrottlerGuard extends ThrottlerGuard {
+  /**
+   * The shared-bucket condition is deployment-wide, so the warning fires once per guard instance.
+   * In practice that is once per process: this guard runs as the singleton APP_GUARD. The only other
+   * instance is InstanceThrottlerGuard, whose defensive super.getTracker fallback (missing route
+   * params) is unreachable on the real ingress route, so at most one extra line could ever appear.
+   */
+  private warnedSharedProxyBucket = false;
+
   protected getTracker(req: Record<string, unknown>): Promise<string> {
     const trustedProxies = (process.env.TRUSTED_PROXIES || '')
       .split(',')
       .map(proxy => proxy.trim())
       .filter(Boolean);
+    // An X-Forwarded-For header with an empty TRUSTED_PROXIES is the silent self-DoS this guard
+    // exists to prevent: every client collapses onto the proxy's socket address, so all traffic
+    // shares ONE bucket per tier and one abuser rate-limits everyone. The header itself must stay
+    // untrusted (spoofable), so the fix is operator-side: name the proxy in TRUSTED_PROXIES. Warn
+    // once instead of per request; the stock-resolve fallback below is still the safe default.
+    if (trustedProxies.length === 0 && !this.warnedSharedProxyBucket) {
+      const headers = (req.headers ?? {}) as Record<string, unknown>;
+      if (headers['x-forwarded-for'] !== undefined) {
+        this.warnedSharedProxyBucket = true;
+        logger.warn(
+          'X-Forwarded-For is present but TRUSTED_PROXIES is empty: every client shares one ' +
+            'rate-limit bucket keyed on the proxy address (and per-key IP allowlists see the proxy ' +
+            'too). Set TRUSTED_PROXIES to the proxy address/subnet to key limits per client.',
+        );
+      }
+    }
     return Promise.resolve(resolveClientIp(req as unknown as RequestLike, trustedProxies));
   }
 
