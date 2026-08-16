@@ -2140,7 +2140,7 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
   // the finished flags AFTER the await — so a late encode does not resurrect a finished adapter to
   // QR_READY, does not overwrite qrCode with a stale value, and does not re-fire the publish/webhook
   // callback. A native 'disconnected' emitted mid-encode latches disconnectReported synchronously (via
-  // setStatus(DISCONNECTED)) and is exactly the post-await-unsafe window F-06 names.
+  // setStatus(DISCONNECTED)) and is exactly the post-await-unsafe window the reconnect latch exists to close.
   it('drops a QR whose encode finishes after the source client disconnects', async () => {
     let resolveEncode!: (value: string) => void;
     const encodePending = new Promise<string>(resolve => {

@@ -1,4 +1,4 @@
-import { IngressService, extractConversationId } from './ingress.service';
+import { IngressService, extractConversationId, redactSensitiveHeaders } from './ingress.service';
 import { EngineStatus } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createHmac } from 'node:crypto';
 
@@ -29,6 +29,45 @@ function deps(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe('redactSensitiveHeaders (persisted ingress payloads)', () => {
+  it('redacts credential and signature headers, keeps the rest verbatim', () => {
+    const out = redactSensitiveHeaders({
+      authorization: 'Bearer eyJhbGciOi',
+      'x-hub-signature-256': 'sha256=abc',
+      cookie: 'session=secret',
+      'x-delivery': 'd1',
+      'content-type': 'application/json',
+    });
+    expect(out.authorization).toBe('[redacted]');
+    expect(out['x-hub-signature-256']).toBe('[redacted]');
+    expect(out.cookie).toBe('[redacted]');
+    expect(out['x-delivery']).toBe('d1');
+    expect(out['content-type']).toBe('application/json');
+  });
+
+  it('the persisted payload carries redacted headers (wiring, not just the helper)', async () => {
+    const recordOrSkip = jest.fn().mockResolvedValue(true);
+    const d = deps();
+    d.events.recordOrSkip = recordOrSkip;
+    const svc = new IngressService(d);
+    await svc.handle({
+      pluginId: 'chatwoot',
+      instanceId: 'acct1',
+      route: 'chatwoot',
+      method: 'POST',
+      headers: { 'x-delivery': 'd1', authorization: 'Bearer tok' },
+      query: {},
+      rawBody: '{}',
+    });
+    // jest's mock.calls typing erodes through the deps() override — one explicit cast at the
+    // boundary beats a chain of eslint suppressions.
+    const calls = recordOrSkip.mock.calls as unknown as [[{ payload: { headers: Record<string, string> } }]];
+    const recorded = calls[0][0];
+    expect(recorded.payload.headers.authorization).toBe('[redacted]');
+    expect(recorded.payload.headers['x-delivery']).toBe('d1');
+  });
+});
 
 describe('IngressService.handle', () => {
   const req = {

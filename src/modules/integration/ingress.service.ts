@@ -163,7 +163,14 @@ export class IngressService {
     const defaultDedupHeader = route.signature.scheme === 'standard-webhooks' ? 'webhook-id' : 'x-delivery';
     const dedupHeader = (route.dedupHeader ?? route.signature.dedupHeader ?? defaultDedupHeader).toLowerCase();
     const deliveryId = req.headers[dedupHeader] ?? deriveDeliveryId(req);
-    const payload = { headers: req.headers, query: req.query, body: req.rawBody, rawBody: req.rawBody };
+    // Provider request headers persist with the event (redrive/debugging); credentials must not.
+    // Signature headers are re-derivable, auth material is not — redact before the first write.
+    const payload = {
+      headers: redactSensitiveHeaders(req.headers),
+      query: req.query,
+      body: req.rawBody,
+      rawBody: req.rawBody,
+    };
     const isNew = await this.deps.events.recordOrSkip({
       instanceId: req.instanceId,
       pluginId: req.pluginId,
@@ -257,4 +264,29 @@ export function extractConversationId(
     }
   }
   return undefined;
+}
+
+/**
+ * Header names whose VALUES must never reach the persisted event payload: bearer/basic
+ * credentials, cookies, and the provider signature headers (recomputable from the raw body, and
+ * useless for redrive — the retry re-signs). The names survive so operators can still see WHICH
+ * scheme the provider used.
+ */
+const SENSITIVE_INGRESS_HEADERS = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'x-hub-signature',
+  'x-hub-signature-256',
+  'x-signature',
+  'x-signature-ed25519',
+  'x-webhook-signature',
+]);
+
+export function redactSensitiveHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    out[name] = SENSITIVE_INGRESS_HEADERS.has(name.toLowerCase()) ? '[redacted]' : value;
+  }
+  return out;
 }

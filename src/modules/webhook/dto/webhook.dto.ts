@@ -1,16 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
   IsString,
   IsUrl,
-  IsArray,
-  IsOptional,
-  IsBoolean,
-  IsInt,
-  Min,
   Max,
   MaxLength,
-  ArrayMinSize,
-  IsIn,
+  Min,
+  MinLength,
 } from 'class-validator';
 import { Expose, plainToInstance } from 'class-transformer';
 import { Webhook } from '../entities/webhook.entity';
@@ -127,6 +128,9 @@ export class CreateWebhookDto {
   })
   @IsOptional()
   @IsString()
+  // A short secret signs webhooks badly: HMAC-SHA256 over a 4-char key is brute-forcible from one
+  // observed signature. 16 is the floor, not a recommendation.
+  @MinLength(16)
   @MaxLength(255)
   secret?: string;
 

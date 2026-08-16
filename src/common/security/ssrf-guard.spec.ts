@@ -836,3 +836,23 @@ describe('withSafeFetch followRedirects validates every hop over real sockets', 
     }
   });
 });
+
+// OS connect errors name the receiver's host:port — internal topology that must not ride a
+// delivery-failure row out to API consumers. The code stays (actionable), the address goes.
+describe('redactSsrfError redacts network topology', () => {
+  it('strips host:port from connect errors', () => {
+    const out = redactSsrfError(new Error('connect ECONNREFUSED 10.0.0.1:443'));
+    expect(out).toContain('ECONNREFUSED');
+    expect(out).not.toContain('10.0.0.1');
+  });
+
+  it('strips host:port from DNS failures too', () => {
+    const out = redactSsrfError(new Error('getaddrinfo ENOTFOUND internal.receiver.svc.local'));
+    expect(out).toContain('ENOTFOUND');
+    expect(out).not.toContain('internal.receiver.svc.local');
+  });
+
+  it('leaves ordinary operator-actionable messages untouched', () => {
+    expect(redactSsrfError(new Error('socket hang up'))).toBe('socket hang up');
+  });
+});

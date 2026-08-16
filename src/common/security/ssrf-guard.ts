@@ -32,7 +32,13 @@ export function redactSsrfError(error: unknown, logger?: { warn: (message: strin
     logger?.warn(`SSRF guard blocked ${site ?? 'an outbound fetch'}: ${error.message}`);
     return SSRF_BLOCKED_CLIENT_MESSAGE;
   }
-  return error instanceof Error ? error.message : String(error);
+  // OS-level connect errors name the receiver's host:port (connect ECONNREFUSED 10.0.0.1:443) —
+  // internal topology an API consumer has no business reading out of a delivery-failure row.
+  // The error code stays (actionable), the address goes.
+  return (error instanceof Error ? error.message : String(error)).replace(
+    /\b(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EHOSTUNREACH|ECONNRESET|EAI_AGAIN)\s+[\w.-]+(?::\d+)?(?=\s|$)/g,
+    '$1 [redacted]',
+  );
 }
 
 /**

@@ -78,6 +78,10 @@ export class IngressController {
       rawBody,
     });
     if (result.headers) res.set(result.headers);
+    // Both reflections echo provider-controlled strings (hub.challenge, the ack template). Express
+    // types a bare send() as text/html, which turns a reflection into XSS material on this origin —
+    // force text/plain so the browser refuses to parse it.
+    res.type('text/plain');
     res.status(result.status).send(result.body ?? '');
   }
 }
