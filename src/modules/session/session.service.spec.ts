@@ -3906,7 +3906,7 @@ describe('SessionService', () => {
       // The emit lives AFTER the dedup gate. A re-fire that hits the UNIQUE(sessionId, waMessageId)
       // constraint must not emit message:persisted — no row was durably stored on this attempt.
       const callbacks = await startAndCaptureCallbacks();
-      // Emulate the SQLite UNIQUE-violation phrasing that `isUniqueConstraintError` matches via regex.
+      // Emulate the SQLite UNIQUE-violation phrasing that `isUniqueViolation` matches via regex.
       (messageRepository.insert as jest.Mock).mockRejectedValueOnce(
         new Error('UNIQUE constraint failed: messages.sessionId, messages.waMessageId'),
       );
