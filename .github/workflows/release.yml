@@ -117,6 +117,12 @@ jobs:
       - name: Check SDK docs cover the shipped client surface
         run: npm run check:sdk-docs
 
+      # The typed-SDK wire-shape gate: the last lane gate ci.yml runs that this workflow lacked, so
+      # a tag could publish SDK builds whose mapped response types had drifted from the contract
+      # while the branch path would have caught it.
+      - name: Check contract shapes across the typed SDKs
+        run: npm run check:contract-shapes
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -152,6 +158,11 @@ jobs:
       # absent from the tag path entirely.
       - name: Run script unit tests
         run: npm run test:scripts
+
+      # The repo-file drift specs (docs, trees, gates) run on the branch path; a tag is the one
+      # place that must not be verified less than the branch it came from.
+      - name: Run docs unit tests
+        run: npm run test:docs
 
       - name: Run e2e smoke tests
         run: npm run test:e2e
