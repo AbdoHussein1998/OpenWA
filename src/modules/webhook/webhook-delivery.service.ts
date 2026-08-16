@@ -10,6 +10,7 @@ import { Webhook } from './entities/webhook.entity';
 import { WebhookDeliveryFailure } from './entities/webhook-delivery-failure.entity';
 import { recordWebhookDeliveryFailure, statusCodeFromError } from './utils/record-delivery-failure';
 import { createLogger } from '../../common/services/logger.service';
+import { DEFAULT_WEBHOOK_MEDIA_INLINE_MAX_BYTES, shedInlineMedia } from '../../common/utils/inline-media';
 import { incrementWebhookDeliveryFailures } from '../../common/metrics/webhook-delivery-metrics';
 import { QUEUE_NAMES } from '../queue/queue-names';
 import { generateIdempotencyKey, generateDeliveryId } from './utils/idempotency.util';
@@ -46,13 +47,9 @@ export interface WebhookJobData {
  */
 const DEFAULT_WEBHOOK_MAX_PAYLOAD_BYTES = 1024 * 1024;
 
-/**
- * Decoded-byte cap for inline base64 media in webhook payloads. A larger blob is replaced with the
- * engine's omitted-marker shape ({ mimetype, filename?, omitted: true, sizeBytes }) before the
- * payload is cloned per webhook or queued, so fan-out and Redis retention never copy it. Default
- * 1 MiB; override with WEBHOOK_MEDIA_INLINE_MAX_BYTES (0 = never inline media).
- */
-const DEFAULT_WEBHOOK_MEDIA_INLINE_MAX_BYTES = 1024 * 1024;
+// Decoded-byte cap for inline base64 media and the shed helper live in common/utils/inline-media:
+// the WebSocket gateway sheds message-event payloads with the SAME cap and marker, so the two
+// outbound sinks stay one contract.
 
 /**
  * How long shutdown waits for in-flight direct deliveries (and their dead-letter bookkeeping) to
@@ -184,7 +181,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     // payload.data in place and must not bleed into siblings — but after shedding it is small.
     const baseData =
       matchingWebhooks.length > 0
-        ? this.shedInlineMedia(
+        ? shedInlineMedia(
             data,
             this.configService.get<number>('webhook.mediaInlineMaxBytes', DEFAULT_WEBHOOK_MEDIA_INLINE_MAX_BYTES),
           )
@@ -348,7 +345,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
         // Size-gated body shedding: over budget, strip ANY remaining inline media blob (threshold
         // 0 — the marker form keeps the event deliverable) and re-check, instead of dropping the
         // event or queueing a giant payload.
-        const shedData = this.shedInlineMedia(finalPayload.data, 0);
+        const shedData = shedInlineMedia(finalPayload.data, 0);
         if (shedData !== finalPayload.data) {
           finalPayload.data = shedData;
           body = JSON.stringify(finalPayload);
@@ -713,34 +710,6 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
       incrementWebhookDeliveryFailures();
       throw error;
     }
-  }
-
-  /**
-   * Replace an over-size inline base64 blob on `data.media` with the engine's omitted-marker shape
-   * ({ mimetype, filename?, omitted: true, sizeBytes }) — the same contract the inbound media cap
-   * and the status store already emit — so the multi-MB blob is never cloned per webhook, queued
-   * into Redis, or POSTed. Returns the ORIGINAL object when nothing was shed (zero-copy fast path);
-   * otherwise a shallow copy with only `media` replaced, so the caller's event data is never
-   * mutated. `maxBytes` compares against the DECODED size; 0 sheds any inline blob.
-   */
-  private shedInlineMedia(data: Record<string, unknown>, maxBytes: number): Record<string, unknown> {
-    if (!data || typeof data !== 'object') return data;
-    const media = data.media as
-      { mimetype?: unknown; filename?: unknown; data?: unknown; omitted?: unknown } | undefined;
-    if (!media || typeof media !== 'object' || typeof media.data !== 'string' || media.data.length === 0) {
-      return data;
-    }
-    const sizeBytes = Buffer.byteLength(media.data, 'base64');
-    if (sizeBytes <= maxBytes) return data;
-    return {
-      ...data,
-      media: {
-        mimetype: media.mimetype,
-        ...(typeof media.filename === 'string' ? { filename: media.filename } : {}),
-        omitted: true,
-        sizeBytes,
-      },
-    };
   }
 
   /**
