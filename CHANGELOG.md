@@ -9,19 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The OpenAPI contract now describes the webhook smart-filter shape: `filters` on the webhook create, update and read DTOs degraded to a bare `{ "type": "object" }` because the runtime type is a plain interface the scanner cannot introspect. Metadata classes (`WebhookFiltersDto`, `WebhookFilterConditionDto`) now back all three, so generated clients and the dashboard type view see the real `conditions` shape with its bounds (1..20). Runtime validation is unchanged.
-
-- `GET /infra/config` now resolves each field with the boot precedence (host environment, then project `.env`, then `data/.env.generated`) instead of reporting only the dashboard-saved file: a deployment setting `ENGINE_TYPE`/`DATABASE_TYPE`/`REDIS_ENABLED` via Compose `environment:` no longer reads back `whatsapp-web.js`/`sqlite`/disabled defaults that contradict the running process (#1313). Values that only ever lived in the saved file still hydrate the form as before, so the "saved, pending restart" state is unchanged, and the dashboard now omits `engine.type` from a save when the seeded value is an environment pin the operator never chose — the stored engine selection survives until the variable is unset (#1082).
+- The OpenAPI contract now describes the webhook `filters` shape on all three DTOs — `conditions` with its 1..20 bounds — instead of a bare object schema. Runtime validation is unchanged.
+- `GET /infra/config` now resolves each field with boot precedence — host env, then project `.env`, then `data/.env.generated` — so Compose-set `ENGINE_TYPE`/`DATABASE_TYPE`/`REDIS_ENABLED` no longer read back as first-run defaults (#1313, #1082).
 
 ### Security
 
-- `GET /sessions/:sessionId/status/:statusId/media` now serves `image/svg+xml` status media as an inert download (`application/octet-stream` plus `Content-Disposition: attachment`), matching the chat-media route: SVG is scriptable despite the `image/` prefix, and serving it with its declared Content-Type made the endpoint stored-XSS material on the API origin.
-- Session credential directories (whatsapp-web.js profiles and Baileys auth state) are created owner-only (`0o700`) and re-tightened on every session start, whichever engine runs: read access to the data volume alone is no longer equivalent to taking over the linked WhatsApp account.
+- Status media is served as an inert download: `image/svg+xml` in any form becomes `application/octet-stream` with `Content-Disposition: attachment`, matching the chat-media route.
+- Session credential directories (engine profiles, Baileys auth state) are created `0o700` and re-tightened on every start.
+- Webhook HMAC secrets require 16+ characters when set; ingress event payloads persist credential and signature headers redacted; delivery-failure errors redact host:port; the ingress reflections answer `text/plain`.
+- The SSRF opt-out no longer follows redirects silently (`WEBHOOK_SSRF_REDIRECTS=true` opts in), and `SSRF_ALLOWED_HOSTS` entries are pinned to their resolved addresses.
+- Plugin installs from a URL require a `#sha256=` pin in production (`PLUGIN_INSTALL_REQUIRE_PIN`); SECURITY.md now documents the plugin trust model.
 
 ### Added
 
-- Weekly scheduled security scan (`.github/workflows/security-scan.yml`): the merge-time audit gates re-run against the current dependency trees, and the release image scan re-runs against the published `latest` image on both architectures — a newly published advisory surfaces within days instead of at the next push or release. Also dispatchable on demand.
-- Client wire-shape contract gate (`check:contract-shapes`, in the CI lint job): the JavaScript SDK's and the dashboard's hand-written wire types are now checked field-by-field against the OpenAPI schemas — presence, required-vs-optional, and type drift for simple fields — closing the gap where every existing gate verified which routes exist but none verified the body shapes they carry. the gate now spans five clients — the JavaScript SDK, the dashboard, and the Python, Go and Java clients (the PHP client returns untyped arrays and has no types layer to gate) — with 113 pairs conforming; the single remaining exclusion is deliberate (the dashboard's tri-state `engineLoaded` client model, which models client state rather than the wire). The Python, Go and Java clients' wire types were conformed to the contract in the same pass, including two genuine Go wire bugs the measurement surfaced (both fixed): `WebhookResponse.Events` and `ChatHistoryMessage.MentionedIds` were modelled as single strings where the wire carries arrays.
+- Weekly scheduled security scan (`security-scan.yml`): re-runs the dependency audits and scans the published `latest` image on both architectures; also dispatchable on demand.
+- Client wire-shape gate (`check:contract-shapes`, CI lint job): checks the JavaScript, Python, Go and Java clients' and the dashboard's wire types against the OpenAPI schemas, field by field — 113 pairs gated. Two Go wire bugs it surfaced are fixed: `WebhookResponse.Events` and `ChatHistoryMessage.MentionedIds` were modelled as strings where the wire carries arrays.
 
 ## [0.19.0] - 2026-08-15
 
