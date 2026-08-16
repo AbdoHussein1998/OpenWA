@@ -271,6 +271,9 @@ if [ -f "$STAGE/main.sqlite" ]; then
   snapshot_external_db "$MAIN_DB"
   mkdir -p "$(dirname "$MAIN_DB")"
   cp "$STAGE/main.sqlite" "$MAIN_DB"
+  # Owner-only, matching what the app re-tightens on every boot (sqlite-file-permissions.ts);
+  # cp preserves the staged mode, and a foreign-umask extraction may leave it broader.
+  chmod 0600 "$MAIN_DB" 2>/dev/null || true
 else
   log "WARN: main.sqlite not in archive — API keys / audit log will NOT be restored"
 fi
@@ -280,6 +283,7 @@ if [ -f "$STAGE/openwa.sqlite" ]; then
   snapshot_external_db "$DATA_DB"
   mkdir -p "$(dirname "$DATA_DB")"
   cp "$STAGE/openwa.sqlite" "$DATA_DB"
+  chmod 0600 "$DATA_DB" 2>/dev/null || true
 fi
 
 if [ -d "$STAGE/sessions" ]; then

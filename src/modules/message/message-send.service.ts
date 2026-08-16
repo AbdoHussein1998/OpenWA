@@ -16,7 +16,7 @@ import { renderTemplate } from '../../common/utils/template-render';
 import { createLogger } from '../../common/services/logger.service';
 import { SsrfBlockedError, SSRF_BLOCKED_CLIENT_MESSAGE } from '../../common/security/ssrf-guard';
 import { resolveFeatureFlags } from '../../config/feature-flags';
-import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
+import { isUniqueViolation } from '../../common/utils/db-errors';
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
 
 /** Default cap on a rendered template's final text; overridable via TEMPLATE_RENDER_MAX_CHARS. */
@@ -567,7 +567,7 @@ export class MessageSendService {
     });
     const saved = await this.messageRepository.save(message).catch(async (err: unknown) => {
       const waMessageId = message.waMessageId;
-      if (!waMessageId || !isUniqueConstraintError(err)) throw err;
+      if (!waMessageId || !isUniqueViolation(err)) throw err;
       const patch: QueryDeepPartialEntity<Message> = {
         status: message.status,
         timestamp: message.timestamp,
@@ -651,7 +651,7 @@ export class MessageSendService {
       // Reconcile the earlier PENDING emission with the finalized row (#906).
       this.emitPersisted(message.sessionId, message);
     } catch (persistError) {
-      if (result.id && isUniqueConstraintError(persistError)) {
+      if (result.id && isUniqueViolation(persistError)) {
         // The engine's own-send echo (onMessageCreate) won the race and already persisted a row with
         // this waMessageId. That row carries only what the engine reported — for a Baileys API send,
         // a media-less marker — so merge our SENT state AND our metadata (the actual media payload)

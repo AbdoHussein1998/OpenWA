@@ -23,7 +23,7 @@ import { PresenceStore, type ChatPresence } from './presence-store.service';
 import { SessionEngineLifecycle, resolveReconnectConfig } from './session-engine-lifecycle.service';
 import { SessionOwnershipService } from './session-ownership.service';
 import { paginate, ListOptions, resolveListWindow } from '../../common/utils/paginate';
-import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
+import { isUniqueViolation } from '../../common/utils/db-errors';
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
@@ -245,7 +245,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         return await manager.save(session);
       });
     } catch (err) {
-      if (isUniqueConstraintError(err)) {
+      if (isUniqueViolation(err)) {
         throw new ConflictException(`Session with name '${dto.name}' already exists`);
       }
       throw err;
