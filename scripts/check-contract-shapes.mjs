@@ -95,20 +95,9 @@ const MINIMUM_MAPPED = {
 
 /** Known drift, deliberately not gated yet — each line is a to-adjudicate follow-up. */
 const EXCLUDED = {
-  'sdk/javascript/src/types.ts': {
-    ChatHistoryMessage: 'field-level differences across the 20+-field history shape; adjudicate pair-by-pair',
-    ChatSummary:
-      'hand marks every field optional and widens timestamp to string|number; contract requires them, timestamp a number',
-    GroupInfo: 'nullable-vs-optional and enum differences across 10+ fields; adjudicate pair-by-pair',
-    SessionResponse: 'field-level differences; adjudicate pair-by-pair',
-    WebhookResponse:
-      'CONTRACT GAP: response schema declares filters as Record<string, never>; fix the backend DTO decorator, then pin',
-  },
   'dashboard/src/services/api.ts': {
     Session:
       'BY DESIGN, not drift: the wire always carries engineLoaded, but this client clears it to "unknown" after a websocket status event so the action helpers fall back to the status set — the type models client state, not the wire',
-    EngineHistoryMessage:
-      'hand models a subset of the history shape (13 contract fields missing, fromMe optional); mirror the full shape',
   },
 };
 
@@ -227,6 +216,15 @@ function baseSchemaToken(node, schemas, depth = 0) {
     const rest = parts.filter(p => p !== 'null').filter(p => p !== 'any' || !nullable);
     if (nullable && rest.length === 1) return `${rest[0]}|null`;
     return `union(${rest.sort().join(',')})`;
+  }
+  if (node.allOf) {
+    // OpenAPI 3.0 composes class-typed fields (and ref+nullable pairs) as allOf members — merge
+    // the members' object tokens into one (later members win, matching composition semantics).
+    const merged = Object.assign({}, ...node.allOf.map(n => parseObjectToken(schemaToken(n, schemas, depth + 1))));
+    return `object(${Object.entries(merged)
+      .map(([f, v]) => `${f}${v.optional ? '?' : ''}:${v.token}`)
+      .sort()
+      .join(',')})`;
   }
   if (node.type === 'object') {
     if (depth >= MAX_DEPTH) return 'object';

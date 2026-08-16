@@ -14,10 +14,45 @@ import {
 } from 'class-validator';
 import { Expose, plainToInstance } from 'class-transformer';
 import { Webhook } from '../entities/webhook.entity';
-import { WebhookFilters } from '../filters/filter-types';
+import { MAX_CONDITIONS } from '../filters/filter-types';
+import type { FilterOperator, WebhookFilters } from '../filters/filter-types';
 import { IsValidWebhookFilters } from '../filters/filter-validation';
 import { IsHeaderMap } from './is-header-map.validator';
 import { ToStrictBoolean, ToStrictNumber } from '../../../common/utils/strict-boolean';
+
+/**
+ * Swagger metadata for the smart-filter shape — `WebhookFilters` in filters/filter-types.ts is a
+ * plain interface (validated at runtime by @IsValidWebhookFilters), which the scanner cannot
+ * introspect: without these classes the `filters` field on every webhook DTO degraded to a bare
+ * `{ "type": "object" }` in openapi.json, describing NEITHER side of the wire. Metadata only —
+ * no validators here; the runtime types stay authoritative.
+ */
+class WebhookFilterConditionDto {
+  @ApiProperty({ example: 'sender', description: 'Filterable field for the fired event family.' })
+  field!: string;
+
+  @ApiProperty({ enum: ['is', 'isNot', 'contains', 'equals'], example: 'is' })
+  operator!: FilterOperator;
+
+  @ApiProperty({
+    oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }, { type: 'boolean' }],
+    example: ['1234567890@c.us'],
+  })
+  value!: string | string[] | boolean;
+
+  @ApiPropertyOptional({ description: 'Only meaningful for text fields. Defaults to false.' })
+  caseSensitive?: boolean;
+}
+
+class WebhookFiltersDto {
+  @ApiProperty({
+    type: [WebhookFilterConditionDto],
+    minItems: 1,
+    maxItems: MAX_CONDITIONS,
+    description: 'Every condition must match (AND) for the webhook to fire.',
+  })
+  conditions!: WebhookFilterConditionDto[];
+}
 
 const FILTERS_API_DESCRIPTION =
   'Optional smart pre-filter. When set, every condition must match (AND) for the webhook to fire. Omit or null to fire on every subscribed event.';
@@ -107,7 +142,12 @@ export class CreateWebhookDto {
   // STORED as null whenever a webhook is created without filters (`dto.filters ?? null`), and the
   // description offers null as an input, so a schema without it rejects a value the route both
   // sends and accepts.
-  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE, nullable: true })
+  @ApiPropertyOptional({
+    type: WebhookFiltersDto,
+    description: FILTERS_API_DESCRIPTION,
+    example: FILTERS_API_EXAMPLE,
+    nullable: true,
+  })
   @IsOptional()
   @IsValidWebhookFilters()
   filters?: WebhookFilters | null;
@@ -160,7 +200,12 @@ export class UpdateWebhookDto {
   // STORED as null whenever a webhook is created without filters (`dto.filters ?? null`), and the
   // description offers null as an input, so a schema without it rejects a value the route both
   // sends and accepts.
-  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE, nullable: true })
+  @ApiPropertyOptional({
+    type: WebhookFiltersDto,
+    description: FILTERS_API_DESCRIPTION,
+    example: FILTERS_API_EXAMPLE,
+    nullable: true,
+  })
   @IsOptional()
   @IsValidWebhookFilters()
   filters?: WebhookFilters | null;
@@ -217,7 +262,12 @@ export class WebhookResponseDto {
   // STORED as null whenever a webhook is created without filters (`dto.filters ?? null`), and the
   // description offers null as an input, so a schema without it rejects a value the route both
   // sends and accepts.
-  @ApiPropertyOptional({ description: FILTERS_API_DESCRIPTION, example: FILTERS_API_EXAMPLE, nullable: true })
+  @ApiPropertyOptional({
+    type: WebhookFiltersDto,
+    description: FILTERS_API_DESCRIPTION,
+    example: FILTERS_API_EXAMPLE,
+    nullable: true,
+  })
   filters?: WebhookFilters | null;
 
   @Expose()

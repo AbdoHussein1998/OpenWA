@@ -79,7 +79,7 @@ export interface SessionResponse {
    * `disconnected` covers both a session mid automatic-reconnect (engine present) and one stopped
    * with no engine. Absent from a gateway that predates the field.
    */
-  engineLoaded?: boolean;
+  engineLoaded: boolean;
 }
 
 /**
@@ -482,19 +482,40 @@ export interface MessageRecord {
  * A message read live from WhatsApp by `messages.history()`. This is the engine
  * payload (richer and differently shaped than the persisted {@link MessageRecord}).
  */
+/**
+ * The engine-normalized message kinds — persisted rows, `message.received`/`message.sent`
+ * payloads and the websocket all use these values (raw engine tokens are normalized at the
+ * adapter boundary).
+ */
+export type MessageType =
+  | 'text'
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'voice'
+  | 'document'
+  | 'sticker'
+  | 'location'
+  | 'contact'
+  | 'poll'
+  | 'call'
+  | 'revoked'
+  | 'masked'
+  | 'unknown';
+
 export interface ChatHistoryMessage {
   id: string;
   from: Jid;
   to: Jid;
   chatId: Jid;
   body: string;
-  type: string;
+  type: MessageType;
   /** Unix timestamp in seconds. */
   timestamp: number;
   fromMe: boolean;
   isGroup: boolean;
   isStatusBroadcast?: boolean;
-  kind?: ChatKind;
+  kind: ChatKind;
   /** Disappearing-messages timer on the chat, in seconds. Absent when the chat has none set. */
   ephemeralDuration?: number;
   /** For group messages, the participant who sent it (`from` is the group JID). */
@@ -700,7 +721,15 @@ export interface GroupSummary {
 export interface GroupInfo {
   id: Jid;
   name: string;
-  description?: string | null;
+  description?: string;
+  /** Only admins may send messages. */
+  announce?: boolean;
+  /** Disappearing-messages timer in seconds; 0 or absent means off. */
+  ephemeralSeconds?: number;
+  /** Only admins may edit subject, description and picture. */
+  locked?: boolean;
+  /** Who may add participants. Absent when the engine did not report it. */
+  memberAddMode?: 'all' | 'admins';
   owner?: Jid | null;
   /** Unix timestamp in seconds. */
   createdAt?: number;
@@ -869,7 +898,7 @@ export interface WebhookResponse {
   filters?: WebhookFilters | null;
   retryCount: number;
   /** ISO timestamp of the last delivery attempt, or null if never triggered. */
-  lastTriggeredAt: string | null;
+  lastTriggeredAt?: string | null;
   createdAt: string;
   updatedAt: string;
   // NOTE: the server deliberately omits `secret` and `headers` from read responses.
@@ -885,13 +914,14 @@ export interface WebhookTestResult {
 
 export interface ChatSummary {
   id: Jid;
-  name?: string | null;
-  isGroup?: boolean;
-  unreadCount?: number;
+  name: string;
+  isGroup: boolean;
+  unreadCount: number;
   /** Preview text of the last message (the server returns a plain string, not an object). */
   lastMessage?: string;
-  timestamp?: string | number;
-  kind?: ChatKind;
+  /** Unix seconds of the last activity. */
+  timestamp: number;
+  kind: ChatKind;
 }
 
 /** Body for {@link SessionsResource.setOnlinePresence}. */

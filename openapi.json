@@ -10538,6 +10538,71 @@
           "memoryUsage"
         ]
       },
+      "WebhookFilterConditionDto": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "example": "sender",
+            "description": "Filterable field for the fired event family."
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "is",
+              "isNot",
+              "contains",
+              "equals"
+            ],
+            "example": "is"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "example": [
+              "1234567890@c.us"
+            ]
+          },
+          "caseSensitive": {
+            "type": "boolean",
+            "description": "Only meaningful for text fields. Defaults to false."
+          }
+        },
+        "required": [
+          "field",
+          "operator",
+          "value"
+        ]
+      },
+      "WebhookFiltersDto": {
+        "type": "object",
+        "properties": {
+          "conditions": {
+            "minItems": 1,
+            "maxItems": 20,
+            "description": "Every condition must match (AND) for the webhook to fire.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookFilterConditionDto"
+            }
+          }
+        },
+        "required": [
+          "conditions"
+        ]
+      },
       "CreateWebhookDto": {
         "type": "object",
         "properties": {
@@ -10597,7 +10662,6 @@
             }
           },
           "filters": {
-            "type": "object",
             "description": "Optional smart pre-filter. When set, every condition must match (AND) for the webhook to fire. Omit or null to fire on every subscribed event.",
             "example": {
               "conditions": [
@@ -10615,7 +10679,13 @@
                 }
               ]
             },
-            "nullable": true
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookFiltersDto"
+              }
+            ]
           },
           "retryCount": {
             "type": "number",
@@ -10648,7 +10718,6 @@
             }
           },
           "filters": {
-            "type": "object",
             "description": "Optional smart pre-filter. When set, every condition must match (AND) for the webhook to fire. Omit or null to fire on every subscribed event.",
             "example": {
               "conditions": [
@@ -10666,7 +10735,13 @@
                 }
               ]
             },
-            "nullable": true
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookFiltersDto"
+              }
+            ]
           },
           "active": {
             "type": "boolean"
@@ -10749,7 +10824,6 @@
             "description": "Custom headers"
           },
           "filters": {
-            "type": "object",
             "description": "Optional smart pre-filter. When set, every condition must match (AND) for the webhook to fire. Omit or null to fire on every subscribed event.",
             "example": {
               "conditions": [
@@ -10767,7 +10841,13 @@
                 }
               ]
             },
-            "nullable": true
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookFiltersDto"
+              }
+            ]
           },
           "active": {
             "type": "boolean",

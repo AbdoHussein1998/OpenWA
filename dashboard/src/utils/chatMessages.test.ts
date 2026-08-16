@@ -17,6 +17,8 @@ const hist = (over: Partial<EngineHistoryMessage> = {}): EngineHistoryMessage =>
   type: 'text',
   timestamp: 1782053533,
   fromMe: false,
+  isGroup: true,
+  kind: 'group',
   ...over,
 });
 
