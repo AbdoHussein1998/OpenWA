@@ -140,7 +140,16 @@ describe('docs/06 matches the published contract', () => {
     for (let i = 0; i < headings.length; i++) {
       const key = `${headings[i][1]} ${normalise(headings[i][2])}`;
       const body = doc.slice(headings[i].index, (headings[i + 1] ?? { index: doc.length }).index);
-      const line = body.match(/^\*\*Errors:\*\*.*$/m)?.[0] ?? '';
+      // An Errors block may wrap across physical lines (long route-specific descriptions); join the
+      // block until the first blank line or next heading so codes on continuation lines count too.
+      const blockLines: string[] = [];
+      let capturing = false;
+      for (const raw of body.split('\n')) {
+        if (/^\*\*Errors:\*\*/.test(raw)) capturing = true;
+        else if (capturing && (raw.trim() === '' || /^#{2,4} /.test(raw))) break;
+        if (capturing) blockLines.push(raw);
+      }
+      const line = blockLines.join('\n');
       errorsOf.set(key, [...line.matchAll(/`(\d{3})`/g)].map(match => match[1]).join(','));
     }
 
