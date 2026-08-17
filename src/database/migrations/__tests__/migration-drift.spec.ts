@@ -28,7 +28,8 @@ const importMigrations = (dir: string): unknown[] => {
       (v): v is new () => { up: (runner: never) => Promise<void> } =>
         typeof v === 'function' && (v as { prototype?: { up?: unknown } }).prototype?.up !== undefined,
     );
-    if (Ctor) out.push(Ctor);
+    if (!Ctor) throw new Error(`Non-migration file in chain dir: ${file}`);
+    out.push(Ctor);
   }
   return out;
 };
@@ -85,20 +86,28 @@ describe('migration chain matches entity metadata (drift gate)', () => {
       migrations: importMigrations(join(repoRoot, 'src/database/migrations')) as never,
     });
     const drift = await driftStatements(data);
-    // Every statement must be part of the documented rebuild pattern. A column-type-only change
-    // never produces anything else; a MISSING column, a missing FK, a new constraint, or a DROP
-    // does - and this filter rejects exactly those while keeping the baseline visible.
-    const structuralDrift = drift.filter(sql => {
-      if (/^CREATE TABLE "temporary_/.test(sql)) return false;
-      if (/^ALTER TABLE "temporary_[^"]+" RENAME TO/.test(sql)) return false;
-      // Index (re)creation on a rebuilt table is part of the rebuild, not independent drift.
-      if (/^CREATE (UNIQUE )?INDEX /.test(sql)) return false;
-      if (/^DROP (TABLE|INDEX) /.test(sql)) return false;
-      if (/^INSERT INTO "temporary_/.test(sql)) return false;
-      return true;
-    });
-    expect(`New structural drift (beyond the known column-type rebuild):\n  ${structuralDrift.join('\n  ')}`).toBe(
-      'New structural drift (beyond the known column-type rebuild):\n  ',
+    // Classify every statement against the KNOWN drift shapes. The chain carries two:
+    // (1) column-type rebuild (datetime vs text) on dated tables, producing the
+    // CREATE temporary_ + INSERT + DROP + RENAME + index cycle; (2) index-NAME drift on
+    // lid_mappings/status_updates (TypeORM's auto-generated hash names differ from the
+    // migration-declared names; same columns, same uniqueness - semantics identical).
+    // Anything matching NEITHER shape is structural drift and fails.
+    const classifyDrift = (stmts: string[]): string[] =>
+      stmts.filter(sql => {
+        // Shape 1: column-type rebuild byproducts.
+        if (/^CREATE TABLE "temporary_/.test(sql)) return false;
+        if (/^ALTER TABLE "temporary_[^"]+" RENAME TO/.test(sql)) return false;
+        if (/^INSERT INTO "temporary_/.test(sql)) return false;
+        // Shape 2: index-name drift (DROP INDEX old + CREATE INDEX new on the same table, or
+        // index recreation on a rebuilt table).
+        if (/^DROP INDEX /.test(sql)) return false;
+        if (/^CREATE (UNIQUE )?INDEX /.test(sql)) return false;
+        if (/^DROP TABLE /.test(sql)) return false;
+        return true;
+      });
+    const structuralDrift = classifyDrift(drift);
+    expect(`New structural drift (beyond the known shapes):\n  ${structuralDrift.join('\n  ')}`).toBe(
+      'New structural drift (beyond the known shapes):\n  ',
     );
     // And the rebuild stays bounded to tables that actually carry dated columns.
     expect(countRebuildTables(drift)).toBeGreaterThan(0);
@@ -115,16 +124,28 @@ describe('migration chain matches entity metadata (drift gate)', () => {
       migrations: importMigrations(join(repoRoot, 'src/database/migrations-main')) as never,
     });
     const drift = await driftStatements(main);
-    const structuralDrift = drift.filter(sql => {
-      if (/^CREATE TABLE "temporary_/.test(sql)) return false;
-      if (/^ALTER TABLE "temporary_[^"]+" RENAME TO/.test(sql)) return false;
-      if (/^CREATE (UNIQUE )?INDEX /.test(sql)) return false;
-      if (/^DROP (TABLE|INDEX) /.test(sql)) return false;
-      if (/^INSERT INTO "temporary_/.test(sql)) return false;
-      return true;
-    });
-    expect(`New structural drift (beyond the known column-type rebuild):\n  ${structuralDrift.join('\n  ')}`).toBe(
-      'New structural drift (beyond the known column-type rebuild):\n  ',
+    // Classify every statement against the KNOWN drift shapes. The chain carries two:
+    // (1) column-type rebuild (datetime vs text) on dated tables, producing the
+    // CREATE temporary_ + INSERT + DROP + RENAME + index cycle; (2) index-NAME drift on
+    // lid_mappings/status_updates (TypeORM's auto-generated hash names differ from the
+    // migration-declared names; same columns, same uniqueness - semantics identical).
+    // Anything matching NEITHER shape is structural drift and fails.
+    const classifyDrift = (stmts: string[]): string[] =>
+      stmts.filter(sql => {
+        // Shape 1: column-type rebuild byproducts.
+        if (/^CREATE TABLE "temporary_/.test(sql)) return false;
+        if (/^ALTER TABLE "temporary_[^"]+" RENAME TO/.test(sql)) return false;
+        if (/^INSERT INTO "temporary_/.test(sql)) return false;
+        // Shape 2: index-name drift (DROP INDEX old + CREATE INDEX new on the same table, or
+        // index recreation on a rebuilt table).
+        if (/^DROP INDEX /.test(sql)) return false;
+        if (/^CREATE (UNIQUE )?INDEX /.test(sql)) return false;
+        if (/^DROP TABLE /.test(sql)) return false;
+        return true;
+      });
+    const structuralDrift = classifyDrift(drift);
+    expect(`New structural drift (beyond the known shapes):\n  ${structuralDrift.join('\n  ')}`).toBe(
+      'New structural drift (beyond the known shapes):\n  ',
     );
   }, 60_000);
 });

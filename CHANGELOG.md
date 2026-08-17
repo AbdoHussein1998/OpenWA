@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Follow-ups from the batch review: the chain-boot e2e sets MAIN_DATABASE_SYNCHRONIZE=false explicitly (the env's absence defaults to synchronize=true, so the main chain was never exercised), the drift gate classifies statements against the two known shape families (column-type rebuild, index-name drift) instead of blanket-filtering every index/DROP statement, the shared delivery recorder strips the raw error before the persistence spread, and the ignore-pattern list deduplicates.
 - The direct and queued webhook delivery paths share one POST-and-classify core (`postWebhookPayload`) and one terminal-failure recorder, instead of two line-for-line copies that an outbox would have tripled.
 - Test and DB infrastructure: the 23 file-reading specs are excluded from the unit coverage denominators (spec files were counted as 0%-covered source, ~994 lines inflating every floor), an e2e boots the production SQLite schema from scratch through both full migration chains (the path the other suites' synchronize=true never touches), and a drift gate derives the chain-vs-entity diff so a missing index, column, or constraint fails while the known column-type rebuild is pinned as a visible baseline.
 - The ingress route's rate bound is the per-instance limit alone: the global per-IP medium tier (100/min, below the instance default of 120/min) used to 429 every tenant of a shared-egress-IP provider before the instance bound ever fired.

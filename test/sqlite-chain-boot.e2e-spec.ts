@@ -11,8 +11,11 @@ process.env.AUTO_START_SESSIONS = 'false';
 process.env.RATE_LIMIT_SHORT_LIMIT = '100000';
 process.env.RATE_LIMIT_MEDIUM_LIMIT = '100000';
 process.env.RATE_LIMIT_LONG_LIMIT = '100000';
-delete process.env.DATABASE_SYNCHRONIZE;
-delete process.env.MAIN_DATABASE_SYNCHRONIZE;
+process.env.DATABASE_SYNCHRONIZE = 'false';
+// The main connection defaults synchronize to true when the env is merely absent (configuration.ts
+// maps !== 'false'), so deleting the env would silently boot main through synchronize. Set it to
+// 'false' explicitly: BOTH connections must run their migration chains.
+process.env.MAIN_DATABASE_SYNCHRONIZE = 'false';
 // Fresh throwaway files per run; the chain must CREATE everything that exists in them.
 import { existsSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -43,8 +46,11 @@ describe('production SQLite schema path: full migration chain from scratch (e2e)
   });
 
   afterAll(async () => {
-    await app.close();
-    for (const f of [dataDb, mainDb, keyFile]) rmSync(f, { force: true });
+    try {
+      await app.close();
+    } finally {
+      for (const f of [dataDb, mainDb, keyFile]) rmSync(f, { force: true });
+    }
   });
 
   it('boots to readiness against chain-built schema (both connections, no synchronize)', async () => {
