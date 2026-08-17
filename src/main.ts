@@ -128,7 +128,14 @@ async function bootstrap() {
     process.env.INFLIGHT_BODY_BUDGET_BYTES,
     process.env.BODY_SIZE_LIMIT,
   );
-  app.use(createInflightBodyBudget(inflightBudgetBytes).middleware);
+  app.use(
+    createInflightBodyBudget(inflightBudgetBytes, {
+      trustedProxies: (process.env.TRUSTED_PROXIES || '')
+        .split(',')
+        .map(p => p.trim())
+        .filter(Boolean),
+    }).middleware,
+  );
 
   // Cap request body size (DoS hardening). Media sends carry base64 in the JSON body,
   // so the default is generous; tune with BODY_SIZE_LIMIT.
