@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- docs/06 repair pass over the Errors lines: the ingress `401` is the signature failure (not an API-key error), label writes have no `404`, the catalog product lookup answers `200` empty (not `404`), search's `501` names the no-provider case, multi-line Errors blocks were re-joined (no severed sentences, duplicate codes, or `· ·` separators), and the gate now reads wrapped blocks.
 - All five SDKs expose `deleteProfilePicture` (the contract's `DELETE /profile/picture` shipped in none of them), and the SDK coverage gate now checks verbs on multi-verb paths, not just path reachability.
 - The typed SDKs' message-list records declare `chatName`, `author`, `mediaPath` and `mediaMimetype` (the wire carried all four; every typed client missed them), and the contract-shape gate now maps `MessageRecord` in all four SDKs, including the Python functional-TypedDict form.
 - The dashboard's manual WebSocket retry re-registers the message handler on the fresh socket; the handler effect only re-ran on events changes, so a reconnect left the new socket silent while reporting connected.
