@@ -301,15 +301,15 @@ export function ApiKeys() {
             </div>
           ) : (
             <>
-              <label>{t('common.name')}</label>
-              <input
+              <label htmlFor="ak-1">{t('common.name')}</label>
+              <input id="ak-1"
                 type="text"
                 placeholder={t('apiKeys.namePlaceholder')}
                 value={newKey.name}
                 onChange={e => setNewKey({ ...newKey, name: e.target.value })}
               />
-              <label>{t('common.role')}</label>
-              <select value={newKey.role} onChange={e => setNewKey({ ...newKey, role: e.target.value })}>
+              <label htmlFor="ak-2">{t('common.role')}</label>
+              <select id="ak-2" value={newKey.role} onChange={e => setNewKey({ ...newKey, role: e.target.value })}>
                 {roleNames.map(r => (
                   <option key={r} value={r}>
                     {t(`apiKeys.roles.${r}`)}

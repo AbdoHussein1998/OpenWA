@@ -77,11 +77,11 @@ function ConfigField({
     return (
       <div className="form-group toggle-group">
         <div className="toggle-info">
-          <label>{label}</label>
+          <label htmlFor="plg-1">{label}</label>
           {desc}
         </div>
         <label className="toggle-switch">
-          <input type="checkbox" checked={Boolean(value)} onChange={e => onChange(e.target.checked)} />
+          <input id="plg-1" type="checkbox" checked={Boolean(value)} onChange={e => onChange(e.target.checked)} />
           <span className="toggle-slider"></span>
         </label>
       </div>
