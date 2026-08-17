@@ -2520,9 +2520,12 @@ describe('WhatsAppWebJsAdapter.resolveContactPhone (@lid -> phone, #263)', () =>
     ).resolves.toBeNull();
   });
 
-  it('is best-effort: a thrown engine error resolves to null, not a rejection', async () => {
+  it('propagates a lookup failure instead of nulling it: a transient error must not read as "no mapping"', async () => {
+    // The engine method rejects on failure (dead page, evaluation error, rate limit) so the lid
+    // resolver never mistakes one for a definitive negative; the HTTP boundary
+    // (ContactService.resolveContactPhone) is where null-on-failure is produced.
     const adapter = readyAdapter(jest.fn().mockRejectedValue(new Error('Evaluation failed')));
-    await expect(adapter.resolveContactPhone('123@lid')).resolves.toBeNull();
+    await expect(adapter.resolveContactPhone('123@lid')).rejects.toThrow('Evaluation failed');
   });
 });
 

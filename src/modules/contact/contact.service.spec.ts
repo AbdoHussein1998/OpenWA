@@ -207,4 +207,18 @@ describe('ContactService', () => {
       expect(upsertContact).toHaveBeenCalled();
     });
   });
+
+  describe('resolveContactPhone null-on-failure boundary', () => {
+    it('returns null (200 contract) when the engine lookup throws', async () => {
+      const svc = makeService({
+        resolveContactPhone: jest.fn().mockRejectedValue(new Error('Protocol error: Target closed')),
+      });
+      await expect(svc.resolveContactPhone('s1', '123@lid')).resolves.toBeNull();
+    });
+
+    it('returns the engine answer verbatim on success', async () => {
+      const svc = makeService({ resolveContactPhone: jest.fn().mockResolvedValue('628123') });
+      await expect(svc.resolveContactPhone('s1', '123@lid')).resolves.toBe('628123');
+    });
+  });
 });

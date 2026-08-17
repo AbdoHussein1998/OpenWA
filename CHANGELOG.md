@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A transient whatsapp-web.js lid-to-phone lookup failure (dead page, rate limit) no longer overwrites a valid stored mapping with a definitive null; the engine method rejects on failure and the HTTP boundary keeps its null-on-failure contract.
 - Nine whatsapp-web.js group routes answer `404` (`GroupNotFoundError`) when the id is not a group or is unknown, like the guarded settings writes; they previously threw a bare error that surfaced as an opaque `500`.
 - The cold-reachout budget is charged only after the group engine call resolves; a createGroup that 501s (whatsapp-web.js, always) or an add the engine refuses no longer burns the day's allowance for participants never contacted.
 - block/unblock refuse ids that do not name a person (400, both engines): whatsapp-web.js silently returned false for a group id (answered 200 "blocked" with nothing blocked) and Baileys surfaced an opaque 500 for an unresolvable jid.

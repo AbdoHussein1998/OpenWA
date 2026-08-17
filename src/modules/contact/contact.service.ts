@@ -46,8 +46,18 @@ export class ContactService {
     return this.getEngine(sessionId).getNumberId(number);
   }
 
-  resolveContactPhone(sessionId: string, contactId: string) {
-    return this.getEngine(sessionId).resolveContactPhone(contactId);
+  /**
+   * The HTTP route promises null when the engine cannot map the id (docs/06 and the ApiResponse
+   * text), and that includes "the lookup itself failed": a dead page, an evaluation error or a
+   * rate limit answers 200 null, not a 5xx. The ENGINE method rejects on those (the lid resolver
+   * needs the distinction), so swallow here at the boundary.
+   */
+  async resolveContactPhone(sessionId: string, contactId: string): Promise<string | null> {
+    try {
+      return await this.getEngine(sessionId).resolveContactPhone(contactId);
+    } catch {
+      return null;
+    }
   }
 
   getProfilePicture(sessionId: string, contactId: string) {

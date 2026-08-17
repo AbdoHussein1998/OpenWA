@@ -83,19 +83,16 @@ export class WwebjsContacts {
 
   async resolveContactPhone(contactId: string): Promise<string | null> {
     this.host.ensureReady();
-    try {
-      // Queried one id at a time: the batch form is prone to "Evaluation failed" and rate-limiting
-      // (whatsapp-web.js #3857/#3969). `pn` is the phone JID (`<digits>@c.us`) when the account knows
-      // the mapping; best-effort, so a missing mapping or any failure resolves to null.
-      const [result] = await this.client().getContactLidAndPhone([contactId]);
-      const pn = result?.pn;
-      return pn ? pn.replace(/@c\.us$/i, '').replace(/\D/g, '') || null : null;
-    } catch (error) {
-      this.host.logger.debug(`resolveContactPhone failed for ${contactId}`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
+    // Queried one id at a time: the batch form is prone to "Evaluation failed" and rate-limiting
+    // (whatsapp-web.js #3857/#3969). `pn` is the phone JID (`<digits>@c.us`) when the account knows
+    // the mapping. An empty/absent pn RESOLVES to null (a definitive "no mapping" answer); a thrown
+    // error PROPAGATES - the lid resolver must not mistake a transient failure (dead page,
+    // evaluation error, rate limit) for "this contact has no phone" and clobber a valid stored
+    // mapping with it. The HTTP route that promises null-on-failure swallows at its boundary
+    // (contact.service.resolveContactPhone).
+    const [result] = await this.client().getContactLidAndPhone([contactId]);
+    const pn = result?.pn;
+    return pn ? pn.replace(/@c\.us$/i, '').replace(/\D/g, '') || null : null;
   }
 
   async upsertContact(contactId: string, firstName: string, lastName = ''): Promise<void> {
