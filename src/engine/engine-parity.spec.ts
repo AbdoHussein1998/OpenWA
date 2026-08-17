@@ -69,12 +69,27 @@ const ADAPTERS: ReadonlyArray<[AdapterKey, AdapterCtor]> = [
  * Bucketed by filename because that is what identifies the engine: `baileys*` is Baileys, the wwjs
  * adapter and its `wwebjs-*` delegates are wwjs.
  */
-const THROW_SITE_RE = /(?:new EngineNotSupportedError|this\.unsupported)\(\s*'([a-zA-Z][a-zA-Z0-9]*)'/;
+const THROW_SITE_RE = /(?:new EngineNotSupportedError|this\.unsupported)\(\s*'([^']+)'/;
+/** Every construction site, literal-arg or not - the fence denominator. */
+const ANY_THROW_SITE_RE = /(?:new EngineNotSupportedError|this\.unsupported)\(/;
+
+/**
+ * Throw sites whose literal names a CONDITION, not a whole method: the method is supported and the
+ * refusal fires only when the caller passes the named option. These must NOT flip the matrix cell
+ * ('supported with a refused option' is not 'not-available'), but they stay pinned here so deleting
+ * the throw without updating this list fails the fence below - the registry keys on the literal, so
+ * an unlisted conditional site would otherwise register as a pseudo-method nothing reads.
+ */
+const CONDITIONAL_THROW_SITES: Readonly<Record<string, string>> = {
+  'sendTextMessage(customPreview)':
+    'wwjs sendTextMessage is supported; it refuses only when customPreview is passed, because whatsapp-web.js takes a boolean linkPreview and cannot represent a custom card',
+};
 
 function readDelegateThrows(): Record<string, Set<string>> {
   const registry: Record<string, Set<string>> = { wwjs: new Set(), baileys: new Set() };
   for (const file of adapterFiles()) {
     for (const method of throwsIn(file)) {
+      if (method in CONDITIONAL_THROW_SITES) continue;
       for (const engine of enginesForFile(file)) registry[engine].add(method);
     }
   }
@@ -169,6 +184,44 @@ describe('engine capability matrix — drift invariants', () => {
   // fail here rather than pass vacuously. A NEW unprefixed adapter file appears on the left and names
   // itself — attribute it in UNPREFIXED_FILE_ENGINES or give it an engine prefix — and an entry left
   // behind by a rename or deletion is caught the same way from the other side.
+  // A construction site the literal registry cannot see (template literal, variable argument,
+  // anything but a plain single-quoted string) is invisible to BOTH invariants while still
+  // refusing at runtime. And a literal that names a CONDITION rather than a method registers as a
+  // pseudo-method no assertion reads. This fence counts every construction site in every adapter
+  // file and requires each to be exactly one of: a literal naming a real interface method, a
+  // conditional site listed above, or the single variable-argument site in the unsupported() helper.
+  it('every unsupported-throw construction site is literal-arg, a method name, and registered', () => {
+    const interfaceMethods = new Set(readInterfaceMethods());
+    const exemptHelperBody = /private unsupported\(method: string\)[\s\S]*?new EngineNotSupportedError\(method\)/;
+    for (const file of adapterFiles()) {
+      const src = readFileSync(join(__dirname, 'adapters', file), 'utf8');
+      const all = [...src.matchAll(new RegExp(ANY_THROW_SITE_RE.source, 'g'))];
+      const literal = [...src.matchAll(new RegExp(THROW_SITE_RE.source, 'g'))].map(m => m[1]);
+      for (const name of literal) {
+        if (name in CONDITIONAL_THROW_SITES) continue;
+        if (!interfaceMethods.has(name)) {
+          throw new Error(
+            `throw site '${name}' in ${file} names no interface method: it is a conditional refusal ` +
+              '(list it in CONDITIONAL_THROW_SITES) or a name typo (name the method it refuses)',
+          );
+        }
+      }
+      const nonLiteral = all.length - literal.length;
+      const hasHelper = exemptHelperBody.test(src);
+      expect(nonLiteral).toBe(hasHelper ? 1 : 0);
+    }
+    // Reverse direction: a conditional entry whose throw site no longer exists is stale.
+    const allLiterals = new Set(
+      adapterFiles().flatMap(file =>
+        [
+          ...readFileSync(join(__dirname, 'adapters', file), 'utf8').matchAll(new RegExp(THROW_SITE_RE.source, 'g')),
+        ].map(m => m[1]),
+      ),
+    );
+    const stale = Object.keys(CONDITIONAL_THROW_SITES).filter(name => !allLiterals.has(name));
+    expect(stale).toEqual([]);
+  });
+
   it('every adapter file is attributed to an engine', () => {
     expect([...UNPREFIXED_FILES].sort()).toEqual(Object.keys(UNPREFIXED_FILE_ENGINES).sort());
   });

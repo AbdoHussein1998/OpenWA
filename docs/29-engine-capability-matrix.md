@@ -73,7 +73,12 @@ Key adapter facts:
   covers both shapes: besides the `Class.prototype.method.toString()` throw-scan it derives a
   throw registry from the `EngineNotSupportedError('method')` / `this.unsupported('method')`
   literals in every adapter and delegate source file (`engine-parity.spec.ts`), so a throw in a
-  delegate is machine-checked exactly like an inline one.
+  delegate is machine-checked exactly like an inline one. Two refinements: the literal must be a
+  plain single-quoted string naming the refused method (a template-literal or variable-argument
+  construction fails the gate, as does a literal that names no interface method), and a refusal
+  that fires only under a runtime condition - `sendText` with `customPreview` on whatsapp-web.js -
+  is pinned in the gate's conditional list instead of flipping the cell, because 'supported with a
+  refused option' is not 'not-available'.
 - **Inbound events** flow the other way: each adapter normalizes library events into the neutral
   `EngineEventCallbacks` (`onMessage`, `onMessageAck`, `onGroupEvent`, `onCall`, …), which the
   session module turns into OpenWA webhook events. Which library events are consumed — and which
