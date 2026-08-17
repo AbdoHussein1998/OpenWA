@@ -121,6 +121,13 @@ curl -X POST 'http://localhost:2785/api/infra/import-data' \
 > `scripts/backup.sh`, which snapshots the database file itself.
 
 > [!NOTE]
+> **Session statuses in the backup describe the source host.** An active status (`ready`,
+> `initializing`, ...) is restored as `disconnected` (the import response counts them in a notice),
+> so the migrated sessions are immediately startable - via `POST /api/sessions/:id/start`, or by
+> the auto-start/takeover paths - without restarting the process. A session held by a live peer
+> whose claim the import preserves keeps the backup's status.
+
+> [!NOTE]
 > **Dual-Database Architecture**
 >
 > OpenWA separates databases:

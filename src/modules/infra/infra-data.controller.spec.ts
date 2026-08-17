@@ -22,7 +22,7 @@ jest.mock('fs', () => {
   };
 });
 
-import { DataSource, QueryFailedError } from 'typeorm';
+import { DataSource, IsNull, QueryFailedError } from 'typeorm';
 import { ConflictException } from '@nestjs/common';
 import { InfraDataController } from './infra-data.controller';
 import { InfraDataService, restoreSessionOwnership } from './infra-data.service';
@@ -236,6 +236,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
           events.push('release');
         };
       },
+      claimableWhere: () => [],
       heldByOtherNodes: () => Promise.resolve([]),
     };
     // Observe from inside the transaction: the token must already be held by the time rows move.
@@ -346,6 +347,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
         };
       },
       heldByOtherNodes: () => Promise.resolve([]),
+      claimableWhere: () => [],
     };
     // Stubbed rather than provoked: TypeORM nests a second startTransaction as SAVEPOINT, so no
     // dialect here rejects it today. What is pinned is the STRUCTURE — the pre-body span sits
@@ -378,6 +380,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
         };
       },
       heldByOtherNodes: () => Promise.resolve([]),
+      claimableWhere: () => [],
     };
     jest.spyOn(ds, 'createQueryRunner').mockImplementation(() => {
       throw new Error('no connection available');
@@ -401,6 +404,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
         return () => {};
       },
       heldByOtherNodes: () => Promise.resolve([]),
+      claimableWhere: () => [],
     };
     // Postgres hands every runner a dedicated pooled client, so the heartbeat cannot see the
     // import's uncommitted DELETE. Suspending there would disable genuine loss detection in exactly
@@ -1616,6 +1620,44 @@ describe('InfraDataController.importData status_updates + runtime reconciliation
   // automation_rules FKs sessions ON DELETE CASCADE, so the import's `DELETE FROM sessions` takes
   // every rule with it — on SQLite too, where better-sqlite3 enforces foreign keys. Without export +
   // re-insert the documented backup/restore silently destroyed every autoreply rule.
+  it('restores an active session status as disconnected: the backup describes the source host engines', async () => {
+    await seedSession('s1');
+    const repo = ds.getRepository(Session);
+    const dump = await build().exportData();
+    // seedSession writes READY; the export carries it. With no ownership service (single-node
+    // default), every row is claimable, so the import must normalize it.
+    expect(dump.tables.sessions?.[0]?.status).toBe(SessionStatus.READY);
+
+    const res = await build().importData({ tables: dump.tables });
+
+    expect(res.imported).toBe(true);
+    await expect(repo.findOneByOrFail({ id: 's1' })).resolves.toMatchObject({ status: SessionStatus.DISCONNECTED });
+    expect(res.notices?.some(n => n.includes('restored as disconnected'))).toBe(true);
+  });
+
+  it('keeps the backup status of a session held by a PEER (its live engine backs the row)', async () => {
+    await seedSession('held');
+    const repo = ds.getRepository(Session);
+    // A peer's unexpired claim: not claimable by this node, so the normalization must skip it.
+    // The import re-applies the preserved claim after the inserts (restoreSessionOwnership), which
+    // is what keeps the row excluded when the normalization runs.
+    await repo.update({ id: 'held' }, { nodeId: 'node-b', leaseExpiresAt: new Date(Date.now() + 60_000) });
+    const dump = await build().exportData();
+
+    const ownership = {
+      nodeId: 'node-a',
+      heldByOtherNodes: () => Promise.resolve(['held']),
+      suspendLossDetection: () => () => undefined,
+      claimableWhere: () => [{ nodeId: IsNull() }, { nodeId: 'node-a' }],
+    };
+    const res = await new InfraDataController(
+      new InfraDataService(cfg as never, ds, undefined, undefined, undefined, ownership as never),
+    ).importData({ tables: dump.tables });
+
+    expect(res.imported).toBe(true);
+    await expect(repo.findOneByOrFail({ id: 'held' })).resolves.toMatchObject({ status: SessionStatus.READY });
+  });
+
   it('exports and restores automation_rules, which the session wipe would otherwise cascade away', async () => {
     await seedSession('s1');
     const ruleRepo = ds.getRepository(AutomationRule);

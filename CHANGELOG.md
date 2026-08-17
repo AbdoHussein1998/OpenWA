@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- import-data restores an active session status from the backup as `disconnected` (scoped to claimable rows; a notice counts them), so migrated sessions are startable without a process restart.
 - The engine parity gate reads any single-quoted throw literal (a parenthesized site like sendText(customPreview) escaped the identifier-only regex), rejects construction sites it cannot see (template literals, variable arguments, literals naming no method), and pins conditional refusals in an explicit list; docs/29 states the refinements.
 - The Baileys adapter builds one shared host object for its nine delegates instead of nine overlapping closure bags; a new cross-cutting member is added once. No behavior change.
 - A transient whatsapp-web.js lid-to-phone lookup failure (dead page, rate limit) no longer overwrites a valid stored mapping with a definitive null; the engine method rejects on failure and the HTTP boundary keeps its null-on-failure contract.
