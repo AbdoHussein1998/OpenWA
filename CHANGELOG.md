@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- All five SDKs expose `deleteProfilePicture` (the contract's `DELETE /profile/picture` shipped in none of them), and the SDK coverage gate now checks verbs on multi-verb paths, not just path reachability.
 - The dashboard's manual WebSocket retry re-registers the message handler on the fresh socket; the handler effect only re-ran on events changes, so a reconnect left the new socket silent while reporting connected.
 - The Chats page honours the system dark theme: four dark-palette rules (outgoing bubble, document media, quote box, action menus) only matched an explicit data-theme and left the default 'system' theme rendering light popups inside a dark thread.
 - The Logs page resets to page 1 on a new search and its empty state distinguishes "no matches on this page" (search filters the fetched page only) from "no logs yet".
