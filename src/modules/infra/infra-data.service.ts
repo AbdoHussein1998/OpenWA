@@ -9,6 +9,8 @@ import { AuditAction } from '../audit/entities/audit-log.entity';
 import { SessionService } from '../session/session.service';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { SessionOwnershipService } from '../session/session-ownership.service';
+import { Session as SessionEntity, SessionStatus } from '../session/entities/session.entity';
+import { In } from 'typeorm';
 import type { MigrationTables, TableCounts } from './migration-tables.types';
 import { EXPORT_TABLES, EXPORT_TABLE_EXCLUSIONS } from './export-tables';
 import { TABLE_IMPORTERS } from './table-importers';
@@ -664,6 +666,36 @@ export class InfraDataService {
         } catch (error) {
           warnings.push(
             `Failed to restore session ownership: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+
+        // Normalize imported statuses the same way boot does: an ACTIVE status (ready,
+        // initializing, ...) in a backup describes the SOURCE host's engines, and restoring it
+        // verbatim leaves rows reading ready with no engine anywhere - invisible to auto-start
+        // (selects disconnected) and to the takeover sweep, until a process restart. Scoped to
+        // CLAIMABLE rows only, so a session whose ownership claim was just re-applied to this
+        // node or a peer (a live engine still backs it) keeps the backup's status.
+        const ACTIVE_STATUSES = [
+          SessionStatus.READY,
+          SessionStatus.INITIALIZING,
+          SessionStatus.QR_READY,
+          SessionStatus.AUTHENTICATING,
+          SessionStatus.ACTION_REQUIRED,
+        ];
+        const claimable = this.ownership?.claimableWhere() ?? [{}];
+        // An empty clause list means nothing is claimable (no rows to normalize). TypeORM also
+        // rejects empty update criteria, so skip rather than build an empty OR.
+        const normalized =
+          claimable.length === 0
+            ? { affected: 0 }
+            : await queryRunner.manager.getRepository(SessionEntity).update(
+                claimable.map(clause => ({ ...clause, status: In(ACTIVE_STATUSES) })),
+                { status: SessionStatus.DISCONNECTED },
+              );
+        if (normalized.affected && normalized.affected > 0) {
+          notices.push(
+            `${normalized.affected} imported session(s) carried an active status (the source host's engines): ` +
+              'restored as disconnected - start them via POST /api/sessions/:id/start or let auto-start adopt them.',
           );
         }
 
