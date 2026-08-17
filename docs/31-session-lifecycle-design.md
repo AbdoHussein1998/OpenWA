@@ -115,19 +115,33 @@ for minutes; detaching from bootstrap means the API answers while engines warm.
 
 ## 31.2 Status-transition ownership
 
-Exactly one writer per transition — when debugging a status surprise, find the writer before
-anything else:
+Every transition has a known, enumerated set of writers. When debugging a status surprise, find the
+writer before anything else:
 
-| Transition                      | Sole writer                                                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------ |
-| → `INITIALIZING`                | `initializeEngine` (persisted before `initialize()`)                                       |
-| → `QR_READY` / `AUTHENTICATING` | engine callbacks (wired in the lifecycle delegate), via the registry's liveness check      |
-| → `READY`                       | `handleEngineReady` (also drops a recorded failure reason — see INV-7's rationale comment) |
-| → `DISCONNECTED`                | init-timeout eviction, graceful stop, puppeteer-death detection                            |
-| → `FAILED`                      | `start()`'s rejection path — and nothing else; reconnect loops NEVER write FAILED          |
+| Transition                      | Writers                                                                                   |
+| ------------------------------- | ----------------------------------------------------------------------------------------- |
+| → `INITIALIZING`                | `initializeEngine` (persisted before `initialize()`)                                      |
+| → `QR_READY` / `AUTHENTICATING` | engine callbacks (wired in the lifecycle delegate), via the registry's liveness check     |
+| → `READY`                       | `handleEngineReady` (also drops a recorded failure reason, see INV-7's rationale comment) |
+| → `DISCONNECTED`                | init-timeout eviction, graceful stop, puppeteer-death detection                           |
+| → `FAILED`                      | four terminal paths only, all ownership-fenced: see below                                 |
 
-The last row is load-bearing: a reconnect loop that wrote FAILED would convert every transient
-network blip into an operator-visible terminal state, defeating INV-7's signal.
+`FAILED` is the one worth spelling out, because it is terminal (neither the boot reset nor the
+takeover sweep resumes a FAILED row, INV-7) and because more than one path reaches it:
+
+1. `start()`'s own rejection path, when `initializeEngine` throws (`session-engine-controls.ts`).
+2. The engine's `onError` callback, which is terminal by definition: it cancels any pending
+   reconnect before persisting, because a re-scan is required (`session-engine-event-wiring.ts`).
+3. The engine reporting `EngineStatus.FAILED` through `onStateChanged`, which the status map
+   forwards verbatim (`session-engine-event-wiring.ts`).
+4. A reconnect chain that EXHAUSTS its attempts, so the session is not left silently stuck
+   `DISCONNECTED` with no engine (`session-engine-lifecycle.service.ts`).
+
+What still holds, and is load-bearing, is the narrower claim: no reconnect ATTEMPT writes FAILED.
+Only the exhaustion of the whole chain does. A loop that marked each failed attempt would turn every
+transient network blip into an operator-visible terminal state and defeat INV-7's signal. All four
+paths are fenced on `ownsSession`, so a dying generation cannot park a peer's session in a status
+nothing resets automatically.
 
 ## 31.3 Comments that exist because the obvious fix is wrong
 
