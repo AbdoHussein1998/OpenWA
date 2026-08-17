@@ -8,7 +8,8 @@ import * as crypto from 'crypto';
 import { setTimeout } from 'node:timers/promises';
 import { Webhook } from './entities/webhook.entity';
 import { WebhookDeliveryFailure } from './entities/webhook-delivery-failure.entity';
-import { recordWebhookDeliveryFailure, statusCodeFromError } from './utils/record-delivery-failure';
+import { recordWebhookDeliveryFailure } from './utils/record-delivery-failure';
+import { postWebhookPayload, recordTerminalFailure } from './utils/deliver-once';
 import { createLogger } from '../../common/services/logger.service';
 import { DEFAULT_WEBHOOK_MEDIA_INLINE_MAX_BYTES, shedInlineMedia } from '../../common/utils/inline-media';
 import { incrementWebhookDeliveryFailures } from '../../common/metrics/webhook-delivery-metrics';
@@ -16,7 +17,7 @@ import { QUEUE_NAMES } from '../queue/queue-names';
 import { generateIdempotencyKey, generateDeliveryId } from './utils/idempotency.util';
 import { evaluateFilters } from './filters/filter-evaluator';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
-import { withSafeFetch, isSsrfProtectionEnabled, redactSsrfError } from '../../common/security/ssrf-guard';
+import { redactSsrfError } from '../../common/security/ssrf-guard';
 import { HookManager } from '../../core/hooks';
 import { ConcurrencyLimiter } from '../../common/utils/concurrency-limiter';
 
@@ -643,21 +644,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      const { ok, status, statusText } = await withSafeFetch(
-        webhook.url,
-        {
-          method: 'POST',
-          headers,
-          body,
-          signal: AbortSignal.timeout(this.configService.get<number>('webhook.timeout', 10000)),
-        },
-        response => ({ ok: response.ok, status: response.status, statusText: response.statusText }),
-        { guard: isSsrfProtectionEnabled() },
-      );
-
-      if (!ok) {
-        throw new Error(`HTTP ${status}: ${statusText}`);
-      }
+      await postWebhookPayload(webhook.url, body, headers, this.configService.get<number>('webhook.timeout', 10000));
 
       // The receiver already answered 2xx — the delivery SUCCEEDED. A bookkeeping failure here (e.g.
       // the lastTriggeredAt update on a flaky DB) must not reach the catch below: it would retry an
@@ -695,8 +682,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
       }
       // All direct-path retries exhausted — persist a durable failure record before giving up, mirroring
       // the queued processor's final-attempt path so the queue-disabled path isn't a blind spot.
-      const errMessage = redactSsrfError(error);
-      await recordWebhookDeliveryFailure(this.failureRepository, this.logger, {
+      await recordTerminalFailure(this.failureRepository, this.logger, {
         webhookId: webhook.id,
         sessionId: payload.sessionId,
         event: payload.event,
@@ -704,8 +690,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
         idempotencyKey: payload.idempotencyKey,
         deliveryId: payload.deliveryId,
         attempts: attempt,
-        lastStatusCode: statusCodeFromError(errMessage),
-        lastError: errMessage,
+        error,
       });
       incrementWebhookDeliveryFailures();
       throw error;
