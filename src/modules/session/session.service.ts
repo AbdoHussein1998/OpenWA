@@ -480,11 +480,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   async getQRCode(id: string): Promise<{ qrCode: string; status: SessionStatus }> {
     const session = await this.findOne(id);
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
-    }
+    const engine = this.engines.require(
+      id,
+      () => new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.'),
+    );
 
     const qrCode = engine.getQRCode();
 
@@ -507,11 +506,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    */
   async requestPairingCode(id: string, phoneNumber: string): Promise<{ pairingCode: string; status: SessionStatus }> {
     const session = await this.findOne(id);
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.');
-    }
+    const engine = this.engines.require(
+      id,
+      () => new BadRequestException('Session is not started. Call POST /sessions/:sessionId/start first.'),
+    );
     if (session.status === SessionStatus.READY) {
       throw new BadRequestException('Session is already authenticated, no pairing needed');
     }
@@ -524,16 +522,21 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     return this.engines.get(id);
   }
 
+  /**
+   * The engine for a started session, or the documented 400. Routes through engines.require's
+   * default onMissing so the wire contract stays byte-identical to the hand-rolled guards this
+   * replaces ('Session is not started', exactly as each API surface documented it).
+   */
+  private requireEngine(id: string): IWhatsAppEngine {
+    return this.engines.require(id);
+  }
+
   async getGroups(
     id: string,
     opts: ListOptions = {},
   ): Promise<{ id: string; name: string; linkedParentJID?: string | null }[]> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     const groups = await engine.getGroups();
     const mapped = groups.map(g => ({
@@ -546,11 +549,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   async getChats(id: string, opts: ListOptions = {}): Promise<ChatSummary[]> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     // Most-recent first, then bound the response window. Sorting before the cap means a capped
     // response is the N newest chats (what clients show first) rather than an arbitrary slice.
@@ -569,11 +568,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    */
   async subscribeToPresence(id: string, chatId: string): Promise<void> {
     await this.findOne(id);
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     return engine.subscribeToPresence(chatId);
   }
@@ -584,11 +579,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    */
   async setOnlinePresence(id: string, available: boolean): Promise<void> {
     await this.findOne(id);
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     return engine.setOnlinePresence(available);
   }
@@ -605,22 +596,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   async sendSeen(id: string, chatId: string): Promise<boolean> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     return engine.sendSeen(chatId);
   }
 
   async markUnread(id: string, chatId: string): Promise<boolean> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     return engine.markUnread(chatId);
   }
@@ -631,11 +614,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    */
   async clearChatMessages(id: string, chatId: string): Promise<boolean> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     return engine.clearChatMessages(chatId);
   }
@@ -647,11 +626,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    */
   async archiveChat(id: string, chatId: string, archive: boolean): Promise<boolean> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     return engine.archiveChat(chatId, archive);
   }
@@ -663,11 +638,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    */
   async muteChat(id: string, chatId: string, muteUntil: number | null): Promise<void> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     return engine.muteChat(chatId, muteUntil);
   }
@@ -678,33 +649,21 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    */
   async pinChat(id: string, chatId: string, pin: boolean): Promise<boolean> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     return engine.pinChat(chatId, pin);
   }
 
   async deleteChat(id: string, chatId: string): Promise<boolean> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     return engine.deleteChat(chatId);
   }
 
   async sendChatState(id: string, chatId: string, state: ChatState): Promise<void> {
     await this.findOne(id); // Verify session exists
-    const engine = this.engines.get(id);
-
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
-    }
+    const engine = this.requireEngine(id);
 
     await engine.sendChatState(chatId, state);
   }

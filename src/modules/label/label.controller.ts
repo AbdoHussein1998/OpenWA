@@ -22,7 +22,6 @@ export class LabelController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({ status: 200, description: 'List of labels', type: [LabelDto] })
   @ApiResponse({ status: 400, description: 'Session not ready or not a business account' })
-  @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   @ApiResponse({ status: 501, description: ENGINE_NOT_SUPPORTED_501 })
   async findAll(@Param('sessionId') sessionId: string) {
