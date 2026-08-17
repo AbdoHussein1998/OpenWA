@@ -185,13 +185,9 @@ export class WwebjsGroups {
   }
 
   async addParticipants(groupId: string, participants: string[]): Promise<ParticipantOperationResult[]> {
-    this.host.ensureReady();
-    const chat = await this.client().getChatById(groupId);
-    if (!chat.isGroup) {
-      throw new Error('Chat is not a group');
-    }
+    const chat = await this.requireGroupChat(groupId);
     const participantIds = participants.map(toParticipantWid);
-    const raw = await (chat as unknown as GroupChat).addParticipants(participantIds);
+    const raw = await chat.addParticipants(participantIds);
     // whatsapp-web.js reports a batch-level refusal (no admin rights, empty group) by RESOLVING a
     // plain reason string (GroupChat.js:106-107,128-130) instead of throwing — surface it as a
     // refusal, not a success.
@@ -248,13 +244,9 @@ export class WwebjsGroups {
     groupId: string,
     participants: string[],
   ): Promise<ParticipantOperationResult[]> {
-    this.host.ensureReady();
-    const chat = await this.client().getChatById(groupId);
-    if (!chat.isGroup) {
-      throw new Error('Chat is not a group');
-    }
+    const chat = await this.requireGroupChat(groupId);
     const participantIds = participants.map(toParticipantWid);
-    const res = await this.runParticipantBatch(op, groupId, chat as unknown as GroupChat, participantIds);
+    const res = await this.runParticipantBatch(op, groupId, chat, participantIds);
     if (res?.status !== 200) {
       throw new EngineRefusedError(`${op} refused for group ${groupId} (status ${res?.status ?? 'unknown'})`);
     }
@@ -319,51 +311,35 @@ export class WwebjsGroups {
   }
 
   async leaveGroup(groupId: string): Promise<void> {
-    this.host.ensureReady();
-    const chat = await this.client().getChatById(groupId);
-    if (!chat.isGroup) {
-      throw new Error('Chat is not a group');
-    }
-    await (chat as unknown as GroupChat).leave();
+    const chat = await this.requireGroupChat(groupId);
+    await chat.leave();
   }
 
   async setGroupSubject(groupId: string, subject: string): Promise<void> {
-    this.host.ensureReady();
-    const chat = await this.client().getChatById(groupId);
-    if (!chat.isGroup) {
-      throw new Error('Chat is not a group');
-    }
+    const chat = await this.requireGroupChat(groupId);
     // GroupChat.setSubject resolves false when WA Web rejects the change (e.g. the account lacks
     // admin rights; index.d.ts:1982) instead of throwing — surface the refusal, not a false success.
-    const ok = await (chat as unknown as GroupChat).setSubject(subject);
+    const ok = await chat.setSubject(subject);
     if (!ok) {
       throw new EngineRefusedError(`Failed to set the subject for group ${groupId} — admin rights required`);
     }
   }
 
   async setGroupDescription(groupId: string, description: string): Promise<void> {
-    this.host.ensureReady();
-    const chat = await this.client().getChatById(groupId);
-    if (!chat.isGroup) {
-      throw new Error('Chat is not a group');
-    }
+    const chat = await this.requireGroupChat(groupId);
     // Same discarded-boolean contract as setSubject (index.d.ts:1984).
-    const ok = await (chat as unknown as GroupChat).setDescription(description);
+    const ok = await chat.setDescription(description);
     if (!ok) {
       throw new EngineRefusedError(`Failed to set the description for group ${groupId} — admin rights required`);
     }
   }
 
   async getGroupInviteCode(groupId: string): Promise<string> {
-    this.host.ensureReady();
-    const chat = await this.client().getChatById(groupId);
-    if (!chat.isGroup) {
-      throw new Error(`${groupId} is not a group`);
-    }
+    const chat = await this.requireGroupChat(groupId);
     // Typed Promise<string>, but WA Web yields nothing when the account is not an admin of the
     // group — and String(undefined) is the literal 'undefined', which the caller renders as the
     // link "https://chat.whatsapp.com/undefined". Same refusal contract as setDescription.
-    const inviteCode = await (chat as unknown as GroupChat).getInviteCode();
+    const inviteCode = await chat.getInviteCode();
     if (!inviteCode) {
       throw new EngineRefusedError(`Failed to get the invite code for group ${groupId} — admin rights required`);
     }
@@ -372,12 +348,8 @@ export class WwebjsGroups {
   }
 
   async revokeGroupInviteCode(groupId: string): Promise<string> {
-    this.host.ensureReady();
-    const chat = await this.client().getChatById(groupId);
-    if (!chat.isGroup) {
-      throw new Error(`${groupId} is not a group`);
-    }
-    const newCode = await (chat as unknown as GroupChat).revokeInvite();
+    const chat = await this.requireGroupChat(groupId);
+    const newCode = await chat.revokeInvite();
     if (!newCode) {
       throw new EngineRefusedError(`Failed to revoke the invite code for group ${groupId} — admin rights required`);
     }
