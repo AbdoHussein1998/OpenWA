@@ -75,8 +75,9 @@ Key adapter facts:
   literals in every adapter and delegate source file (`engine-parity.spec.ts`), so a throw in a
   delegate is machine-checked exactly like an inline one. Two refinements: the literal must be a
   plain single-quoted string naming the refused method (a template-literal or variable-argument
-  construction fails the gate, as does a literal that names no interface method), and a refusal
-  that fires only under a runtime condition - `sendText` with `customPreview` on whatsapp-web.js -
+  construction fails the gate outside the one `unsupported()` helper body, as does a literal that
+  names no interface method), and a refusal
+  that fires only under a runtime condition - `sendTextMessage` with `customPreview` on whatsapp-web.js -
   is pinned in the gate's conditional list instead of flipping the cell, because 'supported with a
   refused option' is not 'not-available'.
 - **Inbound events** flow the other way: each adapter normalizes library events into the neutral
