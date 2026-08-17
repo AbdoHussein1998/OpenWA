@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Nine whatsapp-web.js group routes answer `404` (`GroupNotFoundError`) when the id is not a group or is unknown, like the guarded settings writes; they previously threw a bare error that surfaced as an opaque `500`.
+- The cold-reachout budget is charged only after the group engine call resolves; a createGroup that 501s (whatsapp-web.js, always) or an add the engine refuses no longer burns the day's allowance for participants never contacted.
+- block/unblock refuse ids that do not name a person (400, both engines): whatsapp-web.js silently returned false for a group id (answered 200 "blocked" with nothing blocked) and Baileys surfaced an opaque 500 for an unresolvable jid.
 - whatsapp-web.js profile, status and channel operations classify a dead browser page as the documented `503` plus an early death signal instead of an opaque `500` while the session still reports READY, matching the split the chat operations already made.
 - docs/06 repair pass over the Errors lines: the ingress `401` is the signature failure (not an API-key error), label writes have no `404`, the catalog product lookup answers `200` empty (not `404`), search's `501` names the no-provider case, multi-line Errors blocks were re-joined (no severed sentences, duplicate codes, or `· ·` separators), and the gate now reads wrapped blocks.
 - docs/14 corrects four hazard-table release labels (instance-config is 0.18.0, the reload `409` is 0.15.0, the group-summary retypes are 0.14.6, Baileys 5xx is 0.14.5), docs/03 drops a duplicated `health/`, and docs/10's scaling note matches docs/13's "still deploy replicas: 1" stance.

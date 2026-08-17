@@ -166,12 +166,12 @@ export class SendPacingService {
    * report per-participant outcomes for real failures already — a pacing refusal must not be
    * mistaken for one of those.
    */
-  async assertReachoutAllowed(sessionId: string, contactIds: string[]): Promise<void> {
+  async assertReachoutAllowed(sessionId: string, contactIds: string[]): Promise<number> {
     const config = resolveSendPacingConfig(this.configService);
-    if (!config.enabled) return;
+    if (!config.enabled) return 0;
 
     this.assertBreakerClosed(sessionId, config);
-    if (config.coldSchedule.length === 0 || contactIds.length === 0) return;
+    if (config.coldSchedule.length === 0 || contactIds.length === 0) return 0;
 
     // The same id twice in one request is one contact, and must cost one. Each contact is probed
     // under both user-id dialects (see dialectVariants) — a contact known under the other spelling
@@ -186,10 +186,10 @@ export class SendPacingService {
       .getRawMany<{ chatId: string }>();
     const knownIds = new Set(knownRows.map(row => row.chatId));
     const coldCount = unique.filter(id => !variantsByContact.get(id)!.some(v => knownIds.has(v))).length;
-    if (coldCount === 0) return;
+    if (coldCount === 0) return 0;
 
     const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
-    if (!session) return;
+    if (!session) return 0;
 
     const dayStart = startOfUtcDay(new Date());
     const ageDays = Math.floor((dayStart.getTime() - startOfUtcDay(session.createdAt).getTime()) / DAY_MS);
@@ -200,9 +200,10 @@ export class SendPacingService {
     const usedToday =
       (await this.countColdReachoutsToday(sessionId, dayStart)) + this.groupReachoutsToday(sessionId, dayStart);
     if (usedToday + coldCount <= allowance) {
-      // Charge the budget now, on the allowed path, so a second add request in the same day sees it.
-      this.addGroupReachouts(sessionId, dayStart, coldCount);
-      return;
+      // Caller charges this AFTER the engine call resolves (chargeGroupReachouts): a createGroup
+      // that 501s on whatsapp-web.js (always) or an add the engine refuses must not burn the
+      // day's cold allowance for participants never contacted.
+      return coldCount;
     }
 
     this.refuse('cold_daily_cap', sessionId, secondsUntilNextUtcDay(), {
@@ -213,6 +214,15 @@ export class SendPacingService {
       coldToday: usedToday,
       coldCount,
     });
+  }
+
+  /**
+   * Charge `coldCount` cold reachouts against the in-memory group tally. Split out of
+   * assertReachoutAllowed so the group callers charge only after the engine call resolves.
+   */
+  chargeGroupReachouts(sessionId: string, coldCount: number): void {
+    if (coldCount <= 0) return;
+    this.addGroupReachouts(sessionId, startOfUtcDay(new Date()), coldCount);
   }
 
   /** Cold group-add reachouts charged to this session today (0 once the stored day rolls over). */
