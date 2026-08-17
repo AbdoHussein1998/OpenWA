@@ -1000,8 +1000,7 @@ Mute a chat's notifications until a given moment, or unmute it.
 > last message on either engine, so a chat with no known history mutes like any other. The response is
 > always `{ "success": true }` or an error.
 
-**Errors:** `400` session not ready, or invalid `chatId`/`muteUntil` · `401` missing/invalid API key · · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
-`404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
+**Errors:** `400` session not ready, or invalid `chatId`/`muteUntil` · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:sessionId/chats/pin
 
@@ -1043,8 +1042,7 @@ Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct fro
 > not "the chat is pinned". Unlike `chats/archive` the patch is not keyed to the chat's last message,
 > so a chat with no known history pins normally.
 
-**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found · · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
-`409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
+**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:sessionId/chats/delete
 
@@ -2313,8 +2311,7 @@ tell "this contact has no avatar" from "we could not find out".
 
 > The path segment is `profile-picture` (hyphenated), not `profile-pic`.
 
-**Errors:** `400` session is not started · `401` missing/invalid API key · `503` the engine could not · `409` conflict or engine not ready (retryable)
-complete the lookup
+**Errors:** `400` session is not started · `401` missing/invalid API key · `409` conflict or engine not ready (retryable) · `503` the engine could not complete the lookup
 
 Note the batch route below keeps its best-effort contract: it has no per-id error channel, so a
 failed lookup there still appears as `null`.
@@ -2634,7 +2631,7 @@ Create a new group with an initial set of participants.
 | Field        | Type     | Required | Constraints                                                        | Description                                               |
 | ------------ | -------- | -------- | ------------------------------------------------------------------ | --------------------------------------------------------- |
 | name         | string   | Yes      | `@IsString`, `@IsNotEmpty`, 1..100 chars                           | Group subject/name                                        |
-| participants | string[] | Yes      | `@IsArray`, `@ArrayNotEmpty`, `@IsString({each:true})`, 2..256 ids | Non-empty array of WhatsApp IDs, e.g. `628123456789@c.us` |
+| participants | string[] | Yes      | `@IsArray`, `@ArrayNotEmpty`, `@IsString({each:true})`, 1..256 ids | Non-empty array of WhatsApp IDs, e.g. `628123456789@c.us` |
 
 ```json
 {
@@ -3142,6 +3139,8 @@ for every **named** requester is a `403`.
 Reject pending join requests. Same body, response shape, batch-guard contract and error map as
 `.../membership-requests/approve`; rejecting an empty queue is likewise a no-op.
 
+**Errors:** `400` validation / session not started · `401` missing/invalid `X-API-Key` · `403` key lacks OPERATOR role, or the engine refused (admin rights / every named requester failed) · `409` engine not ready · `503` WhatsApp did not answer within the request budget
+
 ```json
 {
   "success": true,
@@ -3153,8 +3152,6 @@ Reject pending join requests. Same body, response shape, batch-guard contract an
 ### 6.4.5 Message Templates
 
 Reusable message templates scoped to a session, with `{{variable}}` placeholders rendered at send time. All routes are nested under `/api/sessions/:sessionId/templates` and require an **OPERATOR** key. The `sessionId` is stored on the template but is **not** validated against an existing session in these handlers.
-
-**Errors:** `401` missing/invalid `X-API-Key` · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
 
 #### GET /api/sessions/:sessionId/templates
 
@@ -3365,9 +3362,9 @@ Get business catalog info for the session's WhatsApp Business account.
 }
 ```
 
-**Baileys engine only.** whatsapp-web.js has no native Catalog API (the former null-returning stub was removed) and answers `501`; its readiness guard runs first, so a session that exists but is not `READY` (initializing, waiting on a QR, reconnecting) gets `409` instead. Baileys returns the catalog synthesized from its first collection; a business without collections has no catalog to describe and the metadata fields come back `null`.
+**Baileys engine only.** whatsapp-web.js has no native Catalog API (the former null-returning stub was removed) and answers `501`; its readiness guard runs first, so a session that exists but is not `READY` (initializing, waiting on a QR, reconnecting) gets `409` instead. Baileys returns the catalog synthesized from its first collection; a business without collections has no catalog to describe and the route answers `200` with an empty body.
 
-**Errors:** `401` missing/invalid API key · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY (whatsapp-web.js only) · `501` whatsapp-web.js only (no Catalog API) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `401` missing/invalid API key · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY · `501` whatsapp-web.js only (no Catalog API) · `503` session not ready or dependency unavailable (retryable)
 
 #### GET /api/sessions/:sessionId/catalog/products
 
@@ -3414,7 +3411,7 @@ Validated against `ProductQueryDto` via the global ValidationPipe; any unknown q
 
 **Baileys engine only.** whatsapp-web.js answers `501` (its readiness guard runs first, so a session that exists but is not `READY` gets `409` instead). Baileys pages the products with a cursor; query validation still runs first, so a bad `page`/`limit` is a `400`.
 
-**Errors:** `400` invalid `page`/`limit` or unknown query key · `401` missing/invalid API key · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY (whatsapp-web.js only) · `501` whatsapp-web.js only (no Catalog API) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` invalid `page`/`limit` or unknown query key · `401` missing/invalid API key · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY · `501` whatsapp-web.js only (no Catalog API) · `503` session not ready or dependency unavailable (retryable)
 
 #### GET /api/sessions/:sessionId/catalog/products/:productId
 
@@ -3446,9 +3443,9 @@ Get a specific catalog product by id.
 }
 ```
 
-**Baileys engine only.** whatsapp-web.js answers `501` (readiness-guarded as above). Baileys resolves the product from the session catalog; an id with no catalog row is a `404`.
+**Baileys engine only.** whatsapp-web.js answers `501` (readiness-guarded as above). Baileys resolves the product from the session catalog; an id no product carries answers `200` with an empty body.
 
-**Errors:** `401` missing/invalid API key · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY (whatsapp-web.js only) · `501` whatsapp-web.js only (no Catalog API) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `401` missing/invalid API key · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY · `501` whatsapp-web.js only (no Catalog API) · `503` session not ready or dependency unavailable (retryable)
 
 #### POST /api/sessions/:sessionId/messages/send-product
 
@@ -3486,7 +3483,7 @@ On whatsapp-web.js the readiness guard runs before the refusal, so a session tha
 `READY` gets `409` instead of `501`. Baileys resolves the product from the session catalog and sends
 the single-product message; an id with no catalog row is a `404` before anything is sent.
 
-**Errors:** `400` missing `chatId`/`productId`, wrong types, or any field not on the DTO · `401` missing/invalid API key · `403` API-key role below OPERATOR · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY (whatsapp-web.js only) · `500` engine error · `501` not supported on the active engine · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` missing `chatId`/`productId`, wrong types, or any field not on the DTO · `401` missing/invalid API key · `403` API-key role below OPERATOR · `404` `Session <sessionId> not found or not connected` · `409` session present but not READY · `500` engine error · `501` whatsapp-web.js only (no Catalog API) · `503` session not ready or dependency unavailable (retryable)
 
 #### GET /api/sessions/:sessionId/channels
 
@@ -3607,7 +3604,7 @@ engine can delete a channel it does not own.
 **Response** `201` — the created `Channel`, including its `inviteCode` (the code, not the full
 `https://whatsapp.com/channel/…` link — the code is what `POST /channels/subscribe` takes).
 
-**Errors:** `400` validation, or session not started · `401` · `403` · `403` the engine refused (on whatsapp-web.js this includes channel creation being disabled for the account) · `409` conflict or engine not ready (retryable)
+**Errors:** `400` validation, or session not started · `401` · `403` the engine refused (on whatsapp-web.js this includes channel creation being disabled for the account) · `409` conflict or engine not ready (retryable)
 
 #### POST /api/sessions/:sessionId/channels/:channelId/delete
 
@@ -3624,7 +3621,7 @@ Irreversible, and every subscriber loses the channel.
 
 **Response** `200` — `{ "success": true }`
 
-**Errors:** `400` session not started · `401` · `403` · `403` the engine refused (not found, or this account does not own it) · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` session not started · `401` · `403` the engine refused (not found, or this account does not own it) · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
 
 #### POST /api/sessions/:sessionId/channels/:channelId/mute
 
@@ -3643,7 +3640,7 @@ soft unsubscribe.
 
 **Response** `200` — `{ "success": true }`
 
-**Errors:** `400` validation, or session not started · `401` · `403` · `403` the engine refused · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` validation, or session not started · `401` · `403` the engine refused · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
 
 #### POST /api/sessions/:sessionId/channels/:channelId/admins/demote
 
@@ -3668,9 +3665,7 @@ fails. Rather than ship a route that always errors on that engine, it answers `5
 
 **Response** `200` — `{ "success": true }`
 
-**Errors:** `400` validation, or session not started · `401` · `403` the engine refused — not the · `409` conflict or engine not ready (retryable) · `501` not supported on the active engine · `503` session not ready or dependency unavailable (retryable)
-owner, or the user is not an admin · `501` the whatsapp-web.js engine cannot perform this ·
-`503` WhatsApp did not answer within the request budget
+**Errors:** `400` validation, or session not started · `401` · `403` the engine refused (not the owner, or the user is not an admin) · `409` conflict or engine not ready (retryable) · `501` the whatsapp-web.js engine cannot perform this · `503` WhatsApp did not answer within the request budget
 
 #### POST /api/sessions/:sessionId/channels/:channelId/owner/transfer
 
@@ -3699,9 +3694,7 @@ repopulate. Rather than ship a route that always fails on that engine, it answer
 
 **Response** `200` — `{ "success": true }`
 
-**Errors:** `400` validation, or session not started · `401` · `403` WhatsApp refused the transfer · · `409` conflict or engine not ready (retryable) · `501` not supported on the active engine · `503` session not ready or dependency unavailable (retryable)
-`501` the whatsapp-web.js engine cannot perform this · `503` WhatsApp did not answer within the
-request budget, and the transfer may or may not have applied
+**Errors:** `400` validation, or session not started · `401` · `403` WhatsApp refused the transfer · `409` conflict or engine not ready (retryable) · `501` the whatsapp-web.js engine cannot perform this · `503` WhatsApp did not answer within the request budget, and the transfer may or may not have applied
 
 #### POST /api/sessions/:sessionId/channels/subscribe
 
@@ -3878,7 +3871,7 @@ silently sets the wrong colour.
 { "success": true }
 ```
 
-**Errors:** `400` validation, or session not started (also when the session does not exist) · `401` · `403` · `404` label not found · `501` whatsapp-web.js, which cannot edit labels · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` validation, or session not started (also when the session does not exist) · `401` · `403` · `501` whatsapp-web.js, which cannot edit labels · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
 
 #### DELETE /api/sessions/:sessionId/labels/:labelId
 
@@ -3892,7 +3885,7 @@ Delete a label. It disappears from every chat it was on.
 { "success": true }
 ```
 
-**Errors:** `400` session not started (also when the session does not exist) · `401` · `403` · `404` label not found · `501` whatsapp-web.js, which cannot edit labels · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` session not started (also when the session does not exist) · `401` · `403` · `501` whatsapp-web.js, which cannot edit labels · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
 
 #### GET /api/sessions/:sessionId/labels/chat/:chatId
 
@@ -3948,7 +3941,7 @@ Add a label to a chat.
 
 The handler always returns the literal `{ "success": true }`.
 
-**Errors:** `400` validation failure (missing/empty/non-string `labelId`, or any unknown body field — strict whitelist), or session is not started · `401` missing/invalid API key · `403` key lacks `OPERATOR` role · `409` conflict or engine not ready (retryable) · `422` engine refused the value · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` validation failure (missing/empty/non-string `labelId`, or any unknown body field — strict whitelist), or session is not started · `401` missing/invalid API key · `403` key lacks `OPERATOR` role · `409` conflict or engine not ready (retryable) · `422` labels require a WhatsApp Business account, or the chat type has no labels · `503` session not ready or dependency unavailable (retryable)
 
 #### DELETE /api/sessions/:sessionId/labels/chat/:chatId/:labelId
 
@@ -3972,7 +3965,7 @@ Remove a label from a chat.
 
 The handler always returns `{ "success": true }`. DELETE default status is `200` (no `@HttpCode` override).
 
-**Errors:** `400` session is not started · `401` missing/invalid API key · `403` key lacks `OPERATOR` role · `409` conflict or engine not ready (retryable) · `422` engine refused the value · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` session is not started · `401` missing/invalid API key · `403` key lacks `OPERATOR` role · `409` conflict or engine not ready (retryable) · `422` labels require a WhatsApp Business account, or the chat type has no labels · `503` session not ready or dependency unavailable (retryable)
 
 #### GET /api/sessions/:sessionId/status
 
@@ -5040,7 +5033,7 @@ Notes: raw return of an in-memory `Settings` object built once in the controller
 
 #### GET /api/audit
 
-List audit-log entries, newest first. API-key lifecycle changes, session lifecycle events and ADMIN infra operations land here. **Message and webhook events deliberately do not**: message sends and webhook deliveries are tracked in their own tables (`messages`, `webhook_delivery_failures`), so filtering for `message_sent`, `message_failed`, `webhook_created`, `webhook_deleted`, `webhook_triggered` or `webhook_failed` returns zero rows by design.
+List audit-log entries, newest first. API-key lifecycle changes, session lifecycle events and ADMIN infra operations land here. **The six actions below are never emitted**: message sends and webhook deliveries are tracked in their own tables (`messages`, `webhook_delivery_failures`) — `webhook_created`/`webhook_deleted` are simply not wired yet — so filtering for `message_sent`, `message_failed`, `webhook_created`, `webhook_deleted`, `webhook_triggered` or `webhook_failed` returns zero rows by design.
 
 **Auth:** API key (ADMIN) · **Scope:** rows are confined to the calling key's `allowedSessions` — the `sessionId` query may only narrow within that list, never widen it
 
@@ -5082,7 +5075,7 @@ List audit-log entries, newest first. API-key lifecycle changes, session lifecyc
 }
 ```
 
-Unlike the other list routes this one is **not** a bare array: `data` is the page and `total` the unpaginated match count. Nullable columns (`apiKeyId`, `sessionId`, `metadata`, `errorMessage`, …) are `null` when the event has no such dimension. `userAgent`, `method`, `path` and `statusCode` are reserved columns: the request-actor context does not populate them today, so rows carry `null` (the sample above shows a `session_started` row as it is actually written).
+Unlike the other list routes this one is **not** a bare array: `data` is the page and `total` the unpaginated match count. Nullable columns (`apiKeyId`, `sessionId`, `metadata`, `errorMessage`, …) are `null` when the event has no such dimension. `userAgent` and `statusCode` are reserved columns nothing populates, so rows carry `null`. `method` and `path` are populated only where an emitter passes them explicitly (API-key auth failures, key lifecycle changes, queue-board mutations); session/message-flow rows like the sample leave them `null`.
 
 **Errors:** `401` missing/invalid API key · `403` key role below ADMIN
 
@@ -6107,7 +6100,7 @@ Search messages across sessions (active search provider).
 - `score` is optional and provider-specific (rank ordering is stable within a provider; cross-provider
   scores are not comparable).
 
-**Errors:** `400` empty/whitespace `q`, a non-numeric `dateFrom`/`dateTo`/`limit`/`offset`, or a malformed · `501` not supported on the active engine
+**Errors:** `400` empty/whitespace `q`, a non-numeric `dateFrom`/`dateTo`/`limit`/`offset`, or a malformed
 SQLite FTS5 query (unbalanced quote/paren, bare operator) — Postgres's `websearch_to_tsquery` is
 tolerant and has no equivalent · `401` missing/invalid `X-API-Key` · `403` key role below `OPERATOR` ·
 `501` no search provider configured (including a non-FTS5 SQLite build, where the provider is absent) ·
@@ -6134,7 +6127,7 @@ Set the account display name (max 25 chars).
 
 **Response** `200` — `{ "success": true, "message": "Profile name updated" }`
 
-**Errors:** `400` session is not started / invalid name · `401` · `403` · `403` engine refused the change · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` session is not started / invalid name · `401` · `403` engine refused the change · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
 
 #### PUT /api/sessions/:sessionId/profile/status
 
@@ -6168,7 +6161,7 @@ or
 
 **Response** `200` — `{ "success": true, "message": "Profile picture updated" }`
 
-**Errors:** `400` neither `url` nor `base64` provided / base64 without `mimetype` · `401` · `403` · `403` engine refused the change · `409` conflict or engine not ready (retryable) · `413` payload too large · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` neither `url` nor `base64` provided / base64 without `mimetype` · `401` · `403` engine refused the change · `409` conflict or engine not ready (retryable) · `413` payload too large · `503` session not ready or dependency unavailable (retryable)
 
 #### DELETE /api/sessions/:sessionId/profile/picture
 
@@ -6183,7 +6176,7 @@ No request body.
 Removing a picture that is already absent is a no-op and also answers `200`, so the call is safe to
 repeat.
 
-**Errors:** `400` session is not started · `401` · `403` · `403` engine refused the removal · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` session is not started · `401` · `403` engine refused the removal · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
 
 ### 6.4.14 Calls
 
@@ -6225,8 +6218,7 @@ Generate a shareable WhatsApp call link.
 > caller handed `{ "link": "" }` — or a bare prefix with nothing after it — would pass it to a user
 > before discovering it is dead.
 
-**Errors:** `400` session not ready, or an invalid `type`/`startTime` · `401` missing/invalid API key · · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
-`403` WhatsApp generated no link · `503` WhatsApp did not answer within the request budget
+**Errors:** `400` session not ready, or an invalid `type`/`startTime` · `401` missing/invalid API key · `403` WhatsApp generated no link · `409` conflict or engine not ready (retryable) · `503` WhatsApp did not answer within the request budget
 
 #### POST /api/sessions/:sessionId/calls/:callId/reject
 
@@ -6294,9 +6286,7 @@ identified from the bytes.
 { "base64": "T2dnUwACAAAA...", "mimetype": "audio/ogg; codecs=opus", "bytes": 14970 }
 ```
 
-**Errors:** `400` neither field given, or ffmpeg refused the input (its reason is included) · `401` · `413` payload too large · `503` session not ready or dependency unavailable (retryable)
-missing/invalid `X-API-Key` · `403` key lacks OPERATOR role · `413` media above the size cap · `503`
-conversion disabled, or the binary is not runnable
+**Errors:** `400` neither field given, or ffmpeg refused the input (its reason is included) · `401` missing/invalid `X-API-Key` · `403` key lacks OPERATOR role · `413` media above the size cap · `503` conversion is disabled, the ffmpeg binary is not runnable, or the conversion queue is saturated
 
 #### POST /api/sessions/:sessionId/media/convert/video
 
@@ -6304,7 +6294,7 @@ Convert video into an MP4 every WhatsApp client accepts: baseline H.264 with AAC
 bounded at 1280 (never upscaled), index moved to the front so playback can start before the whole
 file arrives.
 
-Request body and errors are identical to the voice endpoint.
+**Errors:** `400` neither field given, or ffmpeg refused the input (its reason is included) · `401` missing/invalid `X-API-Key` · `403` key lacks OPERATOR role · `413` media above the size cap · `503` conversion is disabled, the ffmpeg binary is not runnable, or the conversion queue is saturated
 
 **Response** `200`
 
@@ -6338,8 +6328,6 @@ fires. Be clear about what this guarantees: the cooldown **rate-bounds** an
 autoreply-vs-autoreply exchange with another bot, it does not terminate one — and
 `cooldownSeconds: 0` removes that bound entirely, so disable it only for rules whose conditions
 cannot match another bot's replies. The cooldown state is in-process: it resets on restart.
-
-**Errors:** `401` missing/invalid `X-API-Key` · `413` payload too large · `503` session not ready or dependency unavailable (retryable)
 
 #### POST /api/sessions/:sessionId/automation-rules
 
@@ -6525,19 +6513,19 @@ response only; the `verifyToken` is also shown (unchanged).
 
 #### GET /api/ingress/:pluginId/:instanceId/:path
 
-**Errors:** `401` missing/invalid `X-API-Key` · `413` payload too large · `429` rate limit exceeded
+**Errors:** `401` signature verification failed (missing, stale, or wrong per-instance secret) · `413` payload too large · `429` rate limit exceeded
 
 #### POST /api/ingress/:pluginId/:instanceId/:path
 
-**Errors:** `401` missing/invalid `X-API-Key` · `413` payload too large · `429` rate limit exceeded
+**Errors:** `401` signature verification failed (missing, stale, or wrong per-instance secret) · `413` payload too large · `429` rate limit exceeded
 
 #### PUT /api/ingress/:pluginId/:instanceId/:path
 
-**Errors:** `401` missing/invalid `X-API-Key` · `413` payload too large · `429` rate limit exceeded
+**Errors:** `401` signature verification failed (missing, stale, or wrong per-instance secret) · `413` payload too large · `429` rate limit exceeded
 
 #### PATCH /api/ingress/:pluginId/:instanceId/:path
 
-**Errors:** `401` missing/invalid `X-API-Key` · `413` payload too large · `429` rate limit exceeded
+**Errors:** `401` signature verification failed (missing, stale, or wrong per-instance secret) · `413` payload too large · `429` rate limit exceeded
 
 #### DELETE /api/ingress/:pluginId/:instanceId/:path
 

@@ -568,7 +568,8 @@
       "title": "找不到記錄",
       "description": "執行操作後，審計記錄會顯示在這裡",
       "filteredTitle": "本頁無符合項目",
-      "filteredDescription": "搜尋只會過濾目前頁面。請清除搜尋、翻頁，或使用嚴重程度篩選在伺服器端收窄。"
+      "filteredDescription": "搜尋只會過濾目前頁面。請清除搜尋、翻頁，或使用嚴重程度篩選在伺服器端收窄。",
+      "filteredServerDescription": "沒有符合這些篩選條件的日誌。請調整嚴重程度篩選以擴大搜尋範圍。"
     }
   },
   "messageTester": {

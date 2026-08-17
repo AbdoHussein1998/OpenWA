@@ -568,7 +568,8 @@
       "title": "Kayıt bulunamadı",
       "description": "İşlemler gerçekleştirildikçe denetim kayıtları burada görünecektir",
       "filteredTitle": "Bu sayfada eşleşme yok",
-      "filteredDescription": "Arama yalnızca geçerli sayfayı filtreler. Temizleyin, sayfalar arasında gezinin veya sunucu tarafında önem filtresini kullanın."
+      "filteredDescription": "Arama yalnızca geçerli sayfayı filtreler. Temizleyin, sayfalar arasında gezinin veya sunucu tarafında önem filtresini kullanın.",
+      "filteredServerDescription": "Bu filtrelerle eşleşen log yok. Aramayı genişletmek için önem filtresini ayarlayın."
     }
   },
   "messageTester": {

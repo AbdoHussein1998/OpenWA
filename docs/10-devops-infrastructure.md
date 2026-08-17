@@ -266,14 +266,17 @@ volumes:
 ```
 
 > [!IMPORTANT]
-> **Keep `replicas: 1` unless you follow [13 - Horizontal Scaling Guide](./13-horizontal-scaling.md)
-> end to end.** Session ownership is now claim/lease-based (`nodeId` owner + `leaseExpiresAt`, per
-> docs/13): two replicas no longer race to start the same session, so the old "two browsers corrupt
-> one WhatsApp LocalAuth directory" failure this warning used to describe can no longer happen.
-> Multi-node still carries real requirements (`NODE_ID`/`NODE_URL` per replica, Redis for queue,
-> cache and cross-replica WebSocket fan-out, Postgres for the data DB, `AUTO_START_SESSIONS=false`)
-> and buys engine capacity, not shared engine state: live engine handles still live in exactly one
-> process's `EngineRegistry` (`src/engine/engine-registry.service.ts`).
+> **Keep `replicas: 1`.** Session ownership gained claim/lease fencing (`nodeId` owner +
+> `leaseExpiresAt`), which bounds any two-engine overlap on one session to roughly one heartbeat
+> interval instead of eliminating it — and docs/13 still says DO NOT run its multi-replica examples
+> yet: process-local key eviction, WebSocket rate-limit buckets, the unfenced liveness watchdog,
+> bulk-batch state and MCP locality all remain per-process. Follow
+> [13 - Horizontal Scaling Guide](./13-horizontal-scaling.md) for the full list and the design
+> sketch. What multi-node eventually buys is engine capacity, not shared engine state: live engine
+> handles live in exactly one process's `EngineRegistry` (`src/engine/engine-registry.service.ts`),
+> and the hard requirements include a stable `NODE_ID` across restarts, NTP-synced clocks (lease
+> skew beyond the TTL wrongfully transfers a session), sticky sessions, `TRUSTED_PROXIES` for
+> forwarded calls, Redis and Postgres.
 
 ### Helm Chart (Kubernetes)
 

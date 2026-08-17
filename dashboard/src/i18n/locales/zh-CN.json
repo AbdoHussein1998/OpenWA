@@ -568,7 +568,8 @@
       "title": "未找到日志",
       "description": "执行操作后，审计日志将显示在这里",
       "filteredTitle": "本页无匹配项",
-      "filteredDescription": "搜索仅过滤当前页。请清除搜索、翻页，或使用严重级别筛选在服务端收窄。"
+      "filteredDescription": "搜索仅过滤当前页。请清除搜索、翻页，或使用严重级别筛选在服务端收窄。",
+      "filteredServerDescription": "没有符合这些筛选条件的日志。请调整严重级别筛选以扩大搜索范围。"
     }
   },
   "messageTester": {
