@@ -471,6 +471,14 @@ export interface MessageRecord {
   body?: string | null;
   type: string;
   direction: MessageDirection;
+  /** Chat display name, when the session resolves one for the chat. */
+  chatName?: string | null;
+  /** Author display name for an inbound group message. */
+  author?: string | null;
+  /** Storage key of the archived media copy, when chat-media archiving wrote one. */
+  mediaPath?: string | null;
+  /** Mimetype of the archived media; null whenever `mediaPath` is. */
+  mediaMimetype?: string | null;
   /** Unix timestamp in seconds. */
   timestamp?: number | null;
   metadata?: Record<string, unknown> | null;

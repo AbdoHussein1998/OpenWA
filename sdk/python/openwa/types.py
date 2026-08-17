@@ -12,10 +12,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, Optional, TypedDict
 
-if TYPE_CHECKING:
-    # Annotations are lazy (`from __future__ import annotations`), so NotRequired — which typing
-    # only ships from 3.11 — is needed exclusively where type checkers look, never at runtime.
-    # typing_extensions rides along with mypy; the runtime dependency set stays httpx-only.
+# NotRequired ships in typing from 3.11. Class-form annotations are lazy (`from __future__ import
+# annotations`) and only type checkers evaluate them — but the FUNCTIONAL TypedDicts below
+# (MessageRecord: `from` is a keyword and cannot appear in a class body) evaluate their field
+# values at import time, so a real runtime import is needed on 3.9/3.10. typing_extensions is a
+# version-marked runtime dependency for exactly those Pythons.
+import sys
+
+if sys.version_info >= (3, 11):
+    from typing import NotRequired
+else:
     from typing_extensions import NotRequired
 
 Jid = str
@@ -433,24 +439,30 @@ class MessageHistoryQuery(TypedDict, total=False):
 
 # ``from`` is a Python keyword, so use the functional TypedDict form (and
 # Optional[...] rather than ``X | None`` so the runtime values stay 3.9-safe).
+# Functional form (not a class) because `from` is a Python keyword and cannot appear in a class
+# body. Required-vs-optional mirrors the wire DTO exactly; nullable-and-optional fields use
+# NotRequired[Optional[...]] like the class-form TypedDicts in this file.
 MessageRecord = TypedDict(
     "MessageRecord",
     {
         "id": str,
         "sessionId": str,
-        "waMessageId": Optional[str],
+        "waMessageId": NotRequired[Optional[str]],
         "chatId": Jid,
         "from": Jid,
         "to": Jid,
-        "body": Optional[str],
+        "body": NotRequired[Optional[str]],
         "type": str,
         "direction": MessageDirection,
-        "timestamp": Optional[int],
-        "metadata": dict,
+        "chatName": NotRequired[Optional[str]],
+        "author": NotRequired[Optional[str]],
+        "mediaPath": NotRequired[Optional[str]],
+        "mediaMimetype": NotRequired[Optional[str]],
+        "timestamp": NotRequired[Optional[int]],
+        "metadata": NotRequired[Optional[dict]],
         "status": DeliveryStatus,
         "createdAt": str,
     },
-    total=False,
 )
 
 
