@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { ContactService } from './contact.service';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
@@ -205,6 +205,27 @@ describe('ContactService', () => {
       const upsertContact = jest.fn();
       await makeService({ upsertContact }).upsertContact('s1', id, 'Ada');
       expect(upsertContact).toHaveBeenCalled();
+    });
+  });
+
+  describe('resolveContactPhone error contract', () => {
+    it('propagates the 400 when the session is not started (getEngine is outside the swallow)', async () => {
+      const svc = makeService(undefined);
+      await expect(svc.resolveContactPhone('s1', '123@lid')).rejects.toThrow('Session is not started');
+    });
+
+    it('propagates an HttpException from the engine (409 not-ready keeps its retry guidance)', async () => {
+      const svc = makeService({
+        resolveContactPhone: jest.fn().mockRejectedValue(new ConflictException('Session is not connected')),
+      });
+      await expect(svc.resolveContactPhone('s1', '123@lid')).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('returns null for a non-HTTP lookup failure (dead page), preserving the route contract', async () => {
+      const svc = makeService({
+        resolveContactPhone: jest.fn().mockRejectedValue(new Error('Protocol error: Target closed')),
+      });
+      await expect(svc.resolveContactPhone('s1', '123@lid')).resolves.toBeNull();
     });
   });
 

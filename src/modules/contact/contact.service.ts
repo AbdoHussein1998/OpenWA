@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { HttpException, BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { EngineRegistry } from '../../engine/engine-registry.service';
+import { createLogger } from '../../common/services/logger.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { paginate, ListOptions } from '../../common/utils/paginate';
 import { isIndividualWid, parseWaId } from '../../engine/identity/wa-id';
@@ -10,6 +11,8 @@ import { isIndividualWid, parseWaId } from '../../engine/identity/wa-id';
  */
 @Injectable()
 export class ContactService {
+  private readonly logger = createLogger('ContactService');
+
   constructor(private readonly engines: EngineRegistry) {}
 
   private getEngine(sessionId: string): IWhatsAppEngine {
@@ -47,15 +50,23 @@ export class ContactService {
   }
 
   /**
-   * The HTTP route promises null when the engine cannot map the id (docs/06 and the ApiResponse
-   * text), and that includes "the lookup itself failed": a dead page, an evaluation error or a
-   * rate limit answers 200 null, not a 5xx. The ENGINE method rejects on those (the lid resolver
-   * needs the distinction), so swallow here at the boundary.
+   * The HTTP route promises null when the LOOKUP cannot produce an answer (docs/06 and the
+   * ApiResponse text): a dead page, an evaluation error or a rate limit answers 200 null, not a
+   * 5xx. The ENGINE method rejects on those (the lid resolver needs the distinction), so genuine
+   * lookup failures are swallowed here at the boundary - logged at debug, since the old adapter
+   * catch was the only place these were visible. Deliberate HTTP answers (400 not-started, 409
+   * not-ready) propagate: nulling them would tell a retrying caller "no mapping" for a session
+   * that simply is not running.
    */
   async resolveContactPhone(sessionId: string, contactId: string): Promise<string | null> {
+    const engine = this.getEngine(sessionId);
     try {
-      return await this.getEngine(sessionId).resolveContactPhone(contactId);
-    } catch {
+      return await engine.resolveContactPhone(contactId);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.debug(`resolveContactPhone lookup failed for ${contactId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }
