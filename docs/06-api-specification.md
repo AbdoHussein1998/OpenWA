@@ -6543,7 +6543,7 @@ plugin processing. `200` means the `GET` verification-challenge echo, or a dupli
 already persisted (idempotent re-delivery). A route may shape the synchronous status/body/headers
 the provider sees via its declarative `ack` config (doc 25); the plugin itself always runs async.
 
-**Errors:** `401` signature verification failed (missing, stale, or wrong secret) · `403` `GET` verification challenge failed (`verifyToken` mismatch) · `404` unknown pluginId/instanceId, or no such claimed route · `413` body over the route's `maxBodyBytes` · `429` per-instance rate limit (`INGRESS_INSTANCE_LIMIT` per `INGRESS_INSTANCE_TTL`, on top of the global per-IP throttle)
+**Errors:** `401` signature verification failed (missing, stale, or wrong secret) · `403` `GET` verification challenge failed (`verifyToken` mismatch) · `404` unknown pluginId/instanceId, or no such claimed route · `413` body over the route's `maxBodyBytes` · `429` per-instance rate limit (`INGRESS_INSTANCE_LIMIT` per `INGRESS_INSTANCE_TTL`; the per-instance bound is this route's only rate limit - the global per-IP tiers skip it)
 
 ## 6.5 Real-time API (WebSocket)
 

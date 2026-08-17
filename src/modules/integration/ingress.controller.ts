@@ -1,17 +1,23 @@
 import { All, Controller, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ApiTags, ApiOkResponse, ApiParam, ApiResponse } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { Public } from '../auth/decorators/auth.decorators';
 import { IngressService } from './ingress.service';
 import { InstanceThrottlerGuard } from './instance-throttler.guard';
 
-// @Public so the global ApiKeyGuard early-returns (providers can't present an API key), but NOT
-// @SkipThrottle — the global IP throttle stays as a coarse guard (per-instance fairness is P1).
+// @Public so the global ApiKeyGuard early-returns (providers can't present an API key). The
+// controller-level @SkipThrottle below exempts the GLOBAL per-IP guard (see its comment).
 // The provider body is read as RAW bytes from req.rawBody (stashed by the json() verify callback in
 // main.ts) — it is intentionally NOT DTO-bound, so the global ValidationPipe never 400s on the
 // provider's unknown keys, and the exact signed bytes reach the HMAC verifier.
 @ApiTags('integration')
 @Public()
+// The global per-IP throttle SKIPS this route (its medium tier, 100/min by default, sits below the
+// per-instance limit's 120/min, so a provider delivering every tenant's webhooks from one shared
+// egress IP was 429'd at the IP tier before the instance bound ever fired). Fairness here is the
+// InstanceThrottlerGuard's job: keyed on (pluginId, instanceId), a noisy tenant sheds alone.
+@SkipThrottle()
 @Controller('ingress')
 export class IngressController {
   constructor(private readonly ingress: IngressService) {}
@@ -19,13 +25,15 @@ export class IngressController {
   // Express 5 (path-to-regexp v8) has no bare `*` — Nest's route converter rewrites it to the named
   // wildcard `*path`, so the trailing segments land in req.params.path (an array), not req.params[0].
   //
-  // InstanceThrottlerGuard runs IN ADDITION to the global per-IP ProxyAwareThrottlerGuard (an
-  // APP_GUARD, so it still applies here) — two independent buckets, keyed differently, both enforced.
+  // InstanceThrottlerGuard is the route's ONLY rate bound: the global per-IP guard skips this
+  // controller (@SkipThrottle above) because its medium tier (100/min) sits below this guard's
+  // per-instance default (120/min), which 429'd every tenant of a shared-egress-IP provider at
+  // the IP tier before the instance bound ever fired. This guard ignores the bare @SkipThrottle
+  // (see its shouldSkip) and keys on (pluginId, instanceId), so a noisy tenant sheds alone.
   // Its limit/ttl (INGRESS_INSTANCE_LIMIT / INGRESS_INSTANCE_TTL) are read directly by the guard
   // itself, NOT via @Throttle: @Throttle metadata is reflected on the route and read by every
-  // ThrottlerGuard subclass that walks a tier of that name, including the global per-IP guard — so a
-  // route-level override here would silently retarget the global guard's tolerance too. See
-  // InstanceThrottlerGuard's onModuleInit for how it keeps its tier fully independent.
+  // ThrottlerGuard subclass that walks a tier of that name. See InstanceThrottlerGuard's
+  // onModuleInit for how it keeps its tier fully independent.
   @UseGuards(InstanceThrottlerGuard)
   @All(':pluginId/:instanceId/*path')
   // The wildcard segment is part of the published path template, so it needs a parameter of its own —
