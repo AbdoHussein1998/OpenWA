@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Baileys adapter builds one shared host object for its nine delegates instead of nine overlapping closure bags; a new cross-cutting member is added once. No behavior change.
 - A transient whatsapp-web.js lid-to-phone lookup failure (dead page, rate limit) no longer overwrites a valid stored mapping with a definitive null; the engine method rejects on failure and the HTTP boundary keeps its null-on-failure contract.
 - Nine whatsapp-web.js group routes answer `404` (`GroupNotFoundError`) when the id is not a group or is unknown, like the guarded settings writes; they previously threw a bare error that surfaced as an opaque `500`.
 - The cold-reachout budget is charged only after the group engine call resolves; a createGroup that 501s (whatsapp-web.js, always) or an add the engine refuses no longer burns the day's allowance for participants never contacted.

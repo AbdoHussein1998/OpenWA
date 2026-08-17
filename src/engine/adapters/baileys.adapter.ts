@@ -7,6 +7,7 @@ import { BaileysContacts } from './baileys-contacts';
 import { BaileysEvents } from './baileys-events';
 import { BaileysGroups } from './baileys-groups';
 import { BaileysHistory, toUnixSeconds } from './baileys-history';
+import { type BaileysEngineHost } from './baileys-host';
 import { BaileysLifecycle } from './baileys-lifecycle';
 import { BaileysMessaging } from './baileys-messaging';
 import { BaileysStatus } from './baileys-status';
@@ -113,19 +114,24 @@ export class BaileysAdapter implements IWhatsAppEngine {
     this.sessionStore = new BaileysSessionStore(config.lidMappingStore, config.sessionId);
     // Constructed before messaging: the messaging delegate's own-send echo maps through
     // events.mapMessage (and the lifecycle delegate clears that same live-call cache on teardown).
-    // An object-literal getter's `this` is the literal itself, so the live connectedAt read goes
-    // through an arrow closure that captures the adapter.
+    // One host literal for every delegate (the wwebjs-host pattern): a new cross-cutting member
+    // is added once here, not to nine per-delegate bags. Each delegate keeps its own narrow Host
+    // interface, which this literal satisfies structurally - least privilege stays enforceable.
+    const delegates: { events?: BaileysEvents } = {};
     const connectedAt = (): number => this.connectedAt;
-    this.events = new BaileysEvents({
+    const host: BaileysEngineHost = {
+      // An object-literal getter's `this` is the literal itself, so the live connectedAt read goes
+      // through the arrow closure above, which captures the adapter.
+      get connectedAt() {
+        return connectedAt();
+      },
       getSocket: () => this.sock!,
       getSocketOrNull: () => this.sock,
       logger: this.logger,
       toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
       normalizedSelfJid: () => this.normalizedSelfJid(),
       loadLib: () => this.loadLib(),
-      get connectedAt() {
-        return connectedAt();
-      },
+      toUnixSeconds,
       inboundLimiter: this.inboundLimiter,
       recordKeyLidMappings: key => this.sessionStore.recordKeyLidMappings(key),
       recordMessage: msg => this.sessionStore.recordMessage(msg),
@@ -141,86 +147,33 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getOnCall: () => this.callbacks.onCall,
       getOnPresenceUpdate: () => this.callbacks.onPresenceUpdate,
       getOnCallOutcome: () => this.callbacks.onCallOutcome,
-    });
-    this.groups = new BaileysGroups({
       ensureReady: () => this.ensureReady(),
-      getSocket: () => this.sock!,
-      logger: this.logger,
-      toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
       toEngineJid: jid => this.sessionStore.toEngineJid(jid),
-      normalizedSelfJid: () => this.normalizedSelfJid(),
-    });
-    this.messaging = new BaileysMessaging({
-      ensureReady: () => this.ensureReady(),
-      getSocket: () => this.sock!,
-      logger: this.logger,
-      toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
-      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
-      normalizedSelfJid: () => this.normalizedSelfJid(),
       getEphemeralExpiration: chatId => this.sessionStore.getEphemeralExpiration(chatId),
-      toUnixSeconds,
-      loadLib: () => this.loadLib(),
-      putStoredMessage: msg => this.config.messageStore?.put(this.config.dbSessionId, msg),
       getStoredMessage: messageId => this.config.messageStore?.getMessage(this.config.dbSessionId, messageId),
-      // Store the device-stripped lid: that is the key the lid->phone lookup reads.
       recordLidMapping: (lid, pn) =>
         this.sessionStore.addLidMappings([{ lid: `${lid.split('@')[0].split(':')[0]}@lid`, pn }]),
-      getOnMessageCreate: () => this.callbacks.onMessageCreate,
       mapMessage: (msg, contentType, opts) => this.events.mapMessage(msg, contentType, opts),
-    });
-    this.contacts = new BaileysContacts({
-      ensureReady: () => this.ensureReady(),
-      getSocket: () => this.sock!,
-      logger: this.logger,
-      normalizedSelfJid: () => this.normalizedSelfJid(),
       listContacts: () => this.sessionStore.listContacts(),
       findContact: contactId => this.sessionStore.findContact(contactId),
       resolvePhone: contactId => this.sessionStore.resolvePhone(contactId),
       listChats: () => this.sessionStore.listChats(),
       lastMessage: chatId => this.sessionStore.lastMessage(chatId),
-      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
-      toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
-    });
-    this.statusOps = new BaileysStatus({
-      ensureReady: () => this.ensureReady(),
-      getSocket: () => this.sock!,
-      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
-      normalizedSelfJid: () => this.normalizedSelfJid(),
-      toUnixSeconds,
-    });
-    this.channels = new BaileysChannels({
-      ensureReady: () => this.ensureReady(),
-      getSocket: () => this.sock!,
-      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
-    });
-    this.catalog = new BaileysCatalog({
-      ensureReady: () => this.ensureReady(),
-      getSocket: () => this.sock!,
-      logger: this.logger,
-      normalizedSelfJid: () => this.normalizedSelfJid(),
-    });
-    this.history = new BaileysHistory({
-      getSocket: () => this.sock!,
-      logger: this.logger,
-      toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
-      normalizedSelfJid: () => this.normalizedSelfJid(),
-      loadLib: () => this.loadLib(),
-      recordMessage: msg => this.sessionStore.recordMessage(msg),
       upsertContacts: records => this.sessionStore.upsertContacts(records),
       upsertChats: records => this.sessionStore.upsertChats(records),
       extractEphemeralDuration: msg => this.sessionStore.extractEphemeralDuration(msg),
       getOnHistoryMessages: () => this.callbacks.onHistoryMessages,
-    });
-    // Constructed last: its host closes over the delegates above (event/history handlers), while the
-    // live-call map is captured eagerly — a stable readonly reference owned by BaileysEvents.
-    this.lifecycle = new BaileysLifecycle({
-      logger: this.logger,
       authPath: this.authPath,
       config: this.config,
-      liveCalls: this.events.liveCalls,
+      // A getter so the events delegate exists by first read: the literal is built before the
+      // delegates are constructed, and the OLD wiring captured this.events.liveCalls eagerly -
+      // a stable readonly reference owned by BaileysEvents. The indirection defers the capture.
+      get liveCalls() {
+        // Construction order guarantees the events delegate exists before lifecycle first reads
+        // this (lifecycle is constructed last and only USES the bag during socket events).
+        return delegates.events!.liveCalls;
+      },
       extractPhone: id => this.extractPhone(id),
-      upsertContacts: records => this.sessionStore.upsertContacts(records),
-      upsertChats: records => this.sessionStore.upsertChats(records),
       addLidMappings: mappings => this.sessionStore.addLidMappings(mappings),
       handleMessagesUpsert: event => this.events.handleMessagesUpsert(event),
       handleMessagesUpdate: updates => this.events.handleMessagesUpdate(updates),
@@ -239,7 +192,16 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getOnStateChanged: () => this.callbacks.onStateChanged,
       getOnCredentialTeardownStarted: () => this.callbacks.onCredentialTeardownStarted,
       getOnAccountRestriction: () => this.callbacks.onAccountRestriction,
-    });
+    };
+    delegates.events = this.events = new BaileysEvents(host);
+    this.groups = new BaileysGroups(host);
+    this.messaging = new BaileysMessaging(host);
+    this.contacts = new BaileysContacts(host);
+    this.statusOps = new BaileysStatus(host);
+    this.channels = new BaileysChannels(host);
+    this.catalog = new BaileysCatalog(host);
+    this.history = new BaileysHistory(host);
+    this.lifecycle = new BaileysLifecycle(host);
   }
 
   // ----- Lifecycle -----
