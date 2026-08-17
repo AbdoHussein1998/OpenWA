@@ -40,7 +40,7 @@ All five SDKs expose the same fluent surface:
 | `status`    | list, fromContact, media, sendText, sendImage, sendVideo, sendVoice, delete _(Stories)_                                                                                                                                                                                                                  |
 | `search`    | search                                                                                                                                                                                                                                                                                                   |
 | `templates` | list, get, create, update, delete                                                                                                                                                                                                                                                                        |
-| `profile`   | setProfileName, setProfileStatus, setProfilePicture                                                                                                                                                                                                                                                      |
+| `profile`   | setProfileName, setProfileStatus, setProfilePicture, deleteProfilePicture                                                                                                                                                                                                                                |
 | `calls`     | rejectCall, createLink                                                                                                                                                                                                                                                                                   |
 | `media`     | conversionStatus, convertVoice, convertVideo _(OPERATOR)_                                                                                                                                                                                                                                                |
 | `health`    | check, live, ready                                                                                                                                                                                                                                                                                       |
@@ -316,11 +316,12 @@ Media bodies share the `SendMediaRequest` shape: `{ chatId, url? | base64?, mime
 
 #### `profile`
 
-| Method              | Signature                             | Description                                                                    |
-| ------------------- | ------------------------------------- | ------------------------------------------------------------------------------ |
-| `setProfileName`    | `setProfileName(sessionId, name)`     | Set the account display name. **OPERATOR**                                     |
-| `setProfileStatus`  | `setProfileStatus(sessionId, status)` | Set the account about/status text (empty clears it). **OPERATOR**              |
-| `setProfilePicture` | `setProfilePicture(sessionId, body)`  | Set the account profile picture (`url` or `base64` + `mimetype`). **OPERATOR** |
+| Method                 | Signature                             | Description                                                                    |
+| ---------------------- | ------------------------------------- | ------------------------------------------------------------------------------ |
+| `setProfileName`       | `setProfileName(sessionId, name)`     | Set the account display name. **OPERATOR**                                     |
+| `setProfileStatus`     | `setProfileStatus(sessionId, status)` | Set the account about/status text (empty clears it). **OPERATOR**              |
+| `setProfilePicture`    | `setProfilePicture(sessionId, body)`  | Set the account profile picture (`url` or `base64` + `mimetype`). **OPERATOR** |
+| `deleteProfilePicture` | `deleteProfilePicture(sessionId)`     | Remove the account profile picture. **OPERATOR**                               |
 
 #### `calls`
 
@@ -682,11 +683,12 @@ Resources are accessed as properties on the client (e.g. `client.messages`). All
 
 #### `client.profile`
 
-| Method                | Signature                                                | Description                                                                    |
-| --------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `set_profile_name`    | `set_profile_name(session_id, body) -> SuccessResult`    | Set the account display name. **OPERATOR**                                     |
-| `set_profile_status`  | `set_profile_status(session_id, body) -> SuccessResult`  | Set the account about/status text (empty clears it). **OPERATOR**              |
-| `set_profile_picture` | `set_profile_picture(session_id, body) -> SuccessResult` | Set the account profile picture (`url` or `base64` + `mimetype`). **OPERATOR** |
+| Method                   | Signature                                                | Description                                                                    |
+| ------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `set_profile_name`       | `set_profile_name(session_id, body) -> SuccessResult`    | Set the account display name. **OPERATOR**                                     |
+| `set_profile_status`     | `set_profile_status(session_id, body) -> SuccessResult`  | Set the account about/status text (empty clears it). **OPERATOR**              |
+| `set_profile_picture`    | `set_profile_picture(session_id, body) -> SuccessResult` | Set the account profile picture (`url` or `base64` + `mimetype`). **OPERATOR** |
+| `delete_profile_picture` | `delete_profile_picture(session_id) -> SuccessResult`    | Remove the account profile picture. **OPERATOR**                               |
 
 #### `client.calls`
 
@@ -1023,11 +1025,12 @@ All payloads are associative arrays; all listed methods are synchronous and retu
 
 #### `profile`
 
-| Method              | Signature                                                    | Description                                                                    |
-| ------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `setProfileName`    | `setProfileName(string $sessionId, string $name): array`     | Set the account display name. **OPERATOR**                                     |
-| `setProfileStatus`  | `setProfileStatus(string $sessionId, string $status): array` | Set the account about/status text (empty clears it). **OPERATOR**              |
-| `setProfilePicture` | `setProfilePicture(string $sessionId, array $body): array`   | Set the account profile picture (`url` or `base64` + `mimetype`). **OPERATOR** |
+| Method                 | Signature                                                    | Description                                                                    |
+| ---------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `setProfileName`       | `setProfileName(string $sessionId, string $name): array`     | Set the account display name. **OPERATOR**                                     |
+| `setProfileStatus`     | `setProfileStatus(string $sessionId, string $status): array` | Set the account about/status text (empty clears it). **OPERATOR**              |
+| `setProfilePicture`    | `setProfilePicture(string $sessionId, array $body): array`   | Set the account profile picture (`url` or `base64` + `mimetype`). **OPERATOR** |
+| `deleteProfilePicture` | `deleteProfilePicture(string $sessionId): array`             | Remove the account profile picture. **OPERATOR**                               |
 
 #### `calls`
 

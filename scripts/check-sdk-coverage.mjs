@@ -242,6 +242,127 @@ if (!errors.length) {
   }
 }
 
+
+// ─── Verb layer ──────────────────────────────────────────────────────────────────────────────
+// The path layer above proves each client REACHES a route; a shared path can still miss a VERB
+// entirely; the profile-picture route carried PUT in every client while its DELETE shipped in
+// none, and the path gate stayed green because the PUT satisfied it. This layer asks the verb
+// question: for every contract path published with MORE THAN ONE verb, each client must build
+// that path with every verb the contract declares on it. Multi-verb paths only; a single-verb
+// path is already fully proven by the layer above.
+const VERBS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+/** Join a concatenated path expression: literals verbatim, code between them becomes a `*`. */
+const literalsToPath = (expr) => {
+  let path = '';
+  let last = 0;
+  for (const m of expr.matchAll(/["'`](\/[^"'`\n]*)["'`]/g)) {
+    const between = expr.slice(last, m.index);
+    if (path && /\S/.test(between.replace(/["'`+\s]+/g, ''))) path += '*';
+    else if (!path && /\S/.test(between.replace(/\s+/g, ''))) path += '*';
+    path += m[1];
+    last = m.index + m[0].length;
+  }
+  // Trailing code after the LAST literal (`"/api/sessions/" + encodeSegment(id)`) is an id segment too.
+  const trailing = expr.slice(last).replace(/["'`+\s,;)\n]+/g, '');
+  if (path && trailing) path += '*';
+  return path.startsWith('/api/') ? path : null;
+};
+
+/** Go resolves its base() helpers so `s.base(sessionID)+"/picture"` reattaches to a real path. */
+const goVerbPairs = (dir) => {
+  const pairs = new Set();
+  for (const file of walk(dir, ['.go']).filter((f) => !f.endsWith('_test.go'))) {
+    const source = strip(readFileSync(file, 'utf8'));
+    const bases = new Map();
+    for (const helper of source.matchAll(/func \(s \*\w+Service\) (\w+)\([^)]*\) string \{\s*return ([^\n]+)\n/g)) {
+      const base = normalize(
+        helper[2].split('+').map((t) => t.trim()).map((t) => /^"([^"]*)"$/.exec(t)?.[1] ?? '*').join(''),
+      );
+      if (base.startsWith('/api/')) bases.set(helper[1], base);
+    }
+    // Wrapper helpers route the verb through a parameter (`s.participants(ctx, "POST", ..., "/participants")`),
+    // so the do() site only sees a variable. Harvest the verb + suffix literal from the wrapper call
+    // and pair it with the file's service bases (base+suffix and base/*+suffix), same generosity as
+    // the path layer's helper-argument rule.
+    for (const m of source.matchAll(/\.\w+\(\s*ctx\s*,\s*"(GET|POST|PUT|PATCH|DELETE)"\s*,[^)]*?"(\/[a-z0-9][\w.\/-]*)"/g)) {
+      for (const base of bases.values()) {
+        pairs.add(`${m[1]} ${normalize(base + m[2])}`);
+        pairs.add(`${m[1]} ${normalize(`${base}/*${m[2]}`)}`);
+      }
+    }
+    for (const m of source.matchAll(/\.do\(\s*ctx\s*,\s*"(GET|POST|PUT|PATCH|DELETE)"\s*,\s*([^\n]+?),\s*(?:nil|[A-Za-z_&])/g)) {
+      const expr = m[2]
+        .split('+')
+        .map((t) => t.trim())
+        .map((t) => {
+          const lit = /^"([^"]*)"$/.exec(t)?.[1];
+          if (lit !== undefined) return lit;
+          const helper = /^s\.(\w+)\(/.exec(t)?.[1];
+          if (helper && bases.has(helper)) return bases.get(helper);
+          return '*';
+        })
+        .join('');
+      if (expr.startsWith('/api/')) pairs.add(`${m[1]} ${normalize(expr)}`);
+    }
+  }
+  return pairs;
+};
+
+const verbPairsOf = (sdk) => {
+  if (sdk.name === 'go') return goVerbPairs(join(root, sdk.dir));
+  const pairs = new Set();
+  for (const file of walk(join(root, sdk.dir), sdk.exts)) {
+    const src = readFileSync(file, 'utf8');
+    const patterns =
+      sdk.name === 'javascript'
+        ? [/(GET|POST|PUT|PATCH|DELETE)'\s*,\s*[\s\S]{0,80}?path:\s*[`'"]([^`'"]+)[`'"]/g]
+        : sdk.name === 'python'
+          ? [/\.request\(\s*"(GET|POST|PUT|PATCH|DELETE)"\s*,\s*f?"([^"]+)"/g]
+          : sdk.name === 'php'
+            ? [/->request\(\s*'(GET|POST|PUT|PATCH|DELETE)'\s*,\s*['"]([^'"]+)['"]/g]
+            : [/HttpMethod\.(GET|POST|PUT|PATCH|DELETE)\s*,\s*([\s\S]{2,400}?)\s*,\s*\n?\s*(?:null|new |[a-z]\w)/g];
+    for (const re of patterns) {
+      for (const m of src.matchAll(re)) {
+        const path = sdk.name === 'java' ? literalsToPath(m[2]) : m[2];
+        if (path && path.startsWith('/api/')) pairs.add(`${m[1]} ${normalize(path)}`);
+      }
+    }
+  }
+  return pairs;
+};
+
+{
+  const spec = JSON.parse(readFileSync(join(root, 'openapi.json'), 'utf8')).paths;
+  // Same scope as the path layer: resources the README declares unexposed are not the SDKs' to build.
+  const specByPath = new Map(Object.entries(spec).map(([k, v]) => [normalize(k), v]));
+  const multi = [];
+  for (const raw of inScope) {
+    const verbs = VERBS.filter((v) => specByPath.get(raw)?.[v.toLowerCase()]);
+    if (verbs.length > 1) multi.push({ path: raw, verbs });
+  }
+  const verbErrors = [];
+  for (const sdk of SDKS) {
+    const pairs = verbPairsOf(sdk);
+    // Non-vacuity: a regex that stopped matching yields an empty set and the layer goes blind.
+    if (pairs.size < 60) verbErrors.push(`${sdk.name}: harvested only ${pairs.size} verb/path pairs — the verb scan has drifted.`);
+    for (const { path, verbs } of multi) {
+      for (const verb of verbs) {
+        if (!pairs.has(`${verb} ${path}`)) verbErrors.push(`${verb} ${path} — declared by the contract, built by no ${sdk.name} method`);
+      }
+    }
+  }
+  if (multi.length < 15) {
+    console.error('check-sdk-coverage: expected 15+ in-scope multi-verb contract paths, found ' + multi.length);
+    process.exit(1);
+  }
+  if (verbErrors.length) {
+    console.error('\n✖ Verbs missing from SDK methods on shared paths:');
+    for (const e of verbErrors) console.error(`  - ${e}`);
+    process.exit(1);
+  }
+}
+
 if (errors.length) {
   console.error('\n✖ The contract publishes routes the SDKs do not expose:');
   for (const e of errors) console.error(`  - ${e}`);
