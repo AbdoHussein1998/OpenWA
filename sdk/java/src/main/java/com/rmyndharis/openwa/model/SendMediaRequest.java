@@ -8,7 +8,9 @@ public record SendMediaRequest(
     String mimetype,
     String filename,
     String caption,
-    String quotedMessageId) {
+    String quotedMessageId,
+    /** WIDs to @mention; the caption must also contain the @&lt;number&gt; token. */
+    java.util.List<String> mentions) {
 
     public static Builder builder() {
         return new Builder();
@@ -22,6 +24,7 @@ public record SendMediaRequest(
         private String filename;
         private String caption;
         private String quotedMessageId;
+        private java.util.List<String> mentions;
 
         public Builder chatId(String v) {
             this.chatId = v;
@@ -67,8 +70,14 @@ public record SendMediaRequest(
             return this;
         }
 
+        /** WIDs to @mention; the caption must also contain the @&lt;number&gt; token. */
+        public Builder mentions(java.util.List<String> v) {
+            this.mentions = v;
+            return this;
+        }
+
         public SendMediaRequest build() {
-            return new SendMediaRequest(chatId, url, base64, mimetype, filename, caption, quotedMessageId);
+            return new SendMediaRequest(chatId, url, base64, mimetype, filename, caption, quotedMessageId, mentions);
         }
     }
 }

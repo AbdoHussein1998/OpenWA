@@ -463,6 +463,14 @@ class TestProfile:
         client.profile.set_profile_picture("s", {"base64": "aGVsbG8=", "mimetype": "image/jpeg"})
         assert backend.calls[-1].body == {"base64": "aGVsbG8=", "mimetype": "image/jpeg"}
 
+    def test_delete_profile_picture(self):
+        backend = MockBackend().on("DELETE", "/profile/picture", body={"success": True, "message": "Profile picture removed"})
+        client = make_client(backend)
+        client.profile.delete_profile_picture("s")
+        assert backend.calls[-1].method == "DELETE"
+        assert backend.calls[-1].url == "http://localhost:2785/api/sessions/s/profile/picture"
+        assert backend.calls[-1].body is None
+
 
 class TestMedia:
     def test_conversion_status(self):

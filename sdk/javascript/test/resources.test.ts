@@ -128,6 +128,13 @@ describe('ProfileResource — exact paths and bodies', () => {
     await client(t).profile.setProfilePicture('s', { base64: 'aGVsbG8=', mimetype: 'image/png' });
     expect(t.lastCall!.body).toEqual({ base64: 'aGVsbG8=', mimetype: 'image/png' });
   });
+  it('deleteProfilePicture sends DELETE to the picture route with no body', async () => {
+    const t = new MockTransport().on('DELETE', /\/profile\/picture$/, { body: { success: true } });
+    await client(t).profile.deleteProfilePicture('s');
+    expect(t.lastCall!.method).toBe('DELETE');
+    expect(t.lastCall!.url).toBe('http://x/api/sessions/s/profile/picture');
+    expect(t.lastCall!.body).toBeUndefined();
+  });
 });
 
 describe('CallsResource — exact paths', () => {

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Go, Python and Java clients' media/audio sends declare `mentions` (only the JS client could type-safely mention on media), and the contract-shape gate compares numeric enum unions for real (member-level, both sides sorted numerically) instead of skipping them.
 - All five SDKs expose `deleteProfilePicture` (the contract's `DELETE /profile/picture` shipped in none of them), and the SDK coverage gate now checks verbs on multi-verb paths, not just path reachability.
 - The typed SDKs' message-list records declare `chatName`, `author`, `mediaPath` and `mediaMimetype` (the wire carried all four; every typed client missed them), and the contract-shape gate now maps `MessageRecord` in all four SDKs, including the Python functional-TypedDict form.
 - The dashboard's manual WebSocket retry re-registers the message handler on the fresh socket; the handler effect only re-ran on events changes, so a reconnect left the new socket silent while reporting connected.
