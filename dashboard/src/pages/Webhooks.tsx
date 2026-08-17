@@ -309,8 +309,8 @@ export function Webhooks() {
             </>
           }
         >
-          <label>{t('webhooks.session')}</label>
-          <select
+          <label htmlFor="wh-1">{t('webhooks.session')}</label>
+          <select id="wh-1"
             value={newWebhook.sessionId}
             onChange={e => setNewWebhook({ ...newWebhook, sessionId: e.target.value })}
           >
@@ -321,8 +321,8 @@ export function Webhooks() {
               </option>
             ))}
           </select>
-          <label>{t('common.url')}</label>
-          <input
+          <label htmlFor="wh-2">{t('common.url')}</label>
+          <input id="wh-2"
             type="url"
             placeholder="https://..."
             value={newWebhook.url}
@@ -372,8 +372,8 @@ export function Webhooks() {
             </>
           }
         >
-          <label>{t('common.url')}</label>
-          <input
+          <label htmlFor="wh-3">{t('common.url')}</label>
+          <input id="wh-3"
             type="url"
             value={editWebhook.url}
             onChange={e => setEditWebhook({ ...editWebhook, url: e.target.value })}

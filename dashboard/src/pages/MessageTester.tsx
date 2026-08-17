@@ -445,8 +445,8 @@ export function MessageTester() {
           <h2 className="eyebrow">{t('messageTester.compose')}</h2>
 
           <div className="form-group">
-            <label>{t('messageTester.session')}</label>
-            <select value={session} onChange={e => setSession(e.target.value)}>
+            <label htmlFor="mt-1">{t('messageTester.session')}</label>
+            <select id="mt-1" value={session} onChange={e => setSession(e.target.value)}>
               {sessions.length === 0 && <option value="">{t('messageTester.noReadySessions')}</option>}
               {sessions.map(s => (
                 <option key={s.id} value={s.id}>
@@ -537,8 +537,8 @@ export function MessageTester() {
 
           {messageType === 'text' && (
             <div className="form-group">
-              <label>{t('messageTester.messageContent')}</label>
-              <textarea
+              <label htmlFor="mt-2">{t('messageTester.messageContent')}</label>
+              <textarea id="mt-2"
                 value={content}
                 onChange={e => setContent(e.target.value)}
                 placeholder={t('messageTester.messagePlaceholder')}
@@ -550,8 +550,8 @@ export function MessageTester() {
           {isMediaMessageType && (
             <>
               <div className="form-group">
-                <label>{t('messageTester.mediaUrl')}</label>
-                <input
+                <label htmlFor="mt-3">{t('messageTester.mediaUrl')}</label>
+                <input id="mt-3"
                   type="text"
                   value={mediaUrl}
                   onChange={e => {
@@ -614,8 +614,8 @@ export function MessageTester() {
             <>
               <div className="form-row">
                 <div className="form-group">
-                  <label>{t('messageTester.locationLatitude')}</label>
-                  <input
+                  <label htmlFor="mt-4">{t('messageTester.locationLatitude')}</label>
+                  <input id="mt-4"
                     type="number"
                     step="any"
                     min={-90}
@@ -626,8 +626,8 @@ export function MessageTester() {
                   />
                 </div>
                 <div className="form-group">
-                  <label>{t('messageTester.locationLongitude')}</label>
-                  <input
+                  <label htmlFor="mt-5">{t('messageTester.locationLongitude')}</label>
+                  <input id="mt-5"
                     type="number"
                     step="any"
                     min={-180}
@@ -656,8 +656,8 @@ export function MessageTester() {
           {messageType === 'contact' && (
             <>
               <div className="form-group">
-                <label>{t('messageTester.contactName')}</label>
-                <input
+                <label htmlFor="mt-6">{t('messageTester.contactName')}</label>
+                <input id="mt-6"
                   type="text"
                   value={contactName}
                   onChange={e => setContactName(e.target.value)}
@@ -665,8 +665,8 @@ export function MessageTester() {
                 />
               </div>
               <div className="form-group">
-                <label>{t('messageTester.contactNumber')}</label>
-                <input
+                <label htmlFor="mt-7">{t('messageTester.contactNumber')}</label>
+                <input id="mt-7"
                   type="text"
                   value={contactNumber}
                   onChange={e => setContactNumber(e.target.value)}
@@ -679,8 +679,8 @@ export function MessageTester() {
           {messageType === 'poll' && (
             <>
               <div className="form-group">
-                <label>{t('messageTester.pollQuestion')}</label>
-                <input
+                <label htmlFor="mt-8">{t('messageTester.pollQuestion')}</label>
+                <input id="mt-8"
                   type="text"
                   value={pollQuestion}
                   onChange={e => setPollQuestion(e.target.value)}
@@ -748,8 +748,8 @@ export function MessageTester() {
                 <span className="hint">{t('messageTester.forwardFromHint')}</span>
               </div>
               <div className="form-group">
-                <label>{t('messageTester.forwardToChatId')}</label>
-                <input
+                <label htmlFor="mt-9">{t('messageTester.forwardToChatId')}</label>
+                <input id="mt-9"
                   type="text"
                   value={forwardTo}
                   onChange={e => setForwardTo(e.target.value)}
@@ -757,8 +757,8 @@ export function MessageTester() {
                 />
               </div>
               <div className="form-group">
-                <label>{t('messageTester.forwardMessageId')}</label>
-                <input type="text" value={forwardMessageId} onChange={e => setForwardMessageId(e.target.value)} />
+                <label htmlFor="mt-10">{t('messageTester.forwardMessageId')}</label>
+                <input id="mt-10" type="text" value={forwardMessageId} onChange={e => setForwardMessageId(e.target.value)} />
                 <span className="hint">{t('messageTester.forwardMessageIdHint')}</span>
               </div>
             </>
@@ -767,8 +767,8 @@ export function MessageTester() {
           {messageType === 'bulk' && (
             <>
               <div className="form-group">
-                <label>{t('messageTester.bulkRecipients')}</label>
-                <textarea
+                <label htmlFor="mt-11">{t('messageTester.bulkRecipients')}</label>
+                <textarea id="mt-11"
                   value={bulkRecipients}
                   onChange={e => setBulkRecipients(e.target.value)}
                   placeholder={t('messageTester.bulkRecipientsPlaceholder')}
@@ -780,8 +780,8 @@ export function MessageTester() {
                 </span>
               </div>
               <div className="form-group">
-                <label>{t('messageTester.messageContent')}</label>
-                <textarea
+                <label htmlFor="mt-12">{t('messageTester.messageContent')}</label>
+                <textarea id="mt-12"
                   value={content}
                   onChange={e => setContent(e.target.value)}
                   placeholder={t('messageTester.messagePlaceholder')}
