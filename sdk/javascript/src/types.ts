@@ -265,6 +265,8 @@ export interface SendMediaRequest {
    * stored. An id the engine cannot resolve fails the send rather than delivering it unquoted.
    */
   quotedMessageId?: string;
+  /** WIDs to @mention; the caption must also contain the @<number> token. */
+  mentions?: string[];
 }
 
 export interface SendAudioRequest extends SendMediaRequest {
@@ -870,7 +872,7 @@ export type WebhookEvent =
 
 export interface WebhookFilterCondition {
   field: string;
-  operator: string;
+  operator: 'contains' | 'equals' | 'is' | 'isNot';
   /**
    * Polymorphic per field kind: a single string (text fields), a string array
    * (id/idArray/enum fields), or a boolean (boolean fields).
@@ -1026,8 +1028,8 @@ export interface SendTextStatusRequest {
   recipients?: string[];
   /** Hex background color, e.g. `#25D366`. */
   backgroundColor?: string;
-  /** Font index supported by WhatsApp status. */
-  font?: number;
+  /** WhatsApp status font family: 0 (default), 1, 2, 6 (bold), 7, 8, 9, 10. */
+  font?: 0 | 1 | 2 | 6 | 7 | 8 | 9 | 10;
 }
 
 /** Media payload for a status post: provide `url` OR `base64`. */

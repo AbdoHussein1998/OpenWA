@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { OpenWAClient } from '../src';
+import type { WebhookFilters } from '../src/types';
 import { MockTransport } from './helpers';
 
 function client(t: MockTransport): OpenWAClient {
@@ -226,7 +227,17 @@ describe('WebhooksResource — exact paths', () => {
         body: { id: 'w1', sessionId: 's', url: 'u', events: ['*'], active: true, createdAt: '', updatedAt: '' },
       })
       .on('POST', /\/webhooks$/, {
-        body: { id: 'w1', sessionId: 's', url: 'u', events: ['*'], active: true, retryCount: 5, lastTriggeredAt: null, createdAt: '', updatedAt: '' },
+        body: {
+          id: 'w1',
+          sessionId: 's',
+          url: 'u',
+          events: ['*'],
+          active: true,
+          retryCount: 5,
+          lastTriggeredAt: null,
+          createdAt: '',
+          updatedAt: '',
+        },
       })
       .on('PUT', /\/webhooks\/w1$/, {
         body: { id: 'w1', sessionId: 's', url: 'u', events: ['*'], active: false, createdAt: '', updatedAt: '' },
@@ -253,7 +264,7 @@ describe('WebhooksResource — exact paths', () => {
     const t = new MockTransport().on('POST', /\/webhooks$/, {
       body: { id: 'w1', sessionId: 's', url: 'u', events: ['*'], active: true, createdAt: '', updatedAt: '' },
     });
-    const filters = {
+    const filters: WebhookFilters = {
       conditions: [
         { field: 'sender', operator: 'is', value: ['123@c.us'] },
         { field: 'body', operator: 'contains', value: 'invoice', caseSensitive: true },
@@ -268,8 +279,12 @@ describe('WebhooksResource — exact paths', () => {
 describe('StatusResource — nested media bodies', () => {
   it('sendImage/sendVideo forward the server-required nested {image|video:{...}} shape', async () => {
     const t = new MockTransport()
-      .on('POST', /\/status\/send-image$/, { body: { statusId: 's1', timestamp: '2025-01-01T00:00:00.000Z', expiresAt: '2025-01-02T00:00:00.000Z' } })
-      .on('POST', /\/status\/send-video$/, { body: { statusId: 's2', timestamp: '2025-01-01T00:00:00.000Z', expiresAt: '2025-01-02T00:00:00.000Z' } });
+      .on('POST', /\/status\/send-image$/, {
+        body: { statusId: 's1', timestamp: '2025-01-01T00:00:00.000Z', expiresAt: '2025-01-02T00:00:00.000Z' },
+      })
+      .on('POST', /\/status\/send-video$/, {
+        body: { statusId: 's2', timestamp: '2025-01-01T00:00:00.000Z', expiresAt: '2025-01-02T00:00:00.000Z' },
+      });
     const c = client(t);
     await c.status.sendImage('s', { image: { url: 'http://img' }, recipients: ['a@c.us'], caption: 'hi' });
     expect(t.lastCall!.body).toEqual({ image: { url: 'http://img' }, recipients: ['a@c.us'], caption: 'hi' });
@@ -453,7 +468,9 @@ describe('HealthResource + auth — exact paths', () => {
 
 describe('CallsResource — call link', () => {
   it('createLink posts to /calls/link with the type and start time', async () => {
-    const t = new MockTransport().on('POST', /\/calls\/link$/, { body: { link: 'https://call.whatsapp.com/video/AbC' } });
+    const t = new MockTransport().on('POST', /\/calls\/link$/, {
+      body: { link: 'https://call.whatsapp.com/video/AbC' },
+    });
     const res = await client(t).calls.createLink('s', { type: 'video', startTime: 1800000000000 });
 
     expect(t.lastCall!.method).toBe('POST');
