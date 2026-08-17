@@ -13,6 +13,7 @@ import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, Not, IsNull, DataSource, FindManyOptions } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { setTimeout } from 'node:timers/promises';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { Session, SessionStatus } from './entities/session.entity';
 import { CreateSessionDto, SessionConfigResponseDto, UpdateSessionConfigDto } from './dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
@@ -28,6 +29,28 @@ import { resolveFeatureFlags } from '../../config/feature-flags';
 import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
+
+/** Stagger before the single transient-launch retry; short - the claim is held while it waits. */
+const SESSION_START_RETRY_DELAY_MS = 2_000;
+
+/**
+ * A launch failure worth one retry: infrastructure said "not now" (a 5xx, a transport death, a
+ * database error while persisting status), not the session or the caller being refused. HTTP 4xx
+ * and the documented 409 not-ready are deliberate answers, and a lost-claim ConflictException is a
+ * real conflict.
+ */
+function isTransientLaunchFailure(error: unknown): boolean {
+  // EngineTransportError (503) is the one mapped HTTP shape that means infrastructure died
+  // mid-launch (dead page/socket at initialize). Every OTHER HttpException is a deliberate
+  // answer: the 409 not-ready family reflects session state, the 504 auth-timeout family
+  // reflects the account/proxy, and a 4xx is a refusal.
+  if (error instanceof EngineTransportError) return true;
+  // TypeORM QueryFailedError and driver errors carry no HttpException shape.
+  return (
+    error instanceof Error &&
+    /connection|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|SQLITE_BUSY|terminating connection/i.test(error.message)
+  );
+}
 
 /** Pause between sequential auto-start launches so a burst of Chromium boots does not spike the host. */
 export const AUTOSTART_THROTTLE_MS = 2_000;
@@ -408,7 +431,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       throw new ConflictException(`Session ${id} is running on another node`);
     }
     try {
-      return await this.engineLifecycle.start(id);
+      return await this.startWithTransientRetry(id);
     } catch (error) {
       // A failed or refused start must not leave the claim pinned here — the heartbeat would renew
       // it and the session could never be started anywhere else. Released only when nothing is
@@ -416,6 +439,39 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       // runs the engine, and releasing then would invite a peer to open a second connection.
       await this.releaseUnlessEngineActive(id);
       throw error;
+    }
+  }
+
+  /**
+   * One bounded retry for a TRANSIENT launch failure (a database hiccup while persisting the
+   * initial status, a transport blip while the adapter boots). A transient failure during adopt or
+   * boot auto-start used to release the claim and end the story: nothing ever retried, so the
+   * session stayed down until some process restarted. The retry keeps the claim held (the outer
+   * catch only runs when this gives up), and re-claims it if the retry window outlived the lease -
+   * a lapsed claim must not turn the retry into a 409.
+   *
+   * Bounded to one retry on a short stagger: a persistent failure is a real fault, and an
+   * unbounded loop here would hold the concurrency slot hostage. HTTP-shaped refusals (409
+   * not-ready, 4xx) are NOT transient - they propagate immediately.
+   */
+  private async startWithTransientRetry(id: string): Promise<Session> {
+    try {
+      return await this.engineLifecycle.start(id);
+    } catch (error) {
+      if (!isTransientLaunchFailure(error)) throw error;
+      this.logger.warn(`Transient launch failure for session ${id}; retrying once`, {
+        sessionId: id,
+        action: 'session_start_transient_retry',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await setTimeout(SESSION_START_RETRY_DELAY_MS);
+      // The lease may have lapsed while the first attempt ran; the retry must keep holding the
+      // claim, never 409 on the session it already owns.
+      if (this.ownership && !(await this.ownership.claim(id))) {
+        await this.findOne(id);
+        throw new ConflictException(`Session ${id} is running on another node`);
+      }
+      return this.engineLifecycle.start(id);
     }
   }
 
