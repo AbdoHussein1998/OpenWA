@@ -119,8 +119,11 @@ function ChatSidebar({
       <div className="sidebar-header-box">
         {/* Session selector */}
         <div className="session-select-group">
-          <label className="form-label" htmlFor="csb-1">{t('chats.sessionLabel')}</label>
-          <select id="csb-1"
+          <label className="form-label" htmlFor="csb-1">
+            {t('chats.sessionLabel')}
+          </label>
+          <select
+            id="csb-1"
             value={selectedSessionId}
             onChange={e => onSelectSession(e.target.value)}
             className="session-selector"
