@@ -180,21 +180,36 @@ func (q *MessageHistoryQuery) values() url.Values {
 	return v
 }
 
+// DeliveryStatus is a message's send/read lifecycle state.
+type DeliveryStatus string
+
+const (
+	DeliveryPending   DeliveryStatus = "pending"
+	DeliverySent      DeliveryStatus = "sent"
+	DeliveryDelivered DeliveryStatus = "delivered"
+	DeliveryRead      DeliveryStatus = "read"
+	DeliveryFailed    DeliveryStatus = "failed"
+)
+
 // MessageRecord is a persisted message row.
 type MessageRecord struct {
-	ID          string         `json:"id"`
-	SessionID   string         `json:"sessionId"`
-	WaMessageID *string        `json:"waMessageId,omitempty"`
-	ChatID      string         `json:"chatId"`
-	From        string         `json:"from"`
-	To          string         `json:"to"`
-	Body        *string        `json:"body,omitempty"`
-	Type        string         `json:"type"`
-	Direction   string         `json:"direction"`
-	Timestamp   *int64         `json:"timestamp,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Status      string         `json:"status"`
-	CreatedAt   string         `json:"createdAt"`
+	ID            string           `json:"id"`
+	SessionID     string           `json:"sessionId"`
+	WaMessageID   *string          `json:"waMessageId,omitempty"`
+	ChatID        string           `json:"chatId"`
+	From          string           `json:"from"`
+	To            string           `json:"to"`
+	Body          *string          `json:"body,omitempty"`
+	Type          string           `json:"type"`
+	Direction     MessageDirection `json:"direction"`
+	ChatName      *string          `json:"chatName,omitempty"`
+	Author        *string          `json:"author,omitempty"`
+	MediaPath     *string          `json:"mediaPath,omitempty"`
+	MediaMimetype *string          `json:"mediaMimetype,omitempty"`
+	Timestamp     *int64           `json:"timestamp,omitempty"`
+	Metadata      map[string]any   `json:"metadata,omitempty"`
+	Status        DeliveryStatus   `json:"status"`
+	CreatedAt     string           `json:"createdAt"`
 }
 
 // MessageListResponse is the paginated message list payload.

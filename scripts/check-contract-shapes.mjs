@@ -60,7 +60,64 @@ const MAPPINGS = {
     GroupParticipant: 'GroupParticipantDto',
     GroupSummary: 'GroupSummaryDto',
     MessageListResponse: 'MessageListResponseDto',
+    MessageRecord: 'MessageListItemDto',
     MessageResponse: 'MessageResponseDto',
+    // Request-side pairs: every *Request interface with a matching DTO, plus the filter-condition
+    // shape. Two requests have NO named schema (inline objects on their routes) and stay unmapped:
+    // AddLabelRequest (POST /labels/chat/:chatId) and SubscribeChannelRequest (POST /channels/subscribe).
+    ArchiveChatRequest: 'ArchiveChatDto',
+    BulkMediaRequest: 'BulkMediaDto',
+    CreateCallLinkRequest: 'CreateCallLinkDto',
+    CreateChannelRequest: 'CreateChannelDto',
+    CreateGroupRequest: 'CreateGroupDto',
+    CreateSessionRequest: 'CreateSessionDto',
+    CreateTemplateRequest: 'CreateTemplateDto',
+    CreateWebhookRequest: 'CreateWebhookDto',
+    DeleteChatRequest: 'DeleteChatDto',
+    DeleteMessageRequest: 'DeleteMessageDto',
+    DemoteChannelAdminRequest: 'DemoteChannelAdminDto',
+    EditMessageRequest: 'EditMessageDto',
+    ForwardMessageRequest: 'ForwardMessageDto',
+    GroupDescriptionRequest: 'GroupDescriptionDto',
+    GroupMembershipRequest: 'GroupMembershipRequestDto',
+    GroupSubjectRequest: 'GroupSubjectDto',
+    JoinGroupRequest: 'JoinGroupDto',
+    MarkChatRequest: 'MarkChatReadDto',
+    MuteChannelRequest: 'MuteChannelDto',
+    MuteChatRequest: 'MuteChatDto',
+    ParticipantsRequest: 'ParticipantsDto',
+    PinChatRequest: 'PinChatDto',
+    PinMessageRequest: 'PinMessageDto',
+    ReactMessageRequest: 'ReactMessageDto',
+    ReplyMessageRequest: 'ReplyMessageDto',
+    RequestPairingCodeRequest: 'RequestPairingCodeDto',
+    SendAudioRequest: 'SendAudioMessageDto',
+    SendBulkRequest: 'SendBulkMessageDto',
+    SendChatStateRequest: 'SendChatStateDto',
+    SendContactRequest: 'SendContactDto',
+    SendImageStatusRequest: 'SendImageStatusDto',
+    SendLocationRequest: 'SendLocationDto',
+    SendMediaRequest: 'SendMediaMessageDto',
+    SendPollRequest: 'SendPollDto',
+    SendProductRequest: 'SendProductDto',
+    SendTemplateRequest: 'SendTemplateMessageDto',
+    SendTextRequest: 'SendTextMessageDto',
+    SendTextStatusRequest: 'SendTextStatusDto',
+    SendVideoStatusRequest: 'SendVideoStatusDto',
+    SendVoiceStatusRequest: 'SendVoiceStatusDto',
+    SetGroupPictureRequest: 'SetGroupPictureDto',
+    SetOwnPresenceRequest: 'SetOwnPresenceDto',
+    SetProfileNameRequest: 'SetProfileNameDto',
+    SetProfilePictureRequest: 'SetProfilePictureDto',
+    SetProfileStatusRequest: 'SetProfileStatusDto',
+    StarMessageRequest: 'StarMessageDto',
+    TransferChannelOwnershipRequest: 'TransferChannelOwnershipDto',
+    UnpinMessageRequest: 'UnpinMessageDto',
+    UpdateSessionConfigRequest: 'UpdateSessionConfigDto',
+    UpsertContactRequest: 'UpsertContactDto',
+    UpsertLabelRequest: 'UpsertLabelDto',
+    VotePollRequest: 'VotePollDto',
+    WebhookFilterCondition: 'WebhookFilterConditionDto',
     PairingCodeResponse: 'PairingCodeResponseDto',
     ParticipantPresence: 'ParticipantPresenceDto',
     ProfilePictureResponse: 'ProfilePictureResponseDto',
@@ -101,11 +158,11 @@ const MAPPINGS = {
  * these floors as pairs are added makes the shrink loud.
  */
 const MINIMUM_MAPPED = {
-  'sdk/javascript/src/types.ts': 24,
+  'sdk/javascript/src/types.ts': 78,
   'dashboard/src/services/api.ts': 20,
-  'sdk/python/openwa/types.py': 22,
-  'sdk/go': 24,
-  'sdk/java': 24,
+  'sdk/python/openwa/types.py': 23,
+  'sdk/go': 25,
+  'sdk/java': 25,
 };
 
 /** Known drift, deliberately not gated yet — each line is a to-adjudicate follow-up. */
@@ -132,6 +189,7 @@ const PYTHON_MAPPING = {
   GroupParticipant: 'GroupParticipantDto',
   GroupSummary: 'GroupSummaryDto',
   MessageListResponse: 'MessageListResponseDto',
+  MessageRecord: 'MessageListItemDto',
   MessageResponse: 'MessageResponseDto',
   PairingCodeResponse: 'PairingCodeResponseDto',
   ParticipantPresence: 'ParticipantPresenceDto',
@@ -159,6 +217,7 @@ const GO_MAPPING = {
   GroupParticipant: 'GroupParticipantDto',
   GroupSummary: 'GroupSummaryDto',
   MessageListResponse: 'MessageListResponseDto',
+  MessageRecord: 'MessageListItemDto',
   MessageResponse: 'MessageResponseDto',
   PairingCodeResponse: 'PairingCodeResponseDto',
   ParticipantPresence: 'ParticipantPresenceDto',
@@ -187,6 +246,7 @@ const JAVA_MAPPING = {
   GroupParticipant: 'GroupParticipantDto',
   GroupSummary: 'GroupSummaryDto',
   MessageListResponse: 'MessageListResponseDto',
+  MessageRecord: 'MessageListItemDto',
   MessageResponse: 'MessageResponseDto',
   PairingCodeResponse: 'PairingCodeResponseDto',
   ParticipantPresence: 'ParticipantPresenceDto',
@@ -439,6 +499,30 @@ export function parsePythonTypes(source) {
   const dicts = {};
   const parents = {};
   const optionalAll = new Set();
+  // Functional TypedDict form (`Name = TypedDict("Name", { ... }, total=False)`): the only way to
+  // declare a field named `from` (a Python keyword), so MessageRecord uses it. Normalise each into
+  // the same shape the class-form parse below produces, so both forms map identically.
+  for (const m of source.matchAll(/(\w+) = TypedDict\(\s*"\w+",\s*\{([\s\S]*?)\}\s*,?\s*(total=False)?\s*,?\s*\)/g)) {
+    const [, name, body, totalFalse] = m;
+    // Same member shape parsePythonMembers produces, so the downstream token merge treats both
+    // forms identically. Optional[...] unwraps to the inner type and marks the member optional.
+    const members = {};
+    // The bracket-joining preprocessing above collapses the dict to ONE line, so fields are
+    // delimited by the next `"key":` (lookahead), not by newlines.
+    for (const f of body.matchAll(/"([^"]+)"\s*:\s*(".*?"|[^,]+?)(?=\s*,?\s*(?:\}|$)|\s*,\s*"[^"]+"\s*:)/g)) {
+      // Optional[...] stays verbatim: the comparator reads it as `T|null` (nullability), distinct
+      // from optionality. Only total=False / NotRequired mark a member optional.
+      let token = f[2].trim().replace(/,$/, '');
+      let optional = !!totalFalse;
+      const notReq = token.match(/^NotRequired\[([\s\S]+)\]$/);
+      if (notReq) {
+        token = notReq[1].trim();
+        optional = true;
+      }
+      members[f[1]] = { optional, token, __py: true };
+    }
+    dicts[name] = members;
+  }
   const blocks = [...source.matchAll(/class (\w+)\(([^)]*)\):\n([\s\S]*?)(?=\nclass |\n[A-Z]\w+ = |\n*$)/g)];
   // A subclass never re-mentions TypedDict — accept any class whose base chain reaches one
   // (fixpoint: a class is rooted when a base is itself a rooted class).

@@ -265,6 +265,8 @@ export interface SendMediaRequest {
    * stored. An id the engine cannot resolve fails the send rather than delivering it unquoted.
    */
   quotedMessageId?: string;
+  /** WIDs to @mention; the caption must also contain the @<number> token. */
+  mentions?: string[];
 }
 
 export interface SendAudioRequest extends SendMediaRequest {
@@ -471,6 +473,14 @@ export interface MessageRecord {
   body?: string | null;
   type: string;
   direction: MessageDirection;
+  /** Chat display name, when the session resolves one for the chat. */
+  chatName?: string | null;
+  /** Author display name for an inbound group message. */
+  author?: string | null;
+  /** Storage key of the archived media copy, when chat-media archiving wrote one. */
+  mediaPath?: string | null;
+  /** Mimetype of the archived media; null whenever `mediaPath` is. */
+  mediaMimetype?: string | null;
   /** Unix timestamp in seconds. */
   timestamp?: number | null;
   metadata?: Record<string, unknown> | null;
@@ -862,7 +872,7 @@ export type WebhookEvent =
 
 export interface WebhookFilterCondition {
   field: string;
-  operator: string;
+  operator: 'contains' | 'equals' | 'is' | 'isNot';
   /**
    * Polymorphic per field kind: a single string (text fields), a string array
    * (id/idArray/enum fields), or a boolean (boolean fields).
@@ -1018,8 +1028,8 @@ export interface SendTextStatusRequest {
   recipients?: string[];
   /** Hex background color, e.g. `#25D366`. */
   backgroundColor?: string;
-  /** Font index supported by WhatsApp status. */
-  font?: number;
+  /** WhatsApp status font family: 0 (default), 1, 2, 6 (bold), 7, 8, 9, 10. */
+  font?: 0 | 1 | 2 | 6 | 7 | 8 | 9 | 10;
 }
 
 /** Media payload for a status post: provide `url` OR `base64`. */
