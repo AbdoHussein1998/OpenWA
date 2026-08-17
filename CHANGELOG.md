@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- whatsapp-web.js profile, status and channel operations classify a dead browser page as the documented `503` plus an early death signal instead of an opaque `500` while the session still reports READY, matching the split the chat operations already made.
 - docs/06 repair pass over the Errors lines: the ingress `401` is the signature failure (not an API-key error), label writes have no `404`, the catalog product lookup answers `200` empty (not `404`), search's `501` names the no-provider case, multi-line Errors blocks were re-joined (no severed sentences, duplicate codes, or `· ·` separators), and the gate now reads wrapped blocks.
 - docs/14 corrects four hazard-table release labels (instance-config is 0.18.0, the reload `409` is 0.15.0, the group-summary retypes are 0.14.6, Baileys 5xx is 0.14.5), docs/03 drops a duplicated `health/`, and docs/10's scaling note matches docs/13's "still deploy replicas: 1" stance.
 - docs/06's audit section scopes the always-null columns correctly (`userAgent`/`statusCode` always null; `method`/`path` populated on auth-failure, key-lifecycle and queue-board rows), the Chats quote box renders identically under system-dark and explicit dark, and the Logs empty state gives server-filter guidance when only the severity filter is active (13 locales).

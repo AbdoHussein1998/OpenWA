@@ -3,6 +3,7 @@ import { Channel, ChannelMessage } from '../interfaces/whatsapp-engine.interface
 import { BusinessClient, WwjsChannelData } from '../types/whatsapp-web-js.types';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { type WwebjsEngineHost } from './wwebjs-host';
 
@@ -19,9 +20,28 @@ export class WwebjsChannels {
     return this.host.getClient();
   }
 
+  /**
+   * Run a client operation, classifying a dead page/transport as the documented 503 plus an early
+   * death signal instead of an opaque 500 under a status that still says READY - the split every
+   * chats read already makes (#1081). Other errors propagate unchanged.
+   */
+  private async withPage<T>(context: string, op: () => Promise<T>): Promise<T> {
+    try {
+      return await op();
+    } catch (error) {
+      if (this.host.isPageTransportError(error)) {
+        this.host.reportIfPageTransportError(error, context);
+        throw new EngineTransportError(`Transport died during ${context}`);
+      }
+      throw error;
+    }
+  }
+
   async getSubscribedChannels(): Promise<Channel[]> {
     this.host.ensureReady();
-    const channels = await (this.client() as unknown as BusinessClient).getChannels();
+    const channels = await this.withPage('getSubscribedChannels', () =>
+      (this.client() as unknown as BusinessClient).getChannels(),
+    );
     if (!channels) {
       return [];
     }
@@ -47,9 +67,11 @@ export class WwebjsChannels {
    */
   async createChannel(name: string, description?: string): Promise<Channel> {
     this.host.ensureReady();
-    const result = await (this.client() as unknown as BusinessClient).createChannel(
-      name,
-      description === undefined ? {} : { description },
+    const result = await this.withPage('createChannel', () =>
+      (this.client() as unknown as BusinessClient).createChannel(
+        name,
+        description === undefined ? {} : { description },
+      ),
     );
     if (typeof result === 'string' || !result?.nid) {
       throw new EngineRefusedError(typeof result === 'string' ? result : `Failed to create the channel '${name}'`);
@@ -149,7 +171,7 @@ export class WwebjsChannels {
     if (!channelId.endsWith('@newsletter')) {
       throw new ChannelNotFoundError(channelId);
     }
-    const chat = (await this.client().getChatById(channelId)) as unknown as {
+    const chat = (await this.withPage('muteChannel', () => this.client().getChatById(channelId))) as unknown as {
       mute?: () => Promise<boolean>;
       unmute?: () => Promise<boolean>;
     } | null;
@@ -157,7 +179,7 @@ export class WwebjsChannels {
     if (!act) {
       throw new ChannelNotFoundError(channelId);
     }
-    const ok = await act.call(chat);
+    const ok = await this.withPage('muteChannel', () => act.call(chat));
     if (!ok) {
       throw new EngineRefusedError(`Failed to ${mute ? 'mute' : 'unmute'} channel ${channelId}`);
     }
@@ -187,7 +209,9 @@ export class WwebjsChannels {
     this.host.ensureReady();
     // Resolves false instead of throwing when the unsubscription did not complete (Client.js:2556)
     // — surface the refusal rather than reporting a false success.
-    const ok = await (this.client() as unknown as BusinessClient).unsubscribeFromChannel(channelId);
+    const ok = await this.withPage('unsubscribeFromChannel', () =>
+      (this.client() as unknown as BusinessClient).unsubscribeFromChannel(channelId),
+    );
     if (!ok) {
       throw new EngineRefusedError(`Failed to unsubscribe from channel ${channelId}`);
     }
@@ -201,7 +225,9 @@ export class WwebjsChannels {
     // so resolve the channel from that list and read its messages. A missing channel surfaces as a
     // ChannelNotFoundError (→ 404, like getChannelById) so callers can tell "no messages" apart from
     // "wrong/unsubscribed channel" instead of getting a silent [].
-    const channels = await (this.client() as unknown as BusinessClient).getChannels();
+    const channels = await this.withPage('getChannelMessages', () =>
+      (this.client() as unknown as BusinessClient).getChannels(),
+    );
     const channel = channels?.find(c => (typeof c.id === 'object' ? c.id._serialized : c.id) === channelId);
     if (!channel) {
       throw new ChannelNotFoundError(channelId);
@@ -210,7 +236,7 @@ export class WwebjsChannels {
     // splice are both gated on `searchOptions.limit > 0` (Channel.js:352), so a 0/negative/NaN
     // limit fails OPEN and returns every loaded message. Substitute the default instead.
     const safeLimit = Number.isFinite(limit) && limit >= 1 ? Math.trunc(limit) : 50;
-    const messages = await channel.fetchMessages({ limit: safeLimit });
+    const messages = await this.withPage('getChannelMessages', () => channel.fetchMessages({ limit: safeLimit }));
     return (messages ?? []).map(msg => ({
       // Read `$1` before the sentinel (#747), and don't `String()` the object branch: that turned an
       // unreadable id into the literal "undefined" rather than the empty sentinel every other path

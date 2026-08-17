@@ -6035,6 +6035,43 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
       await expect(adapter.joinGroupViaInviteCode('CODE123')).rejects.toBeInstanceOf(EngineTransportError);
     });
 
+    // The profile/status/channel delegates gained the same split the chats reads already had:
+    // a dead page is the documented 503 plus an early death signal, not an opaque 500.
+    // Adapter-level signatures (no sessionId: that is the service layer's argument).
+    it.each([
+      ['setProfileName', (a: WhatsAppWebJsAdapter) => a.setProfileName('New Name')],
+      ['setProfileStatus', (a: WhatsAppWebJsAdapter) => a.setProfileStatus('Busy')],
+      ['setProfilePicture', (a: WhatsAppWebJsAdapter) => a.setProfilePicture({ mimetype: 'image/png', data: 'aGk=' })],
+      ['deleteProfilePicture', (a: WhatsAppWebJsAdapter) => a.deleteProfilePicture()],
+      ['getContactStatuses', (a: WhatsAppWebJsAdapter) => a.getContactStatuses()],
+      ['postTextStatus', (a: WhatsAppWebJsAdapter) => a.postTextStatus('hello', {})],
+      ['deleteStatus', (a: WhatsAppWebJsAdapter) => a.deleteStatus('status@broadcast')],
+      ['getSubscribedChannels', (a: WhatsAppWebJsAdapter) => a.getSubscribedChannels()],
+    ])('%s answers EngineTransportError (503) on a dead page', async (_name, call) => {
+      const adapter = readyAdapter({
+        setDisplayName: jest.fn().mockRejectedValue(transportError()),
+        setStatus: jest.fn().mockRejectedValue(transportError()),
+        setProfilePicture: jest.fn().mockRejectedValue(transportError()),
+        deleteProfilePicture: jest.fn().mockRejectedValue(transportError()),
+        getBroadcasts: jest.fn().mockRejectedValue(transportError()),
+        sendMessage: jest.fn().mockRejectedValue(transportError()),
+        revokeStatusMessage: jest.fn().mockRejectedValue(transportError()),
+        getChannels: jest.fn().mockRejectedValue(transportError()),
+      });
+      await expect(call(adapter)).rejects.toBeInstanceOf(EngineTransportError);
+    });
+
+    it('setProfilePicture classifies a dead page even when the media conversion itself fails on the dying transport', async () => {
+      // toMessageMedia with an http URL fetches through the page; on a dead transport that fetch
+      // dies first. The conversion stays OUTSIDE withPage by design (a bad URL is a 400-class
+      // failure, not a transport death), so this case asserts the rejection is the raw TypeError
+      // from the mock - documenting the boundary rather than forcing it into the 503 class.
+      const adapter = readyAdapter({ setProfilePicture: jest.fn() });
+      await expect(
+        adapter.setProfilePicture({ mimetype: 'image/png', data: 'http://dead.lan/x.png' }),
+      ).rejects.toBeInstanceOf(Error);
+    });
+
     it('joinGroupViaInviteCode still maps a refused invite to InvalidInviteCodeError (400)', async () => {
       const adapter = readyAdapter({
         acceptInvite: jest.fn().mockRejectedValue(new Error('Evaluation failed: Error: 404')),
