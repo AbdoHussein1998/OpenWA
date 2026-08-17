@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { readdirSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -14,8 +14,9 @@ import { join } from 'path';
  *
  * Each connection builds its FULL chain on an in-memory SQLite DataSource, then asks TypeORM's
  * schema builder what it would change to match the entity metadata (captured inside a transaction
- * that is rolled back, so nothing persists). An empty diff passes; any statement fails with the
- * full list. This is the same harness the from-scratch boot e2e drives (test/sqlite-chain-boot).
+ * that is rolled back, so nothing persists). The result is compared against a pinned snapshot of
+ * the drift the chain carries TODAY. This is the same harness the from-scratch boot e2e drives
+ * (test/sqlite-chain-boot).
  */
 const importMigrations = (dir: string): unknown[] => {
   const out: unknown[] = [];
@@ -54,98 +55,75 @@ async function driftStatements(ds: DataSource): Promise<string[]> {
 }
 
 /**
- * The KNOWN drift the chain carries today: the baseline migration created dated columns as
- * 'datetime' while the entities declare dateColumnType() = 'text' on SQLite (both TEXT affinity,
- * so the data is identical), and the schema builder resolves ANY column-type mismatch by
- * rebuilding the whole table - which surfaces as a CREATE temporary_X + RENAME pair plus every
- * index on the table. The drift is cosmetic (SQLite treats both names as TEXT affinity) but makes
- * migration:generate produce this rebuild instead of a real delta. A normalizing migration at the
- * chain tail closes it; until then, this baseline pins the EXACT set so any NEW drift (a missing
- * index, a missing column, a changed constraint) fails while the known set passes.
+ * The drift the chain carries today, pinned VERBATIM rather than classified by statement shape.
+ *
+ * Shape classification cannot work here. On SQLite the schema builder resolves a column change by
+ * rebuilding the whole table (CREATE temporary_X + INSERT + DROP + RENAME, plus every index on it),
+ * and it emits a bare CREATE INDEX for a new index. Those are the same statement shapes the KNOWN
+ * drift produces, so any filter broad enough to pass the known set also passes a new column and a
+ * new index: exactly the drift this gate exists to catch. Comparing the full statement text does
+ * not have that blind spot, because a new column changes the CREATE TABLE body and a new index adds
+ * a statement that is not in the snapshot.
+ *
+ * The known drift itself is cosmetic: the baseline migration created dated columns as 'datetime'
+ * while the entities declare dateColumnType() = 'text' on SQLite (both TEXT affinity, so the data is
+ * identical), plus index-NAME differences where TypeORM's auto-generated hash names differ from the
+ * migration-declared ones. A normalizing migration at the chain tail closes it.
+ *
+ * WHEN THIS FAILS: read the diff before touching the snapshot. Statements listed as unexpected are
+ * schema your entities declare and your migrations do not create, which is a real bug that reaches
+ * production (a synchronize-disabled deploy answers 500 `no such column` on the first query that
+ * touches it). Regenerate the snapshot only when you have deliberately changed the known drift, for
+ * example by landing a normalizing migration, and expect the count to go DOWN when you do.
  */
-const countRebuildTables = (stmts: string[]): number =>
-  new Set(
-    stmts.filter(s => s.startsWith('CREATE TABLE "temporary_')).map(s => /"temporary_([^"]+)"/.exec(s)?.[1] ?? ''),
-  ).size;
+const KNOWN = JSON.parse(readFileSync(join(__dirname, '__fixtures__/known-migration-drift.json'), 'utf8')) as {
+  data: string[];
+  main: string[];
+};
+
+const expectDriftMatchesSnapshot = (actual: string[], known: string[]): void => {
+  // A snapshot that lost its contents would make any comparison vacuous, so require it to hold the
+  // drift we know is there before comparing against it.
+  expect(known.length).toBeGreaterThan(0);
+  const unexpected = actual.filter(sql => !known.includes(sql));
+  const missing = known.filter(sql => !actual.includes(sql));
+  expect({ unexpected, missing }).toEqual({ unexpected: [], missing: [] });
+};
+
+const dataConnection = (): DataSource =>
+  new DataSource({
+    type: 'better-sqlite3',
+    database: ':memory:',
+    entities: [
+      join(repoRoot, 'src/modules/session/**/*.entity{.ts,.js}'),
+      join(repoRoot, 'src/modules/webhook/**/*.entity{.ts,.js}'),
+      join(repoRoot, 'src/modules/message/**/*.entity{.ts,.js}'),
+      join(repoRoot, 'src/modules/template/**/*.entity{.ts,.js}'),
+      join(repoRoot, 'src/engine/**/*.entity{.ts,.js}'),
+      join(repoRoot, 'src/modules/integration/**/*.entity{.ts,.js}'),
+      join(repoRoot, 'src/modules/status-store/**/*.entity{.ts,.js}'),
+      join(repoRoot, 'src/modules/automation/**/*.entity{.ts,.js}'),
+    ],
+    migrations: importMigrations(join(repoRoot, 'src/database/migrations')) as never,
+  });
+
+const mainConnection = (): DataSource =>
+  new DataSource({
+    type: 'better-sqlite3',
+    database: ':memory:',
+    entities: [
+      join(repoRoot, 'src/modules/auth/**/*.entity{.ts,.js}'),
+      join(repoRoot, 'src/modules/audit/**/*.entity{.ts,.js}'),
+    ],
+    migrations: importMigrations(join(repoRoot, 'src/database/migrations-main')) as never,
+  });
 
 describe('migration chain matches entity metadata (drift gate)', () => {
-  it('data connection: drift is EXACTLY the known rebuild set (any new statement fails)', async () => {
-    const data = new DataSource({
-      type: 'better-sqlite3',
-      database: ':memory:',
-      entities: [
-        join(repoRoot, 'src/modules/session/**/*.entity{.ts,.js}'),
-        join(repoRoot, 'src/modules/webhook/**/*.entity{.ts,.js}'),
-        join(repoRoot, 'src/modules/message/**/*.entity{.ts,.js}'),
-        join(repoRoot, 'src/modules/template/**/*.entity{.ts,.js}'),
-        join(repoRoot, 'src/engine/**/*.entity{.ts,.js}'),
-        join(repoRoot, 'src/modules/integration/**/*.entity{.ts,.js}'),
-        join(repoRoot, 'src/modules/status-store/**/*.entity{.ts,.js}'),
-        join(repoRoot, 'src/modules/automation/**/*.entity{.ts,.js}'),
-      ],
-      migrations: importMigrations(join(repoRoot, 'src/database/migrations')) as never,
-    });
-    const drift = await driftStatements(data);
-    // Classify every statement against the KNOWN drift shapes. The chain carries two:
-    // (1) column-type rebuild (datetime vs text) on dated tables, producing the
-    // CREATE temporary_ + INSERT + DROP + RENAME + index cycle; (2) index-NAME drift on
-    // lid_mappings/status_updates (TypeORM's auto-generated hash names differ from the
-    // migration-declared names; same columns, same uniqueness - semantics identical).
-    // Anything matching NEITHER shape is structural drift and fails.
-    const classifyDrift = (stmts: string[]): string[] =>
-      stmts.filter(sql => {
-        // Shape 1: column-type rebuild byproducts.
-        if (/^CREATE TABLE "temporary_/.test(sql)) return false;
-        if (/^ALTER TABLE "temporary_[^"]+" RENAME TO/.test(sql)) return false;
-        if (/^INSERT INTO "temporary_/.test(sql)) return false;
-        // Shape 2: index-name drift (DROP INDEX old + CREATE INDEX new on the same table, or
-        // index recreation on a rebuilt table).
-        if (/^DROP INDEX /.test(sql)) return false;
-        if (/^CREATE (UNIQUE )?INDEX /.test(sql)) return false;
-        if (/^DROP TABLE /.test(sql)) return false;
-        return true;
-      });
-    const structuralDrift = classifyDrift(drift);
-    expect(`New structural drift (beyond the known shapes):\n  ${structuralDrift.join('\n  ')}`).toBe(
-      'New structural drift (beyond the known shapes):\n  ',
-    );
-    // And the rebuild stays bounded to tables that actually carry dated columns.
-    expect(countRebuildTables(drift)).toBeGreaterThan(0);
+  it('data connection: drift is EXACTLY the pinned set (a new column or index fails)', async () => {
+    expectDriftMatchesSnapshot(await driftStatements(dataConnection()), KNOWN.data);
   }, 60_000);
 
-  it('main connection: drift is EXACTLY the known rebuild set (any new statement fails)', async () => {
-    const main = new DataSource({
-      type: 'better-sqlite3',
-      database: ':memory:',
-      entities: [
-        join(repoRoot, 'src/modules/auth/**/*.entity{.ts,.js}'),
-        join(repoRoot, 'src/modules/audit/**/*.entity{.ts,.js}'),
-      ],
-      migrations: importMigrations(join(repoRoot, 'src/database/migrations-main')) as never,
-    });
-    const drift = await driftStatements(main);
-    // Classify every statement against the KNOWN drift shapes. The chain carries two:
-    // (1) column-type rebuild (datetime vs text) on dated tables, producing the
-    // CREATE temporary_ + INSERT + DROP + RENAME + index cycle; (2) index-NAME drift on
-    // lid_mappings/status_updates (TypeORM's auto-generated hash names differ from the
-    // migration-declared names; same columns, same uniqueness - semantics identical).
-    // Anything matching NEITHER shape is structural drift and fails.
-    const classifyDrift = (stmts: string[]): string[] =>
-      stmts.filter(sql => {
-        // Shape 1: column-type rebuild byproducts.
-        if (/^CREATE TABLE "temporary_/.test(sql)) return false;
-        if (/^ALTER TABLE "temporary_[^"]+" RENAME TO/.test(sql)) return false;
-        if (/^INSERT INTO "temporary_/.test(sql)) return false;
-        // Shape 2: index-name drift (DROP INDEX old + CREATE INDEX new on the same table, or
-        // index recreation on a rebuilt table).
-        if (/^DROP INDEX /.test(sql)) return false;
-        if (/^CREATE (UNIQUE )?INDEX /.test(sql)) return false;
-        if (/^DROP TABLE /.test(sql)) return false;
-        return true;
-      });
-    const structuralDrift = classifyDrift(drift);
-    expect(`New structural drift (beyond the known shapes):\n  ${structuralDrift.join('\n  ')}`).toBe(
-      'New structural drift (beyond the known shapes):\n  ',
-    );
+  it('main connection: drift is EXACTLY the pinned set (a new column or index fails)', async () => {
+    expectDriftMatchesSnapshot(await driftStatements(mainConnection()), KNOWN.main);
   }, 60_000);
 });
