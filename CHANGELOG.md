@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The lifecycle fences (teardown chaining, fail-closed 409, identity-checked initial-status waits, force-destroy eviction) and the status broadcaster (persist-then-mirror, transition de-dup, clear-on-delete) carry their own unit specs instead of being reachable only through the session-service suite's white-box pokes.
 - Follow-ups: the transient-launch classifier rejects every HttpException up front (the 504 no-retry no longer rests on message wording) and recognizes ECONNRESET; the sendTemplate 404 description names only the template; import-status normalization comments and the parity-fence failure messages state their exact scope.
 - GET /contacts/:id/phone keeps its documented 400/409 answers (not-started, not-ready) and nulls only genuine lookup failures, logging them at debug; the boundary swallow had absorbed the deliberate errors too.
 - A transient session-launch failure (dead page at initialize, a database hiccup) gets one bounded retry that keeps the claim held; adopt and boot auto-start used to release the claim and leave the session down until a restart.
