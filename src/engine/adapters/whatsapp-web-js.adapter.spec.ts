@@ -5591,6 +5591,24 @@ describe('WhatsAppWebJsAdapter group join + settings + own profile', () => {
       );
     });
 
+    // The nine write routes that previously threw a bare Error('Chat is not a group') for a
+    // non-group id (surfacing as an opaque 500) now share this guard: unknown id, 1:1 id and
+    // status id are all GroupNotFoundError (404), like the guarded settings writes above.
+    it.each([
+      ['addParticipants', (a: WhatsAppWebJsAdapter) => a.addParticipants('628111@c.us', ['628222@c.us'])],
+      ['removeParticipants', (a: WhatsAppWebJsAdapter) => a.removeParticipants('628111@c.us', ['628222@c.us'])],
+      ['promoteParticipants', (a: WhatsAppWebJsAdapter) => a.promoteParticipants('628111@c.us', ['628222@c.us'])],
+      ['demoteParticipants', (a: WhatsAppWebJsAdapter) => a.demoteParticipants('628111@c.us', ['628222@c.us'])],
+      ['leaveGroup', (a: WhatsAppWebJsAdapter) => a.leaveGroup('628111@c.us')],
+      ['setGroupSubject', (a: WhatsAppWebJsAdapter) => a.setGroupSubject('628111@c.us', 'New subject')],
+      ['setGroupDescription', (a: WhatsAppWebJsAdapter) => a.setGroupDescription('628111@c.us', 'New description')],
+      ['getGroupInviteCode', (a: WhatsAppWebJsAdapter) => a.getGroupInviteCode('628111@c.us')],
+      ['revokeGroupInviteCode', (a: WhatsAppWebJsAdapter) => a.revokeGroupInviteCode('628111@c.us')],
+    ])('%s answers 404 (GroupNotFoundError) when the id is not a group', async (_name, call) => {
+      const getChatById = jest.fn().mockResolvedValue({ isGroup: false });
+      await expect(call(readyAdapter({ getChatById }))).rejects.toBeInstanceOf(GroupNotFoundError);
+    });
+
     it.each([
       ['setGroupMessagesAdminsOnly', 'setMessagesAdminsOnly'],
       ['setGroupInfoAdminsOnly', 'setInfoAdminsOnly'],
