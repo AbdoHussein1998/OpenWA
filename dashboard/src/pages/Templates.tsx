@@ -305,7 +305,8 @@ export function Templates() {
             <div className="template-form">
               <div className="form-group">
                 <label htmlFor="tpl-1">{t('common.name')}</label>
-                <input id="tpl-1"
+                <input
+                  id="tpl-1"
                   value={form.name}
                   onChange={event => setForm({ ...form, name: event.target.value })}
                   placeholder={t('templates.namePlaceholder')}
@@ -316,7 +317,8 @@ export function Templates() {
               <div className="template-message-fields">
                 <div className="form-group">
                   <label htmlFor="tpl-2">{t('templates.header')}</label>
-                  <input id="tpl-2"
+                  <input
+                    id="tpl-2"
                     value={form.header}
                     onChange={event => setForm({ ...form, header: event.target.value })}
                     placeholder={t('templates.headerPlaceholder')}
@@ -326,7 +328,8 @@ export function Templates() {
 
                 <div className="form-group body-field">
                   <label htmlFor="tpl-3">{t('templates.body')}</label>
-                  <textarea id="tpl-3"
+                  <textarea
+                    id="tpl-3"
                     value={form.body}
                     onChange={event => setForm({ ...form, body: event.target.value })}
                     placeholder={t('templates.bodyPlaceholder')}
@@ -337,7 +340,8 @@ export function Templates() {
 
                 <div className="form-group">
                   <label htmlFor="tpl-4">{t('templates.footer')}</label>
-                  <input id="tpl-4"
+                  <input
+                    id="tpl-4"
                     value={form.footer}
                     onChange={event => setForm({ ...form, footer: event.target.value })}
                     placeholder={t('templates.footerPlaceholder')}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { localizePlugin } from '../utils/localizePlugin';
 import { configUiSafeConfig, missingRequiredConfig, sparseSessionOverride } from '../utils/pluginConfigRules';
@@ -65,6 +65,10 @@ function ConfigField({
   onChange: (next: unknown) => void;
 }) {
   const { t } = useTranslation();
+  // Per-instance id: ConfigField renders once per schema property (and recurses), so a hardcoded
+  // id would collide on any schema with two boolean fields - the second label would toggle the
+  // first checkbox. useId is stable across re-renders and unique per instance.
+  const fieldId = React.useId();
   const desc = field.description ? <small>{field.description}</small> : null;
   const labelEl = (
     <label>
@@ -77,11 +81,11 @@ function ConfigField({
     return (
       <div className="form-group toggle-group">
         <div className="toggle-info">
-          <label htmlFor="plg-1">{label}</label>
+          <label htmlFor={fieldId}>{label}</label>
           {desc}
         </div>
         <label className="toggle-switch">
-          <input id="plg-1" type="checkbox" checked={Boolean(value)} onChange={e => onChange(e.target.checked)} />
+          <input id={fieldId} type="checkbox" checked={Boolean(value)} onChange={e => onChange(e.target.checked)} />
           <span className="toggle-slider"></span>
         </label>
       </div>

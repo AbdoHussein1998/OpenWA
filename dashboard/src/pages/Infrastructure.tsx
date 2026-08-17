@@ -215,7 +215,8 @@ export function Infrastructure() {
                   <div className="form-row">
                     <div className="form-group">
                       <label htmlFor="infra-1">{t('common.host')}</label>
-                      <input id="infra-1"
+                      <input
+                        id="infra-1"
                         type="text"
                         value={configForm.dbConfig.host}
                         onChange={e => configForm.updateDbConfig('host', e.target.value)}
@@ -223,7 +224,8 @@ export function Infrastructure() {
                     </div>
                     <div className="form-group small">
                       <label htmlFor="infra-2">{t('common.port')}</label>
-                      <input id="infra-2"
+                      <input
+                        id="infra-2"
                         type="text"
                         value={configForm.dbConfig.port}
                         onChange={e => configForm.updateDbConfig('port', e.target.value)}
@@ -233,7 +235,8 @@ export function Infrastructure() {
                   <div className="form-row">
                     <div className="form-group">
                       <label htmlFor="infra-3">{t('common.username')}</label>
-                      <input id="infra-3"
+                      <input
+                        id="infra-3"
                         type="text"
                         value={configForm.dbConfig.username}
                         onChange={e => configForm.updateDbConfig('username', e.target.value)}
@@ -241,7 +244,8 @@ export function Infrastructure() {
                     </div>
                     <div className="form-group">
                       <label htmlFor="infra-4">{t('common.password')}</label>
-                      <input id="infra-4"
+                      <input
+                        id="infra-4"
                         type="password"
                         value={configForm.dbConfig.password}
                         onChange={e => configForm.updateDbConfig('password', e.target.value)}
@@ -251,7 +255,8 @@ export function Infrastructure() {
                   <div className="form-row">
                     <div className="form-group">
                       <label htmlFor="infra-5">{t('infrastructure.database.dbName')}</label>
-                      <input id="infra-5"
+                      <input
+                        id="infra-5"
                         type="text"
                         value={configForm.dbConfig.database}
                         onChange={e => configForm.updateDbConfig('database', e.target.value)}
@@ -259,7 +264,8 @@ export function Infrastructure() {
                     </div>
                     <div className="form-group small">
                       <label htmlFor="infra-6">{t('infrastructure.database.poolSize')}</label>
-                      <input id="infra-6"
+                      <input
+                        id="infra-6"
                         type="number"
                         min="1"
                         max="50"
@@ -271,7 +277,8 @@ export function Infrastructure() {
                   <div className="form-row">
                     <div className="form-group">
                       <label htmlFor="infra-7">{t('infrastructure.database.schema')}</label>
-                      <input id="infra-7"
+                      <input
+                        id="infra-7"
                         type="text"
                         value={configForm.dbConfig.schema}
                         onChange={e => configForm.updateDbConfig('schema', e.target.value)}
@@ -427,7 +434,8 @@ export function Infrastructure() {
               </div>
               <div className="form-group">
                 <label htmlFor="infra-8">{t('infrastructure.engine.sessionDataPath')}</label>
-                <input id="infra-8"
+                <input
+                  id="infra-8"
                   type="text"
                   value={configForm.engineConfig.sessionDataPath}
                   onChange={e => configForm.updateEngineConfig('sessionDataPath', e.target.value)}
@@ -435,7 +443,8 @@ export function Infrastructure() {
               </div>
               <div className="form-group">
                 <label htmlFor="infra-9">{t('infrastructure.engine.browserArgs')}</label>
-                <input id="infra-9"
+                <input
+                  id="infra-9"
                   type="text"
                   value={configForm.engineConfig.browserArgs}
                   onChange={e => configForm.updateEngineConfig('browserArgs', e.target.value)}
@@ -516,7 +525,8 @@ export function Infrastructure() {
                   <div className="form-row">
                     <div className="form-group">
                       <label htmlFor="infra-10">{t('common.host')}</label>
-                      <input id="infra-10"
+                      <input
+                        id="infra-10"
                         type="text"
                         value={configForm.redisConfig.host}
                         onChange={e => configForm.updateRedisConfig('host', e.target.value)}
@@ -524,7 +534,8 @@ export function Infrastructure() {
                     </div>
                     <div className="form-group small">
                       <label htmlFor="infra-11">{t('common.port')}</label>
-                      <input id="infra-11"
+                      <input
+                        id="infra-11"
                         type="text"
                         value={configForm.redisConfig.port}
                         onChange={e => configForm.updateRedisConfig('port', e.target.value)}
@@ -532,7 +543,8 @@ export function Infrastructure() {
                     </div>
                     <div className="form-group">
                       <label htmlFor="infra-12">{t('common.password')}</label>
-                      <input id="infra-12"
+                      <input
+                        id="infra-12"
                         type="password"
                         value={configForm.redisConfig.password}
                         onChange={e => configForm.updateRedisConfig('password', e.target.value)}
@@ -672,7 +684,8 @@ export function Infrastructure() {
             {configForm.storageConfig.type === 'local' && (
               <div className="form-group">
                 <label htmlFor="infra-13">{t('infrastructure.storage.storagePath')}</label>
-                <input id="infra-13"
+                <input
+                  id="infra-13"
                   type="text"
                   value={configForm.storageConfig.localPath}
                   onChange={e => configForm.updateStorageConfig('localPath', e.target.value)}
@@ -702,7 +715,8 @@ export function Infrastructure() {
                     <div className="form-row">
                       <div className="form-group">
                         <label htmlFor="infra-14">{t('infrastructure.storage.bucket')}</label>
-                        <input id="infra-14"
+                        <input
+                          id="infra-14"
                           type="text"
                           value={configForm.storageConfig.s3Bucket}
                           onChange={e => configForm.updateStorageConfig('s3Bucket', e.target.value)}
@@ -710,7 +724,8 @@ export function Infrastructure() {
                       </div>
                       <div className="form-group">
                         <label htmlFor="infra-15">{t('infrastructure.storage.region')}</label>
-                        <input id="infra-15"
+                        <input
+                          id="infra-15"
                           type="text"
                           value={configForm.storageConfig.s3Region}
                           onChange={e => configForm.updateStorageConfig('s3Region', e.target.value)}
@@ -720,7 +735,8 @@ export function Infrastructure() {
                     <div className="form-row">
                       <div className="form-group">
                         <label htmlFor="infra-16">{t('infrastructure.storage.accessKey')}</label>
-                        <input id="infra-16"
+                        <input
+                          id="infra-16"
                           type="text"
                           value={configForm.storageConfig.s3AccessKey}
                           onChange={e => configForm.updateStorageConfig('s3AccessKey', e.target.value)}
@@ -728,7 +744,8 @@ export function Infrastructure() {
                       </div>
                       <div className="form-group">
                         <label htmlFor="infra-17">{t('infrastructure.storage.secretKey')}</label>
-                        <input id="infra-17"
+                        <input
+                          id="infra-17"
                           type="password"
                           value={configForm.storageConfig.s3SecretKey}
                           onChange={e => configForm.updateStorageConfig('s3SecretKey', e.target.value)}
@@ -737,7 +754,8 @@ export function Infrastructure() {
                     </div>
                     <div className="form-group">
                       <label htmlFor="infra-18">{t('infrastructure.storage.endpoint')}</label>
-                      <input id="infra-18"
+                      <input
+                        id="infra-18"
                         type="text"
                         value={configForm.storageConfig.s3Endpoint}
                         onChange={e => configForm.updateStorageConfig('s3Endpoint', e.target.value)}

@@ -186,7 +186,8 @@ function StatusComposeModal({ sessionId, onClose, onPosted }: Props) {
         <>
           <div className="compose-field">
             <label htmlFor="scm-1">{t('chats.status.composeText')}</label>
-            <textarea id="scm-1"
+            <textarea
+              id="scm-1"
               value={composeText}
               onChange={e => setComposeText(e.target.value)}
               maxLength={4096}
@@ -196,7 +197,8 @@ function StatusComposeModal({ sessionId, onClose, onPosted }: Props) {
           <div className="compose-row">
             <div className="compose-field">
               <label htmlFor="scm-2">{t('chats.status.backgroundColor')}</label>
-              <input id="scm-2"
+              <input
+                id="scm-2"
                 type="color"
                 value={composeBgColor || '#000000'}
                 onChange={e => setComposeBgColor(e.target.value)}
@@ -221,7 +223,8 @@ function StatusComposeModal({ sessionId, onClose, onPosted }: Props) {
         <>
           <div className="compose-field">
             <label htmlFor="scm-4">{t('chats.status.composeImage')}</label>
-            <input id="scm-4"
+            <input
+              id="scm-4"
               type="url"
               placeholder="https://example.com/image.jpg"
               value={composeImageUrl}
@@ -234,7 +237,8 @@ function StatusComposeModal({ sessionId, onClose, onPosted }: Props) {
           </div>
           <div className="compose-field">
             <label htmlFor="scm-5">{t('chats.status.caption')}</label>
-            <input id="scm-5"
+            <input
+              id="scm-5"
               type="text"
               placeholder={t('chats.captionPlaceholder')}
               value={composeCaption}
@@ -248,7 +252,8 @@ function StatusComposeModal({ sessionId, onClose, onPosted }: Props) {
       {isBaileysEngine && (
         <div className="compose-field">
           <label htmlFor="scm-6">{t('chats.status.recipients')}</label>
-          <input id="scm-6"
+          <input
+            id="scm-6"
             type="text"
             placeholder={t('common.search')}
             value={composeRecipientSearch}

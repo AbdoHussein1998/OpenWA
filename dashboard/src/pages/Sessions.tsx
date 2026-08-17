@@ -467,7 +467,8 @@ export function Sessions() {
           }
         >
           <label htmlFor="sess-1">{t('sessions.create.label')}</label>
-          <input id="sess-1"
+          <input
+            id="sess-1"
             type="text"
             placeholder={t('sessions.create.placeholder')}
             value={newSessionName}

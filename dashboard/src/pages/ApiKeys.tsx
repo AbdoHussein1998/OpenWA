@@ -302,7 +302,8 @@ export function ApiKeys() {
           ) : (
             <>
               <label htmlFor="ak-1">{t('common.name')}</label>
-              <input id="ak-1"
+              <input
+                id="ak-1"
                 type="text"
                 placeholder={t('apiKeys.namePlaceholder')}
                 value={newKey.name}
