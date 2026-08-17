@@ -326,10 +326,14 @@ async function bootstrap() {
       'X-RateLimit-Limit-instance',
       'X-RateLimit-Remaining-instance',
       'X-RateLimit-Reset-instance',
+      'X-RateLimit-Limit-ingress-ip',
+      'X-RateLimit-Remaining-ingress-ip',
+      'X-RateLimit-Reset-ingress-ip',
       'Retry-After-short',
       'Retry-After-medium',
       'Retry-After-long',
       'Retry-After-instance',
+      'Retry-After-ingress-ip',
     ],
     maxAge: 86400, // 24 hours
   });

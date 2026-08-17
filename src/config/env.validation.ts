@@ -243,6 +243,7 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'WS_MAX_SOCKETS_PER_KEY',
     'WEBHOOK_TIMEOUT',
     'INGRESS_INSTANCE_LIMIT',
+    'INGRESS_IP_LIMIT',
     'REQUEST_TIMEOUT_MS',
     'HEADERS_TIMEOUT_MS',
     'KEEPALIVE_TIMEOUT_MS',

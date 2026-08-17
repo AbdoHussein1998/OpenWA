@@ -295,6 +295,7 @@ services:
       # Integration Fabric ingress: per-instance fairness, retries, retention, reconciler, workers.
       - INGRESS_INSTANCE_LIMIT=${INGRESS_INSTANCE_LIMIT:-}
       - INGRESS_INSTANCE_TTL=${INGRESS_INSTANCE_TTL:-}
+      - INGRESS_IP_LIMIT=${INGRESS_IP_LIMIT:-}
       - INGRESS_MAX_ATTEMPTS=${INGRESS_MAX_ATTEMPTS:-}
       - INGRESS_RETRY_DELAY_MS=${INGRESS_RETRY_DELAY_MS:-}
       - INGRESS_DEDUP_RETENTION_DAYS=${INGRESS_DEDUP_RETENTION_DAYS:-}
