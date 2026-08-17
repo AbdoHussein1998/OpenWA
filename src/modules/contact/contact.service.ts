@@ -125,15 +125,34 @@ export class ContactService {
   }
 
   /**
-   * Guarded like the addressbook writes: whatsapp-web.js's Contact.block()/unblock() silently
-   * return false for a group id (nothing blocked, reported as success), and Baileys passes the id
-   * to updateBlockStatus, whose Boom for an unresolvable jid has no HttpException mapping (opaque
-   * 500). A group/newsletter/lid id does not name a person, so refuse it here on both engines
-   * with the same 400 the addressbook surfaces use.
+   * Guarded because whatsapp-web.js's Contact.block()/unblock() silently return false for a group id
+   * (nothing blocked, reported as success), and Baileys passes the id to updateBlockStatus, whose
+   * Boom for an unresolvable jid has no HttpException mapping (opaque 500). See `assertBlockable`
+   * for why this guard is wider than the addressbook one.
    */
   blockContact(sessionId: string, contactId: string) {
-    this.assertAddressable(contactId);
+    this.assertBlockable(contactId);
     return this.getEngine(sessionId).blockContact(this.toAddressableId(contactId));
+  }
+
+  /**
+   * Blocking acts on an IDENTITY, not on an addressbook row, so unlike the addressbook writes it
+   * accepts a privacy id (`@lid`) as well as a phone-based one. It has to: a privacy-id contact has
+   * no phone number, and the blocklist READ answers ids verbatim (Baileys maps each blocked jid
+   * through `toNeutralJid`, which leaves an unresolved lid as `<lid>@lid`; whatsapp-web.js returns
+   * the wid as-is), so refusing them made the very ids this API hands out unusable for the matching
+   * write and left such a contact listed as blocked with no way to unblock it.
+   *
+   * Neither engine needs a phone here: Baileys passes the jid straight to `updateBlockStatus`, and
+   * whatsapp-web.js only short-circuits (`Contact.block()` returns false without acting) for a
+   * group. What must still be refused is an id that names no individual at all, which is what made
+   * whatsapp-web.js answer 200 "blocked" while nothing was blocked.
+   */
+  private assertBlockable(contactId: string): void {
+    if (isIndividualWid(contactId) || this.isBareNumber(contactId)) return;
+    throw new BadRequestException(
+      `Contact ${contactId} does not name an individual; block and unblock act on a person, so pass a phone-based or privacy (@lid) contact id instead`,
+    );
   }
 
   /**
@@ -195,7 +214,7 @@ export class ContactService {
   }
 
   unblockContact(sessionId: string, contactId: string) {
-    this.assertAddressable(contactId);
+    this.assertBlockable(contactId);
     return this.getEngine(sessionId).unblockContact(this.toAddressableId(contactId));
   }
 }
