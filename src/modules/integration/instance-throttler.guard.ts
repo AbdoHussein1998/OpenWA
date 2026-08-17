@@ -39,6 +39,18 @@ export class InstanceThrottlerGuard extends ProxyAwareThrottlerGuard {
     ];
   }
 
+  /**
+   * This guard does NOT honour a bare `@SkipThrottle()`. The ingress controller carries one so the
+   * GLOBAL per-IP guard skips the route: its medium tier (default 100/min) sits BELOW this guard's
+   * per-instance default (120/min), so a provider delivering every tenant's webhooks from one
+   * shared egress IP - the exact scenario this guard exists for - was 429'd at the IP tier before
+   * the instance bound ever fired, and sustained traffic hit the 1000/h long tier at ~16/min. The
+   * instance fairness bound is the better-keyed limit for this route and stays unconditional.
+   */
+  protected shouldSkip(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
   protected async getTracker(req: Record<string, unknown>): Promise<string> {
     const params = (req.params ?? {}) as { pluginId?: string; instanceId?: string };
     if (params.pluginId && params.instanceId) {
