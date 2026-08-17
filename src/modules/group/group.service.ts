@@ -67,8 +67,10 @@ export class GroupService {
    */
   async createGroup(sessionId: string, name: string, participants: string[]) {
     this.assertAddressableParticipants(participants);
-    await this.pacing.assertReachoutAllowed(sessionId, participants);
-    return this.getEngine(sessionId).createGroup(name, participants);
+    const coldCount = await this.pacing.assertReachoutAllowed(sessionId, participants);
+    const group = await this.getEngine(sessionId).createGroup(name, participants);
+    this.pacing.chargeGroupReachouts(sessionId, coldCount);
+    return group;
   }
 
   /**
@@ -78,8 +80,10 @@ export class GroupService {
    */
   async addParticipants(sessionId: string, groupId: string, participants: string[]) {
     this.assertAddressableParticipants(participants);
-    await this.pacing.assertReachoutAllowed(sessionId, participants);
-    return this.getEngine(sessionId).addParticipants(groupId, participants);
+    const coldCount = await this.pacing.assertReachoutAllowed(sessionId, participants);
+    const result = await this.getEngine(sessionId).addParticipants(groupId, participants);
+    this.pacing.chargeGroupReachouts(sessionId, coldCount);
+    return result;
   }
 
   removeParticipants(sessionId: string, groupId: string, participants: string[]) {

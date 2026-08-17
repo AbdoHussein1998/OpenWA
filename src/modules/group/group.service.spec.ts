@@ -8,13 +8,25 @@ import { SendPacingService } from '../message/send-pacing.service';
 
 /** Pacing is off by default; its own spec covers the governor, so here it must simply not refuse. */
 const inertPacing = (): SendPacingService =>
-  ({ assertReachoutAllowed: jest.fn().mockResolvedValue(undefined) }) as unknown as SendPacingService;
+  ({
+    assertReachoutAllowed: jest.fn().mockResolvedValue(0),
+    chargeGroupReachouts: jest.fn(),
+  }) as unknown as SendPacingService;
 
 describe('GroupService', () => {
   const makeService = (engine: Partial<IWhatsAppEngine> | undefined, pacing: SendPacingService = inertPacing()) => {
     const engines = new EngineRegistry();
     if (engine) engines.set('s1', engine as IWhatsAppEngine);
     return new GroupService(engines, pacing);
+  };
+
+  const makeServiceWithPacing = (
+    engine: Partial<IWhatsAppEngine>,
+    pacing: Record<string, jest.Mock>,
+  ): { svc: GroupService; pacing: Record<string, jest.Mock> } => {
+    const engines = new EngineRegistry();
+    engines.set('s1', engine as IWhatsAppEngine);
+    return { svc: new GroupService(engines, pacing as unknown as SendPacingService), pacing };
   };
 
   // On Baileys the id reaches sock.updateProfilePicture/removeProfilePicture verbatim, and Baileys
@@ -103,6 +115,45 @@ describe('GroupService', () => {
   it('returns the group when found', async () => {
     const svc = makeService({ getGroupInfo: jest.fn().mockResolvedValue({ id: 'g1', name: 'G' }) });
     await expect(svc.getGroupInfo('s1', 'g1')).resolves.toEqual({ id: 'g1', name: 'G' });
+  });
+
+  it('charges the cold-reachout budget only after the engine call resolves', async () => {
+    const addParticipants = jest.fn().mockResolvedValue(undefined);
+    const { svc, pacing } = makeServiceWithPacing(
+      { addParticipants },
+      {
+        assertReachoutAllowed: jest.fn().mockResolvedValue(3),
+        chargeGroupReachouts: jest.fn(),
+      },
+    );
+    await svc.addParticipants('s1', 'g1', ['628111111@c.us']);
+    expect(pacing.chargeGroupReachouts).toHaveBeenCalledWith('s1', 3);
+  });
+
+  it('does not charge the budget when the engine refuses the add (the participants were never contacted)', async () => {
+    const addParticipants = jest.fn().mockRejectedValue(new Error('no admin rights'));
+    const { svc, pacing } = makeServiceWithPacing(
+      { addParticipants },
+      {
+        assertReachoutAllowed: jest.fn().mockResolvedValue(3),
+        chargeGroupReachouts: jest.fn(),
+      },
+    );
+    await expect(svc.addParticipants('s1', 'g1', ['628111111@c.us'])).rejects.toThrow('no admin rights');
+    expect(pacing.chargeGroupReachouts).not.toHaveBeenCalled();
+  });
+
+  it('does not charge the budget when createGroup fails (whatsapp-web.js always 501s)', async () => {
+    const createGroup = jest.fn().mockRejectedValue(new Error('EngineNotSupportedError'));
+    const { svc, pacing } = makeServiceWithPacing(
+      { createGroup },
+      {
+        assertReachoutAllowed: jest.fn().mockResolvedValue(2),
+        chargeGroupReachouts: jest.fn(),
+      },
+    );
+    await expect(svc.createGroup('s1', 'G', ['628111111@c.us', '628222222@c.us'])).rejects.toThrow();
+    expect(pacing.chargeGroupReachouts).not.toHaveBeenCalled();
   });
 
   it('passes participant lists straight through to the engine', async () => {
