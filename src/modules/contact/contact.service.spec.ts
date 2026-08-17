@@ -107,6 +107,37 @@ describe('ContactService', () => {
     expect(Date.now() - started).toBeLessThan(12_000);
   }, 15_000);
 
+  describe('block/unblock reject ids that do not name a person', () => {
+    // whatsapp-web.js's Contact.block()/unblock() return false for a group id (nothing blocked,
+    // answered 200 "blocked"); Baileys hands the id to updateBlockStatus whose Boom for an
+    // unresolvable jid surfaces as an opaque 500. Both engines share this 400 guard.
+    it.each([
+      ['blockContact', (svc: ContactService) => svc.blockContact('s1', '120363000000000000@g.us')],
+      ['unblockContact', (svc: ContactService) => svc.unblockContact('s1', '120363000000000000@g.us')],
+      ['blockContact (lid)', (svc: ContactService) => svc.blockContact('s1', '159442138038327@lid')],
+      ['blockContact (free text)', (svc: ContactService) => svc.blockContact('s1', 'hello@c.us')],
+    ])('%s refuses the id with a 400 before the engine is called', (_name, call) => {
+      const blockContact = jest.fn();
+      const unblockContact = jest.fn();
+      const svc = makeService({ blockContact, unblockContact });
+      expect(() => call(svc)).toThrow(BadRequestException);
+      expect(blockContact).not.toHaveBeenCalled();
+      expect(unblockContact).not.toHaveBeenCalled();
+    });
+
+    it('qualifies a bare number and forwards it to the engine as a @c.us id', async () => {
+      const blockContact = jest.fn().mockResolvedValue(undefined);
+      await makeService({ blockContact }).blockContact('s1', '628123');
+      expect(blockContact).toHaveBeenCalledWith('628123@c.us');
+    });
+
+    it('still allows a normal phone-based contact id through to the engine', async () => {
+      const unblockContact = jest.fn().mockResolvedValue(undefined);
+      await makeService({ unblockContact }).unblockContact('s1', '628123@c.us');
+      expect(unblockContact).toHaveBeenCalledWith('628123@c.us');
+    });
+  });
+
   describe('addressbook writes reject a privacy id', () => {
     // The lid's digits are NOT a phone number (see the note on
     // MessageService.resolveJidCandidates). whatsapp-web.js takes a bare NUMBER for the

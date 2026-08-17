@@ -103,8 +103,16 @@ export class ContactService {
     return pictures;
   }
 
+  /**
+   * Guarded like the addressbook writes: whatsapp-web.js's Contact.block()/unblock() silently
+   * return false for a group id (nothing blocked, reported as success), and Baileys passes the id
+   * to updateBlockStatus, whose Boom for an unresolvable jid has no HttpException mapping (opaque
+   * 500). A group/newsletter/lid id does not name a person, so refuse it here on both engines
+   * with the same 400 the addressbook surfaces use.
+   */
   blockContact(sessionId: string, contactId: string) {
-    return this.getEngine(sessionId).blockContact(contactId);
+    this.assertAddressable(contactId);
+    return this.getEngine(sessionId).blockContact(this.toAddressableId(contactId));
   }
 
   /**
@@ -166,6 +174,7 @@ export class ContactService {
   }
 
   unblockContact(sessionId: string, contactId: string) {
-    return this.getEngine(sessionId).unblockContact(contactId);
+    this.assertAddressable(contactId);
+    return this.getEngine(sessionId).unblockContact(this.toAddressableId(contactId));
   }
 }
