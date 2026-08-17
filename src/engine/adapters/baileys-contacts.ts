@@ -4,6 +4,7 @@ import { resolveMediaBuffer } from './baileys-messaging';
 import { type createLogger } from '../../common/services/logger.service';
 import { BAILEYS_QUERY_BUDGET_MS, withQueryDeadline } from './baileys-query-deadline';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
+import { RecipientUnreachableError } from '../../common/errors/recipient-unreachable.error';
 
 /**
  * Contacts/profile/chats-domain operations extracted from BaileysAdapter. The adapter keeps the
@@ -101,15 +102,41 @@ export class BaileysContacts {
     await this.confirmed(this.sock().removeContact(this.host.toEngineJid(contactId)), 'the contact removal');
   }
 
+  /**
+   * `updateBlockStatus` maps the id between the phone-number and privacy-id dialects before it sends
+   * anything, and refuses one it cannot map with `Boom(..., { statusCode: 400 })`: no phone number
+   * for a lid, no lid for a phone number, or an id that is neither. Boom is not an HttpException, so
+   * those reached the caller as an opaque `500 Internal server error` even though the request was
+   * well-formed and the id is a shape this API accepts.
+   *
+   * Only a 400 is folded in. A dropped connection carries `DisconnectReason.connectionClosed` and the
+   * write deadline throws `EngineTransportError`, and reporting either as a bad contact id would send
+   * the caller after the wrong problem. whatsapp-web.js already answers `RecipientUnreachableError`
+   * (400) for the same cause on the send path, so this is the parity mapping, not a new contract.
+   */
+  private async mapUnresolvableId<T>(contactId: string, op: () => Promise<T>): Promise<T> {
+    try {
+      return await op();
+    } catch (error) {
+      const status = (error as { output?: { statusCode?: unknown } } | null)?.output?.statusCode;
+      if (status === 400) throw new RecipientUnreachableError(contactId);
+      throw error;
+    }
+  }
+
   async blockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
-    await this.confirmed(this.sock().updateBlockStatus(contactId, 'block'), 'the block');
+    await this.mapUnresolvableId(contactId, () =>
+      this.confirmed(this.sock().updateBlockStatus(contactId, 'block'), 'the block'),
+    );
     this.invalidateBlocklist();
   }
 
   async unblockContact(contactId: string): Promise<void> {
     this.host.ensureReady();
-    await this.confirmed(this.sock().updateBlockStatus(contactId, 'unblock'), 'the unblock');
+    await this.mapUnresolvableId(contactId, () =>
+      this.confirmed(this.sock().updateBlockStatus(contactId, 'unblock'), 'the unblock'),
+    );
     this.invalidateBlocklist();
   }
 

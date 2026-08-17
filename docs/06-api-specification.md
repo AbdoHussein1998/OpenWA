@@ -2062,7 +2062,7 @@ The edited message keeps its original id.
 { "messageId": "true_628123456789@c.us_3EB0ABCD", "timestamp": 1760000000 }
 ```
 
-**Errors:** `400` session not active / unknown body field · `401` missing/invalid API key · `403` key role below OPERATOR · `404` message not found · `500` engine error (e.g. editing another account's message, which WhatsApp forbids) · `409` conflict or engine not ready (retryable)
+**Errors:** `400` session not active / unknown body field · `401` missing/invalid API key · `403` key role below OPERATOR, or the engine refused the edit (only the account's own messages are editable, which WhatsApp enforces) · `404` message not found · `409` conflict or engine not ready (retryable)
 
 #### POST /api/sessions/:sessionId/messages/send-bulk
 
