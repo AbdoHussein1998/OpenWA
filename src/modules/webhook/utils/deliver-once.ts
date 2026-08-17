@@ -42,9 +42,10 @@ export async function recordTerminalFailure(
   logger: LoggerService,
   input: Omit<Parameters<typeof recordWebhookDeliveryFailure>[2], 'lastStatusCode' | 'lastError'> & { error: unknown },
 ): Promise<void> {
-  const errMessage = redactSsrfError(input.error);
+  const { error, ...row } = input;
+  const errMessage = redactSsrfError(error);
   await recordWebhookDeliveryFailure(failureRepository, logger, {
-    ...input,
+    ...row,
     lastStatusCode: statusCodeFromError(errMessage),
     lastError: errMessage,
   });

@@ -27,8 +27,7 @@ describe('postWebhookPayload', () => {
     expect(opts.headers).toEqual({ 'X-Test': '1' });
     expect(opts.signal).toBeInstanceOf(AbortSignal);
     expect(classifier).toBeInstanceOf(Function);
-    expect(guard).toBeDefined();
-    expect(Object.keys(guard)).toContain('guard');
+    expect(guard.guard).toBe(true); // SSRF guard defaults ON; the opt-out env flips it
   });
 
   it('resolves with the status on a 2xx answer', async () => {
