@@ -131,7 +131,7 @@ export class MessageController {
     status: 400,
     description: 'Session not active or invalid request',
   })
-  @ApiResponse({ status: 404, description: 'Session or template not found' })
+  @ApiResponse({ status: 404, description: 'Template not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendTemplate(
     @Param('sessionId') sessionId: string,

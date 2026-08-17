@@ -673,8 +673,10 @@ export class InfraDataService {
         // initializing, ...) in a backup describes the SOURCE host's engines, and restoring it
         // verbatim leaves rows reading ready with no engine anywhere - invisible to auto-start
         // (selects disconnected) and to the takeover sweep, until a process restart. Scoped to
-        // CLAIMABLE rows only, so a session whose ownership claim was just re-applied to this
-        // node or a peer (a live engine still backs it) keeps the backup's status.
+        // CLAIMABLE rows: a PEER's preserved claim (a live engine backs the row elsewhere) keeps
+        // the backup's status; this node's own claims normalize exactly like boot's reset does -
+        // for a live self-engine the row understates reality until the next engine status event,
+        // which is the same trade boot makes.
         const ACTIVE_STATUSES = [
           SessionStatus.READY,
           SessionStatus.INITIALIZING,

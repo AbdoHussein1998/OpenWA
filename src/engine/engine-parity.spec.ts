@@ -147,7 +147,7 @@ const SHARED_FILES = Object.entries(UNPREFIXED_FILE_ENGINES)
 /** Method names an adapter file refuses by literal, in file order. */
 function throwsIn(file: string): string[] {
   const src = readFileSync(join(__dirname, 'adapters', file), 'utf8');
-  // A fresh regex per call: THROW_SITE_RE carries /g, and a shared /g regex keeps lastIndex between
+  // A fresh regex per call: matchAll requires the global flag, and a shared /g regex keeps lastIndex between
   // calls, so reusing the instance would silently skip matches on every other file.
   return [...src.matchAll(new RegExp(THROW_SITE_RE.source, 'g'))].map(m => m[1]);
 }
@@ -190,7 +190,7 @@ describe('engine capability matrix — drift invariants', () => {
   // pseudo-method no assertion reads. This fence counts every construction site in every adapter
   // file and requires each to be exactly one of: a literal naming a real interface method, a
   // conditional site listed above, or the single variable-argument site in the unsupported() helper.
-  it('every unsupported-throw construction site is literal-arg, a method name, and registered', () => {
+  it('every EngineNotSupportedError construction site is literal-arg, a method name, and registered', () => {
     const interfaceMethods = new Set(readInterfaceMethods());
     const exemptHelperBody = /private unsupported\(method: string\)[\s\S]*?new EngineNotSupportedError\(method\)/;
     for (const file of adapterFiles()) {
@@ -208,7 +208,12 @@ describe('engine capability matrix — drift invariants', () => {
       }
       const nonLiteral = all.length - literal.length;
       const hasHelper = exemptHelperBody.test(src);
-      expect(nonLiteral).toBe(hasHelper ? 1 : 0);
+      if (nonLiteral !== (hasHelper ? 1 : 0)) {
+        throw new Error(
+          `${file}: ${nonLiteral} non-literal construction site(s) (expected ${hasHelper ? 1 : 0}) - ` +
+            'a template-literal or variable-argument EngineNotSupportedError escapes the registry',
+        );
+      }
     }
     // Reverse direction: a conditional entry whose throw site no longer exists is stale.
     const allLiterals = new Set(

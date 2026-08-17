@@ -1,4 +1,5 @@
 import {
+  HttpException,
   Injectable,
   NotFoundException,
   ConflictException,
@@ -43,12 +44,14 @@ function isTransientLaunchFailure(error: unknown): boolean {
   // EngineTransportError (503) is the one mapped HTTP shape that means infrastructure died
   // mid-launch (dead page/socket at initialize). Every OTHER HttpException is a deliberate
   // answer: the 409 not-ready family reflects session state, the 504 auth-timeout family
-  // reflects the account/proxy, and a 4xx is a refusal.
+  // reflects the account/proxy, and a 4xx is a refusal. The explicit early-exit (not a message
+  // regex relying on the 504 texts never containing 'connection') pins that intent.
   if (error instanceof EngineTransportError) return true;
+  if (error instanceof HttpException) return false;
   // TypeORM QueryFailedError and driver errors carry no HttpException shape.
   return (
     error instanceof Error &&
-    /connection|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|SQLITE_BUSY|terminating connection/i.test(error.message)
+    /connection|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|SQLITE_BUSY|terminating connection/i.test(error.message)
   );
 }
 
