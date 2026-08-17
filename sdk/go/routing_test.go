@@ -160,6 +160,7 @@ func TestRouting(t *testing.T) {
 		{"Profile.SetProfileName", func(c *Client) { c.Profile.SetProfileName(ctx, "s1", SetProfileNameRequest{}) }, "PUT", "/api/sessions/s1/profile/name"},
 		{"Profile.SetProfileStatus", func(c *Client) { c.Profile.SetProfileStatus(ctx, "s1", SetProfileStatusRequest{}) }, "PUT", "/api/sessions/s1/profile/status"},
 		{"Profile.SetProfilePicture", func(c *Client) { c.Profile.SetProfilePicture(ctx, "s1", SetProfilePictureRequest{}) }, "PUT", "/api/sessions/s1/profile/picture"},
+		{"Profile.DeleteProfilePicture", func(c *Client) { c.Profile.DeleteProfilePicture(ctx, "s1") }, "DELETE", "/api/sessions/s1/profile/picture"},
 
 		{"Calls.RejectCall", func(c *Client) { c.Calls.RejectCall(ctx, "s1", "call1") }, "POST", "/api/sessions/s1/calls/call1/reject"},
 		{"Calls.CreateLink", func(c *Client) { c.Calls.CreateLink(ctx, "s1", CreateCallLinkRequest{}) }, "POST", "/api/sessions/s1/calls/link"},

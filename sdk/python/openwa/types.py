@@ -327,6 +327,8 @@ class SendMediaRequest(TypedDict, total=False):
     # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
     # matches the serialized message id, Baileys the raw key id of a message it has already stored.
     quotedMessageId: str
+    # WIDs to @mention; the caption must also contain the @<number> token.
+    mentions: list[str]
 
 
 class SendAudioRequest(SendMediaRequest, total=False):

@@ -45,6 +45,8 @@ type SendMediaRequest struct {
 	// whatsapp-web.js matches the serialized message id, Baileys the raw key id of a message it has
 	// already stored. Omitted when empty, so an ordinary send carries no quote key.
 	QuotedMessageID string `json:"quotedMessageId,omitempty"`
+	// WIDs to @mention; the caption must also contain the @<number> token.
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // SendAudioRequest sends audio. PTT sends as a voice note. Server only accepts

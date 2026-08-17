@@ -323,12 +323,25 @@ function countUnbalanced(s) {
 
 const MAX_DEPTH = 4;
 
+/** Sort enum members the same way on both sides: numerically when every member is numeric, else
+ *  lexicographically. The two token builders previously both used default .sort() (lexicographic),
+ *  which ordered 10 before 2 - consistent by accident, and unable to recognize unquoted numeric
+ *  unions in hand types at all, leaving numeric enums ungated.
+ */
+const sortEnumMembers = members =>
+  members.every(m => /^-?\d+(\.\d+)?$/.test(m))
+    ? members.slice().sort((a, b) => Number(a) - Number(b))
+    : members.slice().sort();
+
 export function handToken(text, types, depth = 0) {
   const t = text.trim().replace(/;$/, '');
   if (t.endsWith('[]')) return `array<${handToken(t.slice(0, -2), types, depth)}>`;
   if (/^(string|number|boolean|unknown|any)$/.test(t)) return t;
   const literals = [...t.matchAll(/'([^']+)'/g)].map(m => m[1]);
-  if (literals.length && literals.length === t.split('|').length) return `enum(${literals.slice().sort().join(',')})`;
+  // Unquoted numeric literals (font enums like 0|1|2|6) count too.
+  const numerics = [...t.matchAll(/(?<![\w.'])(-?\d+(?:\.\d+)?)(?![\w.])/g)].map(m => m[1]);
+  if (literals.length && literals.length === t.split('|').length) return `enum(${sortEnumMembers(literals).join(',')})`;
+  if (numerics.length && numerics.length === t.split('|').length) return `enum(${sortEnumMembers(numerics).join(',')})`;
   if (t.includes('|')) {
     const parts = t
       .split('|')
@@ -365,7 +378,7 @@ function baseSchemaToken(node, schemas, depth = 0) {
     const target = schemas[node.$ref.split('/').pop()];
     return depth < MAX_DEPTH ? schemaToken(target, schemas, depth + 1) : 'object';
   }
-  if (node.enum) return `enum(${node.enum.slice().sort().join(',')})`;
+  if (node.enum) return `enum(${sortEnumMembers(node.enum.map(String)).join(',')})`;
   if (node.type === 'array') return `array<${schemaToken(node.items, schemas, depth)}>`;
   if (node.anyOf || node.oneOf) {
     const parts = (node.anyOf ?? node.oneOf).map(n => schemaToken(n, schemas, depth + 1));
