@@ -37,7 +37,10 @@ export function Logs() {
   // Distinguish "filters matched nothing on this page" from "there are no logs at all": the search
   // box only filters the fetched page (the API has no text search), so a non-match here must not
   // read as "no such event exists" while more pages may hold it.
-  const hasActiveFilter = searchQuery.trim() !== '' || severityFilter !== 'all';
+  const hasSearch = searchQuery.trim() !== '';
+  // Severity is enforced SERVER-SIDE (the query carries it): an empty result there means no logs
+  // match at all, which deserves different guidance than the page-local search box.
+  const hasSeverityFilter = severityFilter !== 'all';
 
   const formatTimestamp = (date: string) => new Date(date).toLocaleString();
 
@@ -182,10 +185,14 @@ export function Logs() {
           {filteredLogs.length === 0 ? (
             <div className="empty-table-state">
               <FileText size={48} strokeWidth={1} />
-              {hasActiveFilter ? (
+              {hasSeverityFilter || hasSearch ? (
                 <>
                   <h3>{t('logs.empty.filteredTitle')}</h3>
-                  <p>{t('logs.empty.filteredDescription')}</p>
+                  <p>
+                    {hasSeverityFilter && !hasSearch
+                      ? t('logs.empty.filteredServerDescription')
+                      : t('logs.empty.filteredDescription')}
+                  </p>
                 </>
               ) : (
                 <>

@@ -568,7 +568,8 @@
       "title": "Keine Protokolle gefunden",
       "description": "Audit-Protokolle werden hier angezeigt, sobald Aktionen ausgeführt werden",
       "filteredTitle": "Keine Treffer auf dieser Seite",
-      "filteredDescription": "Die Suche filtert nur die aktuelle Seite. Leere sie, blättere weiter oder grenze serverseitig über den Severity-Filter ein."
+      "filteredDescription": "Die Suche filtert nur die aktuelle Seite. Leere sie, blättere weiter oder grenze serverseitig über den Severity-Filter ein.",
+      "filteredServerDescription": "Keine Protokolle passen auf diese Filter. Passe den Severity-Filter an, um die Suche zu erweitern."
     }
   },
   "messageTester": {

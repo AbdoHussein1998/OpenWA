@@ -1143,6 +1143,11 @@
 [data-theme='dark'] .chats-page .message-quote-box {
   background: rgba(255, 255, 255, 0.08);
 }
+/* Outgoing-bubble quote boxes: the plain dark rule loses the specificity tie with the light
+   outgoing rule below, so both dark modes apply the same treatment explicitly. */
+[data-theme='dark'] .chats-page .message-bubble.outgoing .message-quote-box {
+  background: rgba(255, 255, 255, 0.08);
+}
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .chats-page .message-quote-box {

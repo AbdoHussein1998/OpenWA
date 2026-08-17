@@ -523,7 +523,8 @@
       "title": "Nenhum registro encontrado",
       "description": "Os registros de auditoria aparecerão aqui quando ações forem realizadas",
       "filteredTitle": "Nenhuma correspondência nesta página",
-      "filteredDescription": "A busca filtra apenas a página atual. Limpe-a, navegue pelas páginas ou use o filtro de severidade no servidor."
+      "filteredDescription": "A busca filtra apenas a página atual. Limpe-a, navegue pelas páginas ou use o filtro de severidade no servidor.",
+      "filteredServerDescription": "Nenhum log corresponde a estes filtros. Ajuste o filtro de severidade para ampliar a busca."
     }
   },
   "messageTester": {
