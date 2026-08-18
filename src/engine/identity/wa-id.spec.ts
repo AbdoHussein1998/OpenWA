@@ -2,6 +2,7 @@ import {
   chatKind,
   isAddressableParticipant,
   isChannelJid,
+  isIndividualWid,
   parseWaId,
   toNeutralJid,
   toParticipantWid,
@@ -153,5 +154,51 @@ describe('wa-id', () => {
         expect(toParticipantWid(value)).toBe(value);
       },
     );
+  });
+
+  /**
+   * WhatsApp issues Meta-hosted dialects of a phone id and a lid, and Baileys decodes them off the
+   * wire (`WAJIDDomains.HOSTED` = 128, `HOSTED_LID` = 129). They used to parse as `unknown` here, so
+   * an id we had emitted on GET /chats was refused with a 400 when it was handed back to us.
+   *
+   * They fold into `user` and `lid` rather than becoming kinds of their own, because the user-part
+   * names the SAME account: Baileys rewrites `<n>@hosted` to `<n>@s.whatsapp.net` on every inbound
+   * message (`cleanMessage`). A separate kind would split one person's history in two.
+   */
+  describe('Meta-hosted dialects', () => {
+    it('folds each hosted dialect into the entity it names', () => {
+      expect(parseWaId('628111@hosted')).toMatchObject({ kind: 'user', userPart: '628111' });
+      expect(parseWaId('4707@hosted.lid')).toMatchObject({ kind: 'lid', userPart: '4707' });
+      expect(parseWaId('628111:3@hosted')).toMatchObject({ kind: 'user', userPart: '628111', device: '3' });
+      expect(parseWaId('ABC@HOSTED.LID')).toMatchObject({ kind: 'lid', userPart: 'abc' });
+    });
+
+    it('does not confuse @hosted.lid with @hosted: the domain is the whole suffix', () => {
+      // Same user-part, different entity: one is a phone number, the other a privacy id.
+      expect(parseWaId('4707@hosted.lid').kind).toBe('lid');
+      expect(parseWaId('4707@hosted').kind).toBe('user');
+    });
+
+    it('accepts them as individuals, which is what the guards refused before', () => {
+      expect(isIndividualWid('628123456789@hosted')).toBe(true);
+      expect(isIndividualWid('12345678901234567890@hosted.lid')).toBe(true);
+      expect(isAddressableParticipant('628123456789@hosted')).toBe(true);
+      // The user-part still has to look like an id: the domain alone was never enough.
+      expect(isIndividualWid('NOT A USER@hosted')).toBe(false);
+      expect(isIndividualWid('1234@hosted.lid')).toBe(false);
+    });
+
+    it('normalizes to the neutral dialect of the same account, so history stays in one place', () => {
+      expect(toNeutralJid('628111@hosted')).toBe('628111@c.us');
+      expect(toNeutralJid('628111:3@hosted')).toBe('628111@c.us');
+      // An unresolved hosted lid keeps the lid dialect, exactly like a plain @lid.
+      expect(toNeutralJid('4707@hosted.lid')).toBe('4707@lid');
+      expect(toNeutralJid('4707@hosted.lid', () => '628111')).toBe('628111@c.us');
+    });
+
+    it('surfaces as an individual chat, not unknown', () => {
+      expect(chatKind('628111@hosted')).toBe('individual');
+      expect(chatKind('4707@hosted.lid')).toBe('individual');
+    });
   });
 });

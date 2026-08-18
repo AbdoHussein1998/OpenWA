@@ -134,7 +134,7 @@ Data stored in RAM. Fast but non-persistent — lost on restart. Independent of 
 
 ### JID (Jabber ID)
 
-WhatsApp's id format, inherited from XMPP; the user-facing "Chat ID" is a JID. The same entity can be addressed in more than one dialect: `<phone>@c.us` (whatsapp-web.js, and OpenWA's neutral form), `<phone>@s.whatsapp.net` (Baileys' raw form for the same user), `<id>@g.us` (a group), or `<lid>@lid` (a LID, a privacy id). OpenWA normalizes engine ids to a single neutral dialect at the engine boundary - see _System Architecture > WhatsApp Identity Contract_.
+WhatsApp's id format, inherited from XMPP; the user-facing "Chat ID" is a JID. The same entity can be addressed in more than one dialect: `<phone>@c.us` (whatsapp-web.js, and OpenWA's neutral form), `<phone>@s.whatsapp.net` (Baileys' raw form for the same user), `<id>@g.us` (a group), or `<lid>@lid` (a LID, a privacy id). WhatsApp also issues Meta-hosted dialects of the first and last of these (`@hosted`, `@hosted.lid`); they name the same account and normalize to the same neutral form. OpenWA normalizes engine ids to a single neutral dialect at the engine boundary - see _System Architecture > WhatsApp Identity Contract_.
 
 ### Job Queue
 

@@ -180,7 +180,9 @@ chat `id`) is reduced to one small **neutral dialect**:
 
 Never `@s.whatsapp.net`, never a `:device` suffix. **Resolution rule:** prefer `@c.us` (resolve a lid
 to its phone when the mapping is known), and fall back to `@lid` only when it can't be resolved - an
-unresolved lid is never faked into a phone number.
+unresolved lid is never faked into a phone number. WhatsApp's Meta-hosted dialects fold in here
+too: `<n>@hosted` is the same account as `<n>@c.us` and normalizes to it, and `<lid>@hosted.lid`
+normalizes like any other lid. Baileys makes the same fold itself on every inbound message.
 
 The shared implementation lives in `src/engine/identity/wa-id.ts` (`parseWaId` / `toNeutralJid`); the
 contract is documented on the `IWhatsAppEngine` interface.

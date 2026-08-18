@@ -25,8 +25,30 @@
 
 export type WaIdKind = 'user' | 'group' | 'lid' | 'status' | 'newsletter' | 'broadcast' | 'unknown';
 
-/** Domains that denote a phone-addressed user (the two are the same entity, different dialects). */
-const USER_DOMAINS = new Set(['c.us', 's.whatsapp.net']);
+/**
+ * Domain to kind. `c.us` and `s.whatsapp.net` are one entity in two dialects.
+ *
+ * `hosted` and `hosted.lid` are two more dialects of the same two entities, not entities of their
+ * own: they are the Meta-hosted forms WhatsApp issues and Baileys decodes off the wire
+ * (`WAJIDDomains.HOSTED` = 128, `HOSTED_LID` = 129). The user-part is the SAME account either way,
+ * which the library states by folding them itself on every inbound message (`cleanMessage`:
+ * `<n>@hosted` becomes `<n>@s.whatsapp.net`, `<lid>@hosted.lid` becomes `<lid>@lid`) and by treating
+ * `isHostedPnUser` as `isPnUser` throughout its history handling.
+ *
+ * So they fold here too. A separate kind would split one person's history in two: rows arrive under
+ * the plain dialect (Baileys already rewrote them) while a caller filtering by the hosted id we
+ * published would match none of them.
+ */
+const DOMAIN_KINDS = new Map<string, WaIdKind>([
+  ['c.us', 'user'],
+  ['s.whatsapp.net', 'user'],
+  ['lid', 'lid'],
+  ['hosted', 'user'],
+  ['hosted.lid', 'lid'],
+  ['g.us', 'group'],
+  ['newsletter', 'newsletter'],
+  ['broadcast', 'broadcast'],
+]);
 
 export interface ParsedWaId {
   kind: WaIdKind;
@@ -56,17 +78,7 @@ export function parseWaId(jid: string): ParsedWaId {
   }
   const domain = lower.slice(at + 1);
   const [local, device] = lower.slice(0, at).split(':');
-  const kind: WaIdKind = USER_DOMAINS.has(domain)
-    ? 'user'
-    : domain === 'g.us'
-      ? 'group'
-      : domain === 'lid'
-        ? 'lid'
-        : domain === 'newsletter'
-          ? 'newsletter'
-          : domain === 'broadcast'
-            ? 'broadcast'
-            : 'unknown';
+  const kind: WaIdKind = DOMAIN_KINDS.get(domain) ?? 'unknown';
   return { kind, userPart: local, device, raw };
 }
 
@@ -78,7 +90,7 @@ const NUMERIC_ID = /^\d{5,}$/;
 
 /**
  * Whether a string names an individual in a qualified dialect: `<phone>@c.us` (and its raw-protocol
- * twin `@s.whatsapp.net`) or `<lid>@lid`. A `:<device>` suffix is fine — {@link parseWaId} strips it.
+ * twin `@s.whatsapp.net`), `<lid>@lid`, or the Meta-hosted dialect of either. A `:<device>` suffix is fine — {@link parseWaId} strips it.
  *
  * **The domain alone is not enough.** `parseWaId` classifies anything ending in `@c.us` as a user, so
  * a check that stops at the kind accepts `NOT A USER@c.us` and `@c.us`. Those still reach WhatsApp

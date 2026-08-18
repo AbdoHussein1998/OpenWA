@@ -3,7 +3,7 @@ import { EngineRegistry } from '../../engine/engine-registry.service';
 import { createLogger } from '../../common/services/logger.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { paginate, ListOptions } from '../../common/utils/paginate';
-import { isIndividualWid, parseWaId } from '../../engine/identity/wa-id';
+import { isIndividualWid, parseWaId, toNeutralJid } from '../../engine/identity/wa-id';
 
 /**
  * Owns engine access for contact operations so the "session not started" guard and
@@ -200,7 +200,12 @@ export class ContactService {
    * qualification is a no-op there.
    */
   private toAddressableId(contactId: string): string {
-    return this.isBareNumber(contactId) ? `${contactId.trim()}@c.us` : contactId;
+    const trimmed = contactId.trim();
+    // Neutralized rather than passed through: a Meta-hosted id names the same account as its plain
+    // twin but whatsapp-web.js knows no such domain, so forwarding the suffix verbatim would fail
+    // inside the page instead of acting on the person. toNeutralJid is idempotent on ids already in
+    // the neutral dialect, and the Baileys adapter re-encodes to its own dialect on the way out.
+    return this.isBareNumber(trimmed) ? `${trimmed}@c.us` : toNeutralJid(trimmed);
   }
 
   upsertContact(sessionId: string, contactId: string, firstName: string, lastName?: string) {
