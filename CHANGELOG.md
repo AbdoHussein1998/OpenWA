@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The SQLite database files are tightened to owner-only (`0600`, plus `-wal`/`-shm`/`-journal`) on every boot; they hold plaintext webhook/plugin secrets and were group/world-readable while sibling secret files were `0600`.
 - `PUT /sessions/{sessionId}/webhooks/{id}` now enforces the same 16-character webhook-secret floor as create; an empty string still clears signing.
+- The ingress route enforces a second rate-limit window keyed on the client IP (`INGRESS_IP_LIMIT`, default 1200 per window). Its per-instance window is keyed on the caller-supplied `:pluginId/:instanceId`, so varying those segments minted a fresh bucket per request and left this unauthenticated route with no effective bound.
 
 ## [0.20.0] - 2026-08-16
 
