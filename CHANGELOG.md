@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- block and unblock accept a privacy id (`@lid`), the only id a contact without a known phone number has. The blocklist read answers those ids verbatim, so refusing them on the write left such a contact listed as blocked with no way to unblock it; ids that name no individual (group, newsletter, broadcast, free text) are still refused with `400`.
+- whatsapp-web.js `deleteChannel` classifies a dead browser page as the documented `503` plus an early death signal, like every other channel call; it reached the client directly, so a crash there answered an opaque `500` while the session still reported READY.
+- Baileys block/unblock answer `400` when WhatsApp cannot map the id between the phone-number and privacy-id dialects (no mapping either way, or an id that is neither). The library refuses those with a Boom the gateway could not classify, so a well-formed request got an opaque `500`; whatsapp-web.js already answered `400` for the same cause.
+- docs/06 states that editing another account's message answers `403`, not `500`. Both engines raise the refusal as `EngineRefusedError`, and the published contract already declared `403` with no `500` on that route.
+- The migration drift gate compares the chain-vs-entity diff against a pinned snapshot of the full statement text instead of classifying statements by shape. On SQLite a new column is applied as a table rebuild and a new index as a bare `CREATE INDEX`, the same shapes the known column-type drift produces, so the shape filters passed both: an entity change shipped without a migration stayed green and only surfaced as a `no such column` 500 on a synchronize-disabled deployment.
 - The plugin config editor derives a per-field id: a hardcoded one collided on any schema with two boolean fields, so the second field's label toggled the first field's checkbox. Six more multi-line labels in MessageTester are associated with their controls.
 - Dashboard accessibility: 55 form labels are associated with their controls (`htmlFor`/`id`, no duplicates or orphans), the muted-text token meets AA on both themes (4.76:1 light, 5.71:1 dark), and the primary button uses dark text on the green (9.0:1, from 1.98:1).
 - The chain-boot e2e sets `MAIN_DATABASE_SYNCHRONIZE=false` explicitly: the variable's absence defaults to synchronize=true, so the main connection's migration chain was never actually exercised. The shared delivery recorder also strips the raw error before the persistence spread, and the coverage ignore-pattern list deduplicates.
@@ -61,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The SQLite database files are tightened to owner-only (`0600`, plus `-wal`/`-shm`/`-journal`) on every boot; they hold plaintext webhook/plugin secrets and were group/world-readable while sibling secret files were `0600`.
 - `PUT /sessions/{sessionId}/webhooks/{id}` now enforces the same 16-character webhook-secret floor as create; an empty string still clears signing.
+- The ingress route enforces a second rate-limit window keyed on the client IP (`INGRESS_IP_LIMIT`, default 1200 per window). Its per-instance window is keyed on the caller-supplied `:pluginId/:instanceId`, so varying those segments minted a fresh bucket per request and left this unauthenticated route with no effective bound.
 
 ## [0.20.0] - 2026-08-16
 

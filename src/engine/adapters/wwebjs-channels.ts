@@ -152,7 +152,9 @@ export class WwebjsChannels {
   /** Delete a channel. `false` means the channel was not found or the server refused. */
   async deleteChannel(channelId: string): Promise<void> {
     this.host.ensureReady();
-    const ok = await (this.client() as unknown as BusinessClient).deleteChannel(channelId);
+    const ok = await this.withPage('deleteChannel', () =>
+      (this.client() as unknown as BusinessClient).deleteChannel(channelId),
+    );
     if (!ok) {
       throw new EngineRefusedError(`Failed to delete channel ${channelId}`);
     }

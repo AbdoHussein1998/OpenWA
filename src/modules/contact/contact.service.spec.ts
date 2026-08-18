@@ -114,7 +114,9 @@ describe('ContactService', () => {
     it.each([
       ['blockContact', (svc: ContactService) => svc.blockContact('s1', '120363000000000000@g.us')],
       ['unblockContact', (svc: ContactService) => svc.unblockContact('s1', '120363000000000000@g.us')],
-      ['blockContact (lid)', (svc: ContactService) => svc.blockContact('s1', '159442138038327@lid')],
+      ['blockContact (newsletter)', (svc: ContactService) => svc.blockContact('s1', '1200000000@newsletter')],
+      ['blockContact (broadcast)', (svc: ContactService) => svc.blockContact('s1', '1200000000@broadcast')],
+      ['blockContact (status)', (svc: ContactService) => svc.blockContact('s1', 'status@broadcast')],
       ['blockContact (free text)', (svc: ContactService) => svc.blockContact('s1', 'hello@c.us')],
     ])('%s refuses the id with a 400 before the engine is called', (_name, call) => {
       const blockContact = jest.fn();
@@ -123,6 +125,38 @@ describe('ContactService', () => {
       expect(() => call(svc)).toThrow(BadRequestException);
       expect(blockContact).not.toHaveBeenCalled();
       expect(unblockContact).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A privacy-id contact has no phone number at all, and the blocklist READ answers those ids
+     * verbatim (Baileys maps each blocked jid through toNeutralJid, which leaves an unresolved lid
+     * as `<lid>@lid`; whatsapp-web.js returns the wid as-is). Refusing them here made the ids the
+     * API itself hands out unusable for the matching write, so a privacy-id contact could be listed
+     * as blocked and never unblocked. Blocking acts on the identity, not on an addressbook row, so
+     * neither engine needs a phone here: Baileys passes the jid straight to updateBlockStatus, and
+     * whatsapp-web.js only short-circuits (`return false`) for a group.
+     */
+    it.each([
+      ['blockContact', (svc: ContactService) => svc.blockContact('s1', '159442138038327@lid')],
+      ['unblockContact', (svc: ContactService) => svc.unblockContact('s1', '159442138038327@lid')],
+    ])('%s forwards a privacy id (@lid) to the engine unchanged', async (_name, call) => {
+      const blockContact = jest.fn().mockResolvedValue(undefined);
+      const unblockContact = jest.fn().mockResolvedValue(undefined);
+      await call(makeService({ blockContact, unblockContact }));
+      const called = blockContact.mock.calls.length ? blockContact : unblockContact;
+      expect(called).toHaveBeenCalledWith('159442138038327@lid');
+    });
+
+    it('accepts every id shape the blocklist read can return', async () => {
+      // The read half answers ids only, so whatever it lists must be feedable back to unblock.
+      const getBlockedContacts = jest.fn().mockResolvedValue(['628123@c.us', '159442138038327@lid']);
+      const unblockContact = jest.fn().mockResolvedValue(undefined);
+      const svc = makeService({ getBlockedContacts, unblockContact });
+      for (const id of await svc.getBlockedContacts('s1')) {
+        await svc.unblockContact('s1', id);
+      }
+      expect(unblockContact).toHaveBeenCalledWith('628123@c.us');
+      expect(unblockContact).toHaveBeenCalledWith('159442138038327@lid');
     });
 
     it('qualifies a bare number and forwards it to the engine as a @c.us id', async () => {
