@@ -2,8 +2,8 @@ apiVersion: v2
 name: openwa
 description: OpenWA — WhatsApp API. Single-instance StatefulSet (see values.yaml replicaCount warning).
 type: application
-version: 0.1.14
-appVersion: '0.20.0'
+version: 0.1.15
+appVersion: '0.21.0'
 keywords:
   - whatsapp
   - openwa
