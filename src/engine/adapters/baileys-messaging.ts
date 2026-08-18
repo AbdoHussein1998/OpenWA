@@ -500,7 +500,13 @@ export class BaileysMessaging {
     // The destination is resolved like any other send: a lid-migrated contact rejects PN-addressed
     // sends with ack error 463 (see toDeliverableJid).
     const jid = await this.toDeliverableJid(chatId);
-    const sent = await this.sock().sendMessage(jid, { text: body, edit: target.key });
+    // Same guard as sendContent: an edit carries text, so without it the library would fetch
+    // every URL in the new body through its own vulnerable generator.
+    const sent = await this.sock().sendMessage(
+      jid,
+      this.previewSafe({ text: body, edit: target.key }),
+      this.previewSafeOptions({ text: body, edit: target.key }),
+    );
     return { id: sent?.key?.id ?? messageId, timestamp: this.host.toUnixSeconds(sent?.messageTimestamp) };
   }
 
@@ -559,16 +565,42 @@ export class BaileysMessaging {
   }
 
   /** Send a Baileys content object and shape the result like the other sends. */
+  /**
+   * Keep the library's own preview generator unreachable, and keep it from firing at all.
+   *
+   * `generateWAMessageContent` calls the generator whenever the content carries `text` and no
+   * explicit `linkPreview` (Utils/messages.js), and the default generator delegates to
+   * `link-preview-js`, which carries an unfixed SSRF advisory. sendTextMessage guards both halves
+   * itself; every OTHER text-bearing send goes through here, and used to guard neither, so a reply
+   * or an edit containing a URL made the gateway fetch it through the vulnerable path.
+   *
+   * `linkPreview: null` is Baileys' explicit "no preview", which matches the documented engine
+   * default. A caller that set one already keeps it.
+   */
+  private previewSafe(content: AnyMessageContent): AnyMessageContent {
+    if (!('text' in content) || 'linkPreview' in content) return content;
+    return { ...content, linkPreview: null };
+  }
+
+  /**
+   * Options carrying the vetted generator, so the library's own is never selected. Added only for
+   * text-bearing content: media sends never reach the generator, and leaving their options untouched
+   * keeps the two-argument sendMessage call they already make.
+   */
+  private previewSafeOptions(content: AnyMessageContent, options?: MiscMessageGenerationOptions) {
+    if (!('text' in content)) return options;
+    return { ...(options ?? {}), getUrlInfo: (text: string) => generateSafeLinkPreview(text) };
+  }
+
   private async sendContent(
     chatId: string,
     content: AnyMessageContent,
     options?: MiscMessageGenerationOptions,
   ): Promise<MessageResult> {
     const jid = await this.toDeliverableJid(chatId);
-    const merged = this.withEphemeral(jid, options);
-    const sent = merged
-      ? await this.sock().sendMessage(jid, content, merged)
-      : await this.sock().sendMessage(jid, content);
+    const safe = this.previewSafe(content);
+    const merged = this.previewSafeOptions(safe, this.withEphemeral(jid, options));
+    const sent = merged ? await this.sock().sendMessage(jid, safe, merged) : await this.sock().sendMessage(jid, safe);
     if (sent) {
       void this.host.putStoredMessage(sent)?.catch(err =>
         this.host.logger.warn('Failed to persist sent message to store', {

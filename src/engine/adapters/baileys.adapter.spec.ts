@@ -2588,8 +2588,8 @@ describe('BaileysAdapter store-backed ops', () => {
     expect(fakeStore.getMessage).toHaveBeenCalledWith('db-uuid-1', 'TARGET');
     expect(fakeSock.sendMessage).toHaveBeenCalledWith(
       '628111@s.whatsapp.net',
-      { text: 'my reply' },
-      { quoted: stored },
+      { text: 'my reply', linkPreview: null },
+      expect.objectContaining({ quoted: stored }),
     );
   });
 
@@ -2723,8 +2723,8 @@ describe('BaileysAdapter store-backed ops', () => {
     await adapter.replyToMessage('628111@s.whatsapp.net', 'TARGET', 'my reply');
     expect(fakeSock.sendMessage).toHaveBeenCalledWith(
       '628111@s.whatsapp.net',
-      { text: 'my reply' },
-      { quoted: stored, ephemeralExpiration: 604800 },
+      { text: 'my reply', linkPreview: null },
+      expect.objectContaining({ quoted: stored, ephemeralExpiration: 604800 }),
     );
   });
 
@@ -2762,10 +2762,15 @@ describe('BaileysAdapter store-backed ops', () => {
     fakeSock.sendMessage.mockResolvedValue({ key: { ...ownStored.key }, messageTimestamp: 1700000010 });
     const adapter = await ready();
     const res = await adapter.editMessage('628111@s.whatsapp.net', 'TARGET', 'edited body');
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
-      text: 'edited body',
-      edit: ownStored.key,
-    });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '628111@s.whatsapp.net',
+      {
+        text: 'edited body',
+        edit: ownStored.key,
+        linkPreview: null,
+      },
+      expect.objectContaining({ getUrlInfo: expect.any(Function) as unknown }) as unknown,
+    );
     expect(res).toEqual({ id: 'TARGET', timestamp: 1700000010 });
   });
 
@@ -2812,7 +2817,15 @@ describe('BaileysAdapter store-backed ops', () => {
     fakeSock.sendMessage.mockResolvedValue(undefined);
     const adapter = await ready();
     await expect(adapter.editMessage('628111@c.us', 'TARGET', 'x')).resolves.toBeDefined();
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@c.us', { text: 'x', edit: ownStored.key });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '628111@c.us',
+      {
+        text: 'x',
+        edit: ownStored.key,
+        linkPreview: null,
+      },
+      expect.objectContaining({ getUrlInfo: expect.any(Function) as unknown }) as unknown,
+    );
   });
 
   it('editMessage sends to the LID-resolved deliverable jid (463 tctoken fix, same as the send path)', async () => {
@@ -2822,7 +2835,15 @@ describe('BaileysAdapter store-backed ops', () => {
     const adapter = await ready();
     await adapter.editMessage('628111@c.us', 'TARGET', 'edited body');
     expect(fakeSock.signalRepository.lidMapping.getLIDForPN).toHaveBeenCalledWith('628111@s.whatsapp.net');
-    expect(fakeSock.sendMessage).toHaveBeenCalledWith('484848@lid', { text: 'edited body', edit: ownStored.key });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '484848@lid',
+      {
+        text: 'edited body',
+        edit: ownStored.key,
+        linkPreview: null,
+      },
+      expect.objectContaining({ getUrlInfo: expect.any(Function) as unknown }) as unknown,
+    );
   });
 
   it('addLabelToChat wires 1:1 to sock.addChatLabel(chatId, labelId)', async () => {
