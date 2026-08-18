@@ -1,4 +1,6 @@
 import * as path from 'path';
+import { ChatLabelsUnsupportedError } from '../../common/errors/chat-labels-unsupported.error';
+import { isChannelJid } from '../identity/wa-id';
 import type * as BaileysLib from '@whiskeysockets/baileys';
 import type { WASocket } from '@whiskeysockets/baileys';
 import { BaileysChannels } from './baileys-channels';
@@ -580,8 +582,20 @@ export class BaileysAdapter implements IWhatsAppEngine {
   // Fold @c.us -> @s.whatsapp.net first: chatModify (which both calls wrap) keys the label
   // app-state index by the RAW jid, so a neutral @c.us would label a phantom chat the phone never
   // reads — reported as success. Same class of no-op the deleteForMe/star folds fixed.
+  /**
+   * Labels are a Business-account chat feature and WhatsApp has no concept of labelling a channel.
+   * whatsapp-web.js refuses a channel jid outright; this engine forwarded it and answered success
+   * while nothing was labelled, so the same request reported two different outcomes per engine.
+   */
+  private assertLabelable(chatId: string): void {
+    if (isChannelJid(chatId)) {
+      throw new ChatLabelsUnsupportedError('Channels do not support chat labels.');
+    }
+  }
+
   async addLabelToChat(chatId: string, labelId: string): Promise<void> {
     this.ensureReady();
+    this.assertLabelable(chatId);
     await withQueryDeadline(
       this.sock!.addChatLabel(this.sessionStore.toEngineJid(chatId), labelId),
       BAILEYS_QUERY_BUDGET_MS,
@@ -590,6 +604,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
   }
   async removeLabelFromChat(chatId: string, labelId: string): Promise<void> {
     this.ensureReady();
+    this.assertLabelable(chatId);
     await withQueryDeadline(
       this.sock!.removeChatLabel(this.sessionStore.toEngineJid(chatId), labelId),
       BAILEYS_QUERY_BUDGET_MS,

@@ -78,7 +78,9 @@ export class BaileysChannels {
     if (!meta) {
       throw new ChannelNotFoundError(inviteCode);
     }
-    await this.bounded(this.sock().newsletterFollow(meta.id), 'the channel subscribe');
+    await mapServerRefusal('Subscribing to the channel', () =>
+      this.bounded(this.sock().newsletterFollow(meta.id), 'the channel subscribe'),
+    );
     return this.toChannel(meta);
   }
 
@@ -159,7 +161,11 @@ export class BaileysChannels {
 
   async unsubscribeFromChannel(channelId: string): Promise<void> {
     this.host.ensureReady();
-    await this.bounded(this.sock().newsletterUnfollow(channelId), 'the channel unsubscribe');
+    // The other channel writes map WhatsApp's refusal; this one did not, so unfollowing a channel
+    // the account no longer follows answered 500 where whatsapp-web.js answers the documented 403.
+    await mapServerRefusal('Unsubscribing from the channel', () =>
+      this.bounded(this.sock().newsletterUnfollow(channelId), 'the channel unsubscribe'),
+    );
   }
 
   /** Map a Baileys NewsletterMetadata to the neutral Channel shape (optionals only when present). */

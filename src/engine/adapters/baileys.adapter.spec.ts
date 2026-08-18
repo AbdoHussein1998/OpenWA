@@ -142,6 +142,7 @@ import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.error';
 import { GroupNotFoundError } from '../../common/errors/group-not-found.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
+import { ChatLabelsUnsupportedError } from '../../common/errors/chat-labels-unsupported.error';
 import { Boom } from '@hapi/boom';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
@@ -3257,12 +3258,39 @@ describe('BaileysAdapter group management', () => {
     // non-admin with an error node, which reached the caller as a bare 500.
     ['getGroupInviteCode', (a: BaileysAdapter) => a.getGroupInviteCode('123-456@g.us'), 'groupInviteCode'],
     ['revokeGroupInviteCode', (a: BaileysAdapter) => a.revokeGroupInviteCode('123-456@g.us'), 'groupRevokeInvite'],
+    // Was the one group write with no refusal mapping: an unknown or already-left group answered
+    // an opaque 500 while whatsapp-web.js resolves the chat first and answers 404.
+    ['leaveGroup', (a: BaileysAdapter) => a.leaveGroup('123-456@g.us'), 'groupLeave'],
   ])('%s maps an admin-refused operation to EngineRefusedError (403)', async (_name, call, sockMethod) => {
     (fakeSock as unknown as Record<string, jest.Mock>)[sockMethod].mockRejectedValueOnce(
       Object.assign(new Error('not-authorized'), { data: 401 }),
     );
     const adapter = await ready();
     await expect(call(adapter)).rejects.toBeInstanceOf(EngineRefusedError);
+  });
+
+  // The channel writes map WhatsApp's refusal; these two did not, so unfollowing a channel the
+  // account no longer follows answered 500 where whatsapp-web.js answers the documented 403.
+  it.each([
+    ['unsubscribeFromChannel', (a: BaileysAdapter) => a.unsubscribeFromChannel('120@newsletter'), 'newsletterUnfollow'],
+  ])('%s maps a refused channel write to EngineRefusedError (403)', async (_name, call, sockMethod) => {
+    (fakeSock as unknown as Record<string, jest.Mock>)[sockMethod].mockRejectedValueOnce(
+      Object.assign(new Error('not-authorized'), { data: 401 }),
+    );
+    const adapter = await ready();
+    await expect(call(adapter)).rejects.toBeInstanceOf(EngineRefusedError);
+  });
+
+  // Labels are a Business chat feature with no channel equivalent: whatsapp-web.js refuses the jid,
+  // this engine forwarded it and reported success while nothing was labelled.
+  it.each([
+    ['addLabelToChat', (a: BaileysAdapter) => a.addLabelToChat('120@newsletter', 'L1')],
+    ['removeLabelFromChat', (a: BaileysAdapter) => a.removeLabelFromChat('120@newsletter', 'L1')],
+  ])('%s refuses a channel jid instead of reporting success', async (_name, call) => {
+    const adapter = await ready();
+    await expect(call(adapter)).rejects.toBeInstanceOf(ChatLabelsUnsupportedError);
+    expect(fakeSock.addChatLabel).not.toHaveBeenCalled();
+    expect(fakeSock.removeChatLabel).not.toHaveBeenCalled();
   });
 
   it('a transport death on a group write propagates untouched — not folded into a 403', async () => {
