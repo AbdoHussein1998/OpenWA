@@ -420,3 +420,34 @@ describe('DockerService managed specs ↔ docker-compose.yml parity', () => {
     });
   });
 });
+
+/**
+ * The image's pg_dump/psql must never be OLDER than the Postgres it talks to: pg_dump refuses a
+ * newer server outright ("aborting because of server version mismatch"), so an in-container
+ * backup of a DATABASE_TYPE=postgres deployment fails on version alone. The server major is
+ * declared once for the compose stack and again for the container the app orchestrates itself,
+ * while the client major lives in the Dockerfile, so bumping either server silently breaks backups
+ * until this fails.
+ */
+describe('PostgreSQL client is not older than the servers the stack ships', () => {
+  const root = join(__dirname, '../../..');
+
+  const major = (file: string, pattern: RegExp): number => {
+    const match = readFileSync(join(root, file), 'utf8').match(pattern);
+    if (!match) throw new Error(`could not read a Postgres major version from ${file} via ${String(pattern)}`);
+    return Number(match[1]);
+  };
+
+  it('the Dockerfile client covers both the compose server and the managed-container server', () => {
+    const client = major('Dockerfile', /postgresql-client-(\d+)/);
+    const composeServer = major('docker-compose.yml', /image:\s*postgres:(\d+)/);
+    const managedServer = major('src/modules/docker/docker.service.ts', /image: 'postgres:(\d+)/);
+
+    // Reported together so a failure names every version at once rather than the first mismatch.
+    expect({
+      client,
+      composeServerCovered: composeServer <= client,
+      managedServerCovered: managedServer <= client,
+    }).toEqual({ client, composeServerCovered: true, managedServerCovered: true });
+  });
+});

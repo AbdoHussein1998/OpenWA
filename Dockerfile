@@ -78,7 +78,11 @@ ENV NODE_ENV=production
 # with --no-install-recommends the package is dropped, and chromium launches fine under --no-sandbox.
 ARG TARGETARCH
 # sqlite3 ships the CLI so an in-container scripts/backup.sh run takes online-consistent SQLite
-# snapshots (.backup) instead of plain-copying a live database (which can archive a torn file).
+# snapshots (.backup) instead of plain-copying a live database (which can archive a torn file). The
+# DATABASE_TYPE=postgres half of the same script needs pg_dump, installed further down.
+#
+# ca-certificates is required to fetch the PGDG signing key over HTTPS below: the base image has no
+# CA bundle, and curl alone does not pull one in under --no-install-recommends (curl: (77)).
 #
 # ffmpeg backs the opt-in media-conversion endpoints, and also repairs an existing gap: whatsapp-web.js
 # requires fluent-ffmpeg at module load and calls it for video-to-webp animated stickers, so
@@ -110,8 +114,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     patch \
     curl \
     procps \
+    ca-certificates \
     sqlite3 \
     ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# The PostgreSQL client for the DATABASE_TYPE=postgres half of backup.sh/restore.sh, which the
+# runbook drives in-container. Debian bookworm ships client 15 and pg_dump refuses a newer server
+# outright ("aborting because of server version mismatch", reproduced against the postgres:16 the
+# bundled compose file runs), so the distro package would install a pg_dump that cannot dump our own
+# stack, and psql would be missing for restore. PGDG is PostgreSQL's own apt repository and carries
+# current majors for both architectures we build; measured cost ~59 MB.
+#
+# Deliberately NEWER than the postgres:16 the compose file ships. The rule is one-directional (a
+# client may be newer than its server, never older), and DATABASE_HOST often points at a managed
+# Postgres the compose file does not control, where 17 is the current default. Pinning to 16 would
+# have left every such deployment unable to back up. Verified against live 16 and 17 servers.
+RUN install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Puppeteer to skip automatic download during npm install (we download it explicitly below)
