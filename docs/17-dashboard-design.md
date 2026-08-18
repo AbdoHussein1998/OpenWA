@@ -45,10 +45,17 @@ backed by `localStorage` — there is no Zustand store.
 2. **Responsive** - Works on desktop and mobile
 3. **Real-time** - Live updates via WebSocket
 4. **Accessible** - built to WCAG 2.1 AA as the target. Shipped: full keyboard reachability of
-   the chat/channel/status lists (role, focus, Enter/Space activation) and focus-visible styling.
-   Known gaps being worked down: most form labels are not yet associated with their controls via
-   `htmlFor`/`id`, and a handful of muted/primary color pairs still measure below the AA contrast
-   ratio; both are tracked for remediation. Treat the claim as directional, not certified.
+   the chat/channel/status lists (role, focus, Enter/Space activation), focus-visible styling, the
+   form labels in the settings and config surfaces associated with their controls via `htmlFor`/`id`,
+   toggle switches and button groups that expose an accessible name and their selected state, and a
+   muted-text token that meets AA on both themes. `dashboard/src/a11y-controls.test.ts` fails the
+   build when a toggle switch, a button toggle-group or a plugin config field loses its name; other
+   control shapes are not covered by it.
+   Known gaps, all measured rather than assumed: `--primary` as a foreground on a light background is
+   1.98:1 and fails AA wherever it is used as text (the active sidebar item, several badges); a
+   handful of native selects and search inputs still carry no accessible name; and the exclusive
+   button groups report `aria-pressed` without arrow-key roving focus. Four pages have a render
+   harness, so the rest are checked structurally. Treat the claim as directional, not certified.
 5. **Dark mode** - Support for light/dark themes
 
 ## 17.2 Information Architecture

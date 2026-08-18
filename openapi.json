@@ -3681,6 +3681,9 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A template with that name already exists for the session"
           }
         },
         "summary": "Create a message template for the session",
@@ -3810,6 +3813,9 @@
           },
           "404": {
             "description": "Template not found"
+          },
+          "409": {
+            "description": "A template with that name already exists for the session"
           }
         },
         "summary": "Update a template",
@@ -9100,6 +9106,9 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "An instance with that id already exists for the plugin"
           }
         },
         "tags": [

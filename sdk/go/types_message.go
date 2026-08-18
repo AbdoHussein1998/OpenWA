@@ -63,6 +63,9 @@ type SendAudioRequest struct {
 	// whatsapp-web.js matches the serialized message id, Baileys the raw key id of a message it has
 	// already stored. Omitted when empty, so an ordinary send carries no quote key.
 	QuotedMessageID string `json:"quotedMessageId,omitempty"`
+	// WIDs to @mention; the caption must also contain the @<number> token. Kept here as well as on
+	// SendMediaRequest because this struct is flattened rather than embedding it.
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // SendLocationRequest sends a location pin. ChatID/Latitude/Longitude required.
