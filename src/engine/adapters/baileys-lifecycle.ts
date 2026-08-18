@@ -537,8 +537,8 @@ export class BaileysLifecycle {
         return; // stopped while waiting — abort
       }
       void this.connect().catch(err => {
-        // A failed attempt (e.g. fetchLatestBaileysVersion offline mid-outage) is NOT terminal —
-        // the outage may outlast any fixed attempt budget, so schedule the following attempt.
+        // A failed attempt is NOT terminal: the outage may outlast any fixed attempt budget, so
+        // schedule the following attempt.
         this.host.logger.warn('Baileys reconnect attempt failed; will retry', {
           attempt: this.reconnectAttempts,
           error: err instanceof Error ? err.message : String(err),
