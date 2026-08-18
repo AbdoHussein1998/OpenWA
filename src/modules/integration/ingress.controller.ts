@@ -25,15 +25,17 @@ export class IngressController {
   // Express 5 (path-to-regexp v8) has no bare `*` — Nest's route converter rewrites it to the named
   // wildcard `*path`, so the trailing segments land in req.params.path (an array), not req.params[0].
   //
-  // InstanceThrottlerGuard is the route's ONLY rate bound: the global per-IP guard skips this
+  // InstanceThrottlerGuard carries this route's rate bounds: the global per-IP guard skips this
   // controller (@SkipThrottle above) because its medium tier (100/min) sits below this guard's
   // per-instance default (120/min), which 429'd every tenant of a shared-egress-IP provider at
   // the IP tier before the instance bound ever fired. This guard ignores the bare @SkipThrottle
-  // (see its shouldSkip) and keys on (pluginId, instanceId), so a noisy tenant sheds alone.
-  // Its limit/ttl (INGRESS_INSTANCE_LIMIT / INGRESS_INSTANCE_TTL) are read directly by the guard
-  // itself, NOT via @Throttle: @Throttle metadata is reflected on the route and read by every
-  // ThrottlerGuard subclass that walks a tier of that name. See InstanceThrottlerGuard's
-  // onModuleInit for how it keeps its tier fully independent.
+  // (see its shouldSkip) and enforces TWO buckets: one keyed on (pluginId, instanceId), so a noisy
+  // tenant sheds alone, and one keyed on the client IP, because the first key comes from the path
+  // the caller supplies and would otherwise leave this @Public route with no bound it cannot walk
+  // around. Their limits/ttl (INGRESS_INSTANCE_LIMIT / INGRESS_INSTANCE_TTL / INGRESS_IP_LIMIT) are
+  // read directly by the guard itself, NOT via @Throttle: @Throttle metadata is reflected on the
+  // route and read by every ThrottlerGuard subclass that walks a tier of that name. See
+  // InstanceThrottlerGuard's onModuleInit for how it keeps its tiers fully independent.
   @UseGuards(InstanceThrottlerGuard)
   @All(':pluginId/:instanceId/*path')
   // The wildcard segment is part of the published path template, so it needs a parameter of its own —
@@ -57,7 +59,11 @@ export class IngressController {
   @ApiResponse({ status: 403, description: 'GET verification challenge failed (verifyToken mismatch).' })
   @ApiResponse({ status: 404, description: 'Unknown pluginId/instanceId, or no route claimed by the plugin.' })
   @ApiResponse({ status: 413, description: 'Request body exceeds the route maxBodyBytes limit.' })
-  @ApiResponse({ status: 429, description: 'Per-instance rate limit exceeded (INGRESS_INSTANCE_LIMIT).' })
+  @ApiResponse({
+    status: 429,
+    description:
+      'Rate limit exceeded: the per-instance bucket (INGRESS_INSTANCE_LIMIT) or the per-client-IP bucket (INGRESS_IP_LIMIT). The `Retry-After-instance` / `Retry-After-ingress-ip` header names which one shed the request.',
+  })
   async receive(
     @Param('pluginId') pluginId: string,
     @Param('instanceId') instanceId: string,

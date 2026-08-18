@@ -6068,6 +6068,11 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
       ['postTextStatus', (a: WhatsAppWebJsAdapter) => a.postTextStatus('hello', {})],
       ['deleteStatus', (a: WhatsAppWebJsAdapter) => a.deleteStatus('status@broadcast')],
       ['getSubscribedChannels', (a: WhatsAppWebJsAdapter) => a.getSubscribedChannels()],
+      // The channel WRITES take the same path: deleteChannel reached the client directly, so a dead
+      // page there surfaced as an opaque 500 under a session still reporting READY, while the route
+      // documents 503. unsubscribeFromChannel is its structural twin and was already wrapped.
+      ['deleteChannel', (a: WhatsAppWebJsAdapter) => a.deleteChannel('1200@newsletter')],
+      ['unsubscribeFromChannel', (a: WhatsAppWebJsAdapter) => a.unsubscribeFromChannel('1200@newsletter')],
     ])('%s answers EngineTransportError (503) on a dead page', async (_name, call) => {
       const adapter = readyAdapter({
         setDisplayName: jest.fn().mockRejectedValue(transportError()),
@@ -6078,6 +6083,8 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
         sendMessage: jest.fn().mockRejectedValue(transportError()),
         revokeStatusMessage: jest.fn().mockRejectedValue(transportError()),
         getChannels: jest.fn().mockRejectedValue(transportError()),
+        deleteChannel: jest.fn().mockRejectedValue(transportError()),
+        unsubscribeFromChannel: jest.fn().mockRejectedValue(transportError()),
       });
       await expect(call(adapter)).rejects.toBeInstanceOf(EngineTransportError);
     });
