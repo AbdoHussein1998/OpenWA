@@ -30,6 +30,38 @@ describe('SessionStatusBroadcaster', () => {
     expect(emitSessionStatus).toHaveBeenCalledWith('s1', SessionStatus.READY);
   });
 
+  /**
+   * The order is the point, and the assertions above cannot see it: both would still pass with the
+   * mirror running first, or with the write started but never awaited. A client that reacts to the
+   * `session.status` socket event by re-reading GET /sessions would then race the row and read the
+   * PREVIOUS status. So this records what actually happened, and requires the write to have
+   * SETTLED, not merely to have been called.
+   */
+  it('finishes the write before the mirror runs, not just starts it', async () => {
+    const order: string[] = [];
+    const update = jest.fn().mockImplementation(async () => {
+      order.push('persist:start');
+      await Promise.resolve();
+      order.push('persist:settled');
+      return { affected: 1 };
+    });
+    const emitSessionStatus = jest.fn().mockImplementation(() => order.push('ws'));
+    const dispatch = jest.fn().mockImplementation(() => {
+      order.push('webhook');
+      return Promise.resolve();
+    });
+    const broadcaster = new SessionStatusBroadcaster({
+      sessionRepository: { update } as unknown as Repository<Session>,
+      eventsGateway: { emitSessionStatus } as never,
+      webhookService: { dispatch } as never,
+      logger: console as never,
+    });
+
+    await broadcaster.updateStatus('s1', SessionStatus.READY);
+
+    expect(order).toEqual(['persist:start', 'persist:settled', 'ws', 'webhook']);
+  });
+
   it('mirrors to WS and dispatches the session.status webhook on a transition', async () => {
     const { broadcaster, emitSessionStatus, dispatch } = make();
     await broadcaster.updateStatus('s1', SessionStatus.QR_READY);
