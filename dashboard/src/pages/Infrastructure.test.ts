@@ -269,6 +269,39 @@ test('Infrastructure renders and the config form hydrates from /status and /conf
   });
 });
 
+/**
+ * Every toggle is a bare checkbox inside a `<label class="toggle-switch">` whose only other child is
+ * the decorative slider span, so the wrapping label contributes no text: a screen reader announced
+ * anonymous checkboxes on this page. The visible caption lives in a sibling `.toggle-info > span`,
+ * which each checkbox now references with aria-labelledby.
+ *
+ * This proves the reference actually resolves to text in a real DOM. It covers only the four toggles
+ * this fixture renders (SSL, built-in Redis and the rest sit behind other toggles); a11y-controls
+ * covers the rest of them, and every other page, structurally.
+ */
+test('every rendered toggle exposes an accessible name from its visible caption', async () => {
+  const { screen } = rtl;
+  resetFetchCalls();
+  const { container } = renderInfrastructure();
+  await screen.findByText('Database Configuration');
+
+  const toggles = Array.from(container.querySelectorAll('label.toggle-switch input[type="checkbox"]'));
+  // Guards against a vacuous pass if the page ever stops rendering toggles under this fixture.
+  assert.ok(toggles.length >= 4, `expected the open sections to render toggles, found ${toggles.length}`);
+
+  const unnamed = toggles
+    .map(input => {
+      const id = input.getAttribute('aria-labelledby');
+      const name = id ? (container.querySelector(`#${id}`)?.textContent ?? '').trim() : '';
+      return { id, name };
+    })
+    .filter(t => !t.name)
+    .map(t => t.id ?? '(no aria-labelledby)');
+
+  // Named, not counted: a failure has to say WHICH toggle lost its caption.
+  assert.deepEqual(unnamed, [], `toggles with no accessible name: ${unnamed.join(', ')}`);
+});
+
 test('editing a database field and saving PUTs the edited value in the request body', async () => {
   const { screen, waitFor, fireEvent } = rtl;
   resetFetchCalls();

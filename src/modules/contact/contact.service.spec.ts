@@ -145,6 +145,21 @@ describe('ContactService', () => {
     });
 
     /**
+     * Neutralizing covers the raw-protocol dialect too, which used to reach the engine verbatim.
+     * That is a round trip, not a loss: the Baileys adapter hands the jid to `updateBlockStatus`,
+     * which starts with `jidNormalizedUser` and turns `@c.us` straight back into `@s.whatsapp.net`.
+     * whatsapp-web.js, which has no such dialect, gets the form it actually understands.
+     */
+    it('hands the engine the neutral dialect for a raw-protocol id', () => {
+      const blockContact = jest.fn();
+      const svc = makeService({ blockContact });
+
+      svc.blockContact('s1', '628123456789@s.whatsapp.net');
+
+      expect(blockContact).toHaveBeenCalledWith('628123456789@c.us');
+    });
+
+    /**
      * A privacy-id contact has no phone number at all, and the blocklist READ answers those ids
      * verbatim (Baileys maps each blocked jid through toNeutralJid, which leaves an unresolved lid
      * as `<lid>@lid`; whatsapp-web.js returns the wid as-is). Refusing them here made the ids the

@@ -81,9 +81,6 @@ ARG TARGETARCH
 # snapshots (.backup) instead of plain-copying a live database (which can archive a torn file). The
 # DATABASE_TYPE=postgres half of the same script needs pg_dump, installed further down.
 #
-# ca-certificates is required to fetch the PGDG signing key over HTTPS below: the base image has no
-# CA bundle, and curl alone does not pull one in under --no-install-recommends (curl: (77)).
-#
 # ffmpeg backs the opt-in media-conversion endpoints, and also repairs an existing gap: whatsapp-web.js
 # requires fluent-ffmpeg at module load and calls it for video-to-webp animated stickers, so
 # sendSticker with a video mimetype has been failing in this image for want of the binary. Measured
@@ -114,7 +111,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     patch \
     curl \
     procps \
-    ca-certificates \
     sqlite3 \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
@@ -130,10 +126,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # client may be newer than its server, never older), and DATABASE_HOST often points at a managed
 # Postgres the compose file does not control, where 17 is the current default. Pinning to 16 would
 # have left every such deployment unable to back up. Verified against live 16 and 17 servers.
-RUN install -d /usr/share/postgresql-common/pgdg \
-    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+#
+# The signing key is committed rather than fetched at build time. Fetched, it was the one build input
+# nothing pinned: `signed-by` attests only that the .debs match whatever that request returned, so a
+# compromised host, or a build behind a TLS-intercepting proxy whose root is in the trust store,
+# would swap the trust anchor with nothing to notice. Committed, it is reviewed once and diffable
+# forever, and it removes one of the two network calls the release build makes uncached
+# (release.yml's `no-cache-filters: production` rebuilds this stage every tag, on both platforms).
+# Verify with `gpg --show-keys --with-fingerprint scripts/pgdg-ACCC4CF8.asc`:
+#   B97B0AFC AA1A47F0 44F244A0 7FCC7D46 ACCC4CF8, uid "PostgreSQL Debian Repository".
+#
+# 10 packages arrive with it on top of the list above (12 on a bare base; sqlite3 already brings
+# libreadline8), including a full perl interpreter: /usr/bin/pg_dump is a symlink to
+# postgresql-common's pg_wrapper, which is a perl script. Trivy on the built image, with the release
+# job's own settings (CRITICAL,HIGH + ignore-unfixed + .trivyignore): 0 findings, the bar the ffmpeg
+# layer above was held to. Counting unfixed ones too, the perl packages carry 8 CRITICAL/HIGH with
+# no upstream fix, but every one of them is a CVE the base image ALREADY had through perl-base
+# (Debian essential, present before this layer), so the layer adds 0 distinct vulnerabilities.
+# libpq5 and the postgresql-client packages themselves are clean. Recheck with:
+#   trivy image --vuln-type os,library --severity CRITICAL,HIGH --ignore-unfixed --ignorefile .trivyignore <image>
+COPY scripts/pgdg-ACCC4CF8.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+RUN echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
 http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 \
     && rm -rf /var/lib/apt/lists/*
