@@ -142,7 +142,8 @@
       "orLabel": "veya",
       "post": "Paylaş",
       "posted": "Durum paylaşıldı",
-      "postFailed": "Durum paylaşılamadı"
+      "postFailed": "Durum paylaşılamadı",
+      "imageFile": "Durum görseli"
     },
     "channels": {
       "notSupported": "Kanallar Baileys motorunda desteklenmemektedir.",
@@ -160,7 +161,14 @@
       "delete": "Mesaj silinemedi",
       "fileTooLarge": "Dosya çok büyük (maks 18 MB)"
     },
-    "loadMessagesError": "Mesajlar yüklenemedi. Sunucu kayıtlarını kontrol edin."
+    "loadMessagesError": "Mesajlar yüklenemedi. Sunucu kayıtlarını kontrol edin.",
+    "messageStatus": {
+      "pending": "Beklemede",
+      "sent": "Gönderildi",
+      "delivered": "İletildi",
+      "read": "Okundu",
+      "failed": "Başarısız"
+    }
   },
   "errorBoundary": {
     "title": "Bir şeyler ters gitti",
@@ -413,7 +421,10 @@
         "isNot": "eşit değildir",
         "contains": "içerir",
         "equals": "tam eşleşir"
-      }
+      },
+      "fieldLabel": "Filtre alanı",
+      "operatorLabel": "Filtre operatörü",
+      "valueLabel": "Filtre değeri"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +505,8 @@
       "deleted": "Şablon başarıyla silindi",
       "deleteFailed": "Şablon silinemedi: {{message}}",
       "copied": "Şablon adı kopyalandı"
-    }
+    },
+    "sessionSelect": "Oturum"
   },
   "apiKeys": {
     "title": "API Anahtarları",

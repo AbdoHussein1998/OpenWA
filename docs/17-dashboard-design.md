@@ -51,11 +51,16 @@ backed by `localStorage` — there is no Zustand store.
    muted-text token that meets AA on both themes. `dashboard/src/a11y-controls.test.ts` fails the
    build when a toggle switch, a button toggle-group or a plugin config field loses its name; other
    control shapes are not covered by it.
-   Known gaps, all measured rather than assumed: `--primary` as a foreground on a light background is
-   1.98:1 and fails AA wherever it is used as text (the active sidebar item, several badges); a
-   handful of native selects and search inputs still carry no accessible name; and the exclusive
-   button groups report `aria-pressed` without arrow-key roving focus. Four pages have a render
-   harness, so the rest are checked structurally. Treat the claim as directional, not certified.
+   Brand and status colours are split in two: `--primary`, `--error`, `--success` and `--warning` are
+   fill colours for buttons, borders and tints, and `--primary-text`, `--error-text`, `--success-text`
+   and `--warning-text` are darkened twins for anything rendered as text or an icon. As foregrounds
+   the originals measure 1.98:1, 3.76:1, 2.28:1 and 2.15:1 on white. Each twin is set from the
+   darkest surface it actually lands on, which is the 10 to 20 percent tint of its own hue that the
+   badges and callouts paint behind it, not white. Dark restates them as the originals, which are
+   already 6:1 or better on the dark surfaces.
+   Known gap: the exclusive button groups report `aria-pressed` without arrow-key roving focus. Four
+   pages have a render harness, so the rest are checked structurally. Treat the claim as directional,
+   not certified.
 5. **Dark mode** - Support for light/dark themes
 
 ## 17.2 Information Architecture

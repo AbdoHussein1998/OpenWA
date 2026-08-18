@@ -142,7 +142,8 @@
       "orLabel": "또는",
       "post": "게시",
       "posted": "상태가 게시되었습니다",
-      "postFailed": "상태를 게시할 수 없습니다"
+      "postFailed": "상태를 게시할 수 없습니다",
+      "imageFile": "상태 이미지"
     },
     "channels": {
       "notSupported": "Baileys 엔진에서는 채널을 지원하지 않습니다.",
@@ -160,7 +161,14 @@
       "delete": "메시지를 삭제하지 못했습니다",
       "fileTooLarge": "파일이 너무 큽니다 (최대 18 MB)"
     },
-    "loadMessagesError": "메시지를 불러올 수 없습니다. 서버 로그를 확인하세요."
+    "loadMessagesError": "메시지를 불러올 수 없습니다. 서버 로그를 확인하세요.",
+    "messageStatus": {
+      "pending": "대기 중",
+      "sent": "전송됨",
+      "delivered": "전달됨",
+      "read": "읽음",
+      "failed": "실패"
+    }
   },
   "errorBoundary": {
     "title": "문제가 발생했습니다",
@@ -413,7 +421,10 @@
         "isNot": "다음과 같지 않음",
         "contains": "포함",
         "equals": "동일함"
-      }
+      },
+      "fieldLabel": "필터 필드",
+      "operatorLabel": "필터 연산자",
+      "valueLabel": "필터 값"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +505,8 @@
       "deleted": "템플릿이 삭제되었습니다",
       "deleteFailed": "템플릿 삭제 실패: {{message}}",
       "copied": "템플릿 이름이 복사되었습니다"
-    }
+    },
+    "sessionSelect": "세션"
   },
   "apiKeys": {
     "title": "API 키",

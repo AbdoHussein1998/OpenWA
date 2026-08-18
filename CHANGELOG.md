@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `isReadOnly` on a group answers for the calling account rather than repeating the group setting, so an admin of an announce-only group is no longer told they cannot post.
+- `isMyContact` reflects whether the contact is actually saved, instead of reporting `true` for every contact the Baileys engine has seen.
+- Listing membership requests for an id that is not a group is refused instead of answering an empty list, which read as a group with nothing pending.
+- Three Baileys operations answer the refusal they were hiding: leaving a group and unsubscribing from a channel map WhatsApp's rejection like their sibling writes already did, and labelling a channel is refused outright instead of reporting success while nothing was labelled.
+- A message's delivery status is announced, not only coloured. `delivered` and `read` render the same double check and differed only by a blue that measured 2.13:1 on the outgoing bubble, so the distinction reached neither screen readers nor colour-blind readers.
+- Text rendered in a brand or status colour meets AA on the light theme. As foregrounds they measured 1.98:1 (brand), 2.15:1 (warning), 2.28:1 (success) and 3.76:1 (error); darkened `-text` twins now carry text and icons while the originals stay the fill colour. Each clears 4.5:1 against the tint its own badges paint behind it, not just against white. Dark theme is unchanged.
+- The filter builder's three selects, the status image picker and the templates session picker expose accessible names, so a screen reader no longer announces unnamed comboboxes on those surfaces.
+- The plugin session picker exposes an accessible name, and a required array field's asterisk renders in the error colour. The caption lives outside `.form-group`, so the rule that colours the mark never matched it.
+- Baileys forwards `mentions` on an audio send. The route accepts the field and whatsapp-web.js sent it, so the same request tagged group participants on one engine and silently did not on the other.
+- Baileys no longer fetches URLs through the library's own preview generator on the reply and edit routes. Only the text-send path installed the vetted generator, so a reply or an edit containing a link reached `link-preview-js`, which carries an unfixed SSRF advisory, with a caller-supplied URL.
+- Replying with a quoted id that does not belong to the target chat is refused on Baileys with the same `404` whatsapp-web.js already answered. It was the last stored-message path with no chat check, so a reply could quote another conversation.
+- Forwarding a message whose id is not in `fromChatId` is refused on Baileys with the same `404` whatsapp-web.js already answered. The parameter was accepted and then ignored, so any stored id forwarded from any claimed source.
 - The Baileys engine resolves its WhatsApp Web version through a fallback chain instead of one call: an operator pin (`BAILEYS_WA_VERSION`), the two library endpoints, a disk cache of the last known-good version, then a built-in default. Each remote tier is bounded and rides the session proxy, and a stale answer is neither cached nor used. Thanks @giovanni-orciuolo.
 - The Go and Java SDKs can @mention on an audio send. `SendAudioRequest` was flattened off the shared media type and lost the field, so the typed path could not set it while every other client could.
 - Three routes declare the `409` they can answer: a duplicate template name on create or rename, and an integration instance id that already exists. Clients generated from the contract modelled those calls as unable to conflict.
@@ -19,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The image ships the PostgreSQL client, so `backup.sh` and `restore.sh` work in-container with `DATABASE_TYPE=postgres`. Neither `pg_dump` nor `psql` was present, so the backup exited 1 and the restore printed an import that could not be run.
 - A session launch that fails on a locked database is retried. The classifier looked for `SQLITE_BUSY` in the error message while the driver carries it on `code`, so the session stayed down until a restart.
 - Meta-hosted ids (`@hosted`, `@hosted.lid`) normalize to the dialect they name. They parsed as unknown before, so a chat surfaced with kind `unknown` and the same id was then refused with a `400` on any write.
+
+### Documentation
+
+- The API reference and capability matrix record where the two engines differ on calls both support: read receipts, edit, pin and unpin, the profile writes, mute, and the channel lookup.
 
 ## [0.21.0] - 2026-08-18
 

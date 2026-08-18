@@ -903,8 +903,33 @@ adapter boundary — none silently stubs.
   only).
 - **`getContactStatus` / `getContactStatuses` (wwjs).** `Status.type` is the `text|image|video`
   union — audio/other story types collapse to `text`.
-- **`archiveChat` / `clearChatMessages` (baileys).** `chatModify` needs the chat's last known
-  message; a chat with no known history resolves `false` rather than throwing.
+- **`archiveChat` / `clearChatMessages` / `deleteChat` / `sendSeen` / `markUnread` (baileys).** All
+  five need the chat's last known message: `chatModify` carries it for the first three and for the
+  unread mark, and the read receipt is `readMessages([key])`. A chat the session has seen no message
+  in resolves `false` rather than throwing, so `POST chats/read` answers `{"success": false}` for a
+  chat whatsapp-web.js marks read from the page-side chat object without needing any local history.
+- **`setProfileName` / `setProfilePicture` / `deleteProfilePicture` refusals (baileys).**
+  whatsapp-web.js reads a page-side verdict for all three (`setDisplayName` and `setProfilePicture`
+  resolve `false`, `deleteProfilePicture` resolves an explicit `false`) and raises a `403`. The
+  Baileys calls resolve with no acceptance signal, so a change WhatsApp declined answers `200`. Only
+  `setProfileStatus` is symmetric: neither engine surfaces a refusal for it.
+- **`editMessage` / `pinMessage` / `unpinMessage` refusals (baileys).** Both engines refuse what they
+  can judge locally: the target must be addressable inside the given chat, and the Baileys adapter
+  additionally refuses an edit of a message the account did not send. Past those guards they diverge.
+  whatsapp-web.js reads a page-side verdict (`message.edit()` resolves `null`, `message.pin()`
+  resolves `false`) and raises a `403`; Baileys sends the edit or pin as an ordinary protocol message
+  and is never told the outcome. So a pin refused because the account is not a group admin, or an
+  edit refused because the target is not a text message, answers `403` on whatsapp-web.js and `200`
+  on Baileys.
+- **`muteChat` addressing.** whatsapp-web.js resolves the chat before writing and answers `400` for a
+  chatId it cannot resolve; Baileys writes the app-state patch without a lookup and answers `200` for
+  a chat that does not exist. `pinChat` splits the same way.
+- **`getChannelById` reach and payload.** Baileys resolves any channel by JID
+  (`newsletterMetadata('jid', …)`), including one the account does not follow. whatsapp-web.js 1.34.x
+  exposes no per-id lookup, so the adapter scans the subscribed-channel list and returns `null` (a
+  `404`) for every channel the account is not subscribed to. The `Channel` payload differs too:
+  whatsapp-web.js never fills `picture` or `createdAt`, both of which Baileys reads off the newsletter
+  metadata.
 - **`starMessage` (baileys).** Needs the stored key's `fromMe` — the same id means different
   messages depending on direction.
 - **`addParticipants` result shape.** wwjs returns a per-participant `{code,message}` object or a

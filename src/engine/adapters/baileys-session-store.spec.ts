@@ -26,6 +26,22 @@ describe('BaileysSessionStore', () => {
     expect(store.listContacts()).toHaveLength(1);
   });
 
+  /**
+   * Baileys documents `name` as the one YOU saved and `notify` as the pushname the contact set
+   * themselves, so a contact carrying only `notify` is not in the addressbook. Reporting true for
+   * everyone told an automation that every chat partner was a saved contact.
+   */
+  it('reports isMyContact from the saved name, not for every contact seen', () => {
+    store.upsertContacts([
+      { id: '628111@s.whatsapp.net', name: 'Alice', notify: 'Al' },
+      { id: '628222@s.whatsapp.net', notify: 'Bob' },
+    ]);
+    expect(store.findContact('628111@s.whatsapp.net')?.isMyContact).toBe(true);
+    expect(store.findContact('628222@s.whatsapp.net')?.isMyContact).toBe(false);
+    // The pushname still surfaces either way; it is the addressbook claim that changed.
+    expect(store.findContact('628222@s.whatsapp.net')?.pushName).toBe('Bob');
+  });
+
   it('records the newest message per chat and surfaces it in getChats', () => {
     store.upsertChats([{ id: '628111@s.whatsapp.net', name: 'Alice', unreadCount: 2 }]);
     store.recordMessage({

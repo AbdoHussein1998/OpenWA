@@ -202,7 +202,7 @@
 
 .chats-page .chat-item-card.active .chat-avatar {
   background: var(--bg-white);
-  color: var(--primary);
+  color: var(--primary-text);
   border-color: rgba(34, 197, 94, 0.3);
 }
 
@@ -467,7 +467,7 @@
 
 .chats-page .scroll-to-bottom-btn:hover {
   background: var(--bg-light);
-  color: var(--primary);
+  color: var(--primary-text);
   border-color: var(--primary);
 }
 
@@ -590,7 +590,10 @@
 }
 
 .chats-page .message-status-icon.read {
-  color: #53bdeb; /* WhatsApp blue checks */
+  /* The WhatsApp blue is 2.13:1 on the outgoing bubble, and these checks are TEXT, not an icon.
+     Darkened to clear 4.5:1 there and on white; the status is also spelled out in aria-label/title,
+     since delivered and read otherwise differ only by this colour. */
+  color: #337592;
 }
 
 /* =============================================================================
@@ -695,7 +698,7 @@
 }
 
 .chats-page .text-warn {
-  color: #ea580c;
+  color: var(--warning-text);
 }
 
 /* Real-time connection-lost banner */
@@ -707,7 +710,7 @@
   margin-bottom: 0.75rem;
   border-radius: 6px;
   background: rgba(234, 88, 12, 0.1);
-  color: #ea580c;
+  color: var(--warning-text);
   font-size: 0.875rem;
 }
 
@@ -739,7 +742,7 @@
 
 .chats-page .btn-input-accessory.active {
   background: rgba(34, 197, 94, 0.1);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .chats-page .attachment-preview-banner {
@@ -808,7 +811,7 @@
 
 .chats-page .btn-remove-attachment:hover {
   background: rgba(239, 68, 68, 0.12);
-  color: var(--error);
+  color: var(--error-text);
 }
 
 .chats-page .chats-emoji-picker {
@@ -1035,7 +1038,7 @@
 }
 
 .chats-page .action-btn.delete-btn:hover {
-  color: var(--error);
+  color: var(--error-text);
   background: rgba(239, 68, 68, 0.12);
 }
 
@@ -1186,7 +1189,7 @@
 .chats-page .replying-to-title {
   font-size: 0.8125rem;
   font-weight: 700;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .chats-page .replying-to-body {

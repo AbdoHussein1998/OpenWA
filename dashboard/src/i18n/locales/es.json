@@ -142,7 +142,8 @@
       "orLabel": "o",
       "post": "Publicar",
       "posted": "Estado publicado",
-      "postFailed": "No se pudo publicar el estado"
+      "postFailed": "No se pudo publicar el estado",
+      "imageFile": "Imagen de estado"
     },
     "channels": {
       "notSupported": "Los canales no son compatibles con el motor Baileys.",
@@ -160,7 +161,14 @@
       "delete": "Error al eliminar el mensaje",
       "fileTooLarge": "El archivo es demasiado grande (máx. 18 MB)"
     },
-    "loadMessagesError": "No se pudieron cargar los mensajes. Revisa los registros del servidor."
+    "loadMessagesError": "No se pudieron cargar los mensajes. Revisa los registros del servidor.",
+    "messageStatus": {
+      "pending": "Pendiente",
+      "sent": "Enviado",
+      "delivered": "Entregado",
+      "read": "Leído",
+      "failed": "Fallido"
+    }
   },
   "errorBoundary": {
     "title": "Algo salió mal",
@@ -413,7 +421,10 @@
         "isNot": "no es",
         "contains": "contiene",
         "equals": "es igual a"
-      }
+      },
+      "fieldLabel": "Campo de filtro",
+      "operatorLabel": "Operador de filtro",
+      "valueLabel": "Valor de filtro"
     },
     "columns": {
       "url": "URL",
@@ -668,7 +679,8 @@
       "deleted": "Plantilla eliminada correctamente",
       "deleteFailed": "Error al eliminar la plantilla: {{message}}",
       "copied": "Nombre de plantilla copiado"
-    }
+    },
+    "sessionSelect": "Sesión"
   },
   "infrastructure": {
     "title": "Infraestructura",

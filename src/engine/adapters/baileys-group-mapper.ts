@@ -50,7 +50,11 @@ export function mapBaileysGroup(
 }
 
 /** Map a Baileys GroupMetadata to the neutral {@link GroupInfo} (full participant list). */
-export function mapBaileysGroupInfo(metadata: GroupMetadata, normalizeJid: NormalizeJid = identity): GroupInfo {
+export function mapBaileysGroupInfo(
+  metadata: GroupMetadata,
+  normalizeJid: NormalizeJid = identity,
+  selfJid?: string,
+): GroupInfo {
   const participants: GroupParticipant[] = metadata.participants.map(p => {
     const id = preferPhoneDialect(p.id, p.phoneNumber, normalizeJid);
     return {
@@ -68,9 +72,14 @@ export function mapBaileysGroupInfo(metadata: GroupMetadata, normalizeJid: Norma
     owner: metadata.owner ? preferPhoneDialect(metadata.owner, metadata.ownerPn, normalizeJid) : metadata.owner,
     createdAt: metadata.creation,
     participants,
-    // WhatsApp "announce" = only admins can post; surface as both isAnnounce and (members') isReadOnly (best-effort).
+    // WhatsApp "announce" = only admins can post. isAnnounce reports the group SETTING; isReadOnly
+    // reports what it means for THIS account, which is the question whatsapp-web.js answers with WA
+    // Web's own per-account flag. Copying announce into both told an admin of an announce-only group
+    // that they could not post, in the one field a client uses to disable its composer.
     isAnnounce: metadata.announce,
-    isReadOnly: metadata.announce,
+    isReadOnly: selfJid
+      ? Boolean(metadata.announce) && !isSelfAdmin(metadata, selfJid, normalizeJid)
+      : metadata.announce,
     announce: metadata.announce,
     locked: metadata.restrict,
     ephemeralSeconds: metadata.ephemeralDuration,

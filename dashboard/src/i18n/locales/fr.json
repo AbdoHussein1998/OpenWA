@@ -142,7 +142,8 @@
       "orLabel": "ou",
       "post": "Publier",
       "posted": "Statut publié",
-      "postFailed": "Impossible de publier le statut"
+      "postFailed": "Impossible de publier le statut",
+      "imageFile": "Image de statut"
     },
     "channels": {
       "notSupported": "Les chaînes ne sont pas prises en charge par le moteur Baileys.",
@@ -160,7 +161,14 @@
       "delete": "Échec de la suppression du message",
       "fileTooLarge": "Le fichier est trop volumineux (max 18 Mo)"
     },
-    "loadMessagesError": "Impossible de charger les messages. Vérifiez les journaux du serveur."
+    "loadMessagesError": "Impossible de charger les messages. Vérifiez les journaux du serveur.",
+    "messageStatus": {
+      "pending": "En attente",
+      "sent": "Envoyé",
+      "delivered": "Remis",
+      "read": "Lu",
+      "failed": "Échec"
+    }
   },
   "errorBoundary": {
     "title": "Une erreur est survenue",
@@ -413,7 +421,10 @@
         "isNot": "n'est pas",
         "contains": "contient",
         "equals": "est égal à"
-      }
+      },
+      "fieldLabel": "Champ de filtre",
+      "operatorLabel": "Opérateur de filtre",
+      "valueLabel": "Valeur de filtre"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +505,8 @@
       "deleted": "Template supprimé avec succès",
       "deleteFailed": "Échec de la suppression du template : {{message}}",
       "copied": "Nom du template copié"
-    }
+    },
+    "sessionSelect": "Session"
   },
   "apiKeys": {
     "title": "Clés API",

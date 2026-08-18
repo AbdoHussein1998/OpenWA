@@ -1038,7 +1038,7 @@
         },
         "responses": {
           "200": {
-            "description": "Chat marked as read successfully",
+            "description": "Returns `{ success }`. `false` means the engine declined to act: the Baileys engine sends the read receipt against the chat's last known message, so a chat it has seen no message in is reported as declined rather than marked read. The whatsapp-web.js engine reads the chat from the page and needs no local history.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1415,7 +1415,7 @@
             }
           },
           "400": {
-            "description": "Session not ready, or an invalid chatId / muteUntil"
+            "description": "Session not ready, an invalid chatId / muteUntil, or a chatId the whatsapp-web.js engine cannot resolve. The Baileys engine writes the mute without resolving the chat first and answers `success: true` for a chat that does not exist."
           },
           "404": {
             "description": "Session not found"
@@ -3334,7 +3334,7 @@
             "description": "Session not active, or durationSeconds is not one of 86400 / 604800 / 2592000"
           },
           "403": {
-            "description": "The engine refused the pin — in a group only admins may pin"
+            "description": "The whatsapp-web.js engine refused the pin (in a group only admins may pin). The Baileys engine has no acceptance signal and answers 200."
           },
           "404": {
             "description": "Message not found in the chat"
@@ -3388,7 +3388,7 @@
             "description": "Session not active"
           },
           "403": {
-            "description": "The engine refused the unpin — in a group only admins may unpin"
+            "description": "The whatsapp-web.js engine refused the unpin (in a group only admins may unpin). The Baileys engine has no acceptance signal and answers 200."
           },
           "404": {
             "description": "Message not found in the chat"
@@ -3496,7 +3496,7 @@
             "description": "Session not active, invalid request, or the send was blocked by a plugin"
           },
           "403": {
-            "description": "The message was not sent by this account, or the engine refused the edit"
+            "description": "The engine refused the edit. The Baileys adapter refuses a message the account did not send; whatsapp-web.js reads the refusal from the page, which also covers a message that is not text. Past its own guard the Baileys engine has no acceptance signal and answers 200."
           },
           "404": {
             "description": "Message not found"
@@ -5970,7 +5970,7 @@
             "description": "Session is not started"
           },
           "403": {
-            "description": "The engine refused the name change"
+            "description": "The whatsapp-web.js engine refused the name change. The Baileys engine has no acceptance signal and answers 200 for a rename WhatsApp declined."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
@@ -6075,7 +6075,7 @@
             "description": "Neither url nor base64 provided, base64 without mimetype, or session is not started"
           },
           "403": {
-            "description": "The engine refused the picture change"
+            "description": "The whatsapp-web.js engine refused the picture change. The Baileys engine has no acceptance signal and answers 200 for an upload WhatsApp declined."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
@@ -6120,7 +6120,7 @@
             "description": "Session is not started"
           },
           "403": {
-            "description": "The engine refused the picture removal"
+            "description": "The whatsapp-web.js engine refused the picture removal. The Baileys engine has no acceptance signal and answers 200 for a removal WhatsApp declined."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
@@ -6805,7 +6805,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Channel details",
+            "description": "Channel details. The whatsapp-web.js engine never fills `picture` or `createdAt`; the Baileys engine reads both off the newsletter metadata.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6815,7 +6815,7 @@
             }
           },
           "404": {
-            "description": "Channel not found"
+            "description": "Channel not found. On the whatsapp-web.js engine this also covers a channel that exists but the account does not follow, because the lookup scans the subscribed-channel list; the Baileys engine resolves any channel by id."
           },
           "409": {
             "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."

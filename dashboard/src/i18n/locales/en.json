@@ -142,7 +142,8 @@
       "orLabel": "or",
       "post": "Post",
       "posted": "Status posted",
-      "postFailed": "Could not post the status"
+      "postFailed": "Could not post the status",
+      "imageFile": "Status image"
     },
     "channels": {
       "notSupported": "Channels are not supported on the Baileys engine.",
@@ -160,7 +161,14 @@
       "delete": "Failed to delete message",
       "fileTooLarge": "File is too large (max 18 MB)"
     },
-    "loadMessagesError": "Couldn't load messages. Check the server logs."
+    "loadMessagesError": "Couldn't load messages. Check the server logs.",
+    "messageStatus": {
+      "pending": "Pending",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "read": "Read",
+      "failed": "Failed"
+    }
   },
   "errorBoundary": {
     "title": "Something went wrong",
@@ -413,7 +421,10 @@
         "isNot": "is not",
         "contains": "contains",
         "equals": "equals"
-      }
+      },
+      "fieldLabel": "Filter field",
+      "operatorLabel": "Filter operator",
+      "valueLabel": "Filter value"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +505,8 @@
       "deleted": "Template deleted successfully",
       "deleteFailed": "Failed to delete template: {{message}}",
       "copied": "Template name copied"
-    }
+    },
+    "sessionSelect": "Session"
   },
   "apiKeys": {
     "title": "API Keys",

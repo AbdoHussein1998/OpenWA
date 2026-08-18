@@ -1,4 +1,5 @@
 import { WwebjsGroups, normalizeWwebjsRequestMethod } from './wwebjs-groups';
+import { GroupNotFoundError } from '../../common/errors/group-not-found.error';
 import { BaileysGroups, type BaileysGroupsHost } from './baileys-groups';
 import { BaileysEvents, type BaileysEventsHost } from './baileys-events';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
@@ -30,6 +31,7 @@ const logger = createLogger('membership-requests.spec');
 // ---------------------------------------------------------------------------------------------
 
 type WwebjsClientStub = {
+  getChatById: jest.Mock;
   getGroupMembershipRequests: jest.Mock;
   approveGroupMembershipRequests: jest.Mock;
   rejectGroupMembershipRequests: jest.Mock;
@@ -37,6 +39,9 @@ type WwebjsClientStub = {
 
 function makeWwebjsGroups(): { groups: WwebjsGroups; client: WwebjsClientStub } {
   const client: WwebjsClientStub = {
+    // The list resolves the group first, like every other group operation in this adapter, so the
+    // stub has to answer that lookup or the guard reads it as "no such group".
+    getChatById: jest.fn().mockResolvedValue({ isGroup: true }),
     getGroupMembershipRequests: jest.fn(),
     approveGroupMembershipRequests: jest.fn(),
     rejectGroupMembershipRequests: jest.fn(),
@@ -58,6 +63,16 @@ describe('WwebjsGroups membership requests', () => {
     expect(normalizeWwebjsRequestMethod('LinkedGroupJoin')).toBe('linked_group_join');
     expect(normalizeWwebjsRequestMethod('SomethingNew')).toBeUndefined();
     expect(normalizeWwebjsRequestMethod(undefined)).toBeUndefined();
+  });
+
+  // Every other group operation resolves the chat first; this list did not, so an unknown id or a
+  // non-group jid answered 200 with an empty array, which reads as "no pending requests" rather than
+  // "no such group". Baileys answers the refusal for the same call.
+  it('refuses an id that is not a group instead of answering an empty list', async () => {
+    const { groups, client } = makeWwebjsGroups();
+    client.getChatById.mockResolvedValue({ isGroup: false });
+    await expect(groups.getGroupMembershipRequests('628111@c.us')).rejects.toBeInstanceOf(GroupNotFoundError);
+    expect(client.getGroupMembershipRequests).not.toHaveBeenCalled();
   });
 
   it('lists membership requests, reading both wid spellings and dropping unreadable requesters', async () => {

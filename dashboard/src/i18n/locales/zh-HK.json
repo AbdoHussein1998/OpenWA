@@ -142,7 +142,8 @@
       "orLabel": "或",
       "post": "發佈",
       "posted": "狀態已發佈",
-      "postFailed": "無法發佈狀態"
+      "postFailed": "無法發佈狀態",
+      "imageFile": "狀態圖片"
     },
     "channels": {
       "notSupported": "Baileys 引擎不支援頻道。",
@@ -160,7 +161,14 @@
       "delete": "刪除訊息失敗",
       "fileTooLarge": "檔案過大（最大 18 MB）"
     },
-    "loadMessagesError": "無法載入訊息。請檢查伺服器日誌。"
+    "loadMessagesError": "無法載入訊息。請檢查伺服器日誌。",
+    "messageStatus": {
+      "pending": "待傳送",
+      "sent": "已傳送",
+      "delivered": "已送達",
+      "read": "已讀",
+      "failed": "傳送失敗"
+    }
   },
   "errorBoundary": {
     "title": "發生問題",
@@ -413,7 +421,10 @@
         "isNot": "不是",
         "contains": "包含",
         "equals": "等於"
-      }
+      },
+      "fieldLabel": "篩選欄位",
+      "operatorLabel": "篩選運算符",
+      "valueLabel": "篩選值"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +505,8 @@
       "deleted": "範本刪除成功",
       "deleteFailed": "刪除範本失敗：{{message}}",
       "copied": "已複製範本名稱"
-    }
+    },
+    "sessionSelect": "工作階段"
   },
   "apiKeys": {
     "title": "API 金鑰",

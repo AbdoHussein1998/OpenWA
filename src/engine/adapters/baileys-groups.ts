@@ -151,7 +151,7 @@ export class BaileysGroups {
         this.queryBudgetMs,
         'WhatsApp did not answer the group metadata query in time',
       );
-      return mapBaileysGroupInfo(metadata, jid => this.host.toNeutralJid(jid));
+      return mapBaileysGroupInfo(metadata, jid => this.host.toNeutralJid(jid), this.host.normalizedSelfJid());
     } catch (err) {
       // Only a SERVER refusal may become null (→ service 404): the group does not exist or the
       // account cannot see it. Anything else — a dropped socket, a timeout, a protocol error —
@@ -249,7 +249,12 @@ export class BaileysGroups {
 
   async leaveGroup(groupId: string): Promise<void> {
     this.host.ensureReady();
-    await this.confirmed(this.sock().groupLeave(groupId), 'leaving the group');
+    // Wrapped like every other group write in this file. Without it WhatsApp's refusal for an
+    // unknown or already-left group reached the client as an opaque 500, while whatsapp-web.js
+    // resolves the chat first and answers 404.
+    await mapServerRefusal('Leaving the group', () =>
+      this.confirmed(this.sock().groupLeave(groupId), 'leaving the group'),
+    );
   }
 
   async setGroupSubject(groupId: string, subject: string): Promise<void> {

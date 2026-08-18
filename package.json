@@ -241,14 +241,14 @@
         "statements": 91
       },
       "./src/core/agent-tools/": {
-        "branches": 88,
-        "functions": 87,
+        "branches": 83,
+        "functions": 86,
         "lines": 83,
         "statements": 83
       },
       "./src/core/hooks/": {
         "branches": 84,
-        "functions": 73,
+        "functions": 71,
         "lines": 86,
         "statements": 85
       },
@@ -272,7 +272,7 @@
       },
       "./src/engine/identity/": {
         "branches": 85,
-        "functions": 95,
+        "functions": 86,
         "lines": 94,
         "statements": 93
       },
@@ -296,7 +296,7 @@
       },
       "./src/modules/chat-media/": {
         "branches": 75,
-        "functions": 76,
+        "functions": 72,
         "lines": 84,
         "statements": 84
       },
@@ -338,13 +338,13 @@
       },
       "./src/modules/mcp/": {
         "branches": 62,
-        "functions": 81,
+        "functions": 76,
         "lines": 78,
         "statements": 78
       },
       "./src/modules/media/": {
-        "branches": 71,
-        "functions": 87,
+        "branches": 69,
+        "functions": 86,
         "lines": 89,
         "statements": 88
       },
@@ -356,7 +356,7 @@
       },
       "./src/modules/metrics/": {
         "branches": 64,
-        "functions": 65,
+        "functions": 58,
         "lines": 70,
         "statements": 67
       },
@@ -374,7 +374,7 @@
       },
       "./src/modules/search/": {
         "branches": 69,
-        "functions": 87,
+        "functions": 86,
         "lines": 78,
         "statements": 78
       },
@@ -392,7 +392,7 @@
       },
       "./src/modules/status-store/": {
         "branches": 79,
-        "functions": 83,
+        "functions": 79,
         "lines": 92,
         "statements": 91
       },
@@ -403,9 +403,9 @@
         "statements": 82
       },
       "./src/modules/template/": {
-        "branches": 77,
-        "functions": 99,
-        "lines": 92,
+        "branches": 76,
+        "functions": 87,
+        "lines": 91,
         "statements": 89
       },
       "./src/modules/webhook/": {

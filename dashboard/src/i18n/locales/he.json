@@ -147,7 +147,8 @@
       "orLabel": "או",
       "post": "פרסם",
       "posted": "הסטטוס פורסם",
-      "postFailed": "לא ניתן היה לפרסם את הסטטוס"
+      "postFailed": "לא ניתן היה לפרסם את הסטטוס",
+      "imageFile": "תמונת סטטוס"
     },
     "channels": {
       "notSupported": "ערוצים אינם נתמכים במנוע Baileys.",
@@ -167,7 +168,14 @@
       "delete": "מחיקת ההודעה נכשלה",
       "fileTooLarge": "הקובץ גדול מדי (מקסימום 18 MB)"
     },
-    "loadMessagesError": "לא ניתן לטעון את ההודעות. בדקו את יומני השרת."
+    "loadMessagesError": "לא ניתן לטעון את ההודעות. בדקו את יומני השרת.",
+    "messageStatus": {
+      "pending": "ממתין",
+      "sent": "נשלח",
+      "delivered": "נמסר",
+      "read": "נקרא",
+      "failed": "נכשל"
+    }
   },
   "errorBoundary": {
     "title": "משהו השתבש",
@@ -422,7 +430,10 @@
         "isNot": "אינו",
         "contains": "מכיל",
         "equals": "שווה ל"
-      }
+      },
+      "fieldLabel": "שדה סינון",
+      "operatorLabel": "אופרטור סינון",
+      "valueLabel": "ערך סינון"
     },
     "columns": {
       "url": "כתובת URL",
@@ -503,7 +514,8 @@
       "deleted": "התבנית נמחקה בהצלחה",
       "deleteFailed": "מחיקת התבנית נכשלה: {{message}}",
       "copied": "שם התבנית הועתק"
-    }
+    },
+    "sessionSelect": "Session"
   },
   "apiKeys": {
     "title": "מפתחות API",

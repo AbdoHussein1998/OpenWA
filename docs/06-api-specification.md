@@ -852,6 +852,11 @@ Mark a chat as read/seen.
 
 Returns HTTP `200`, matching the OpenAPI contract.
 
+> **`success: false` is a real outcome on the Baileys engine.** The read receipt is sent against the
+> chat's last known message, so a chat the session has seen no message in is reported as declined
+> rather than marked read. The whatsapp-web.js engine reads the chat from the page and needs no local
+> history, so it never produces this outcome.
+
 **Errors:** `400` validation, or session not started · `401` · `403` · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:sessionId/chats/unread
@@ -1000,7 +1005,7 @@ Mute a chat's notifications until a given moment, or unmute it.
 > last message on either engine, so a chat with no known history mutes like any other. The response is
 > always `{ "success": true }` or an error.
 
-**Errors:** `400` session not ready, or invalid `chatId`/`muteUntil` · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
+**Errors:** `400` session not ready, invalid `chatId`/`muteUntil`, or a `chatId` the whatsapp-web.js engine cannot resolve (the Baileys engine writes the mute without resolving the chat first and answers `success: true` for a chat that does not exist) · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:sessionId/chats/pin
 
@@ -1042,7 +1047,7 @@ Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct fro
 > not "the chat is pinned". Unlike `chats/archive` the patch is not keyed to the chat's last message,
 > so a chat with no known history pins normally.
 
-**Errors:** `400` session not ready · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
+**Errors:** `400` session not ready, or a `chatId` the whatsapp-web.js engine cannot resolve (the Baileys engine answers `success: true` for a chat that does not exist) · `401` missing/invalid API key · `404` session not found · `409` the session is not connected (engine exists but is not `ready`) · `503` WhatsApp did not answer within the request budget, or the engine’s browser page died — the change may or may not have been applied
 
 #### POST /api/sessions/:sessionId/chats/delete
 
@@ -1303,7 +1308,7 @@ Pin a message in its chat for a bounded window.
 
 **Response** `200` — `{ "success": true }`
 
-**Errors:** `400` session not active, or `durationSeconds` outside the three accepted values · `401` missing/invalid API key · `403` the engine refused the pin (in a group only admins may pin) · `404` message not found in the chat · `409` conflict or engine not ready (retryable)
+**Errors:** `400` session not active, or `durationSeconds` outside the three accepted values · `401` missing/invalid API key · `403` the whatsapp-web.js engine refused the pin (in a group only admins may pin; the Baileys engine has no acceptance signal and answers `200`) · `404` message not found in the chat · `409` conflict or engine not ready (retryable)
 
 > On whatsapp-web.js the message must be within the 100-message fetch window for the chat, the same
 > limit that applies to react/delete/edit. On Baileys it must be in the adapter's message store.
@@ -1347,7 +1352,7 @@ Remove a message's pin. Takes no duration.
 
 **Response** `200` — `{ "success": true }`
 
-**Errors:** `400` session not active · `401` missing/invalid API key · `403` the engine refused the unpin (in a group only admins may unpin) · `404` message not found in the chat · `409` conflict or engine not ready (retryable)
+**Errors:** `400` session not active · `401` missing/invalid API key · `403` the whatsapp-web.js engine refused the unpin (in a group only admins may unpin; the Baileys engine has no acceptance signal and answers `200`) · `404` message not found in the chat · `409` conflict or engine not ready (retryable)
 
 #### GET /api/sessions/:sessionId/messages/:chatId/:messageId/media
 
@@ -1592,8 +1597,9 @@ One upstream gap remains on whatsapp-web.js and cannot be switched off from here
 message resolves but the page decides it is not replyable, the message is sent without the quote and
 the call still succeeds.
 
-Quoting a message from a **different chat** is not validated on either engine; the id is passed
-through as given.
+Quoting a message from a **different chat** is not validated on these `send-*` routes on either
+engine; the id is passed through as given. `POST /messages/reply` is stricter: both engines refuse a
+quoted id that does not belong to the target chat, with `404`.
 
 #### POST /api/sessions/:sessionId/messages/send-template
 
@@ -2062,7 +2068,7 @@ The edited message keeps its original id.
 { "messageId": "true_628123456789@c.us_3EB0ABCD", "timestamp": 1760000000 }
 ```
 
-**Errors:** `400` session not active / unknown body field · `401` missing/invalid API key · `403` key role below OPERATOR, or the engine refused the edit (only the account's own messages are editable, which WhatsApp enforces) · `404` message not found · `409` conflict or engine not ready (retryable)
+**Errors:** `400` session not active / unknown body field · `401` missing/invalid API key · `403` key role below OPERATOR, or the engine refused the edit (both engines refuse a message the account did not send; whatsapp-web.js also refuses one that is not text, where the Baileys engine has no acceptance signal and answers `200`) · `404` message not found · `409` conflict or engine not ready (retryable)
 
 #### POST /api/sessions/:sessionId/messages/send-bulk
 
@@ -3507,14 +3513,14 @@ List all channels/newsletters the session is subscribed to.
     "description": "Release notes and tips",
     "inviteCode": "ABC123xyz",
     "subscriberCount": 1042,
-    "picture": "https://example.com/ch.jpg",
-    "verified": true,
-    "createdAt": 1717200000
+    "verified": true
   }
 ]
 ```
 
-Bare array, no envelope.
+Bare array, no envelope. Only the whatsapp-web.js engine serves this route, and its channel mapping
+fills neither `picture` nor `createdAt`, so neither field appears here even though the channel schema
+declares them.
 
 **Errors:** `400` `Session is not started` · `401` missing/invalid API key · `409` conflict or engine not ready (retryable) · `501` not supported on the active engine
 
@@ -3546,7 +3552,13 @@ Get a single channel/newsletter by its id.
 }
 ```
 
-**Errors:** `400` `Session is not started` · `401` missing/invalid API key · `404` `Channel <channelId> not found` (engine returned null) · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
+> **`picture` and `createdAt` are Baileys-only, and the lookup reaches further there.** The
+> whatsapp-web.js engine exposes no per-id channel lookup, so the adapter scans the subscribed-channel
+> list: a channel the account does not follow answers `404` even though it exists, and those two
+> fields are always absent from the payload. The Baileys engine resolves any channel by id and fills
+> both.
+
+**Errors:** `400` `Session is not started` · `401` missing/invalid API key · `404` `Channel <channelId> not found` (engine returned null; on whatsapp-web.js this includes a channel the account does not follow) · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
 
 #### GET /api/sessions/:sessionId/channels/:channelId/messages
 
@@ -6127,7 +6139,7 @@ Set the account display name (max 25 chars).
 
 **Response** `200` — `{ "success": true, "message": "Profile name updated" }`
 
-**Errors:** `400` session is not started / invalid name · `401` · `403` engine refused the change · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` session is not started / invalid name · `401` · `403` the whatsapp-web.js engine refused the change (the Baileys engine has no acceptance signal and answers `200`) · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable)
 
 #### PUT /api/sessions/:sessionId/profile/status
 
@@ -6161,7 +6173,7 @@ or
 
 **Response** `200` — `{ "success": true, "message": "Profile picture updated" }`
 
-**Errors:** `400` neither `url` nor `base64` provided / base64 without `mimetype` · `401` · `403` engine refused the change · `409` conflict or engine not ready (retryable) · `413` payload too large · `503` session not ready or dependency unavailable (retryable)
+**Errors:** `400` neither `url` nor `base64` provided / base64 without `mimetype` · `401` · `403` the whatsapp-web.js engine refused the change (the Baileys engine has no acceptance signal and answers `200`) · `409` conflict or engine not ready (retryable) · `413` payload too large · `503` session not ready or dependency unavailable (retryable)
 
 #### DELETE /api/sessions/:sessionId/profile/picture
 

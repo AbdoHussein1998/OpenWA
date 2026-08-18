@@ -505,7 +505,14 @@ function SessionsTab({ plugin }: { plugin: Plugin }) {
         <section className="sessions-section">
           <h3>{t('plugins.sessions.perSessionTitle')}</h3>
           <small>{t('plugins.sessions.perSessionDesc')}</small>
-          <select className="sessions-select" value={selSession} onChange={e => setSelSession(e.target.value)}>
+          {/* The heading above is a sibling, not a label, so the select had no accessible name of its
+              own: a screen reader announced an unnamed combobox. */}
+          <select
+            className="sessions-select"
+            aria-label={t('plugins.sessions.selectSession')}
+            value={selSession}
+            onChange={e => setSelSession(e.target.value)}
+          >
             <option value="">{t('plugins.sessions.selectSession')}</option>
             {sessions.map(s => (
               <option key={s.id} value={s.id}>

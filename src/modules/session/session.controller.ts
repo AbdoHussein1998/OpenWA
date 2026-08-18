@@ -447,7 +447,15 @@ export class SessionController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark a chat as read/seen' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
-  @ApiResponse({ status: 200, description: 'Chat marked as read successfully', type: SessionActionResponseDto })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Returns `{ success }`. `false` means the engine declined to act: the Baileys engine sends the ' +
+      "read receipt against the chat's last known message, so a chat it has seen no message in is " +
+      'reported as declined rather than marked read. The whatsapp-web.js engine reads the chat from ' +
+      'the page and needs no local history.',
+    type: SessionActionResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({
@@ -642,7 +650,13 @@ export class SessionController {
       'history mutes like any other.',
     type: SessionActionResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Session not ready, or an invalid chatId / muteUntil' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Session not ready, an invalid chatId / muteUntil, or a chatId the whatsapp-web.js engine ' +
+      'cannot resolve. The Baileys engine writes the mute without resolving the chat first and ' +
+      'answers `success: true` for a chat that does not exist.',
+  })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({
     status: 503,
