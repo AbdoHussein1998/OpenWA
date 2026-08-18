@@ -3,7 +3,7 @@ import { SessionRestrictionStore } from './session-restriction-store.service';
 import { PresenceStore } from './presence-store.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
-import { Repository, DataSource, In } from 'typeorm';
+import { Repository, DataSource, In, QueryFailedError } from 'typeorm';
 import {
   NotFoundException,
   ConflictException,
@@ -891,6 +891,50 @@ describe('SessionService', () => {
       await expect(service.start('sess-uuid-1')).resolves.toBeDefined();
 
       expect(mockEngine.initialize).toHaveBeenCalledTimes(2);
+    });
+
+    /**
+     * The shape better-sqlite3 actually throws under write contention: the token lives on `code`,
+     * and the message reads `database is locked`. TypeORM copies the driver's own properties onto
+     * QueryFailedError and rewrites the message to `SqliteError: database is locked`, so the token
+     * appears in neither message. A classifier matching `SQLITE_BUSY` as text cannot fire on either.
+     */
+    const sqliteBusy = (): QueryFailedError => {
+      const driverError = Object.assign(new Error('database is locked'), {
+        name: 'SqliteError',
+        code: 'SQLITE_BUSY',
+      });
+      return new QueryFailedError('UPDATE sessions SET status = ?', [], driverError);
+    };
+
+    it('retries a locked-database launch failure, which no message text reveals', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      (engineFactory.create as jest.Mock).mockClear().mockReturnValue(mockEngine);
+      const busy = sqliteBusy();
+      // The premise of reading `code`: the token is absent from every message on this error.
+      expect(busy.message).not.toContain('SQLITE_BUSY');
+      expect(busy.driverError.message).not.toContain('SQLITE_BUSY');
+      expect((busy as unknown as { code: string }).code).toBe('SQLITE_BUSY');
+
+      mockEngine.initialize.mockRejectedValueOnce(busy).mockResolvedValueOnce(undefined);
+
+      await expect(service.start('sess-uuid-1')).resolves.toBeDefined();
+      expect(mockEngine.initialize).toHaveBeenCalledTimes(2);
+    });
+
+    it('does NOT retry a malformed query, which carries a different driver code', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      (engineFactory.create as jest.Mock).mockClear().mockReturnValue(mockEngine);
+      const driverError = Object.assign(new Error('no such column: nope'), {
+        name: 'SqliteError',
+        code: 'SQLITE_ERROR',
+      });
+      mockEngine.initialize.mockRejectedValue(new QueryFailedError('SELECT nope', [], driverError));
+
+      await expect(service.start('sess-uuid-1')).rejects.toBeInstanceOf(QueryFailedError);
+      expect(mockEngine.initialize).toHaveBeenCalledTimes(1);
     });
 
     it('gives up after the single retry and surfaces the failure (no unbounded loop)', async () => {
