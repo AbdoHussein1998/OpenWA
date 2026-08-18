@@ -616,9 +616,9 @@ describe('BaileysAdapter lifecycle & status', () => {
   it('I5: first connect failure → initialize() rejects, status FAILED, onError fired', async () => {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const baileys = jest.requireMock('@whiskeysockets/baileys') as {
-      fetchLatestBaileysVersion: jest.Mock;
+      useMultiFileAuthState: jest.Mock;
     };
-    baileys.fetchLatestBaileysVersion.mockRejectedValueOnce(new Error('network error'));
+    baileys.useMultiFileAuthState.mockRejectedValueOnce(new Error('network error'));
 
     const onError = jest.fn();
     const adapter = newAdapter();

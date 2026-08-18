@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as fs from 'fs';
 import type { Agent } from 'https';
 import * as qrcode from 'qrcode';
@@ -11,6 +12,7 @@ import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error'
 import { type createLogger } from '../../common/services/logger.service';
 import { BaileysAdapterConfig } from '../types/baileys.types';
 import { createBaileysLogger } from './baileys-logger';
+import { BaileysVersionResolver } from './baileys-version-resolver';
 import type { BaileysEvents } from './baileys-events';
 import type { BaileysHistory } from './baileys-history';
 import type { BaileysSessionStore } from './baileys-session-store';
@@ -120,6 +122,7 @@ export class BaileysLifecycle {
   private phoneNumber: string | null = null;
   private pushName: string | null = null;
   private intentionalClose = false;
+  private readonly versionResolver: BaileysVersionResolver;
   private connecting = false;
   private reconnectAttempts = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -128,7 +131,13 @@ export class BaileysLifecycle {
   /** Lazily loaded @whiskeysockets/baileys module (ESM-only; loaded on first connect, not at boot). */
   private lib?: typeof BaileysLib;
 
-  constructor(private readonly host: BaileysLifecycleHost) {}
+  constructor(private readonly host: BaileysLifecycleHost) {
+    this.versionResolver = new BaileysVersionResolver({
+      authDir: this.host.config.authDir || path.dirname(this.host.authPath),
+      sessionId: this.host.config.sessionId,
+      logger: this.host.logger,
+    });
+  }
 
   /** Lazily loaded @whiskeysockets/baileys module (ESM-only; loaded on first connect, not at boot). */
   async loadLib(): Promise<typeof BaileysLib> {
@@ -180,7 +189,7 @@ export class BaileysLifecycle {
     }
     const b = await this.loadLib();
     const { state, saveCreds } = await b.useMultiFileAuthState(this.host.authPath);
-    const { version } = await b.fetchLatestBaileysVersion();
+    const version = await this.versionResolver.resolve(b, { dispatcher: proxyAgent });
     // BaileysLogger matches ILogger exactly; cast needed because the module resolves the type
     // through a deep import path that TypeScript does not auto-unify here. Shared by the key
     // store wrapper below and the socket itself, rather than constructing two instances.

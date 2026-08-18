@@ -220,6 +220,28 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     checkInt(key);
   }
 
+  // BAILEYS_WA_VERSION: optional version pin for the Baileys engine (e.g. 2.3000.1045340097 or 2,3000,1045340097)
+  for (const key of ['BAILEYS_WA_VERSION']) {
+    const raw = str(key);
+    if (raw !== undefined) {
+      const match = raw.match(/^(\d+)[.,](\d+)[.,](\d+)$/);
+      if (!match) {
+        errors.push(
+          `${key} must be a valid WhatsApp Web version (e.g. "2.3000.1045340097"; got ${JSON.stringify(raw)})`,
+        );
+      } else {
+        const major = parseInt(match[1], 10);
+        const minor = parseInt(match[2], 10);
+        const patch = parseInt(match[3], 10);
+        if (major !== 2 || minor < 2000 || patch < 0) {
+          errors.push(
+            `${key} must be a valid WhatsApp Web version (e.g. "2.3000.1045340097"; got ${JSON.stringify(raw)})`,
+          );
+        }
+      }
+    }
+  }
+
   // Some knobs are nonsensical at 0 and contradict the "non-negative" intent: a rate-limit LIMIT of 0
   // disables that tier's throttling (a self-DoS), and a webhook timeout of 0 aborts every delivery
   // immediately. Require a positive integer for these.
