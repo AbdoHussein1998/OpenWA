@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - block and unblock accept a privacy id (`@lid`), the only id a contact without a known phone number has. The blocklist read answers those ids verbatim, so refusing them on the write left such a contact listed as blocked with no way to unblock it; ids that name no individual (group, newsletter, broadcast, free text) are still refused with `400`.
+- whatsapp-web.js `deleteChannel` classifies a dead browser page as the documented `503` plus an early death signal, like every other channel call; it reached the client directly, so a crash there answered an opaque `500` while the session still reported READY.
+- Baileys block/unblock answer `400` when WhatsApp cannot map the id between the phone-number and privacy-id dialects (no mapping either way, or an id that is neither). The library refuses those with a Boom the gateway could not classify, so a well-formed request got an opaque `500`; whatsapp-web.js already answered `400` for the same cause.
+- docs/06 states that editing another account's message answers `403`, not `500`. Both engines raise the refusal as `EngineRefusedError`, and the published contract already declared `403` with no `500` on that route.
 - Follow-ups from the accessibility review: the plugin ConfigField derives a per-field id (a hardcoded id collided on any schema with two booleans, making the second label toggle the first checkbox), the 10 codemod-touched files are Prettier-clean (9 failed the dashboard format gate), and six more multi-line labels in MessageTester are wired.
 - Dashboard accessibility: 55 form labels are associated with their controls (`htmlFor`/`id`, no duplicates or orphans), the muted-text token meets AA on both themes (4.76:1 light, 5.71:1 dark), and the primary button uses dark text on the green (9.0:1, from 1.98:1).
 - Follow-ups from the batch review: the chain-boot e2e sets MAIN_DATABASE_SYNCHRONIZE=false explicitly (the env's absence defaults to synchronize=true, so the main chain was never exercised), the drift gate classifies statements against the two known shape families (column-type rebuild, index-name drift) instead of blanket-filtering every index/DROP statement, the shared delivery recorder strips the raw error before the persistence spread, and the ignore-pattern list deduplicates.
@@ -62,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The SQLite database files are tightened to owner-only (`0600`, plus `-wal`/`-shm`/`-journal`) on every boot; they hold plaintext webhook/plugin secrets and were group/world-readable while sibling secret files were `0600`.
 - `PUT /sessions/{sessionId}/webhooks/{id}` now enforces the same 16-character webhook-secret floor as create; an empty string still clears signing.
+- The ingress route enforces a second rate-limit window keyed on the client IP (`INGRESS_IP_LIMIT`, default 1200 per window). Its per-instance window is keyed on the caller-supplied `:pluginId/:instanceId`, so varying those segments minted a fresh bucket per request and left this unauthenticated route with no effective bound.
 
 ## [0.20.0] - 2026-08-16
 

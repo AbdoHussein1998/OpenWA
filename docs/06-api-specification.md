@@ -2062,7 +2062,7 @@ The edited message keeps its original id.
 { "messageId": "true_628123456789@c.us_3EB0ABCD", "timestamp": 1760000000 }
 ```
 
-**Errors:** `400` session not active / unknown body field · `401` missing/invalid API key · `403` key role below OPERATOR · `404` message not found · `500` engine error (e.g. editing another account's message, which WhatsApp forbids) · `409` conflict or engine not ready (retryable)
+**Errors:** `400` session not active / unknown body field · `401` missing/invalid API key · `403` key role below OPERATOR, or the engine refused the edit (only the account's own messages are editable, which WhatsApp enforces) · `404` message not found · `409` conflict or engine not ready (retryable)
 
 #### POST /api/sessions/:sessionId/messages/send-bulk
 
@@ -6543,7 +6543,7 @@ plugin processing. `200` means the `GET` verification-challenge echo, or a dupli
 already persisted (idempotent re-delivery). A route may shape the synchronous status/body/headers
 the provider sees via its declarative `ack` config (doc 25); the plugin itself always runs async.
 
-**Errors:** `401` signature verification failed (missing, stale, or wrong secret) · `403` `GET` verification challenge failed (`verifyToken` mismatch) · `404` unknown pluginId/instanceId, or no such claimed route · `413` body over the route's `maxBodyBytes` · `429` per-instance rate limit (`INGRESS_INSTANCE_LIMIT` per `INGRESS_INSTANCE_TTL`; the per-instance bound is this route's only rate limit - the global per-IP tiers skip it)
+**Errors:** `401` signature verification failed (missing, stale, or wrong secret) · `403` `GET` verification challenge failed (`verifyToken` mismatch) · `404` unknown pluginId/instanceId, or no such claimed route · `413` body over the route's `maxBodyBytes` · `429` rate limit: the per-instance bucket (`INGRESS_INSTANCE_LIMIT`) or the per-client-IP bucket (`INGRESS_IP_LIMIT`), both per `INGRESS_INSTANCE_TTL`; the global per-IP tiers skip this route, so these two are its bounds, and `Retry-After-instance` / `Retry-After-ingress-ip` names the one that shed the request
 
 ## 6.5 Real-time API (WebSocket)
 
