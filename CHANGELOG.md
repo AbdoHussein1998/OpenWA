@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The Go and Java SDKs can @mention on an audio send. `SendAudioRequest` was flattened off the shared media type and lost the field, so the typed path could not set it while every other client could.
 - Three routes declare the `409` they can answer: a duplicate template name on create or rename, and an integration instance id that already exists. Clients generated from the contract modelled those calls as unable to conflict.
+- `DOMAIN` is dropped from `.env.example`. Nothing read it, so an operator setting it to their real hostname changed nothing.
 - Plugin config fields bind their caption to the control for every field type, not just booleans. Clicking the caption of a text, number, secret, enum or textarea field focused nothing, and screen readers announced those inputs with no name.
 - Dashboard toggles expose an accessible name and, for the message-type and recipient groups, their selected state. Their captions sit outside the control, so a screen reader announced anonymous checkboxes and unlabelled buttons.
 - The PostgreSQL signing key is committed instead of fetched during the image build, so the one build input nothing pinned is now reviewable and diffable, and a release build makes one fewer uncached network call.
