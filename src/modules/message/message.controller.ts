@@ -531,7 +531,12 @@ export class MessageController {
     status: 400,
     description: 'Session not active, or durationSeconds is not one of 86400 / 604800 / 2592000',
   })
-  @ApiResponse({ status: 403, description: 'The engine refused the pin — in a group only admins may pin' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'The whatsapp-web.js engine refused the pin (in a group only admins may pin). The Baileys ' +
+      'engine has no acceptance signal and answers 200.',
+  })
   @ApiResponse({ status: 404, description: 'Message not found in the chat' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async pinMessage(@Param('sessionId') sessionId: string, @Body() dto: PinMessageDto): Promise<{ success: boolean }> {
@@ -545,7 +550,12 @@ export class MessageController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({ status: 200, description: 'Message unpinned', type: MessageActionResponseDto })
   @ApiResponse({ status: 400, description: 'Session not active' })
-  @ApiResponse({ status: 403, description: 'The engine refused the unpin — in a group only admins may unpin' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'The whatsapp-web.js engine refused the unpin (in a group only admins may unpin). The Baileys ' +
+      'engine has no acceptance signal and answers 200.',
+  })
   @ApiResponse({ status: 404, description: 'Message not found in the chat' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async unpinMessage(
@@ -598,7 +608,10 @@ export class MessageController {
   })
   @ApiResponse({
     status: 403,
-    description: 'The message was not sent by this account, or the engine refused the edit',
+    description:
+      'The engine refused the edit. The Baileys adapter refuses a message the account did not send; ' +
+      'whatsapp-web.js reads the refusal from the page, which also covers a message that is not text. ' +
+      'Past its own guard the Baileys engine has no acceptance signal and answers 200.',
   })
   @ApiResponse({ status: 404, description: 'Message not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })

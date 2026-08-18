@@ -39,12 +39,24 @@ export class ChannelController {
   @ApiOperation({ summary: 'Get a specific channel by ID' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'channelId', description: 'Channel ID' })
-  @ApiResponse({ status: 200, description: 'Channel details', type: ChannelDto })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Channel details. The whatsapp-web.js engine never fills `picture` or `createdAt`; the Baileys ' +
+      'engine reads both off the newsletter metadata.',
+    type: ChannelDto,
+  })
   @ApiResponse({
     status: 503,
     description: 'WhatsApp did not answer within the request budget — the operation may or may not have applied.',
   })
-  @ApiResponse({ status: 404, description: 'Channel not found' })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Channel not found. On the whatsapp-web.js engine this also covers a channel that exists but ' +
+      'the account does not follow, because the lookup scans the subscribed-channel list; the Baileys ' +
+      'engine resolves any channel by id.',
+  })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async findOne(@Param('sessionId') sessionId: string, @Param('channelId') channelId: string) {
     return this.channelService.getChannelById(sessionId, channelId);

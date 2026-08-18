@@ -19,7 +19,12 @@ export class ProfileController {
   @ApiBody({ type: SetProfileNameDto })
   @ApiResponse({ status: 200, description: 'Profile name updated', type: ProfileAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session is not started' })
-  @ApiResponse({ status: 403, description: 'The engine refused the name change' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'The whatsapp-web.js engine refused the name change. The Baileys engine has no acceptance ' +
+      'signal and answers 200 for a rename WhatsApp declined.',
+  })
   @ApiResponse({
     status: 503,
     description:
@@ -61,7 +66,12 @@ export class ProfileController {
     status: 400,
     description: 'Neither url nor base64 provided, base64 without mimetype, or session is not started',
   })
-  @ApiResponse({ status: 403, description: 'The engine refused the picture change' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'The whatsapp-web.js engine refused the picture change. The Baileys engine has no acceptance ' +
+      'signal and answers 200 for an upload WhatsApp declined.',
+  })
   @ApiResponse({ status: 413, description: 'Decoded base64 image exceeds the configured media cap' })
   @ApiResponse({
     status: 503,
@@ -81,7 +91,12 @@ export class ProfileController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({ status: 200, description: 'Profile picture removed', type: ProfileAckResponseDto })
   @ApiResponse({ status: 400, description: 'Session is not started' })
-  @ApiResponse({ status: 403, description: 'The engine refused the picture removal' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'The whatsapp-web.js engine refused the picture removal. The Baileys engine has no acceptance ' +
+      'signal and answers 200 for a removal WhatsApp declined.',
+  })
   @ApiResponse({
     status: 503,
     description:
