@@ -509,8 +509,8 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.messaging.subscribeToPresence(chatId);
   }
 
-  async sendSeen(chatId: string): Promise<boolean> {
-    return this.contacts.sendSeen(chatId);
+  async sendSeen(chatId: string, messageIds?: string[]): Promise<boolean> {
+    return this.contacts.sendSeen(chatId, messageIds);
   }
 
   async markUnread(chatId: string): Promise<boolean> {

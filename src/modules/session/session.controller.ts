@@ -469,7 +469,7 @@ export class SessionController {
     @Param('sessionId', ParseUUIDPipe) id: string,
     @Body() dto: MarkChatReadDto,
   ): Promise<{ success: boolean }> {
-    const success = await this.sessionService.sendSeen(id, dto.chatId);
+    const success = await this.sessionService.sendSeen(id, dto.chatId, dto.messageIds);
     return { success };
   }
 

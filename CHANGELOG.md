@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `POST /sessions/{sessionId}/chats/read` accepts an optional `messageIds` array (up to 100) naming exactly which messages to acknowledge. Baileys acknowledges individual messages, so without it only the newest message still held in memory got a receipt: a burst left its earlier messages unread, and a session restarted since the message arrived had nothing to acknowledge and answered `false` under a `200`. Omitting the field keeps the previous behaviour, and the whatsapp-web.js engine ignores it because its own receipt is chat-level.
+
 ### Fixed
 
 - The dashboard CSP nonce is substituted at every occurrence in the served document, not only the first. One placeholder exists today, so a second would have been left reading the literal text and its script refused by the browser.

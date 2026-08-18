@@ -889,6 +889,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.chats.getChats();
   }
 
+  // messageIds is dropped on purpose: whatsapp-web.js exposes only a chat-level sendSeen, which
+  // already marks every message in the chat.
   sendSeen(chatId: string): Promise<boolean> {
     return this.chats.sendSeen(chatId);
   }

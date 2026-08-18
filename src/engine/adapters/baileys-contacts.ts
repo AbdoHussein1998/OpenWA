@@ -318,16 +318,26 @@ export class BaileysContacts {
     return this.host.listChats();
   }
 
-  async sendSeen(chatId: string): Promise<boolean> {
+  async sendSeen(chatId: string, messageIds?: string[]): Promise<boolean> {
     this.host.ensureReady();
-    const last = this.host.lastMessage(chatId);
-    if (!last) {
+    // Baileys acknowledges individual messages, not chats. Caller-supplied IDs are what make this
+    // correct: the in-memory fallback below holds only the newest message, so a burst of three
+    // inbound messages left the first two permanently unread, and a session that restarted since
+    // the message arrived had nothing to acknowledge at all (returning a silent false under a 200).
+    // A caller that persists inbound message IDs has both, so it can name exactly what to mark.
+    const keys: WAMessageKey[] = messageIds?.length
+      ? messageIds.map(id => ({ remoteJid: this.host.toEngineJid(chatId), id, fromMe: false }))
+      : (() => {
+          const last = this.host.lastMessage(chatId);
+          return last ? [last.key] : [];
+        })();
+    if (keys.length === 0) {
       return false; // nothing known to mark read
     }
     // readMessages reaches fetchPrivacySettings, which destructures the query result and throws a
     // raw TypeError on an unanswered one — no Boom, so nothing downstream can classify it. Marking
     // a chat read is idempotent, so bounding it is safe: a repeat costs nothing.
-    await this.confirmed(this.sock().readMessages([last.key]), 'the read receipt');
+    await this.confirmed(this.sock().readMessages(keys), 'the read receipt');
     return true;
   }
 

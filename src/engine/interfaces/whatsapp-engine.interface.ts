@@ -1297,7 +1297,12 @@ export interface CatalogCapability {
 export interface ChatCapability {
   getChats(): Promise<ChatSummary[]>;
 
-  sendSeen(chatId: string): Promise<boolean>;
+  /**
+   * `messageIds` names exactly which messages to acknowledge. Engines that acknowledge per
+   * message (Baileys) need it to mark a burst, or anything at all after a restart; engines with a
+   * chat-level receipt (whatsapp-web.js) ignore it.
+   */
+  sendSeen(chatId: string, messageIds?: string[]): Promise<boolean>;
 
   markUnread(chatId: string): Promise<boolean>;
 
