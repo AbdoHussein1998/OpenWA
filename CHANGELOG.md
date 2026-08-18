@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- block and unblock accept a privacy id (`@lid`), the only id a contact without a known phone number has. The blocklist read answers those ids verbatim, so refusing them on the write left such a contact listed as blocked with no way to unblock it; ids that name no individual (group, newsletter, broadcast, free text) are still refused with `400`.
 - whatsapp-web.js `deleteChannel` classifies a dead browser page as the documented `503` plus an early death signal, like every other channel call; it reached the client directly, so a crash there answered an opaque `500` while the session still reported READY.
 - Baileys block/unblock answer `400` when WhatsApp cannot map the id between the phone-number and privacy-id dialects (no mapping either way, or an id that is neither). The library refuses those with a Boom the gateway could not classify, so a well-formed request got an opaque `500`; whatsapp-web.js already answered `400` for the same cause.
 - docs/06 states that editing another account's message answers `403`, not `500`. Both engines raise the refusal as `EngineRefusedError`, and the published contract already declared `403` with no `500` on that route.
