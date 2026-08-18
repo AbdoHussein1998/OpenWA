@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Meta-hosted ids (`@hosted`, `@hosted.lid`) normalize to the dialect they name. They parsed as unknown before, so a chat surfaced with kind `unknown` and the same id was then refused with a `400` on any write.
+
 ## [0.21.0] - 2026-08-18
 
 ### Fixed

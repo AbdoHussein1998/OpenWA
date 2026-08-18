@@ -219,6 +219,23 @@ describe('MessageService', () => {
 
       expect(messages.map(m => m.id)).toEqual(['m-dm']); // only the @c.us DM matches
     });
+
+    // `<n>@hosted` is the Meta-hosted dialect of the SAME phone account, which is why Baileys
+    // rewrites it to `<n>@s.whatsapp.net` on every inbound message. Rows therefore land under the
+    // plain dialect while a chat id we published may carry the hosted suffix, so a filter given the
+    // hosted form has to expand to the phone dialects or it returns none of the person's history.
+    it('expands a hosted id into the phone dialects, so it finds rows stored under @c.us', async () => {
+      const qb = makeFilteringQb();
+      (repository.createQueryBuilder as jest.Mock).mockReturnValue(qb);
+
+      const { messages } = await service.getMessages('sess-1', { from: '628999@hosted' });
+
+      expect(messages.map(m => m.id)).toEqual(['m-dm']);
+      expect(lidMappingStore.lidsForPhone).toHaveBeenCalledWith('628999');
+      const calls = qb.andWhere.mock.calls as Array<[string, { froms?: string[] }?]>;
+      const froms = calls.find(c => c[1]?.froms)?.[1]?.froms;
+      expect(froms).toEqual(expect.arrayContaining(['628999@hosted', '628999@c.us', '628999@s.whatsapp.net']));
+    });
   });
 
   // ── getMessages from-filter matches the group author ──────────────

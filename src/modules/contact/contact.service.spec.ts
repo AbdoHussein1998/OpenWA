@@ -128,6 +128,23 @@ describe('ContactService', () => {
     });
 
     /**
+     * A Meta-hosted id names the same account as its plain twin, so the write must reach the engine
+     * rather than be refused. It is neutralized on the way there: whatsapp-web.js knows no `@hosted`
+     * domain, so forwarding the suffix verbatim would fail inside the page instead of blocking anyone.
+     */
+    it('accepts a Meta-hosted id and hands the engine the neutral dialect', () => {
+      const blockContact = jest.fn();
+      const unblockContact = jest.fn();
+      const svc = makeService({ blockContact, unblockContact });
+
+      svc.blockContact('s1', '628123456789@hosted');
+      svc.unblockContact('s1', '12345678901234567890@hosted.lid');
+
+      expect(blockContact).toHaveBeenCalledWith('628123456789@c.us');
+      expect(unblockContact).toHaveBeenCalledWith('12345678901234567890@lid');
+    });
+
+    /**
      * A privacy-id contact has no phone number at all, and the blocklist READ answers those ids
      * verbatim (Baileys maps each blocked jid through toNeutralJid, which leaves an unresolved lid
      * as `<lid>@lid`; whatsapp-web.js returns the wid as-is). Refusing them here made the ids the
