@@ -12,11 +12,6 @@
 export default jest.fn();
 export const useMultiFileAuthState = jest.fn();
 export const fetchLatestBaileysVersion = jest.fn();
-export const Browsers = {
-  ubuntu: jest.fn((browser: string) => ['Ubuntu', browser, '22.04.4']),
-  macOS: jest.fn((browser: string) => ['Mac OS', browser, '14.4.1']),
-  windows: jest.fn((browser: string) => ['Windows', browser, '10.0.22631']),
-};
 export const getContentType = jest.fn();
 export const DisconnectReason = { loggedOut: 401 };
 

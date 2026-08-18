@@ -5,13 +5,25 @@ import type { LoggerService } from '../../common/services/logger.service';
 
 export type WAVersion = [number, number, number];
 
-/** Default modern fallback version when all remote endpoints and local caches are unavailable */
+/**
+ * Default modern fallback version when all remote endpoints and local caches are unavailable.
+ * WhatsApp Web protocol versions follow semantic versioning [major, minor, client_revision].
+ * Refresh during major version bumps or when WhatsApp deprecates older client revisions.
+ */
 export const DEFAULT_FALLBACK_WA_VERSION: WAVersion = [2, 3000, 1045340097];
+
+/** Default timeout for remote version resolution network calls (5 seconds) */
+export const VERSION_RESOLVER_TIMEOUT_MS = 5000;
 
 export interface BaileysVersionResolverOptions {
   authDir: string;
   sessionId: string;
   logger: Pick<LoggerService, 'log' | 'warn'>;
+  timeoutMs?: number;
+}
+
+export interface ResolveOptions {
+  dispatcher?: unknown;
 }
 
 /**
@@ -22,27 +34,29 @@ export interface BaileysVersionResolverOptions {
  * 2. Direct WhatsApp Web service worker endpoint (fetchLatestWaWebVersion -> web.whatsapp.com/sw.js)
  * 3. Upstream repository Defaults/index.ts (fetchLatestBaileysVersion -> GitHub raw)
  * 4. Local disk cache (last_known_wa_version.json in authDir)
- * 5. Safe modern fallback version
+ * 5. Safe modern fallback version (DEFAULT_FALLBACK_WA_VERSION)
  */
 export class BaileysVersionResolver {
   private readonly cacheFilePath: string;
+  private readonly timeoutMs: number;
 
   constructor(private readonly options: BaileysVersionResolverOptions) {
     this.cacheFilePath = path.join(this.options.authDir, 'last_known_wa_version.json');
+    this.timeoutMs = options.timeoutMs ?? VERSION_RESOLVER_TIMEOUT_MS;
   }
 
-  async resolve(b: typeof BaileysLib): Promise<WAVersion> {
+  async resolve(b: typeof BaileysLib, resolveOptions: ResolveOptions = {}): Promise<WAVersion> {
     const envVersion = this.resolveFromEnv();
     if (envVersion) {
       return envVersion;
     }
 
-    const waWebVersion = await this.resolveFromWaWeb(b);
+    const waWebVersion = await this.resolveFromWaWeb(b, resolveOptions);
     if (waWebVersion) {
       return waWebVersion;
     }
 
-    const baileysVersion = await this.resolveFromBaileys(b);
+    const baileysVersion = await this.resolveFromBaileys(b, resolveOptions);
     if (baileysVersion) {
       return baileysVersion;
     }
@@ -52,6 +66,10 @@ export class BaileysVersionResolver {
       return cachedVersion;
     }
 
+    this.options.logger.warn(
+      `All remote version endpoints and disk cache unavailable; using fallback WhatsApp Web version: ${DEFAULT_FALLBACK_WA_VERSION.join('.')}`,
+      { sessionId: this.options.sessionId },
+    );
     return DEFAULT_FALLBACK_WA_VERSION;
   }
 
@@ -61,32 +79,51 @@ export class BaileysVersionResolver {
       return null;
     }
 
-    const parts = raw.split(/[.,]/).map(p => parseInt(p.trim(), 10));
-    if (parts.length === 3 && parts.every(n => !isNaN(n) && n >= 0)) {
-      this.options.logger.log(`Using BAILEYS_WA_VERSION override: ${parts.join('.')}`, {
-        sessionId: this.options.sessionId,
-      });
-      return parts as WAVersion;
+    const match = raw.match(/^(\d+)[.,](\d+)[.,](\d+)$/);
+    if (match) {
+      const major = parseInt(match[1], 10);
+      const minor = parseInt(match[2], 10);
+      const patch = parseInt(match[3], 10);
+
+      if (major === 2 && minor >= 2000 && patch >= 0) {
+        const version: WAVersion = [major, minor, patch];
+        this.options.logger.log(`Using BAILEYS_WA_VERSION override: ${version.join('.')}`, {
+          sessionId: this.options.sessionId,
+        });
+        return version;
+      }
     }
 
-    this.options.logger.warn(`Invalid BAILEYS_WA_VERSION format "${raw}", expected "major.minor.patch"`, {
-      sessionId: this.options.sessionId,
-    });
+    this.options.logger.warn(
+      `Invalid BAILEYS_WA_VERSION "${raw}", expected format "2.3000.xxxxxxxxx" (e.g. "2.3000.1045340097")`,
+      { sessionId: this.options.sessionId },
+    );
     return null;
   }
 
-  private async resolveFromWaWeb(b: typeof BaileysLib): Promise<WAVersion | null> {
+  private async resolveFromWaWeb(b: typeof BaileysLib, resolveOptions: ResolveOptions): Promise<WAVersion | null> {
     if (typeof b.fetchLatestWaWebVersion !== 'function') {
       return null;
     }
 
     try {
-      const result = await b.fetchLatestWaWebVersion();
-      if (this.isValidVersion(result?.version)) {
-        const version = result.version as WAVersion;
+      const fetchOptions = {
+        ...(resolveOptions.dispatcher ? { dispatcher: resolveOptions.dispatcher } : {}),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      } as unknown as RequestInit;
+
+      const result = await b.fetchLatestWaWebVersion(fetchOptions);
+
+      if (result?.isLatest === true && this.isValidVersion(result?.version)) {
+        const version = result.version;
         this.saveCachedVersion(version);
         return version;
       }
+
+      this.options.logger.warn(
+        `fetchLatestWaWebVersion returned isLatest=false (${JSON.stringify(result?.version)}); advancing to next tier`,
+        { sessionId: this.options.sessionId },
+      );
     } catch (err) {
       this.options.logger.warn(`fetchLatestWaWebVersion failed: ${err instanceof Error ? err.message : String(err)}`, {
         sessionId: this.options.sessionId,
@@ -96,22 +133,43 @@ export class BaileysVersionResolver {
     return null;
   }
 
-  private async resolveFromBaileys(b: typeof BaileysLib): Promise<WAVersion | null> {
+  private async resolveFromBaileys(b: typeof BaileysLib, resolveOptions: ResolveOptions): Promise<WAVersion | null> {
     if (typeof b.fetchLatestBaileysVersion !== 'function') {
       return null;
     }
 
     try {
-      const result = await b.fetchLatestBaileysVersion();
-      if (this.isValidVersion(result?.version)) {
-        const version = result.version as WAVersion;
+      // Baileys' fetchLatestBaileysVersion does not forward signal, so race it with a timeout
+      let timeoutId: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('fetchLatestBaileysVersion timeout')), this.timeoutMs);
+      });
+
+      const fetchOptions = (resolveOptions.dispatcher
+        ? { dispatcher: resolveOptions.dispatcher }
+        : undefined) as unknown as RequestInit;
+
+      const fetchPromise = b.fetchLatestBaileysVersion(fetchOptions);
+
+      const result = await Promise.race([fetchPromise, timeoutPromise]).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+      });
+
+      if (result?.isLatest === true && this.isValidVersion(result?.version)) {
+        const version = result.version;
         this.saveCachedVersion(version);
         return version;
       }
+
+      this.options.logger.warn(
+        `fetchLatestBaileysVersion returned isLatest=false (${JSON.stringify(result?.version)}); advancing to next tier`,
+        { sessionId: this.options.sessionId },
+      );
     } catch (err) {
-      this.options.logger.warn(`fetchLatestBaileysVersion failed: ${err instanceof Error ? err.message : String(err)}`, {
-        sessionId: this.options.sessionId,
-      });
+      this.options.logger.warn(
+        `fetchLatestBaileysVersion failed: ${err instanceof Error ? err.message : String(err)}`,
+        { sessionId: this.options.sessionId },
+      );
     }
 
     return null;
@@ -124,12 +182,12 @@ export class BaileysVersionResolver {
       }
 
       const content = fs.readFileSync(this.cacheFilePath, 'utf8');
-      const parsed = JSON.parse(content);
+      const parsed: unknown = JSON.parse(content);
       if (this.isValidVersion(parsed)) {
         this.options.logger.warn(`Using cached WhatsApp Web version from disk: ${parsed.join('.')}`, {
           sessionId: this.options.sessionId,
         });
-        return parsed as WAVersion;
+        return parsed;
       }
     } catch {
       // Non-blocking disk read fallback
@@ -151,6 +209,10 @@ export class BaileysVersionResolver {
   }
 
   private isValidVersion(v: unknown): v is WAVersion {
-    return Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && !isNaN(n) && n >= 0);
+    return (
+      Array.isArray(v) &&
+      v.length === 3 &&
+      v.every((n: unknown) => typeof n === 'number' && Number.isInteger(n) && n >= 0)
+    );
   }
 }

@@ -189,7 +189,7 @@ export class BaileysLifecycle {
     }
     const b = await this.loadLib();
     const { state, saveCreds } = await b.useMultiFileAuthState(this.host.authPath);
-    const version = await this.versionResolver.resolve(b);
+    const version = await this.versionResolver.resolve(b, { dispatcher: proxyAgent });
     // BaileysLogger matches ILogger exactly; cast needed because the module resolves the type
     // through a deep import path that TypeScript does not auto-unify here. Shared by the key
     // store wrapper below and the socket itself, rather than constructing two instances.
@@ -790,5 +790,4 @@ export class BaileysLifecycle {
     this.status = status;
     this.host.getOnStateChanged()?.(status);
   }
-
 }

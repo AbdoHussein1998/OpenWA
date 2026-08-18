@@ -612,7 +612,7 @@ describe('BaileysAdapter lifecycle & status', () => {
     expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
   });
 
-    // I5 — first-connect error surfacing
+  // I5 — first-connect error surfacing
   it('I5: first connect failure → initialize() rejects, status FAILED, onError fired', async () => {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const baileys = jest.requireMock('@whiskeysockets/baileys') as {
