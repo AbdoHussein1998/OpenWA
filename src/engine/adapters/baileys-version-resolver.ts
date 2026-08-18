@@ -143,6 +143,9 @@ export class BaileysVersionResolver {
       let timeoutId: NodeJS.Timeout | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error('fetchLatestBaileysVersion timeout')), this.timeoutMs);
+        // Same shape as withQueryDeadline: an un-unref'd timer would hold the loop open for the
+        // rest of its window if the process tried to exit mid-resolve.
+        timeoutId.unref?.();
       });
 
       const fetchOptions = (resolveOptions.dispatcher
@@ -150,6 +153,10 @@ export class BaileysVersionResolver {
         : undefined) as unknown as RequestInit;
 
       const fetchPromise = b.fetchLatestBaileysVersion(fetchOptions);
+      // Racing abandons the loser without cancelling it. Today that call cannot reject (it catches
+      // everything and resolves the frozen stub), so this is defence against the library changing,
+      // not a live bug: an abandoned rejection would otherwise surface as an unhandled rejection.
+      fetchPromise.catch(() => undefined);
 
       const result = await Promise.race([fetchPromise, timeoutPromise]).finally(() => {
         if (timeoutId) clearTimeout(timeoutId);
