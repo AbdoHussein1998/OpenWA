@@ -74,7 +74,7 @@
   background: rgba(217, 119, 6, 0.12);
 }
 .plugins-page .type-queue .plugin-icon-wrapper svg {
-  color: #d97706;
+  color: var(--warning-text);
 }
 .plugins-page .type-auth .plugin-icon-wrapper {
   background: rgba(147, 51, 234, 0.12);
@@ -110,7 +110,7 @@
   padding: 0.0625rem 0.4375rem;
   font-size: 0.6875rem;
   font-weight: 600;
-  color: var(--primary, #25d366);
+  color: var(--primary-text, #17813e);
   background: color-mix(in srgb, var(--primary, #25d366) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--primary, #25d366) 35%, transparent);
   border-radius: 999px;
@@ -132,7 +132,7 @@
   margin-left: 6px;
   font-size: 0.6875rem;
   font-weight: 700;
-  color: var(--primary, #25d366);
+  color: var(--primary-text, #17813e);
   background: color-mix(in srgb, var(--primary, #25d366) 18%, transparent);
   border-radius: 999px;
 }
@@ -234,7 +234,7 @@
 }
 
 .plugins-page .plugin-error-text {
-  color: #ef4444;
+  color: var(--error-text);
   font-size: 0.75rem;
 }
 
@@ -276,7 +276,7 @@
 .plugins-page .btn-toggle.disable {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #ef4444;
+  color: var(--error-text);
 }
 
 .plugins-page .btn-toggle.disable:hover {
@@ -430,7 +430,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-light);
-  color: var(--error);
+  color: var(--error-text);
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -458,7 +458,7 @@
 
 .plugins-page .config-form .config-array-add:hover {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 /* Sandboxed-iframe config editor (B-full). */
@@ -481,7 +481,7 @@
 .plugins-page .config-ui-error {
   padding: 1rem;
   text-align: center;
-  color: var(--error);
+  color: var(--error-text);
 }
 
 .plugins-page .config-form .form-group small {
@@ -496,7 +496,7 @@
    caption, which lives in .config-array and so never matched the narrower selector. A required
    array showed its asterisk in body text instead of the error colour. */
 .plugins-page .config-form .required-mark {
-  color: var(--error);
+  color: var(--error-text);
 }
 
 .plugins-page .toggle-group {
@@ -724,7 +724,7 @@
 }
 
 .plugins-page .btn-action-danger:hover svg {
-  color: #ef4444;
+  color: var(--error-text);
 }
 
 /* Install modal */
@@ -750,7 +750,7 @@
   display: flex;
   gap: 0.4rem;
   align-items: flex-start;
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .plugins-page .install-hint-warning svg {
@@ -765,7 +765,7 @@
   padding: 0;
   background: none;
   border: none;
-  color: var(--primary);
+  color: var(--primary-text);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -995,7 +995,7 @@
 
 .plugins-page .catalog-error {
   flex-wrap: wrap;
-  color: var(--error);
+  color: var(--error-text);
 }
 
 .plugins-page .catalog-search {
@@ -1066,7 +1066,7 @@
 }
 
 .plugins-page .catalog-badge.update {
-  color: var(--primary, #25d366);
+  color: var(--primary-text, #17813e);
 }
 
 .plugins-page .catalog-row-action {

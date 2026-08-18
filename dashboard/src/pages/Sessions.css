@@ -151,7 +151,7 @@
 }
 
 .sessions-page .info-value.error-text {
-  color: var(--error);
+  color: var(--error-text);
   font-weight: 500;
   max-width: 60%;
   text-align: right;
@@ -164,7 +164,7 @@
    not the gateway failing. --warning is :root-only and inherited by both themes, the same way
    --error is, so it needs no dark-mode override. */
 .sessions-page .info-value.restriction-text {
-  color: var(--warning);
+  color: var(--warning-text);
   font-weight: 500;
   max-width: 60%;
   text-align: right;
@@ -200,7 +200,7 @@
 }
 
 .sessions-page .btn-action.danger {
-  color: var(--error);
+  color: var(--error-text);
 }
 
 .sessions-page .btn-action.danger:hover {
@@ -401,7 +401,7 @@
 .sessions-page .input-error {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;
-  color: var(--error);
+  color: var(--error-text);
   font-weight: 500;
 }
 
@@ -490,7 +490,7 @@
 
 .sessions-page .status-badge.connected {
   background: rgba(34, 197, 94, 0.1);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .sessions-page .status-badge.disconnected {
@@ -500,7 +500,7 @@
 
 .sessions-page .status-badge.connecting {
   background: rgba(234, 179, 8, 0.1);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .sessions-page .status-badge::before {
@@ -571,7 +571,7 @@
 .sessions-page .btn-close:hover {
   background: rgba(239, 68, 68, 0.12);
   border-color: rgba(239, 68, 68, 0.3);
-  color: var(--error);
+  color: var(--error-text);
 }
 
 .sessions-page .btn-close:hover svg {
@@ -650,7 +650,7 @@
 .sessions-page .status-pill.connecting,
 .sessions-page .status-pill.authenticating {
   background: rgba(234, 179, 8, 0.1);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .sessions-page .status-pill.qr_ready {
@@ -663,18 +663,18 @@
    from the in-progress amber, since the two must not read alike. */
 .sessions-page .status-pill.action_required {
   background: rgba(245, 158, 11, 0.22);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .sessions-page .status-pill.ready {
   background: rgba(34, 197, 94, 0.1);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .sessions-page .status-pill.disconnected,
 .sessions-page .status-pill.failed {
   background: rgba(239, 68, 68, 0.1);
-  color: var(--error);
+  color: var(--error-text);
 }
 
 /* Small Button for QR Placeholder */
@@ -734,7 +734,7 @@
   border-radius: 8px;
   font-size: 0.875rem;
   text-align: start;
-  color: var(--error);
+  color: var(--error-text);
   background: rgb(239 68 68 / 0.12);
 }
 
@@ -769,7 +769,7 @@
   gap: 0.75rem;
   font-size: 2rem;
   font-weight: 700;
-  color: var(--primary);
+  color: var(--primary-text);
   background: var(--bg-light);
   border: 2px dashed var(--border);
   padding: 1rem 2rem;

@@ -275,7 +275,7 @@
   border: 1px solid var(--primary);
   border-radius: 999px;
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -320,7 +320,7 @@
 }
 
 .templates-page .placeholder-list label > span {
-  color: var(--primary);
+  color: var(--primary-text);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
@@ -388,7 +388,7 @@
 .templates-page .icon-btn.danger:hover {
   border-color: rgba(239, 68, 68, 0.3);
   background: rgba(239, 68, 68, 0.12);
-  color: var(--error);
+  color: var(--error-text);
 }
 
 @media (max-width: 1280px) {
