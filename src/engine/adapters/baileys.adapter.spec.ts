@@ -2593,6 +2593,20 @@ describe('BaileysAdapter store-backed ops', () => {
     );
   });
 
+  // The one requireStored path that had no chat check, while whatsapp-web.js resolves the quote by
+  // fetching from the named chat and 404s when the id is not in it.
+  it('replyToMessage throws MessageNotFoundError when the quoted key belongs to another chat', async () => {
+    fakeStore.getMessage.mockResolvedValue({
+      ...stored,
+      key: { ...stored.key, remoteJid: '628999@s.whatsapp.net' },
+    });
+    const adapter = await ready();
+    await expect(adapter.replyToMessage('628111@s.whatsapp.net', 'TARGET', 'my reply')).rejects.toBeInstanceOf(
+      MessageNotFoundError,
+    );
+    expect(fakeSock.sendMessage).not.toHaveBeenCalled();
+  });
+
   it('forwardMessage forwards the stored message', async () => {
     fakeStore.getMessage.mockResolvedValue(stored);
     const adapter = await ready();

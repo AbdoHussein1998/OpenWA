@@ -431,6 +431,13 @@ export class BaileysMessaging {
   async replyToMessage(chatId: string, quotedMsgId: string, text: string): Promise<MessageResult> {
     this.host.ensureReady();
     const quoted = await this.requireStored(quotedMsgId);
+    // The one requireStored path that had no chat check. whatsapp-web.js resolves the quote by
+    // fetching from the named chat and 404s when the id is not in it, so the same request replied
+    // across conversations here and was refused there. The library encodes the foreign chat into
+    // contextInfo rather than rejecting it (Utils/messages.js), so the adapter is the only guard.
+    // NOT applied to quoteOption: cross-chat quoting on the send-* routes is deliberate and
+    // published in docs/06.
+    this.assertStoredInChat(quoted, chatId, quotedMsgId);
     return this.sendContent(chatId, { text }, { quoted });
   }
 
