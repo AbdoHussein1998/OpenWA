@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `isReadOnly` on a group answers for the calling account rather than repeating the group setting, so an admin of an announce-only group is no longer told they cannot post.
+- `isMyContact` reflects whether the contact is actually saved, instead of reporting `true` for every contact the Baileys engine has seen.
+- Listing membership requests for an id that is not a group is refused instead of answering an empty list, which read as a group with nothing pending.
 - Three Baileys operations answer the refusal they were hiding: leaving a group and unsubscribing from a channel map WhatsApp's rejection like their sibling writes already did, and labelling a channel is refused outright instead of reporting success while nothing was labelled.
 - A message's delivery status is announced, not only coloured. `delivered` and `read` render the same double check and differed only by a blue that measured 2.13:1 on the outgoing bubble, so the distinction reached neither screen readers nor colour-blind readers.
 - Text rendered in a brand or status colour meets AA on the light theme. As foregrounds they measured 1.98:1 (brand), 2.15:1 (warning), 2.28:1 (success) and 3.76:1 (error); darkened `-text` twins now carry text and icons while the originals stay the fill colour. Each clears 4.5:1 against the tint its own badges paint behind it, not just against white. Dark theme is unchanged.

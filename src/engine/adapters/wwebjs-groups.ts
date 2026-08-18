@@ -520,7 +520,10 @@ export class WwebjsGroups {
   }
 
   async getGroupMembershipRequests(groupId: string): Promise<GroupMembershipRequest[]> {
-    this.host.ensureReady();
+    // Resolved first, like every other group operation in this file. Without it an unknown id or a
+    // non-group jid answered 200 with an empty list, which reads as "this group has no pending
+    // requests" rather than "there is no such group"; Baileys answers the refusal.
+    await this.requireGroupChat(groupId);
     try {
       const raw = await this.client().getGroupMembershipRequests(groupId);
       // Raw page-context store objects: wids can arrive as {_serialized} OR {$1} (the #747

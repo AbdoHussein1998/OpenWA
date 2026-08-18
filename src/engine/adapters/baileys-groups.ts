@@ -151,7 +151,7 @@ export class BaileysGroups {
         this.queryBudgetMs,
         'WhatsApp did not answer the group metadata query in time',
       );
-      return mapBaileysGroupInfo(metadata, jid => this.host.toNeutralJid(jid));
+      return mapBaileysGroupInfo(metadata, jid => this.host.toNeutralJid(jid), this.host.normalizedSelfJid());
     } catch (err) {
       // Only a SERVER refusal may become null (→ service 404): the group does not exist or the
       // account cannot see it. Anything else — a dropped socket, a timeout, a protocol error —
