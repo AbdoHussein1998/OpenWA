@@ -399,7 +399,8 @@
   margin-bottom: 1.25rem;
 }
 
-.plugins-page .config-form .config-array > label {
+.plugins-page .config-form .config-array > label,
+.plugins-page .config-form .config-array > .config-array-label {
   display: block;
   font-size: 0.875rem;
   font-weight: 600;

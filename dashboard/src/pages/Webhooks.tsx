@@ -406,10 +406,13 @@ export function Webhooks() {
             />
           )}
           <div className="toggle-group">
-            <span className="toggle-label">{t('common.status')}</span>
+            <span className="toggle-label" id="webhook-active-label">
+              {t('common.status')}
+            </span>
             <label className="toggle-switch">
               <input
                 type="checkbox"
+                aria-labelledby="webhook-active-label"
                 checked={editWebhook.active}
                 onChange={e => setEditWebhook({ ...editWebhook, active: e.target.checked })}
               />

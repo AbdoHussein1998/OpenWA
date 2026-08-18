@@ -674,10 +674,13 @@ export function Sessions() {
             {sessionConfig && (
               <div className="detail-item detail-item-toggle">
                 <div className="detail-toggle-row">
-                  <span className="detail-label">{t('sessions.details.autoRejectCalls')}</span>
+                  <span className="detail-label" id="auto-reject-calls-label">
+                    {t('sessions.details.autoRejectCalls')}
+                  </span>
                   <label className="toggle-switch">
                     <input
                       type="checkbox"
+                      aria-labelledby="auto-reject-calls-label"
                       checked={sessionConfig.autoRejectCalls}
                       disabled={!canWrite || savingConfig}
                       onChange={e => void handleAutoRejectToggle(e.target.checked)}

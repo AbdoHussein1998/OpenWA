@@ -197,12 +197,13 @@ export function Infrastructure() {
             <>
               <div className="toggle-row toggle-row-spaced">
                 <div className="toggle-info">
-                  <span>{t('infrastructure.database.useBuiltIn')}</span>
+                  <span id="toggle-db-builtin">{t('infrastructure.database.useBuiltIn')}</span>
                   <small>{t('infrastructure.database.builtInDesc')}</small>
                 </div>
                 <label className="toggle-switch">
                   <input
                     type="checkbox"
+                    aria-labelledby="toggle-db-builtin"
                     checked={configForm.dbConfig.builtIn}
                     onChange={e => configForm.updateDbConfig('builtIn', e.target.checked)}
                   />
@@ -289,12 +290,13 @@ export function Infrastructure() {
                   </div>
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <span>{t('infrastructure.database.ssl')}</span>
+                      <span id="toggle-db-ssl">{t('infrastructure.database.ssl')}</span>
                       <small>{t('infrastructure.database.sslDesc')}</small>
                     </div>
                     <label className="toggle-switch">
                       <input
                         type="checkbox"
+                        aria-labelledby="toggle-db-ssl"
                         checked={configForm.dbConfig.sslEnabled}
                         onChange={e => configForm.updateDbConfig('sslEnabled', e.target.checked)}
                       />
@@ -304,12 +306,13 @@ export function Infrastructure() {
                   {configForm.dbConfig.sslEnabled && (
                     <div className="toggle-row">
                       <div className="toggle-info">
-                        <span>{t('infrastructure.database.sslRejectUnauthorized')}</span>
+                        <span id="toggle-db-ssl-reject">{t('infrastructure.database.sslRejectUnauthorized')}</span>
                         <small>{t('infrastructure.database.sslRejectUnauthorizedDesc')}</small>
                       </div>
                       <label className="toggle-switch">
                         <input
                           type="checkbox"
+                          aria-labelledby="toggle-db-ssl-reject"
                           checked={configForm.dbConfig.sslRejectUnauthorized}
                           onChange={e => configForm.updateDbConfig('sslRejectUnauthorized', e.target.checked)}
                         />
@@ -420,12 +423,13 @@ export function Infrastructure() {
             <div className="config-form">
               <div className="toggle-row">
                 <div className="toggle-info">
-                  <span>{t('infrastructure.engine.headless')}</span>
+                  <span id="toggle-engine-headless">{t('infrastructure.engine.headless')}</span>
                   <small>{t('infrastructure.engine.headlessDesc')}</small>
                 </div>
                 <label className="toggle-switch">
                   <input
                     type="checkbox"
+                    aria-labelledby="toggle-engine-headless"
                     checked={configForm.engineConfig.headless}
                     onChange={e => configForm.updateEngineConfig('headless', e.target.checked)}
                   />
@@ -490,12 +494,13 @@ export function Infrastructure() {
             }}
           >
             <div className="toggle-info">
-              <span>{t('infrastructure.redis.enable')}</span>
+              <span id="toggle-redis-enable">{t('infrastructure.redis.enable')}</span>
               <small>{t('infrastructure.redis.enableDesc')}</small>
             </div>
             <label className="toggle-switch">
               <input
                 type="checkbox"
+                aria-labelledby="toggle-redis-enable"
                 checked={configForm.redisEnabled}
                 onChange={e => configForm.setRedisEnabled(e.target.checked)}
               />
@@ -507,12 +512,13 @@ export function Infrastructure() {
             <>
               <div className="toggle-row toggle-row-spaced-bottom">
                 <div className="toggle-info">
-                  <span>{t('infrastructure.redis.useBuiltIn')}</span>
+                  <span id="toggle-redis-builtin">{t('infrastructure.redis.useBuiltIn')}</span>
                   <small>{t('infrastructure.redis.builtInDesc')}</small>
                 </div>
                 <label className="toggle-switch">
                   <input
                     type="checkbox"
+                    aria-labelledby="toggle-redis-builtin"
                     checked={configForm.redisConfig.builtIn}
                     onChange={e => configForm.updateRedisConfig('builtIn', e.target.checked)}
                   />
@@ -557,12 +563,13 @@ export function Infrastructure() {
 
               <div className="toggle-row queue-toggle-row">
                 <div className="toggle-info">
-                  <span>{t('infrastructure.redis.queueTitle')}</span>
+                  <span id="toggle-queue-enable">{t('infrastructure.redis.queueTitle')}</span>
                   <small>{t('infrastructure.redis.queueDesc')}</small>
                 </div>
                 <label className="toggle-switch">
                   <input
                     type="checkbox"
+                    aria-labelledby="toggle-queue-enable"
                     checked={configForm.queueEnabled}
                     onChange={e => configForm.setQueueEnabled(e.target.checked)}
                   />
@@ -697,12 +704,13 @@ export function Infrastructure() {
               <>
                 <div className="toggle-row toggle-row-spaced">
                   <div className="toggle-info">
-                    <span>{t('infrastructure.storage.useBuiltIn')}</span>
+                    <span id="toggle-storage-builtin">{t('infrastructure.storage.useBuiltIn')}</span>
                     <small>{t('infrastructure.storage.builtInDesc')}</small>
                   </div>
                   <label className="toggle-switch">
                     <input
                       type="checkbox"
+                      aria-labelledby="toggle-storage-builtin"
                       checked={configForm.storageConfig.builtIn}
                       onChange={e => configForm.updateStorageConfig('builtIn', e.target.checked)}
                     />

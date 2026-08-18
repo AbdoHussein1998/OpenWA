@@ -460,15 +460,23 @@ export function MessageTester() {
           {messageType !== 'bulk' && (
             <>
               <div className="form-group">
-                <label>{t('messageTester.recipientType')}</label>
-                <div className="toggle-group">
+                {/* A caption, not a label: it names the group, and there is no single control to bind
+                    it to. The buttons are exclusive choices, so each reports its own pressed state. */}
+                <span className="group-label" id="recipient-type-label">
+                  {t('messageTester.recipientType')}
+                </span>
+                <div className="toggle-group" role="group" aria-labelledby="recipient-type-label">
                   <button
+                    type="button"
+                    aria-pressed={recipientType === 'personal'}
                     className={recipientType === 'personal' ? 'active' : ''}
                     onClick={() => setRecipientType('personal')}
                   >
                     {t('messageTester.personal')}
                   </button>
                   <button
+                    type="button"
+                    aria-pressed={recipientType === 'group'}
                     className={recipientType === 'group' ? 'active' : ''}
                     onClick={() => setRecipientType('group')}
                   >
@@ -517,11 +525,15 @@ export function MessageTester() {
           )}
 
           <div className="form-group">
-            <label>{t('messageTester.messageType')}</label>
-            <div className="toggle-group toggle-group-wrap">
+            <span className="group-label" id="message-type-label">
+              {t('messageTester.messageType')}
+            </span>
+            <div className="toggle-group toggle-group-wrap" role="group" aria-labelledby="message-type-label">
               {messageTypes.map(type => (
                 <button
                   key={type}
+                  type="button"
+                  aria-pressed={messageType === type}
                   className={messageType === type ? 'active' : ''}
                   onClick={() => {
                     // A picked file's mimetype is bound to the category active at pick time, so dropping the

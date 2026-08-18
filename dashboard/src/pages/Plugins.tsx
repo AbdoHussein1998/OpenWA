@@ -70,11 +70,21 @@ function ConfigField({
   // first checkbox. useId is stable across re-renders and unique per instance.
   const fieldId = React.useId();
   const desc = field.description ? <small>{field.description}</small> : null;
+  // Bound to the control it names. The boolean branch below builds its own pair because its caption
+  // and its checkbox sit in different containers.
   const labelEl = (
-    <label>
+    <label htmlFor={fieldId}>
       {label}
       {field.required && <span className="required-mark"> *</span>}
     </label>
+  );
+  // An array renders one control PER ROW, so there is no single input for a label to point at; a
+  // `<label>` here would be an orphan that names nothing. It is a caption, so it is marked up as one.
+  const captionEl = (
+    <span className="config-array-label">
+      {label}
+      {field.required && <span className="required-mark"> *</span>}
+    </span>
   );
 
   if (field.type === 'boolean') {
@@ -98,6 +108,7 @@ function ConfigField({
       <div className="form-group">
         {labelEl}
         <select
+          id={fieldId}
           value={String(value ?? '')}
           // Restore the option's original type (e.g. a number/boolean enum), not the raw string value.
           onChange={e => onChange(options.find(o => String(o) === e.target.value) ?? e.target.value)}
@@ -141,14 +152,14 @@ function ConfigField({
       // that would stringify the array to "[object Object]"/"" and corrupt it).
       return (
         <div className="config-array">
-          {labelEl}
+          {captionEl}
           {desc}
         </div>
       );
     }
     return (
       <div className="config-array">
-        {labelEl}
+        {captionEl}
         {desc}
         {rows.map((row, i) => (
           <div className="config-array-row" key={i}>
@@ -183,6 +194,7 @@ function ConfigField({
       <div className="form-group">
         {labelEl}
         <textarea
+          id={fieldId}
           value={value === undefined || value === null ? '' : String(value)}
           placeholder={field.default !== undefined ? String(field.default) : undefined}
           required={field.required}
@@ -201,6 +213,7 @@ function ConfigField({
     <div className="form-group">
       {labelEl}
       <input
+        id={fieldId}
         type={inputType}
         value={value === undefined || value === null ? '' : String(value)}
         placeholder={field.default !== undefined ? String(field.default) : undefined}
