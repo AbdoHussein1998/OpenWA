@@ -81,12 +81,31 @@ const KNOWN = JSON.parse(readFileSync(join(__dirname, '__fixtures__/known-migrat
   main: string[];
 };
 
+/** Statement text to how many times it appears. The chain emits some statements more than once. */
+const tally = (statements: string[]): Map<string, number> =>
+  statements.reduce((counts, sql) => counts.set(sql, (counts.get(sql) ?? 0) + 1), new Map<string, number>());
+
+/**
+ * Compared as a MULTISET, not a set. 32 of the 95 data statements are repeats (the rebuild cycle
+ * drops and recreates the same index on more than one table pass), so a set comparison would pass a
+ * change that only alters HOW MANY times a statement is emitted: one rebuild pass appearing or
+ * disappearing leaves the distinct-statement list identical. Counting catches that.
+ */
 const expectDriftMatchesSnapshot = (actual: string[], known: string[]): void => {
   // A snapshot that lost its contents would make any comparison vacuous, so require it to hold the
   // drift we know is there before comparing against it.
   expect(known.length).toBeGreaterThan(0);
-  const unexpected = actual.filter(sql => !known.includes(sql));
-  const missing = known.filter(sql => !actual.includes(sql));
+  const actualCounts = tally(actual);
+  const knownCounts = tally(known);
+  const describe = (sql: string, from: number, to: number): string => `${from} -> ${to}  ${sql}`;
+  const unexpected: string[] = [];
+  const missing: string[] = [];
+  for (const sql of new Set([...actualCounts.keys(), ...knownCounts.keys()])) {
+    const got = actualCounts.get(sql) ?? 0;
+    const want = knownCounts.get(sql) ?? 0;
+    if (got > want) unexpected.push(describe(sql, want, got));
+    if (got < want) missing.push(describe(sql, want, got));
+  }
   expect({ unexpected, missing }).toEqual({ unexpected: [], missing: [] });
 };
 
