@@ -147,7 +147,8 @@
       "orLabel": "או",
       "post": "פרסם",
       "posted": "הסטטוס פורסם",
-      "postFailed": "לא ניתן היה לפרסם את הסטטוס"
+      "postFailed": "לא ניתן היה לפרסם את הסטטוס",
+      "imageFile": "תמונת סטטוס"
     },
     "channels": {
       "notSupported": "ערוצים אינם נתמכים במנוע Baileys.",
@@ -422,7 +423,10 @@
         "isNot": "אינו",
         "contains": "מכיל",
         "equals": "שווה ל"
-      }
+      },
+      "fieldLabel": "שדה סינון",
+      "operatorLabel": "אופרטור סינון",
+      "valueLabel": "ערך סינון"
     },
     "columns": {
       "url": "כתובת URL",
@@ -503,7 +507,8 @@
       "deleted": "התבנית נמחקה בהצלחה",
       "deleteFailed": "מחיקת התבנית נכשלה: {{message}}",
       "copied": "שם התבנית הועתק"
-    }
+    },
+    "sessionSelect": "Session"
   },
   "apiKeys": {
     "title": "מפתחות API",

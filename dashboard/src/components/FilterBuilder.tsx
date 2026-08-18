@@ -173,7 +173,12 @@ export function FilterBuilder({ filters, onChange, chats }: FilterBuilderProps) 
         const def = descriptorFor(condition.field);
         return (
           <div key={index} className="filter-row">
-            <select className="filter-field" value={condition.field} onChange={e => changeField(index, e.target.value)}>
+            <select
+              className="filter-field"
+              aria-label={t('webhooks.filters.fieldLabel')}
+              value={condition.field}
+              onChange={e => changeField(index, e.target.value)}
+            >
               {MESSAGE_FIELDS.map(f => (
                 <option key={f.field} value={f.field}>
                   {t(`webhooks.filters.fields.${f.field}`)}
@@ -183,6 +188,7 @@ export function FilterBuilder({ filters, onChange, chats }: FilterBuilderProps) 
 
             <select
               className="filter-operator"
+              aria-label={t('webhooks.filters.operatorLabel')}
               value={condition.operator}
               onChange={e => updateAt(index, { operator: e.target.value as WebhookFilterOperator })}
             >
@@ -247,6 +253,7 @@ export function FilterBuilder({ filters, onChange, chats }: FilterBuilderProps) 
               {def.kind === 'boolean' && (
                 <select
                   className="filter-bool"
+                  aria-label={t('webhooks.filters.valueLabel')}
                   value={condition.value === true ? 'true' : 'false'}
                   onChange={e => updateAt(index, { value: e.target.value === 'true' })}
                 >

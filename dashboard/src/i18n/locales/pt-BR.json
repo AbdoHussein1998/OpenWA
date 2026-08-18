@@ -142,7 +142,8 @@
       "orLabel": "ou",
       "post": "Publicar",
       "posted": "Status publicado",
-      "postFailed": "Não foi possível publicar o status"
+      "postFailed": "Não foi possível publicar o status",
+      "imageFile": "Imagem do status"
     },
     "channels": {
       "notSupported": "Os canais não são compatíveis com o mecanismo Baileys.",
@@ -413,7 +414,10 @@
         "isNot": "não é",
         "contains": "contém",
         "equals": "é igual a"
-      }
+      },
+      "fieldLabel": "Campo do filtro",
+      "operatorLabel": "Operador do filtro",
+      "valueLabel": "Valor do filtro"
     },
     "columns": {
       "url": "URL",
@@ -668,7 +672,8 @@
       "deleted": "Modelo excluído com sucesso",
       "deleteFailed": "Erro ao excluir o modelo: {{message}}",
       "copied": "Nome do modelo copiado"
-    }
+    },
+    "sessionSelect": "Sessão"
   },
   "infrastructure": {
     "title": "Infraestrutura",

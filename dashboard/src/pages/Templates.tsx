@@ -186,6 +186,7 @@ export function Templates() {
         actions={
           <select
             className="templates-session-select"
+            aria-label={t('templates.sessionSelect')}
             value={selectedSessionId}
             onChange={event => {
               setSelectedSessionId(event.target.value);

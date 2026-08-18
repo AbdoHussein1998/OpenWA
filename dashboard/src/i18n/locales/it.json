@@ -142,7 +142,8 @@
       "orLabel": "o",
       "post": "Pubblica",
       "posted": "Stato pubblicato",
-      "postFailed": "Impossibile pubblicare lo stato"
+      "postFailed": "Impossibile pubblicare lo stato",
+      "imageFile": "Immagine di stato"
     },
     "channels": {
       "notSupported": "I canali non sono supportati sul motore Baileys.",
@@ -413,7 +414,10 @@
         "isNot": "non è",
         "contains": "contiene",
         "equals": "è uguale a"
-      }
+      },
+      "fieldLabel": "Campo filtro",
+      "operatorLabel": "Operatore filtro",
+      "valueLabel": "Valore filtro"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +498,8 @@
       "deleted": "Modello eliminato con successo",
       "deleteFailed": "Impossibile eliminare il modello: {{message}}",
       "copied": "Nome del modello copiato"
-    }
+    },
+    "sessionSelect": "Sessione"
   },
   "apiKeys": {
     "title": "Chiavi API",

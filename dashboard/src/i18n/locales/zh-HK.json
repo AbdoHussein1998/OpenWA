@@ -142,7 +142,8 @@
       "orLabel": "或",
       "post": "發佈",
       "posted": "狀態已發佈",
-      "postFailed": "無法發佈狀態"
+      "postFailed": "無法發佈狀態",
+      "imageFile": "狀態圖片"
     },
     "channels": {
       "notSupported": "Baileys 引擎不支援頻道。",
@@ -413,7 +414,10 @@
         "isNot": "不是",
         "contains": "包含",
         "equals": "等於"
-      }
+      },
+      "fieldLabel": "篩選欄位",
+      "operatorLabel": "篩選運算符",
+      "valueLabel": "篩選值"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +498,8 @@
       "deleted": "範本刪除成功",
       "deleteFailed": "刪除範本失敗：{{message}}",
       "copied": "已複製範本名稱"
-    }
+    },
+    "sessionSelect": "工作階段"
   },
   "apiKeys": {
     "title": "API 金鑰",

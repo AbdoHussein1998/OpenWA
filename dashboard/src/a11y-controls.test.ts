@@ -331,3 +331,61 @@ test('every ConfigField caption is bound, and every single control carries the p
   assert.ok(controls >= 4, `expected ConfigField to render controls, found ${controls}`);
   assert.deepEqual(problems, [], problems.join('\n'));
 });
+
+/**
+ * The three cases above cover the patterns this dashboard invented. This one covers the ordinary
+ * ones: a bare `<select>` or `<input>` whose caption is a sibling rather than a label gets no
+ * accessible name either, and nothing here was watching for it. Seven shipped that way.
+ *
+ * A control is considered named by aria-label, aria-labelledby, an id some label points at, an
+ * enclosing <label> (which names it through its own text), or a placeholder. Placeholder is accepted
+ * because it does produce a name, while noting it is a weak one: it disappears on input and WCAG
+ * does not treat it as a label substitute.
+ *
+ * `display: none` controls are exempt and must say so: the file inputs behind an upload button are
+ * never reached by assistive tech, and the button carries the name.
+ */
+test('every native control is named, or is hidden from assistive tech', () => {
+  const unnamed: string[] = [];
+  let checked = 0;
+
+  for (const { file, source } of pages()) {
+    const all = jsxElements(source);
+    const labelTargets = new Set(all.map(n => attrText(n, 'htmlFor')).filter((v): v is string => v !== undefined));
+
+    for (const node of all) {
+      const tag = tagName(node);
+      if (tag !== 'input' && tag !== 'select' && tag !== 'textarea') continue;
+      const type = literalAttr(node, 'type');
+      if (type === 'hidden' || type === 'submit' || type === 'button') continue;
+
+      // Not rendered to anyone, so it has no name to give; the trigger button carries it.
+      const opening = ts.isJsxElement(node) ? node.openingElement : node;
+      if (/display:\s*'none'/.test(opening.getText())) continue;
+
+      checked++;
+      const id = attrText(node, 'id');
+      const named =
+        attr(node, 'aria-label') !== undefined ||
+        attr(node, 'aria-labelledby') !== undefined ||
+        attr(node, 'placeholder') !== undefined ||
+        (id !== undefined && labelTargets.has(id));
+      if (named) continue;
+
+      // A wrapping <label> names it through its own text.
+      let parent: ts.Node | undefined = node.parent;
+      let wrapped = false;
+      while (parent) {
+        if (ts.isJsxElement(parent) && parent.openingElement.tagName.getText() === 'label') {
+          wrapped = true;
+          break;
+        }
+        parent = parent.parent;
+      }
+      if (!wrapped) unnamed.push(`${file}:${line(source, node)} <${tag}>`);
+    }
+  }
+
+  assert.ok(checked >= 80, `expected the dashboard to declare native controls, found ${checked}`);
+  assert.deepEqual(unnamed, [], unnamed.join('\n'));
+});

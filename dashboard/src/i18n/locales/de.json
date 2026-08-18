@@ -142,7 +142,8 @@
       "orLabel": "oder",
       "post": "Posten",
       "posted": "Status gepostet",
-      "postFailed": "Status konnte nicht gepostet werden"
+      "postFailed": "Status konnte nicht gepostet werden",
+      "imageFile": "Statusbild"
     },
     "channels": {
       "notSupported": "Kanäle werden von der Baileys-Engine nicht unterstützt.",
@@ -413,7 +414,10 @@
         "isNot": "ist nicht",
         "contains": "enthält",
         "equals": "entspricht"
-      }
+      },
+      "fieldLabel": "Filterfeld",
+      "operatorLabel": "Filteroperator",
+      "valueLabel": "Filterwert"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +498,8 @@
       "deleted": "Vorlage wurde erfolgreich gelöscht",
       "deleteFailed": "Vorlage konnte nicht gelöscht werden: {{message}}",
       "copied": "Vorlagenname wurde kopiert"
-    }
+    },
+    "sessionSelect": "Sitzung"
   },
   "apiKeys": {
     "title": "API-Schlüssel",

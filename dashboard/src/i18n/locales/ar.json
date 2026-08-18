@@ -150,7 +150,8 @@
       "orLabel": "أو",
       "post": "نشر",
       "posted": "تم نشر الحالة",
-      "postFailed": "تعذر نشر الحالة"
+      "postFailed": "تعذر نشر الحالة",
+      "imageFile": "صورة الحالة"
     },
     "channels": {
       "notSupported": "القنوات غير مدعومة على محرك Baileys.",
@@ -428,7 +429,10 @@
         "isNot": "ليس",
         "contains": "يحتوي على",
         "equals": "يساوي"
-      }
+      },
+      "fieldLabel": "حقل التصفية",
+      "operatorLabel": "عامل التصفية",
+      "valueLabel": "قيمة التصفية"
     },
     "columns": {
       "url": "الرابط",
@@ -509,7 +513,8 @@
       "deleted": "تم حذف القالب بنجاح",
       "deleteFailed": "فشل حذف القالب: {{message}}",
       "copied": "تم نسخ اسم القالب"
-    }
+    },
+    "sessionSelect": "الجلسة"
   },
   "apiKeys": {
     "title": "مفاتيح API",

@@ -142,7 +142,8 @@
       "orLabel": "or",
       "post": "Post",
       "posted": "Status posted",
-      "postFailed": "Could not post the status"
+      "postFailed": "Could not post the status",
+      "imageFile": "స్టేటస్ చిత్రం"
     },
     "channels": {
       "notSupported": "Channels are not supported on the Baileys engine.",
@@ -413,7 +414,10 @@
         "isNot": "కాదు",
         "contains": "కలిగి ఉంది",
         "equals": "సమానం"
-      }
+      },
+      "fieldLabel": "ఫిల్టర్ ఫీల్డ్",
+      "operatorLabel": "ఫిల్టర్ ఆపరేటర్",
+      "valueLabel": "ఫిల్టర్ విలువ"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +498,8 @@
       "deleted": "టెంప్లేట్ విజయవంతంగా తొలగించబడింది",
       "deleteFailed": "టెంప్లేట్ తొలగించడం విఫలమైంది: {{message}}",
       "copied": "టెంప్లేట్ పేరు కాపీ చేయబడింది"
-    }
+    },
+    "sessionSelect": "సెషన్"
   },
   "apiKeys": {
     "title": "API కీలు",

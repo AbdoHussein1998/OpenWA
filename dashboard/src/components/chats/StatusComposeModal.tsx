@@ -233,7 +233,13 @@ function StatusComposeModal({ sessionId, onClose, onPosted }: Props) {
           </div>
           <p className="compose-image-or">{t('chats.status.orLabel')}</p>
           <div className="compose-field">
-            <input type="file" accept="image/*" ref={composeFileInputRef} onChange={handleComposeImageFile} />
+            <input
+              type="file"
+              accept="image/*"
+              aria-label={t('chats.status.imageFile')}
+              ref={composeFileInputRef}
+              onChange={handleComposeImageFile}
+            />
           </div>
           <div className="compose-field">
             <label htmlFor="scm-5">{t('chats.status.caption')}</label>

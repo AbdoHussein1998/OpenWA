@@ -142,7 +142,8 @@
       "orLabel": "veya",
       "post": "Paylaş",
       "posted": "Durum paylaşıldı",
-      "postFailed": "Durum paylaşılamadı"
+      "postFailed": "Durum paylaşılamadı",
+      "imageFile": "Durum görseli"
     },
     "channels": {
       "notSupported": "Kanallar Baileys motorunda desteklenmemektedir.",
@@ -413,7 +414,10 @@
         "isNot": "eşit değildir",
         "contains": "içerir",
         "equals": "tam eşleşir"
-      }
+      },
+      "fieldLabel": "Filtre alanı",
+      "operatorLabel": "Filtre operatörü",
+      "valueLabel": "Filtre değeri"
     },
     "columns": {
       "url": "URL",
@@ -494,7 +498,8 @@
       "deleted": "Şablon başarıyla silindi",
       "deleteFailed": "Şablon silinemedi: {{message}}",
       "copied": "Şablon adı kopyalandı"
-    }
+    },
+    "sessionSelect": "Oturum"
   },
   "apiKeys": {
     "title": "API Anahtarları",
