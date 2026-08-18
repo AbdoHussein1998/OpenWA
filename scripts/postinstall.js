@@ -23,9 +23,11 @@
  *      marker + hasSynced level-check, gated the same way.
  *   6. `node scripts/patch-wwebjs-participant-arity.js --best-effort` when present — makes the group
  *      participant writes report which requested ids resolved to members, gated the same way.
- *   7. `node scripts/patch-baileys-appstate.js --best-effort` when present — the app-state resync
+ *   7. `node scripts/patch-wwebjs-block.js --best-effort` when present, restoring block and
+ *      unblock after WhatsApp Web removed the contact resolver they used.
+ *   8. `node scripts/patch-baileys-appstate.js --best-effort` when present, the app-state resync
  *      bound, gated the same way.
- *   8. `node scripts/patch-baileys-newsletter-create.js --best-effort` when present — the
+ *   9. `node scripts/patch-baileys-newsletter-create.js --best-effort` when present, the
  *      newsletter-create parse fix. Steps 7-8 are the Baileys patches, so a Baileys-only install
  *      runs those and skips 2-6.
  *
@@ -113,6 +115,15 @@ function planSteps(root, env = process.env) {
       name: 'whatsapp-web.js participant batch truth (scripts/patch-wwebjs-participant-arity.js --best-effort)',
       command: process.execPath,
       args: [participantArityPatcher, '--best-effort'],
+      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
+    });
+  }
+  const blockPatcher = path.join(root, 'scripts', 'patch-wwebjs-block.js');
+  if (fs.existsSync(blockPatcher)) {
+    steps.push({
+      name: 'whatsapp-web.js block/unblock LID repair (scripts/patch-wwebjs-block.js --best-effort)',
+      command: process.execPath,
+      args: [blockPatcher, '--best-effort'],
       options: { stdio: 'inherit', cwd: root, env: cleanEnv },
     });
   }
