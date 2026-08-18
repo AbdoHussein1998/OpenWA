@@ -2481,6 +2481,25 @@ describe('BaileysAdapter media sends', () => {
     });
   });
 
+  /**
+   * Audio has no caption, so this tags through contextInfo with no visible @text. It is forwarded
+   * anyway because the route accepts it (SendAudioMessageDto extends SendMediaMessageDto) and
+   * whatsapp-web.js sends it: dropping it here made the same request notify group participants on
+   * one engine and silently not on the other.
+   */
+  it('sendAudioMessage de-normalizes media.mentions into the content', async () => {
+    const adapter = await ready();
+    await adapter.sendAudioMessage('120@g.us', {
+      mimetype: 'audio/mp4',
+      data: Buffer.from([1]),
+      mentions: ['62811@c.us'],
+    });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '120@g.us',
+      expect.objectContaining({ mentions: ['62811@s.whatsapp.net'] }),
+    );
+  });
+
   it('sendAudioMessage with ptt sends a voice note (ptt:true)', async () => {
     const adapter = await ready();
     await adapter.sendAudioMessage('628111@s.whatsapp.net', {
@@ -2579,6 +2598,20 @@ describe('BaileysAdapter store-backed ops', () => {
     const adapter = await ready();
     await adapter.forwardMessage('628111@s.whatsapp.net', '628222@s.whatsapp.net', 'TARGET');
     expect(fakeSock.sendMessage).toHaveBeenCalledWith('628222@s.whatsapp.net', { forward: stored });
+  });
+
+  // fromChatId was accepted and ignored: any stored id forwarded from any claimed source, while
+  // whatsapp-web.js answered 404 for the same request because it fetches from the named chat.
+  it('forwardMessage throws MessageNotFoundError when the stored key belongs to another chat', async () => {
+    fakeStore.getMessage.mockResolvedValue({
+      ...stored,
+      key: { ...stored.key, remoteJid: '628999@s.whatsapp.net' },
+    });
+    const adapter = await ready();
+    await expect(
+      adapter.forwardMessage('628111@s.whatsapp.net', '628222@s.whatsapp.net', 'TARGET'),
+    ).rejects.toBeInstanceOf(MessageNotFoundError);
+    expect(fakeSock.sendMessage).not.toHaveBeenCalled();
   });
 
   it('reactToMessage sends the stored key', async () => {

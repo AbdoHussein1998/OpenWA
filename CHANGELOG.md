@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Baileys forwards `mentions` on an audio send. The route accepts the field and whatsapp-web.js sent it, so the same request tagged group participants on one engine and silently did not on the other.
+- Forwarding a message whose id is not in `fromChatId` is refused on Baileys with the same `404` whatsapp-web.js already answered. The parameter was accepted and then ignored, so any stored id forwarded from any claimed source.
 - The Baileys engine resolves its WhatsApp Web version through a fallback chain instead of one call: an operator pin (`BAILEYS_WA_VERSION`), the two library endpoints, a disk cache of the last known-good version, then a built-in default. Each remote tier is bounded and rides the session proxy, and a stale answer is neither cached nor used. Thanks @giovanni-orciuolo.
 - The Go and Java SDKs can @mention on an audio send. `SendAudioRequest` was flattened off the shared media type and lost the field, so the typed path could not set it while every other client could.
 - Three routes declare the `409` they can answer: a duplicate template name on create or rename, and an integration instance id that already exists. Clients generated from the contract modelled those calls as unable to conflict.

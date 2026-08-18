@@ -327,7 +327,11 @@ export class BaileysMessaging {
     const { data, mimetype } = await resolveMediaBuffer(media);
     return this.sendContent(
       chatId,
-      { audio: data, mimetype, ptt: media.ptt ?? false },
+      // Audio carries no caption, so a mention here tags the recipient through contextInfo without
+      // visible @text. It is still forwarded: the route accepts `mentions` (SendAudioMessageDto
+      // extends SendMediaMessageDto) and whatsapp-web.js sends it, so dropping it here made the same
+      // request notify participants on one engine and silently not on the other.
+      { audio: data, mimetype, ptt: media.ptt ?? false, ...this.withMentions(media.mentions) },
       await this.quoteOption(media.quotedMessageId),
     );
   }
@@ -433,6 +437,10 @@ export class BaileysMessaging {
   async forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult> {
     this.host.ensureReady();
     const forward = await this.requireStored(messageId);
+    // fromChatId was accepted and then ignored, so a message id from ANY chat forwarded successfully
+    // while whatsapp-web.js answered 404 for the same request (it fetches from the named chat and
+    // fails when the id is not in it). Same check the star and react paths already apply.
+    this.assertStoredInChat(forward, fromChatId, messageId);
     return this.sendContent(toChatId, { forward });
   }
 
