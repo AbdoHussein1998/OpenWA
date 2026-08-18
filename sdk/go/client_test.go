@@ -1073,6 +1073,31 @@ func TestCallReceivedPayloadDecodes(t *testing.T) {
 	}
 }
 
+// SendAudioRequest is flattened rather than embedding SendMediaRequest, because ptt is accepted on
+// this route alone. The flattening is what dropped mentions here while every other send carried it,
+// so this asserts the wire body rather than the call.
+func TestSendAudioForwardsMentions(t *testing.T) {
+	rt := &recordTransport{status: 200, body: `{"messageId":"m1","timestamp":1}`}
+	c := newTestClient(t, rt)
+
+	if _, err := c.Messages.SendAudio(context.Background(), "s1", SendAudioRequest{
+		ChatID:   "g@g.us",
+		URL:      "http://u",
+		Mentions: []string{"628123@c.us"},
+	}); err != nil {
+		t.Fatalf("SendAudio: %v", err)
+	}
+
+	var sent map[string]any
+	if err := json.Unmarshal(rt.lastRaw, &sent); err != nil {
+		t.Fatalf("body not JSON: %v", err)
+	}
+	mentions, ok := sent["mentions"].([]any)
+	if !ok || len(mentions) != 1 || mentions[0] != "628123@c.us" {
+		t.Fatalf("sent body = %v", sent)
+	}
+}
+
 func TestSendTextForwardsMentions(t *testing.T) {
 	rt := &recordTransport{status: 200, body: `{"messageId":"m1","timestamp":1}`}
 	c := newTestClient(t, rt)

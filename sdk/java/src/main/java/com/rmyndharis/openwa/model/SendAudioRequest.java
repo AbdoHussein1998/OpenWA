@@ -9,7 +9,8 @@ public record SendAudioRequest(
     String filename,
     String caption,
     Boolean ptt,
-    String quotedMessageId) {
+    String quotedMessageId,
+    java.util.List<String> mentions) {
 
     public static Builder builder() {
         return new Builder();
@@ -24,6 +25,7 @@ public record SendAudioRequest(
         private String caption;
         private Boolean ptt;
         private String quotedMessageId;
+        private java.util.List<String> mentions;
 
         public Builder chatId(String v) { this.chatId = v; return this; }
         public Builder url(String v) { this.url = v; return this; }
@@ -40,8 +42,12 @@ public record SendAudioRequest(
          */
         public Builder quotedMessageId(String v) { this.quotedMessageId = v; return this; }
 
+        /** WIDs to @mention; the caption must also contain the @&lt;number&gt; token. */
+        public Builder mentions(java.util.List<String> v) { this.mentions = v; return this; }
+
         public SendAudioRequest build() {
-            return new SendAudioRequest(chatId, url, base64, mimetype, filename, caption, ptt, quotedMessageId);
+            return new SendAudioRequest(
+                chatId, url, base64, mimetype, filename, caption, ptt, quotedMessageId, mentions);
         }
     }
 }

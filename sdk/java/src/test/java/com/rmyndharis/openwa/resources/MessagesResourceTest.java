@@ -195,6 +195,19 @@ class MessagesResourceTest {
             "s", SendAudioRequest.builder().chatId("628@c.us").url("http://u").quotedMessageId("q-audio").build());
         assertTrue(tx.lastRequest().body().contains("q-audio"));
 
+        // Same flattening cost the audio route its mentions: the field lives on SendMediaRequest,
+        // which this record cannot inherit, so it has to be declared here too or the typed path can
+        // never tag anyone on a voice note.
+        tx.respond(200, MSG);
+        client.messages.sendAudio(
+            "s",
+            SendAudioRequest.builder()
+                .chatId("628@c.us")
+                .url("http://u")
+                .mentions(java.util.List.of("62811@c.us"))
+                .build());
+        assertTrue(tx.lastRequest().body().contains("62811@c.us"));
+
         tx.respond(200, MSG);
         client.messages.sendLocation(
             "s",
