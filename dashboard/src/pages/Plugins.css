@@ -492,7 +492,10 @@
   line-height: 1.4;
 }
 
-.plugins-page .config-form .form-group .required-mark {
+/* Scoped to .config-form rather than .form-group: the same mark also renders inside an array's
+   caption, which lives in .config-array and so never matched the narrower selector. A required
+   array showed its asterisk in body text instead of the error colour. */
+.plugins-page .config-form .required-mark {
   color: var(--error);
 }
 
