@@ -161,7 +161,14 @@
       "delete": "Failed to delete message",
       "fileTooLarge": "File is too large (max 18 MB)"
     },
-    "loadMessagesError": "Couldn't load messages. Check the server logs."
+    "loadMessagesError": "Couldn't load messages. Check the server logs.",
+    "messageStatus": {
+      "pending": "Pending",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "read": "Read",
+      "failed": "Failed"
+    }
   },
   "errorBoundary": {
     "title": "Something went wrong",

@@ -161,7 +161,14 @@
       "delete": "메시지를 삭제하지 못했습니다",
       "fileTooLarge": "파일이 너무 큽니다 (최대 18 MB)"
     },
-    "loadMessagesError": "메시지를 불러올 수 없습니다. 서버 로그를 확인하세요."
+    "loadMessagesError": "메시지를 불러올 수 없습니다. 서버 로그를 확인하세요.",
+    "messageStatus": {
+      "pending": "대기 중",
+      "sent": "전송됨",
+      "delivered": "전달됨",
+      "read": "읽음",
+      "failed": "실패"
+    }
   },
   "errorBoundary": {
     "title": "문제가 발생했습니다",

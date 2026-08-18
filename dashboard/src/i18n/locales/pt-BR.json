@@ -161,7 +161,14 @@
       "delete": "Erro ao excluir a mensagem",
       "fileTooLarge": "O arquivo é muito grande (máx. 18 MB)"
     },
-    "loadMessagesError": "Não foi possível carregar as mensagens. Verifique os registros do servidor."
+    "loadMessagesError": "Não foi possível carregar as mensagens. Verifique os registros do servidor.",
+    "messageStatus": {
+      "pending": "Pendente",
+      "sent": "Enviado",
+      "delivered": "Entregue",
+      "read": "Lido",
+      "failed": "Falhou"
+    }
   },
   "errorBoundary": {
     "title": "Algo deu errado",

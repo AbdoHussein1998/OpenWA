@@ -590,7 +590,10 @@
 }
 
 .chats-page .message-status-icon.read {
-  color: #53bdeb; /* WhatsApp blue checks */
+  /* The WhatsApp blue is 2.13:1 on the outgoing bubble, and these checks are TEXT, not an icon.
+     Darkened to clear 4.5:1 there and on white; the status is also spelled out in aria-label/title,
+     since delivered and read otherwise differ only by this colour. */
+  color: #337592;
 }
 
 /* =============================================================================

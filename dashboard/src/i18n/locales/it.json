@@ -161,7 +161,14 @@
       "delete": "Impossibile eliminare il messaggio",
       "fileTooLarge": "Il file è troppo grande (max 18 MB)"
     },
-    "loadMessagesError": "Impossibile caricare i messaggi. Controlla i log del server."
+    "loadMessagesError": "Impossibile caricare i messaggi. Controlla i log del server.",
+    "messageStatus": {
+      "pending": "In attesa",
+      "sent": "Inviato",
+      "delivered": "Consegnato",
+      "read": "Letto",
+      "failed": "Fallito"
+    }
   },
   "errorBoundary": {
     "title": "Qualcosa è andato storto",

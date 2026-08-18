@@ -161,7 +161,14 @@
       "delete": "Error al eliminar el mensaje",
       "fileTooLarge": "El archivo es demasiado grande (máx. 18 MB)"
     },
-    "loadMessagesError": "No se pudieron cargar los mensajes. Revisa los registros del servidor."
+    "loadMessagesError": "No se pudieron cargar los mensajes. Revisa los registros del servidor.",
+    "messageStatus": {
+      "pending": "Pendiente",
+      "sent": "Enviado",
+      "delivered": "Entregado",
+      "read": "Leído",
+      "failed": "Fallido"
+    }
   },
   "errorBoundary": {
     "title": "Algo salió mal",

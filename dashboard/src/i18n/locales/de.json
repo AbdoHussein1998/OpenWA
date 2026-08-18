@@ -161,7 +161,14 @@
       "delete": "Nachricht konnte nicht gelöscht werden",
       "fileTooLarge": "Die Datei ist zu groß (max. 18 MB)"
     },
-    "loadMessagesError": "Nachrichten konnten nicht geladen werden. Prüfe die Serverprotokolle."
+    "loadMessagesError": "Nachrichten konnten nicht geladen werden. Prüfe die Serverprotokolle.",
+    "messageStatus": {
+      "pending": "Ausstehend",
+      "sent": "Gesendet",
+      "delivered": "Zugestellt",
+      "read": "Gelesen",
+      "failed": "Fehlgeschlagen"
+    }
   },
   "errorBoundary": {
     "title": "Etwas ist schiefgelaufen",

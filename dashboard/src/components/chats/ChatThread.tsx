@@ -324,8 +324,16 @@ function ChatThread({
 
                   <div className="message-meta">
                     <span className="message-time">{formattedTime}</span>
+                    {/* delivered and read render the SAME glyph and differ only in colour, which
+                        carries the meaning nowhere a screen reader or a colour-blind reader can
+                        reach it. The status is spelled out for both. */}
                     {isMe && (
-                      <span className={`message-status-icon ${msg.status}`}>
+                      <span
+                        className={`message-status-icon ${msg.status}`}
+                        role="img"
+                        aria-label={t(`chats.messageStatus.${msg.status}`)}
+                        title={t(`chats.messageStatus.${msg.status}`)}
+                      >
                         {msg.status === 'pending' && '🕒'}
                         {msg.status === 'sent' && '✓'}
                         {msg.status === 'delivered' && '✓✓'}

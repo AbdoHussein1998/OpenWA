@@ -161,7 +161,14 @@
       "delete": "Mesaj silinemedi",
       "fileTooLarge": "Dosya çok büyük (maks 18 MB)"
     },
-    "loadMessagesError": "Mesajlar yüklenemedi. Sunucu kayıtlarını kontrol edin."
+    "loadMessagesError": "Mesajlar yüklenemedi. Sunucu kayıtlarını kontrol edin.",
+    "messageStatus": {
+      "pending": "Beklemede",
+      "sent": "Gönderildi",
+      "delivered": "İletildi",
+      "read": "Okundu",
+      "failed": "Başarısız"
+    }
   },
   "errorBoundary": {
     "title": "Bir şeyler ters gitti",

@@ -161,7 +161,14 @@
       "delete": "刪除訊息失敗",
       "fileTooLarge": "檔案過大（最大 18 MB）"
     },
-    "loadMessagesError": "無法載入訊息。請檢查伺服器日誌。"
+    "loadMessagesError": "無法載入訊息。請檢查伺服器日誌。",
+    "messageStatus": {
+      "pending": "待傳送",
+      "sent": "已傳送",
+      "delivered": "已送達",
+      "read": "已讀",
+      "failed": "傳送失敗"
+    }
   },
   "errorBoundary": {
     "title": "發生問題",

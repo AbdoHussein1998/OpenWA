@@ -161,7 +161,14 @@
       "delete": "删除消息失败",
       "fileTooLarge": "文件过大（最大 18 MB）"
     },
-    "loadMessagesError": "无法加载消息。请检查服务器日志。"
+    "loadMessagesError": "无法加载消息。请检查服务器日志。",
+    "messageStatus": {
+      "pending": "待发送",
+      "sent": "已发送",
+      "delivered": "已送达",
+      "read": "已读",
+      "failed": "发送失败"
+    }
   },
   "errorBoundary": {
     "title": "出了点问题",

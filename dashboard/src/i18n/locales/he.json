@@ -168,7 +168,14 @@
       "delete": "מחיקת ההודעה נכשלה",
       "fileTooLarge": "הקובץ גדול מדי (מקסימום 18 MB)"
     },
-    "loadMessagesError": "לא ניתן לטעון את ההודעות. בדקו את יומני השרת."
+    "loadMessagesError": "לא ניתן לטעון את ההודעות. בדקו את יומני השרת.",
+    "messageStatus": {
+      "pending": "ממתין",
+      "sent": "נשלח",
+      "delivered": "נמסר",
+      "read": "נקרא",
+      "failed": "נכשל"
+    }
   },
   "errorBoundary": {
     "title": "משהו השתבש",

@@ -161,7 +161,14 @@
       "delete": "Échec de la suppression du message",
       "fileTooLarge": "Le fichier est trop volumineux (max 18 Mo)"
     },
-    "loadMessagesError": "Impossible de charger les messages. Vérifiez les journaux du serveur."
+    "loadMessagesError": "Impossible de charger les messages. Vérifiez les journaux du serveur.",
+    "messageStatus": {
+      "pending": "En attente",
+      "sent": "Envoyé",
+      "delivered": "Remis",
+      "read": "Lu",
+      "failed": "Échec"
+    }
   },
   "errorBoundary": {
     "title": "Une erreur est survenue",
