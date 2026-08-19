@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Outbound webhook deliveries survive a hard crash. Fan-out is fire-and-forget, so a crash between persisting a message and completing its POST lost the delivery with no record in either mode, while the documented contract promises at-least-once. Each delivery is now recorded before it is attempted, retired once the queue or the inline send owns it, and a bounded sweep replays whatever is left stranded using the stored idempotency key so the retry stays deduplicable at the receiver.
 - Settled outbound delivery records are pruned after `WEBHOOK_OUTBOX_RETENTION_DAYS` (default 7). A record that can still be replayed is never pruned on age, and a non-positive window falls back to the default rather than letting the table grow without bound.
 - `PLUGIN_STATE_DIR` moves the plugin registry and per-plugin storage off the default `./data`. It was the one piece of state with no path knob, so a test run rewrote the developer's own registry and every suite in that run inherited whatever the previous one left in it.
+- The e2e lane sweeps the throwaway state roots it creates. Each suite gets its own, nothing removed them, and the temp directory accumulated hundreds of entries over a few days of runs.
 
 ### Tests
 
