@@ -1,7 +1,7 @@
 package com.rmyndharis.openwa.model;
 
-/** Request body for marking a chat unread. */
-public record MarkChatRequest(String chatId) {
+/** Request body for subscribing to a chat's presence. */
+public record SubscribePresenceRequest(String chatId) {
     public static Builder builder() {
         return new Builder();
     }
@@ -15,8 +15,8 @@ public record MarkChatRequest(String chatId) {
             return this;
         }
 
-        public MarkChatRequest build() {
-            return new MarkChatRequest(chatId);
+        public SubscribePresenceRequest build() {
+            return new SubscribePresenceRequest(chatId);
         }
     }
 }

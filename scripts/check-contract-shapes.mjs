@@ -87,6 +87,7 @@ const MAPPINGS = {
     JoinGroupRequest: 'JoinGroupDto',
     MarkChatReadRequest: 'MarkChatReadDto',
     MarkChatRequest: 'MarkChatUnreadDto',
+    SubscribePresenceRequest: 'SubscribePresenceDto',
     MessageListResponse: 'MessageListResponseDto',
     MessageRecord: 'MessageListItemDto',
     MessageResponse: 'MessageResponseDto',
@@ -165,11 +166,11 @@ const MAPPINGS = {
  * these floors as pairs are added makes the shrink loud.
  */
 const MINIMUM_MAPPED = {
-  'sdk/javascript/src/types.ts': 79,
+  'sdk/javascript/src/types.ts': 80,
   'dashboard/src/services/api.ts': 20,
-  'sdk/python/openwa/types.py': 74,
-  'sdk/go': 75,
-  'sdk/java': 79,
+  'sdk/python/openwa/types.py': 75,
+  'sdk/go': 76,
+  'sdk/java': 80,
 };
 
 /** Known drift, deliberately not gated yet — each line is a to-adjudicate follow-up. */
@@ -233,6 +234,7 @@ const PYTHON_MAPPING = {
   JoinGroupRequest: 'JoinGroupDto',
   MarkChatReadRequest: 'MarkChatReadDto',
   MarkChatRequest: 'MarkChatUnreadDto',
+  SubscribePresenceRequest: 'SubscribePresenceDto',
   MessageListResponse: 'MessageListResponseDto',
   MessageRecord: 'MessageListItemDto',
   MessageResponse: 'MessageResponseDto',
@@ -311,6 +313,7 @@ const GO_MAPPING = {
   JoinGroupRequest: 'JoinGroupDto',
   MarkChatReadRequest: 'MarkChatReadDto',
   MarkChatRequest: 'MarkChatUnreadDto',
+  SubscribePresenceRequest: 'SubscribePresenceDto',
   MessageListResponse: 'MessageListResponseDto',
   MessageRecord: 'MessageListItemDto',
   MessageResponse: 'MessageResponseDto',
@@ -393,6 +396,7 @@ const JAVA_MAPPING = {
   JoinGroupRequest: 'JoinGroupDto',
   MarkChatReadRequest: 'MarkChatReadDto',
   MarkChatRequest: 'MarkChatUnreadDto',
+  SubscribePresenceRequest: 'SubscribePresenceDto',
   MessageListResponse: 'MessageListResponseDto',
   MessageRecord: 'MessageListItemDto',
   MessageResponse: 'MessageResponseDto',

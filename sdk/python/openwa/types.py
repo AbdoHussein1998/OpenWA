@@ -882,7 +882,12 @@ class ChatSummary(TypedDict):
 
 
 class MarkChatRequest(TypedDict):
-    # Body for mark_unread and subscribe_presence, both of which take the chat id alone.
+    # Body for mark_unread.
+    chatId: Jid
+
+
+class SubscribePresenceRequest(TypedDict):
+    # Body for subscribe_presence.
     chatId: Jid
 
 
