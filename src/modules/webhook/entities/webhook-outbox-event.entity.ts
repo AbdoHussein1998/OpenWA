@@ -64,6 +64,6 @@ export class WebhookOutboxEvent {
   @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
   lastAttemptAt!: Date | null;
 
-  @CreateDateColumn({ type: dateColumnType(), transformer: DateTransformer })
+  @CreateDateColumn()
   createdAt!: Date;
 }

@@ -23,16 +23,19 @@ export class AddWebhookOutboxEvents1786200000000 implements MigrationInterface {
     const id = isPostgres
       ? `"id" varchar PRIMARY KEY NOT NULL DEFAULT gen_random_uuid()::varchar`
       : `"id" varchar PRIMARY KEY NOT NULL`;
-    // SQLite side is `text` + DateTransformer, not `datetime`: that is what `dateColumnType()`
-    // resolves to for this entity, and the drift gate compares the chain against that metadata.
-    const ts = isPostgres ? 'timestamp' : 'text';
+    // The two date columns are NOT the same type, because they carry different decorators.
+    // `lastAttemptAt` is `dateColumnType()` + DateTransformer, which is `text` on SQLite;
+    // `createdAt` is a plain @CreateDateColumn, which TypeORM emits as `datetime` there. The drift
+    // gate compares the chain against that metadata, so guessing one type for both fails.
+    const nullableTs = isPostgres ? 'timestamp' : 'text';
+    const createdTs = isPostgres ? 'timestamp' : 'datetime';
     const now = isPostgres ? 'NOW()' : `(datetime('now'))`;
 
     await queryRunner.query(
       `CREATE TABLE "webhook_outbox_events" (${id}, "webhookId" varchar NOT NULL, "sessionId" varchar NOT NULL, ` +
         `"event" varchar NOT NULL, "idempotencyKey" varchar NOT NULL, "deliveryId" varchar NOT NULL, ` +
-        `"payload" text, "state" varchar, "attempts" integer NOT NULL DEFAULT (0), "lastAttemptAt" ${ts}, ` +
-        `"createdAt" ${ts} NOT NULL DEFAULT ${now})`,
+        `"payload" text, "state" varchar, "attempts" integer NOT NULL DEFAULT (0), "lastAttemptAt" ${nullableTs}, ` +
+        `"createdAt" ${createdTs} NOT NULL DEFAULT ${now})`,
     );
 
     await queryRunner.query(
