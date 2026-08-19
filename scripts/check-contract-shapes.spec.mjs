@@ -259,3 +259,25 @@ test('parseJavaTypes: a package-qualified generic is the same shape as the bare 
   assert.equal(s.mentions.token, 'array<string>');
   assert.equal(s.tags.token, s.mentions.token);
 });
+
+test('parseJavaTypes: a generic carrying a comma is one component, not two', () => {
+  // A plain split(',') tore `Map<String, Object> config` in half: the first piece was unparseable
+  // and dropped, the second parsed as type `Object>` under the right field name, so the member
+  // survived carrying a token nothing could compare.
+  const src = 'public record Sample(String name, Map<String, Object> config, String tail) {}';
+  const s = parseJavaTypes([src]).Sample;
+  assert.deepEqual(Object.keys(s), ['name', 'config', 'tail']);
+  assert.equal(s.config.token, 'dict');
+});
+
+test('parseJavaTypes: boxed numerics reduce to number rather than their class name', () => {
+  // `Double` fell through to the bare class name, which is not a simple token, so comparePair
+  // skipped the field: a Double component against a string contract reported nothing.
+  const s = parseJavaTypes(['public record Sample(Double a, Float b, Short c, Byte d) {}']).Sample;
+  assert.deepEqual(
+    Object.values(s).map(v => v.token),
+    ['number', 'number', 'number', 'number'],
+  );
+  const schema = { type: 'object', required: ['a'], properties: { a: { type: 'string' } } };
+  assert.equal(comparePair('Sample', { a: s.a }, 'Dto', schema, {}, false).length, 1);
+});

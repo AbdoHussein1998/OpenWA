@@ -55,27 +55,17 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MAPPINGS = {
   'sdk/javascript/src/types.ts': {
     AccountRestriction: 'AccountRestrictionDto',
+    ArchiveChatRequest: 'ArchiveChatDto',
     BatchMessageResult: 'BatchMessageResultDto',
     BatchProgress: 'BatchProgressDto',
     BatchStatusResponse: 'BatchStatusResponseDto',
+    BulkMediaRequest: 'BulkMediaDto',
     BulkMessageContent: 'BulkMessageContentDto',
     BulkMessageItem: 'BulkMessageItemDto',
     BulkMessageResponse: 'BulkMessageResponseDto',
     CallLinkResponse: 'CallLinkResponseDto',
     ChatHistoryMessage: 'ChatHistoryMessageDto',
     ChatSummary: 'ChatSummaryDto',
-    GroupInfo: 'GroupInfoDto',
-    GroupJoinInfo: 'GroupJoinInfoDto',
-    GroupParticipant: 'GroupParticipantDto',
-    GroupSummary: 'GroupSummaryDto',
-    MessageListResponse: 'MessageListResponseDto',
-    MessageRecord: 'MessageListItemDto',
-    MessageResponse: 'MessageResponseDto',
-    // Request-side pairs: every *Request interface with a matching DTO, plus the filter-condition
-    // shape. Two requests have NO named schema (inline objects on their routes) and stay unmapped:
-    // AddLabelRequest (POST /labels/chat/:chatId) and SubscribeChannelRequest (POST /channels/subscribe).
-    ArchiveChatRequest: 'ArchiveChatDto',
-    BulkMediaRequest: 'BulkMediaDto',
     CreateCallLinkRequest: 'CreateCallLinkDto',
     CreateChannelRequest: 'CreateChannelDto',
     CreateGroupRequest: 'CreateGroupDto',
@@ -88,18 +78,30 @@ const MAPPINGS = {
     EditMessageRequest: 'EditMessageDto',
     ForwardMessageRequest: 'ForwardMessageDto',
     GroupDescriptionRequest: 'GroupDescriptionDto',
+    GroupInfo: 'GroupInfoDto',
+    GroupJoinInfo: 'GroupJoinInfoDto',
     GroupMembershipRequest: 'GroupMembershipRequestDto',
+    GroupParticipant: 'GroupParticipantDto',
     GroupSubjectRequest: 'GroupSubjectDto',
+    GroupSummary: 'GroupSummaryDto',
     JoinGroupRequest: 'JoinGroupDto',
     MarkChatRequest: 'MarkChatReadDto',
+    MessageListResponse: 'MessageListResponseDto',
+    MessageRecord: 'MessageListItemDto',
+    MessageResponse: 'MessageResponseDto',
     MuteChannelRequest: 'MuteChannelDto',
     MuteChatRequest: 'MuteChatDto',
+    PairingCodeResponse: 'PairingCodeResponseDto',
+    ParticipantPresence: 'ParticipantPresenceDto',
     ParticipantsRequest: 'ParticipantsDto',
     PinChatRequest: 'PinChatDto',
     PinMessageRequest: 'PinMessageDto',
+    ProfilePictureResponse: 'ProfilePictureResponseDto',
+    ProfilePicturesResponse: 'ProfilePicturesResponseDto',
     ReactMessageRequest: 'ReactMessageDto',
     ReplyMessageRequest: 'ReplyMessageDto',
     RequestPairingCodeRequest: 'RequestPairingCodeDto',
+    SearchHit: 'SearchHitDto',
     SendAudioRequest: 'SendAudioMessageDto',
     SendBulkRequest: 'SendBulkMessageDto',
     SendChatStateRequest: 'SendChatStateDto',
@@ -114,12 +116,14 @@ const MAPPINGS = {
     SendTextStatusRequest: 'SendTextStatusDto',
     SendVideoStatusRequest: 'SendVideoStatusDto',
     SendVoiceStatusRequest: 'SendVoiceStatusDto',
+    SessionResponse: 'SessionResponseDto',
     SetGroupPictureRequest: 'SetGroupPictureDto',
     SetOwnPresenceRequest: 'SetOwnPresenceDto',
     SetProfileNameRequest: 'SetProfileNameDto',
     SetProfilePictureRequest: 'SetProfilePictureDto',
     SetProfileStatusRequest: 'SetProfileStatusDto',
     StarMessageRequest: 'StarMessageDto',
+    StatusResult: 'StatusResultDto',
     TransferChannelOwnershipRequest: 'TransferChannelOwnershipDto',
     UnpinMessageRequest: 'UnpinMessageDto',
     UpdateSessionConfigRequest: 'UpdateSessionConfigDto',
@@ -127,13 +131,6 @@ const MAPPINGS = {
     UpsertLabelRequest: 'UpsertLabelDto',
     VotePollRequest: 'VotePollDto',
     WebhookFilterCondition: 'WebhookFilterConditionDto',
-    PairingCodeResponse: 'PairingCodeResponseDto',
-    ParticipantPresence: 'ParticipantPresenceDto',
-    ProfilePictureResponse: 'ProfilePictureResponseDto',
-    ProfilePicturesResponse: 'ProfilePicturesResponseDto',
-    SearchHit: 'SearchHitDto',
-    SessionResponse: 'SessionResponseDto',
-    StatusResult: 'StatusResultDto',
     WebhookResponse: 'WebhookResponseDto',
   },
   'dashboard/src/services/api.ts': {
@@ -169,14 +166,16 @@ const MAPPINGS = {
 const MINIMUM_MAPPED = {
   'sdk/javascript/src/types.ts': 78,
   'dashboard/src/services/api.ts': 20,
-  'sdk/python/openwa/types.py': 72,
-  'sdk/go': 73,
-  'sdk/java': 77,
+  'sdk/python/openwa/types.py': 73,
+  'sdk/go': 74,
+  'sdk/java': 78,
 };
 
 /** Known drift, deliberately not gated yet — each line is a to-adjudicate follow-up. */
 const EXCLUDED = {
   'sdk/go': {
+    UpdateWebhookRequest:
+      'BY DESIGN, same alias as WebhookResponse below: the events list resolves to array<string> because `WebhookEvent` is an alias for string, so the vocabulary cannot be carried on this client',
     WebhookResponse:
       'BY DESIGN: `WebhookEvent` is a type ALIAS for string so the Event* constants drop into a []string literal without a conversion, which means the events list resolves to array<string> and cannot carry the vocabulary. Un-excluding means making it a defined type and retyping the three Events fields, a source break for a published client',
     CreateWebhookRequest:
@@ -195,6 +194,11 @@ const EXCLUDED = {
       'BY DESIGN, not drift: the wire always carries engineLoaded, but this client clears it to "unknown" after a websocket status event so the action helpers fall back to the status set — the type models client state, not the wire',
   },
 };
+
+// UpdateWebhookRequest is mapped on the three clients that declare it as a named type. The
+// JavaScript SDK spells it `Partial<CreateWebhookRequest> & { active?: boolean }`, a type ALIAS
+// rather than an interface, which the hand parser does not read; mapping it there would fail as a
+// missing hand type rather than gate anything.
 
 /** Python client pairs (TypedDict classes in openwa/types.py). */
 const PYTHON_MAPPING = {
@@ -266,6 +270,7 @@ const PYTHON_MAPPING = {
   TransferChannelOwnershipRequest: 'TransferChannelOwnershipDto',
   UnpinMessageRequest: 'UnpinMessageDto',
   UpdateSessionConfigRequest: 'UpdateSessionConfigDto',
+  UpdateWebhookRequest: 'UpdateWebhookDto',
   UpsertContactRequest: 'UpsertContactDto',
   UpsertLabelRequest: 'UpsertLabelDto',
   VotePollRequest: 'VotePollDto',
@@ -343,6 +348,7 @@ const GO_MAPPING = {
   TransferChannelOwnershipRequest: 'TransferChannelOwnershipDto',
   UnpinMessageRequest: 'UnpinMessageDto',
   UpdateSessionConfigRequest: 'UpdateSessionConfigDto',
+  UpdateWebhookRequest: 'UpdateWebhookDto',
   UpsertContactRequest: 'UpsertContactDto',
   UpsertLabelRequest: 'UpsertLabelDto',
   VotePollRequest: 'VotePollDto',
@@ -424,6 +430,7 @@ const JAVA_MAPPING = {
   TransferChannelOwnershipRequest: 'TransferChannelOwnershipDto',
   UnpinMessageRequest: 'UnpinMessageDto',
   UpdateSessionConfigRequest: 'UpdateSessionConfigDto',
+  UpdateWebhookRequest: 'UpdateWebhookDto',
   UpsertContactRequest: 'UpsertContactDto',
   UpsertLabelRequest: 'UpsertLabelDto',
   VotePollRequest: 'VotePollDto',
@@ -949,6 +956,12 @@ export function parseJavaTypes(sources) {
     boolean: 'boolean',
     Integer: 'number',
     Long: 'number',
+    // The boxed numerics as a family: a component typed `Double` resolved to the bare class name,
+    // which is not a simple token, so its type went uncompared while the field counted as present.
+    Double: 'number',
+    Float: 'number',
+    Short: 'number',
+    Byte: 'number',
     Boolean: 'boolean',
     JsonObject: 'any',
     Object: 'any',
@@ -982,7 +995,25 @@ export function parseJavaTypes(sources) {
     const source = raw.replace(/\/\*[\s\S]*?\*\//g, '');
     for (const m of source.matchAll(/record (\w+)\(([^)]*)\)/g)) {
       const members = {};
-      for (const comp of m[2].split(',')) {
+      // Split at TOP-LEVEL commas only. A plain split(',') tears `Map<String, Object> config` into
+      // two halves: the first is unparseable and dropped, the second parses as type `Object>` with
+      // the right field NAME, so the member survived with a token nothing could compare and the
+      // pair passed on names alone.
+      const components = [];
+      let buffer = '';
+      let angle = 0;
+      for (const ch of m[2]) {
+        if (ch === '<') angle++;
+        else if (ch === '>') angle--;
+        if (ch === ',' && angle === 0) {
+          components.push(buffer);
+          buffer = '';
+          continue;
+        }
+        buffer += ch;
+      }
+      if (buffer.trim()) components.push(buffer);
+      for (const comp of components) {
         const cm = comp.trim().match(/^(?:final\s+)?([\w<>,.\[\]\s]+?)\s+(\w+)$/);
         if (!cm) continue;
         members[cm[2]] = { optional: true, token: cm[1].trim(), __java: cm[1].trim() };
