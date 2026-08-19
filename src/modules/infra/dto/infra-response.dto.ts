@@ -388,6 +388,7 @@ export class MigrationTablesDto {
   @ApiProperty({ type: [Object] }) conversationMappings!: object[];
   @ApiProperty({ type: [Object] }) ingressEvents!: object[];
   @ApiProperty({ type: [Object] }) webhookDeliveryFailures!: object[];
+  @ApiProperty({ type: [Object] }) webhookOutboxEvents!: object[];
   @ApiProperty({ type: [Object] }) integrationDeliveryFailures!: object[];
   @ApiProperty({ type: [Object] }) statusUpdates!: object[];
   @ApiProperty({ type: [Object] }) automationRules!: object[];
@@ -406,6 +407,7 @@ export class TableCountsDto {
   @ApiProperty({ example: 8 }) conversationMappings!: number;
   @ApiProperty({ example: 40 }) ingressEvents!: number;
   @ApiProperty({ example: 0 }) webhookDeliveryFailures!: number;
+  @ApiProperty({ example: 0 }) webhookOutboxEvents!: number;
   @ApiProperty({ example: 0 }) integrationDeliveryFailures!: number;
   @ApiProperty({ example: 5 }) statusUpdates!: number;
   @ApiProperty({ example: 2 }) automationRules!: number;

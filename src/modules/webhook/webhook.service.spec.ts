@@ -18,6 +18,7 @@ import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { fetch as undiciFetch } from 'undici';
 import { WebhookService } from './webhook.service';
+import { WebhookOutboxService } from './webhook-outbox.service';
 import { WebhookDeliveryService } from './webhook-delivery.service';
 import { Webhook } from './entities/webhook.entity';
 import { WebhookDeliveryFailure } from './entities/webhook-delivery-failure.entity';
@@ -114,6 +115,10 @@ describe('WebhookService', () => {
         WebhookDeliveryService,
         { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
         { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+        {
+          provide: WebhookOutboxService,
+          useValue: { open: jest.fn().mockResolvedValue(undefined), close: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: getRepositoryToken(Session, 'data'), useValue: sessionRepository },
         { provide: ConfigService, useValue: configService },
         { provide: HookManager, useValue: hookManager },

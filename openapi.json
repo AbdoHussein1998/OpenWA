@@ -13585,6 +13585,12 @@
               "type": "object"
             }
           },
+          "webhookOutboxEvents": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
           "integrationDeliveryFailures": {
             "type": "array",
             "items": {
@@ -13616,6 +13622,7 @@
           "conversationMappings",
           "ingressEvents",
           "webhookDeliveryFailures",
+          "webhookOutboxEvents",
           "integrationDeliveryFailures",
           "statusUpdates",
           "automationRules"
@@ -13668,6 +13675,10 @@
             "type": "number",
             "example": 0
           },
+          "webhookOutboxEvents": {
+            "type": "number",
+            "example": 0
+          },
           "integrationDeliveryFailures": {
             "type": "number",
             "example": 0
@@ -13693,6 +13704,7 @@
           "conversationMappings",
           "ingressEvents",
           "webhookDeliveryFailures",
+          "webhookOutboxEvents",
           "integrationDeliveryFailures",
           "statusUpdates",
           "automationRules"
@@ -13805,6 +13817,9 @@
                 "type": "array"
               },
               "webhookDeliveryFailures": {
+                "type": "array"
+              },
+              "webhookOutboxEvents": {
                 "type": "array"
               },
               "integrationDeliveryFailures": {

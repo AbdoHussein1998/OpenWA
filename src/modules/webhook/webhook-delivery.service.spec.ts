@@ -18,6 +18,7 @@ import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { fetch as undiciFetch } from 'undici';
 import { WebhookDeliveryService, WebhookPayload, WebhookJobData } from './webhook-delivery.service';
+import { WebhookOutboxService } from './webhook-outbox.service';
 import { Webhook } from './entities/webhook.entity';
 import { WebhookDeliveryFailure } from './entities/webhook-delivery-failure.entity';
 import { Session } from '../session/entities/session.entity';
@@ -56,6 +57,7 @@ describe('WebhookDeliveryService', () => {
   let hookManager: jest.Mocked<Partial<HookManager>>;
   let webhookQueue: jest.Mocked<Record<string, jest.Mock>>;
   let lidStore: { getCached: jest.Mock; resolveLid: jest.Mock };
+  let outboxService: { open: jest.Mock; close: jest.Mock };
 
   beforeEach(async () => {
     repository = {
@@ -98,11 +100,14 @@ describe('WebhookDeliveryService', () => {
       resolveLid: jest.fn((jid: string) => (lidStore.getCached(userPart(jid)) as string | null | undefined) ?? null),
     };
 
+    outboxService = { open: jest.fn().mockResolvedValue(undefined), close: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WebhookDeliveryService,
         { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
         { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+        { provide: WebhookOutboxService, useValue: outboxService },
         { provide: ConfigService, useValue: configService },
         { provide: HookManager, useValue: hookManager },
         { provide: LidMappingStoreService, useValue: lidStore },
@@ -174,6 +179,25 @@ describe('WebhookDeliveryService', () => {
       (repository.find as jest.Mock).mockRejectedValue(new Error('db down'));
       await expect(service.dispatch('sess-1', 'message.received', { x: 1 })).resolves.toBeUndefined();
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('records the delivery before attempting it, and retires the record once it lands', async () => {
+      const webhook = createMockWebhook({ events: ['message.received'] });
+      (repository.find as jest.Mock).mockResolvedValue([webhook]);
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+
+      await service.dispatch('sess-1', 'message.received', { from: '628123456789@c.us' });
+
+      // Durability is only worth anything if the row exists BEFORE the attempt: a crash during the
+      // POST is exactly the window this closes.
+      expect(outboxService.open).toHaveBeenCalledTimes(1);
+      const opened = (outboxService.open.mock.calls as unknown as Record<string, unknown>[][])[0][0];
+      expect(opened).toMatchObject({ webhookId: webhook.id, sessionId: 'sess-1', event: 'message.received' });
+      expect(opened.idempotencyKey).toEqual(expect.stringContaining(webhook.id));
+      expect(outboxService.open.mock.invocationCallOrder[0]).toBeLessThan(mockFetch.mock.invocationCallOrder[0]);
+
+      // Retired once a durable owner has it, so the reconciler never replays a delivered event.
+      expect(outboxService.close).toHaveBeenCalledWith(webhook.id, opened.idempotencyKey, 'dispatched');
     });
 
     it('should dispatch to webhooks matching the event', async () => {
@@ -1140,6 +1164,8 @@ describe('WebhookDeliveryService', () => {
           WebhookDeliveryService,
           { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
           { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+          { provide: WebhookOutboxService, useValue: outboxService },
+          { provide: WebhookOutboxService, useValue: outboxService },
           { provide: ConfigService, useValue: { get: jest.fn().mockImplementation(configGet) } },
           { provide: HookManager, useValue: hookManager },
           { provide: getQueueToken(QUEUE_NAMES.WEBHOOK), useValue: webhookQueue },
