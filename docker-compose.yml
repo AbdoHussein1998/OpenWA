@@ -257,6 +257,7 @@ services:
       - BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-}
       # Plugins
       - PLUGINS_DIR=${PLUGINS_DIR:-/app/data/plugins}
+      - PLUGIN_STATE_DIR=${PLUGIN_STATE_DIR:-}
       # Plugin install-from-URL redirect policy (ssrf-guard): off unless the exact string 'true'.
       - PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS=${PLUGIN_DOWNLOAD_ALLOW_INSECURE_REDIRECTS:-false}
       # Security
