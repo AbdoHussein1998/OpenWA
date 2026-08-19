@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `POST /sessions/{sessionId}/chats/unread` publishes its own `MarkChatUnreadDto` rather than sharing `MarkChatReadDto`. The body is unchanged (`chatId` alone), but a generated client sees the schema under a new name.
+- ⚠️ **Breaking (Go and Java clients).** `subscribePresence` takes its own `SubscribePresenceRequest` rather than the shared `MarkChatRequest`, which now serves `markUnread` alone. Swap the type at the call site; the wire body is unchanged. `SubscribePresenceDto` had no contract-gate coverage while one type stood for two routes.
 
 ### Fixed
 

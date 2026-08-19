@@ -968,8 +968,13 @@ export interface TransferChannelOwnershipRequest {
   newOwnerId: Jid;
 }
 
-/** Body for {@link ChatsResource.markUnread} and {@link ChatsResource.subscribePresence}. */
+/** Body for {@link ChatsResource.markUnread}. */
 export interface MarkChatRequest {
+  chatId: Jid;
+}
+
+/** Body for {@link ChatsResource.subscribePresence}. */
+export interface SubscribePresenceRequest {
   chatId: Jid;
 }
 

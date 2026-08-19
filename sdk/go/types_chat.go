@@ -19,8 +19,13 @@ type SetOwnPresenceRequest struct {
 	Available bool `json:"available"`
 }
 
-// MarkChatRequest marks a chat unread, or subscribes to its presence.
+// MarkChatRequest marks a chat unread.
 type MarkChatRequest struct {
+	ChatID string `json:"chatId"`
+}
+
+// SubscribePresenceRequest subscribes to a chat's presence.
+type SubscribePresenceRequest struct {
 	ChatID string `json:"chatId"`
 }
 
