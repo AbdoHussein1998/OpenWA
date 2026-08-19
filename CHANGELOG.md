@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settled outbound delivery records are pruned after `WEBHOOK_OUTBOX_RETENTION_DAYS` (default 7). A record that can still be replayed is never pruned on age, and a non-positive window falls back to the default rather than letting the table grow without bound.
 - `PLUGIN_STATE_DIR` moves the plugin registry and per-plugin storage off the default `./data`. It was the one piece of state with no path knob, so a test run rewrote the developer's own registry and every suite in that run inherited whatever the previous one left in it.
 - The e2e lane sweeps the throwaway state roots it creates. Each suite gets its own, nothing removed them, and the temp directory accumulated hundreds of entries over a few days of runs.
+- e2e assertions are no longer answered by unrelated processes on the host. supertest starts a listener per request on the wildcard address and then dials 127.0.0.1, and macOS both permits that bind over a port another process holds on 127.0.0.1 specifically and routes the connection to the more specific holder, so a run could assert against a status the app has no route for. Each suite's server now listens on loopback while it initialises, which supertest reuses instead of opening one, taking the lane from 230 listeners a run to 27.
 
 ### Tests
 
