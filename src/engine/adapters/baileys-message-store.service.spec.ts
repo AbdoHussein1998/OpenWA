@@ -181,6 +181,39 @@ describe('BaileysMessageStoreService', () => {
     await expect(service.put('s1', msg('M1'))).rejects.toThrow('disk full');
   });
 
+  describe('getMessages', () => {
+    it('returns the batch in one query, skipping ids it has never seen', async () => {
+      await seedSession('s1');
+      await service.put('s1', msg('M1'));
+      await service.put('s1', msg('M2'));
+      const found = await service.getMessages('s1', ['M1', 'MISSING', 'M2']);
+      expect(found.map(m => m.key.id).sort()).toEqual(['M1', 'M2']);
+    });
+
+    it('stays scoped to its own session', async () => {
+      await seedSession('s1');
+      await seedSession('s2');
+      await service.put('s2', msg('M1'));
+      expect(await service.getMessages('s1', ['M1'])).toEqual([]);
+    });
+
+    it('short-circuits on an empty or all-falsy id list instead of querying', async () => {
+      // An empty In() clause is a SQL syntax error on some drivers and matches everything on others.
+      const find = jest.spyOn(repo, 'find');
+      expect(await service.getMessages('s1', [])).toEqual([]);
+      expect(await service.getMessages('s1', [''])).toEqual([]);
+      expect(find).not.toHaveBeenCalled();
+    });
+
+    it('round-trips binary fields the same way getMessage does', async () => {
+      await seedSession('s1');
+      await service.put('s1', msg('M1'));
+      const [found] = await service.getMessages('s1', ['M1']);
+      // mediaKey is off the public WAMessage type, like the fixture that wrote it.
+      expect(Buffer.isBuffer((found as unknown as { mediaKey: unknown }).mediaKey)).toBe(true);
+    });
+  });
+
   it('clearSession removes only that session', async () => {
     await seedSession('s1');
     await seedSession('s2');

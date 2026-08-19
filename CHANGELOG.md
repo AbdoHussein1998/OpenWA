@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `POST /sessions/{sessionId}/chats/read` accepts an optional `messageIds` array (up to 100) naming exactly which messages to acknowledge. Baileys acknowledges individual messages, so without it only the newest message still held in memory got a receipt: a burst left its earlier messages unread, and a session restarted since the message arrived had nothing to acknowledge and answered `false` under a `200`. Each id is resolved through the message store, so a group receipt carries the `participant` that attributes it. Omitting the field keeps the previous behaviour, an empty array is refused with a `400` rather than silently acknowledging the newest message, and the whatsapp-web.js engine ignores the field because its own receipt is chat-level. The `SessionMarkChatRead` agent tool takes the same list, and all five clients expose the field through a dedicated read-request type. Thanks @m7fz7.
+
+### Changed
+
+- `POST /sessions/{sessionId}/chats/unread` publishes its own `MarkChatUnreadDto` instead of sharing `MarkChatReadDto` with the read route. The request body is unchanged (`chatId` alone), but a client generated from the contract sees the schema under a new name. Sharing the class would have advertised `messageIds` on a route that discards it.
+
 ### Fixed
 
 - The dashboard CSP nonce is substituted at every occurrence in the served document, not only the first. One placeholder exists today, so a second would have been left reading the literal text and its script refused by the browser.

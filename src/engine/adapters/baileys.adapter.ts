@@ -153,6 +153,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       toEngineJid: jid => this.sessionStore.toEngineJid(jid),
       getEphemeralExpiration: chatId => this.sessionStore.getEphemeralExpiration(chatId),
       getStoredMessage: messageId => this.config.messageStore?.getMessage(this.config.dbSessionId, messageId),
+      getStoredMessages: messageIds => this.config.messageStore?.getMessages(this.config.dbSessionId, messageIds),
       recordLidMapping: (lid, pn) =>
         this.sessionStore.addLidMappings([{ lid: `${lid.split('@')[0].split(':')[0]}@lid`, pn }]),
       mapMessage: (msg, contentType, opts) => this.events.mapMessage(msg, contentType, opts),
@@ -509,8 +510,8 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.messaging.subscribeToPresence(chatId);
   }
 
-  async sendSeen(chatId: string): Promise<boolean> {
-    return this.contacts.sendSeen(chatId);
+  async sendSeen(chatId: string, messageIds?: string[]): Promise<boolean> {
+    return this.contacts.sendSeen(chatId, messageIds);
   }
 
   async markUnread(chatId: string): Promise<boolean> {

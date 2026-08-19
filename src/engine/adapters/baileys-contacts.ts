@@ -1,4 +1,4 @@
-import type { WAMessageKey, WASocket } from '@whiskeysockets/baileys';
+import type { WAMessage, WAMessageKey, WASocket } from '@whiskeysockets/baileys';
 import { ChatSummary, Contact, MediaInput } from '../interfaces/whatsapp-engine.interface';
 import { resolveMediaBuffer } from './baileys-messaging';
 import { type createLogger } from '../../common/services/logger.service';
@@ -23,6 +23,12 @@ export interface BaileysContactsHost {
   listChats(): ChatSummary[];
   /** The chat's last known message (the handle readMessages/chatModify need), or null when none. */
   lastMessage(chatId: string): { key: WAMessageKey; timestamp: number } | null;
+  /**
+   * Stored copies of the named messages, in whatever order the store returns them. Ids the store
+   * has never seen are absent, so neither the length nor the order tracks the input. `undefined`
+   * when the session was built without a message store.
+   */
+  getStoredMessages(messageIds: string[]): Promise<WAMessage[]> | undefined;
   /** Fold a neutral @c.us id to the engine @s.whatsapp.net form used as the app-state index key. */
   toEngineJid(jid: string): string;
   /** Fold an engine jid back to the neutral dialect before it crosses the engine boundary. */
@@ -318,17 +324,48 @@ export class BaileysContacts {
     return this.host.listChats();
   }
 
-  async sendSeen(chatId: string): Promise<boolean> {
+  async sendSeen(chatId: string, messageIds?: string[]): Promise<boolean> {
     this.host.ensureReady();
-    const last = this.host.lastMessage(chatId);
-    if (!last) {
+    const keys = await this.receiptKeys(chatId, messageIds);
+    if (keys.length === 0) {
       return false; // nothing known to mark read
     }
     // readMessages reaches fetchPrivacySettings, which destructures the query result and throws a
     // raw TypeError on an unanswered one — no Boom, so nothing downstream can classify it. Marking
     // a chat read is idempotent, so bounding it is safe: a repeat costs nothing.
-    await this.confirmed(this.sock().readMessages([last.key]), 'the read receipt');
+    await this.confirmed(this.sock().readMessages(keys), 'the read receipt');
     return true;
+  }
+
+  /**
+   * The keys a read receipt should acknowledge: the messages the caller named, or the chat's newest
+   * one when it named none.
+   *
+   * Baileys acknowledges individual messages, not chats, and the receipt node enumerates ids rather
+   * than carrying a read-up-to watermark. Caller-supplied ids are what make that correct: the
+   * lastMessage fallback holds only the newest message, so a burst of three inbound messages left
+   * the first two permanently unread, and a session that restarted since the message arrived had
+   * nothing to acknowledge at all (a silent false under a 200).
+   *
+   * Named ids are resolved through the message store rather than synthesised, because the receipt
+   * needs the whole key. A synthesised key carries no `participant`, so a group receipt names no
+   * sender; its hardcoded `fromMe: false` is wrong for an id that belongs to an outbound message;
+   * and its jid is whichever dialect the caller happened to send. The stored key has all three
+   * right. Ids the store has never seen — history backfill is emitted but not persisted — keep the
+   * synthesised key, which is what the 1:1 case ran on before.
+   */
+  private async receiptKeys(chatId: string, messageIds?: string[]): Promise<WAMessageKey[]> {
+    if (messageIds === undefined) {
+      const last = this.host.lastMessage(chatId);
+      return last ? [last.key] : [];
+    }
+    if (messageIds.length === 0) {
+      return []; // an explicit empty list asks for nothing to be acknowledged, not for the newest
+    }
+    const remoteJid = this.host.toEngineJid(chatId);
+    const stored = (await this.host.getStoredMessages(messageIds)) ?? [];
+    const keyById = new Map(stored.filter(msg => msg.key?.id).map(msg => [msg.key.id as string, msg.key]));
+    return messageIds.map(id => keyById.get(id) ?? { remoteJid, id, fromMe: false });
   }
 
   async markUnread(chatId: string): Promise<boolean> {

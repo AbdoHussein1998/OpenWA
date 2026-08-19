@@ -41,7 +41,7 @@ func (s *ChatsService) GetPresence(ctx context.Context, sessionID, chatID string
 }
 
 // MarkRead marks a chat as read.
-func (s *ChatsService) MarkRead(ctx context.Context, sessionID string, body MarkChatRequest) (*SuccessResult, error) {
+func (s *ChatsService) MarkRead(ctx context.Context, sessionID string, body MarkChatReadRequest) (*SuccessResult, error) {
 	return s.post(ctx, sessionID, "/read", body)
 }
 

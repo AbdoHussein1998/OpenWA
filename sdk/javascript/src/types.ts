@@ -968,8 +968,21 @@ export interface TransferChannelOwnershipRequest {
   newOwnerId: Jid;
 }
 
+/** Body for {@link ChatsResource.markUnread} and {@link ChatsResource.subscribePresence}. */
 export interface MarkChatRequest {
   chatId: Jid;
+}
+
+/** Body for {@link ChatsResource.markRead}. */
+export interface MarkChatReadRequest extends MarkChatRequest {
+  /**
+   * Specific message IDs to acknowledge. Baileys acknowledges individual messages, so without this
+   * only the newest message the engine still holds in memory gets a receipt: a burst leaves its
+   * earlier messages unread forever, and a restarted session has no message to acknowledge at all.
+   * Callers that persist inbound message IDs should send them here. Ignored by whatsapp-web.js,
+   * whose own sendSeen is chat-level. At most 100 per request; an empty array is rejected.
+   */
+  messageIds?: string[];
 }
 
 export type ChatState = 'typing' | 'recording' | 'paused';

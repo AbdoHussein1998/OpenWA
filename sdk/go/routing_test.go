@@ -94,7 +94,7 @@ func TestRouting(t *testing.T) {
 		{"Webhooks.Test", func(c *Client) { c.Webhooks.Test(ctx, "s1", "w1") }, "POST", "/api/sessions/s1/webhooks/w1/test"},
 
 		{"Chats.List", func(c *Client) { c.Chats.List(ctx, "s1", nil) }, "GET", "/api/sessions/s1/chats"},
-		{"Chats.MarkRead", func(c *Client) { c.Chats.MarkRead(ctx, "s1", MarkChatRequest{}) }, "POST", "/api/sessions/s1/chats/read"},
+		{"Chats.MarkRead", func(c *Client) { c.Chats.MarkRead(ctx, "s1", MarkChatReadRequest{}) }, "POST", "/api/sessions/s1/chats/read"},
 		{"Chats.SubscribePresence", func(c *Client) { c.Chats.SubscribePresence(ctx, "s1", MarkChatRequest{}) }, "POST", "/api/sessions/s1/presence/subscribe"},
 		{"Channels.Create", func(c *Client) { c.Channels.Create(ctx, "s1", CreateChannelRequest{}) }, "POST", "/api/sessions/s1/channels"},
 		{"Channels.Delete", func(c *Client) { c.Channels.Delete(ctx, "s1", "ch1") }, "POST", "/api/sessions/s1/channels/ch1/delete"},

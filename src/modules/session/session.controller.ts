@@ -21,6 +21,7 @@ import {
   SessionResponseDto,
   QRCodeResponseDto,
   MarkChatReadDto,
+  MarkChatUnreadDto,
   SubscribePresenceDto,
   SetOwnPresenceDto,
   ChatPresenceResponseDto,
@@ -469,7 +470,7 @@ export class SessionController {
     @Param('sessionId', ParseUUIDPipe) id: string,
     @Body() dto: MarkChatReadDto,
   ): Promise<{ success: boolean }> {
-    const success = await this.sessionService.sendSeen(id, dto.chatId);
+    const success = await this.sessionService.sendSeen(id, dto.chatId, dto.messageIds);
     return { success };
   }
 
@@ -572,7 +573,7 @@ export class SessionController {
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async markChatUnread(
     @Param('sessionId', ParseUUIDPipe) id: string,
-    @Body() dto: MarkChatReadDto,
+    @Body() dto: MarkChatUnreadDto,
   ): Promise<{ success: boolean }> {
     const success = await this.sessionService.markUnread(id, dto.chatId);
     return { success };

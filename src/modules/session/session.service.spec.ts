@@ -5151,8 +5151,23 @@ describe('SessionService', () => {
 
       const result = await service.sendSeen('sess-uuid-1', '123@c.us');
 
-      expect(mockEngine.sendSeen).toHaveBeenCalledWith('123@c.us');
+      // Second argument is the optional messageIds, absent here — the engine falls back to the
+      // newest message it still holds.
+      expect(mockEngine.sendSeen).toHaveBeenCalledWith('123@c.us', undefined);
       expect(result).toBe(true);
+    });
+
+    it('should forward caller-supplied message IDs to the engine', async () => {
+      const session = createMockSession();
+      (repository.findOne as jest.Mock).mockResolvedValue(session);
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+
+      await service.start('sess-uuid-1');
+      mockEngine.sendSeen.mockResolvedValue(true);
+
+      await service.sendSeen('sess-uuid-1', '123@c.us', ['M1', 'M2']);
+
+      expect(mockEngine.sendSeen).toHaveBeenCalledWith('123@c.us', ['M1', 'M2']);
     });
 
     it('should throw BadRequestException when session is not started', async () => {
