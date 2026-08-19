@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-19
+
 ### Fixed
 
 - `isReadOnly` on a group answers for the calling account rather than repeating the group setting, so an admin of an announce-only group is no longer told they cannot post.
