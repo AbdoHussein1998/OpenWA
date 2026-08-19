@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PLUGIN_STATE_DIR` moves the plugin registry and per-plugin storage off the default `./data`. It was the one piece of state with no path knob, so a test run rewrote the developer's own registry.
 - The e2e lane sweeps the throwaway state roots it creates. Each suite gets its own, nothing removed them, and the temp directory accumulated hundreds of entries over a few days of runs.
 - e2e assertions are no longer answered by unrelated processes on the host. supertest binds its per-request listener to the wildcard address and then dials 127.0.0.1, which on macOS lets a process holding that port on 127.0.0.1 answer instead. Each suite's server now listens on loopback during init, which supertest reuses.
+- A stalled `apt-get` can no longer hold a CI run open. The scripts-smoke job installed sqlite3 and shellcheck unbounded, so a slow mirror held two main runs past an hour with every other job already green. Both steps now time out and skip the install when the runner already ships the tool.
 
 ### Tests
 
