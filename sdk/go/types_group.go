@@ -25,13 +25,22 @@ type GroupSummary struct {
 	LinkedParentJID   *string `json:"linkedParentJID,omitempty"`
 }
 
+// MembershipRequestMethod is how a pending member asked to join.
+type MembershipRequestMethod string
+
+const (
+	MembershipInviteLink      MembershipRequestMethod = "invite_link"
+	MembershipLinkedGroupJoin MembershipRequestMethod = "linked_group_join"
+	MembershipNonAdminAdd     MembershipRequestMethod = "non_admin_add"
+)
+
 // GroupMembershipRequest is a pending request to join a group. Only ParticipantID is always
 // present; the engine reports the rest when it has it.
 type GroupMembershipRequest struct {
 	ParticipantID string `json:"participantId"`
 	AddedByID     string `json:"addedById,omitempty"`
 	// Method is one of: invite_link, non_admin_add, linked_group_join.
-	Method string `json:"method,omitempty"`
+	Method MembershipRequestMethod `json:"method,omitempty"`
 	// RequestedAt is Unix seconds.
 	RequestedAt float64 `json:"requestedAt,omitempty"`
 }

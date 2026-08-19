@@ -191,3 +191,71 @@ test('parseJavaTypes: javadoc between components must not drop fields', () => {
   assert.deepEqual(Object.keys(types.Sample), ['id', 'count']);
   assert.equal(types.Sample.count.token, 'number');
 });
+
+test('parsePythonTypes: a Literal of bare numbers is an enum, not an unreadable token', () => {
+  const src = [
+    'StatusFont = Literal[0, 1, 2, 6, 10]',
+    '',
+    'class Post(TypedDict, total=False):',
+    '    font: StatusFont',
+  ].join('\n');
+  // Members went unread before, so the field fell through to a non-simple token and comparePair
+  // skipped it: the enum silently stopped being gated while the run stayed green.
+  assert.equal(parsePythonTypes(src).Post.font.token, 'enum(0,1,2,6,10)', 'sorted numerically, not 0,1,10,2,6');
+});
+
+test('parseGoTypes: a const block of bare numbers is an enum', () => {
+  const src = [
+    'type Window int',
+    '',
+    'const (',
+    '\tWindowDay   Window = 86400',
+    '\tWindowWeek  Window = 604800',
+    '\tWindowMonth Window = 2592000 // thirty days',
+    ')',
+    '',
+    'type Sample struct {',
+    '\tWindow Window `json:"window"`',
+    '}',
+  ].join('\n');
+  assert.equal(parseGoTypes([src]).Sample.window.token, 'enum(86400,604800,2592000)');
+});
+
+test('parseJavaTypes: enum constants resolve to their wire values, annotated or bare', () => {
+  const src = [
+    'public enum Scheme {',
+    '    @SerializedName("socks5")',
+    '    SOCKS5,',
+    '    @SerializedName("http")',
+    '    HTTP',
+    '}',
+    'public enum Plain {',
+    '    RED,',
+    '    BLUE',
+    '}',
+    'public record Sample(Scheme scheme, List<Plain> shades) {}',
+  ].join('\n');
+  const s = parseJavaTypes([src]).Sample;
+  // Gson emits @SerializedName when present and the constant name otherwise; without this the
+  // component resolved to the Java type name, which comparePair skips as non-simple.
+  assert.equal(s.scheme.token, 'enum(http,socks5)');
+  assert.equal(s.shades.token, 'array<enum(BLUE,RED)>');
+});
+
+test('isSimpleToken-gated diffing reaches inside an array of enum members', () => {
+  const hand = { events: { optional: false, token: 'array<enum(a,b)>' } };
+  const schema = { type: 'object', required: ['events'], properties: { events: { type: 'array', items: { enum: ['a', 'c'] } } } };
+  const diffs = comparePair('Hand', hand, 'Dto', schema, {});
+  assert.equal(diffs.length, 1, 'a vocabulary that travels as a list must still be compared');
+  assert.match(diffs[0], /events/);
+});
+
+test('parseJavaTypes: a package-qualified generic is the same shape as the bare one', () => {
+  // Two request records spell the mentions list `java.util.List<String>`; matching only `List<...>`
+  // left it resolving to its raw text, so its type went uncompared while the field still counted
+  // as present.
+  const src = 'public record Sample(java.util.List<String> mentions, List<String> tags) {}';
+  const s = parseJavaTypes([src]).Sample;
+  assert.equal(s.mentions.token, 'array<string>');
+  assert.equal(s.tags.token, s.mentions.token);
+});

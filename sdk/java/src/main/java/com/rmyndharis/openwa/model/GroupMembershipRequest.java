@@ -11,4 +11,5 @@ package com.rmyndharis.openwa.model;
  * @param method one of {@code invite_link}, {@code non_admin_add}, {@code linked_group_join}
  * @param requestedAt Unix seconds the request was created
  */
-public record GroupMembershipRequest(String participantId, String addedById, String method, Double requestedAt) {}
+public record GroupMembershipRequest(
+        String participantId, String addedById, MembershipRequestMethod method, Double requestedAt) {}

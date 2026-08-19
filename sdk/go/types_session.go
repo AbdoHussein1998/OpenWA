@@ -165,13 +165,23 @@ type SessionResponse struct {
 	EngineLoaded bool `json:"engineLoaded"`
 }
 
+// ProxyType is the scheme of a session proxy.
+type ProxyType string
+
+const (
+	ProxyHTTP   ProxyType = "http"
+	ProxyHTTPS  ProxyType = "https"
+	ProxySOCKS4 ProxyType = "socks4"
+	ProxySOCKS5 ProxyType = "socks5"
+)
+
 // CreateSessionRequest is the body for creating a session. ProxyType is one of:
 // http, https, socks4, socks5.
 type CreateSessionRequest struct {
 	Name      string         `json:"name"`
 	Config    map[string]any `json:"config,omitempty"`
 	ProxyURL  string         `json:"proxyUrl,omitempty"`
-	ProxyType string         `json:"proxyType,omitempty"`
+	ProxyType ProxyType      `json:"proxyType,omitempty"`
 }
 
 // QrCodeResponse carries the current QR code for a session awaiting scan.
