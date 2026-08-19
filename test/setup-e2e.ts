@@ -25,9 +25,23 @@ import { rmSync } from 'fs';
 
 process.env.NODE_ENV = 'test';
 // The plugin registry + per-plugin storage: the last state a suite could not isolate.
-const e2ePluginState = join(tmpdir(), `openwa-e2e-plugins-${process.pid}`);
-rmSync(e2ePluginState, { force: true, recursive: true });
+// Keyed per SETUP RUN, not per process: setupFiles executes once per test file, so a pid-keyed path
+// would be one directory shared by every suite in the run, and wiping it at each suite's start
+// would pull the tree out from under any app a previous suite left running.
+const e2eRunId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const e2ePluginState = join(tmpdir(), `openwa-e2e-plugins-${e2eRunId}`);
 process.env.PLUGIN_STATE_DIR = e2ePluginState;
+
+// The remaining data paths. Each already carries its own knob, and leaving them unset pointed every
+// suite at the same `./data/sessions`, `./data/baileys` and `./data/media`: shared between suites
+// in a run, and the developer's own directories besides.
+for (const [key, name] of [
+  ['SESSION_DATA_PATH', 'sessions'],
+  ['BAILEYS_AUTH_DIR', 'baileys'],
+  ['STORAGE_LOCAL_PATH', 'media'],
+] as const) {
+  process.env[key] = join(tmpdir(), `openwa-e2e-${name}-${e2eRunId}`);
+}
 process.env.DATABASE_TYPE = 'sqlite';
 // Isolate the e2e data DB to a throwaway temp file so suites never pollute the developer's
 // ./data/openwa.sqlite. e2e creates sessions/webhooks and doesn't self-clean, so without this they
