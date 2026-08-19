@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The dashboard CSP nonce is substituted at every occurrence in the served document, not only the first. One placeholder exists today, so a second would have been left reading the literal text and its script refused by the browser.
+
 ## [0.22.0] - 2026-08-19
 
 ### Fixed
