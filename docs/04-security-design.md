@@ -388,7 +388,7 @@ media shedding, so it is small. The HMAC signature is computed over the exact sh
 
 ### Helmet Configuration
 
-The shipped configuration lives in `src/main.ts` — that file is the source of truth:
+The shipped configuration lives in `src/configure-app.ts` (the HTTP stack `main.ts` and the e2e suites both install), and that file is the source of truth:
 
 ```typescript
 app.use(helmet({

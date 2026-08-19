@@ -441,11 +441,17 @@ describe('a queue-dashboard denial is attributable to the credential', () => {
   // The stamp is a no-op outside a request-context scope, so the mount order in main.ts is load
   // bearing. Nothing else binds it; a reordering would silently return the null rows this fixed.
   it('keeps requestContextMiddleware installed ahead of the queue-dashboard mount', () => {
-    const main = fs.readFileSync(path.join(__dirname, '..', '..', 'main.ts'), 'utf8');
-    const contextAt = main.indexOf('app.use(requestContextMiddleware)');
+    // The guarantee now spans two files: configure-app.ts installs the middleware, and main.ts
+    // calls it before mounting the board. Reading only one of them would leave half the order
+    // unbound.
+    const read = (...parts: string[]): string => fs.readFileSync(path.join(__dirname, '..', '..', ...parts), 'utf8');
+    expect(read('configure-app.ts')).toContain('app.use(requestContextMiddleware)');
+
+    const main = read('main.ts');
+    const configureAt = main.indexOf('configureApp(app)');
     const boardAt = main.indexOf('new BullBoardAuthMiddleware');
-    expect(contextAt).toBeGreaterThan(-1);
+    expect(configureAt).toBeGreaterThan(-1);
     expect(boardAt).toBeGreaterThan(-1);
-    expect(contextAt).toBeLessThan(boardAt);
+    expect(configureAt).toBeLessThan(boardAt);
   });
 });
