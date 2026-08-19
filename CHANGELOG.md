@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The dashboard CSP nonce is substituted at every occurrence in the served document, not only the first. One placeholder exists today, so a second would have been left reading the literal text and its script refused by the browser.
+
+### Tests
+
+- The production HTTP stack is assembled by one `configureApp` that `main.ts` and the e2e suites both call, so the nonce, body caps, CORS and the SPA document handler are executed by tests instead of only in production.
+- The serve-static suite drops its own copy of the document handler, which omitted the nonce injection, and exercises the real one.
+
 ## [0.22.0] - 2026-08-19
 
 ### Fixed

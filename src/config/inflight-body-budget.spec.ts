@@ -664,8 +664,10 @@ describe('compressed request bodies', () => {
 describe('body-parser inflate backstop', () => {
   const read = (relative: string): string => readFileSync(resolve(__dirname, relative), 'utf8');
 
-  it('disables inflate on both global parsers in main.ts', () => {
-    const source = read('../main.ts');
+  it('disables inflate on both global parsers', () => {
+    // The parsers live in configure-app.ts, which is where the production stack is assembled; they
+    // sat inline in main.ts until that stack was extracted so the e2e lane could run it too.
+    const source = read('../configure-app.ts');
 
     expect(source.match(/^\s+inflate: false,$/gm)).toHaveLength(2);
   });
