@@ -299,10 +299,17 @@ jobs:
       - name: Install sqlite3
         # smoke-test-backup-restore.sh skips its sqlite3 .backup roundtrip case (with a notice) when
         # the host lacks the CLI; installing it here exercises that path on every run instead.
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sqlite3
+        # Bounded, and skipped when the runner image already ships the CLI. An unbounded apt-get
+        # against a slow mirror held this job open for over an hour with every other job already
+        # green, so the run never reported and main went without a signal.
+        timeout-minutes: 5
+        run: command -v sqlite3 >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends sqlite3; }
 
       - name: Install shellcheck
-        run: sudo apt-get install -y --no-install-recommends shellcheck
+        # Runs its own update rather than inheriting one from the step above, which no longer
+        # always runs.
+        timeout-minutes: 5
+        run: command -v shellcheck >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck; }
 
       - name: shellcheck every shell script
         # Widened from the original three (#926) now that the rest are clean too. The narrow scope was
