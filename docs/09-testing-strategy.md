@@ -126,9 +126,10 @@ E2E smoke tests live in `test/` and use `test/jest-e2e.json`.
 
 > **They run one at a time (`maxWorkers: 1`), and that is a correctness requirement, not a
 > performance preference.** Each suite boots a real application, and not every piece of application
-> state is redirected to a per-worker location. `dataDir` is a hard-coded `./data` with no
-> environment lever, so every worker's plugin loader read-modify-writes the same
-> `data/plugins/registry.json`. Measured on a single parallel run: 52 writes from 12 processes, 30
+> state is redirected to a per-worker location. The plugin registry once had no environment
+> lever, so every worker's plugin loader read-modify-wrote the same
+> `data/plugins/registry.json`. `PLUGIN_STATE_DIR` now redirects it and each suite takes its own state
+> roots, so that particular collision is closed. Measured on a single parallel run: 52 writes from 12 processes, 30
 > of them within 500ms of a write by a different process. Individual writes are atomic; the
 > read-modify-write cycle is not.
 >
@@ -137,7 +138,15 @@ E2E smoke tests live in `test/` and use `test/jest-e2e.json`.
 > reproduced when a suite ran on its own, which is what made it look like flakiness. Serially it
 > does not occur.
 >
-> Adding a suite is safe. Restoring parallelism is not, until each worker gets its own data root.
+> Adding a suite is safe. Restoring parallelism has not been retried since those roots landed, so it
+> is untested rather than known-safe.
+>
+> A second requirement has nothing to do with parallelism: each suite's server is put on a **loopback**
+> port while it initialises (`test/setup-e2e.ts`). Left alone, supertest starts a listener per request
+> on the wildcard address and then dials 127.0.0.1, and macOS both permits that bind over a port
+> another process holds on 127.0.0.1 specifically and routes the connection to the more specific
+> holder. An assertion then reads a status from an unrelated program on the host, which is why the lane
+> could fail on a status no route can return. `setup-e2e-env.e2e-spec.ts` holds that contract.
 
 ```text
 test/
