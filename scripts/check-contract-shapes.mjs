@@ -85,7 +85,8 @@ const MAPPINGS = {
     GroupSubjectRequest: 'GroupSubjectDto',
     GroupSummary: 'GroupSummaryDto',
     JoinGroupRequest: 'JoinGroupDto',
-    MarkChatRequest: 'MarkChatReadDto',
+    MarkChatReadRequest: 'MarkChatReadDto',
+    MarkChatRequest: 'MarkChatUnreadDto',
     MessageListResponse: 'MessageListResponseDto',
     MessageRecord: 'MessageListItemDto',
     MessageResponse: 'MessageResponseDto',
@@ -164,7 +165,7 @@ const MAPPINGS = {
  * these floors as pairs are added makes the shrink loud.
  */
 const MINIMUM_MAPPED = {
-  'sdk/javascript/src/types.ts': 78,
+  'sdk/javascript/src/types.ts': 79,
   'dashboard/src/services/api.ts': 20,
   'sdk/python/openwa/types.py': 73,
   'sdk/go': 74,

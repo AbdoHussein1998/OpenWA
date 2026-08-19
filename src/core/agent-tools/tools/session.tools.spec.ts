@@ -90,8 +90,18 @@ describe('sessionTools', () => {
       sessionId: 's1',
       chatId: '628111@c.us',
     });
-    expect(sendSeen).toHaveBeenCalledWith('s1', '628111@c.us');
+    expect(sendSeen).toHaveBeenCalledWith('s1', '628111@c.us', undefined);
     expect(out).toEqual({ success: true });
+  });
+
+  it('SessionMarkChatRead forwards the message ids it was given', async () => {
+    const sendSeen = jest.fn().mockResolvedValue(true);
+    await run(makeTools({ sendSeen } as unknown as SessionService).get('SessionMarkChatRead')!, {
+      sessionId: 's1',
+      chatId: '628111@c.us',
+      messageIds: ['M1', 'M2'],
+    });
+    expect(sendSeen).toHaveBeenCalledWith('s1', '628111@c.us', ['M1', 'M2']);
   });
 
   it('SessionMarkChatUnread maps the markUnread result to a success field', async () => {

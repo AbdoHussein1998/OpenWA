@@ -150,6 +150,7 @@ import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
 const fakeStore = {
   put: jest.fn().mockResolvedValue(undefined),
   getMessage: jest.fn(),
+  getMessages: jest.fn().mockResolvedValue([]),
   clearSession: jest.fn().mockResolvedValue(undefined),
 };
 

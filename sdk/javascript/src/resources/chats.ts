@@ -17,6 +17,7 @@ import type {
   ChatSummary,
   DeleteChatRequest,
   MarkChatRequest,
+  MarkChatReadRequest,
   ChatPresence,
   SendChatStateRequest,
   SuccessResult,
@@ -67,7 +68,7 @@ export class ChatsResource {
   }
 
   /** Mark a chat as read/seen. */
-  markRead(sessionId: string, body: MarkChatRequest): Promise<SuccessResult> {
+  markRead(sessionId: string, body: MarkChatReadRequest): Promise<SuccessResult> {
     return this.client.request<SuccessResult>({
       method: 'POST',
       path: `/api/sessions/${encodeSegment(sessionId)}/chats/read`,

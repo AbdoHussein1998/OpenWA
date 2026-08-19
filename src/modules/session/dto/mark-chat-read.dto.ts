@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMaxSize, IsArray, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
+
+/**
+ * Ceiling on one request's receipt batch, so a single call cannot hand the engine an unbounded key
+ * list to round-trip. A caller with more than this to acknowledge is catching up on history rather
+ * than marking a conversation read.
+ */
+export const MARK_READ_MESSAGE_IDS_MAX = 100;
 
 export class MarkChatReadDto {
   @ApiProperty({
@@ -24,14 +31,23 @@ export class MarkChatReadDto {
       'Callers that persist inbound message IDs should send them here. Ignored by whatsapp-web.js, ' +
       'whose own sendSeen is chat-level.',
     type: [String],
+    // @ArrayMaxSize is runtime-only; @nestjs/swagger does not derive maxItems from it, so without
+    // this the published schema advertises an unbounded array and a caller batching more than the
+    // cap discovers the limit as a 400.
+    maxItems: MARK_READ_MESSAGE_IDS_MAX,
     example: ['3EB0C767D26B8A3F1A2B', '3EB0C767D26B8A3F1A2C'],
   })
   @IsOptional()
   @IsArray()
-  // Bounded so one request cannot hand the engine an unbounded key list to round-trip; a caller with
-  // more than this to acknowledge is catching up on history, not marking a conversation read.
-  @ArrayMaxSize(100)
+  // An empty array asks for nothing to be acknowledged. Rejected rather than accepted, because the
+  // engine reads a missing list as "the newest message" and the two must not collapse: a caller that
+  // computed its unread set and got none back would otherwise acknowledge a message it never named.
+  @ArrayNotEmpty()
+  @ArrayMaxSize(MARK_READ_MESSAGE_IDS_MAX)
   @IsString({ each: true })
   @IsNotEmpty({ each: true })
+  // Engine-neutral structural check: a message id is one non-whitespace token. @IsNotEmpty alone
+  // accepts '   ', which would reach sendNode as a receipt key.
+  @Matches(/^\S{1,128}$/, { each: true, message: 'each messageIds entry must be a non-empty id with no whitespace' })
   messageIds?: string[];
 }
