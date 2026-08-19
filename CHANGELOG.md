@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - The API reference and capability matrix record where the two engines differ on calls both support: read receipts, edit, pin and unpin, the profile writes, mute, and the channel lookup.
+- The per-client half of the in-flight body budget is documented: one IP is refused with `503` past it even while the gateway has room, and without `TRUSTED_PROXIES` every caller shares that half.
 
 ## [0.21.0] - 2026-08-18
 
