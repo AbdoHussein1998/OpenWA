@@ -32,9 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A session launch that fails on a locked database is retried. The classifier looked for `SQLITE_BUSY` in the error message while the driver carries it on `code`, so the session stayed down until a restart.
 - Meta-hosted ids (`@hosted`, `@hosted.lid`) normalize to the dialect they name. They parsed as unknown before, so a chat surfaced with kind `unknown` and the same id was then refused with a `400` on any write.
 
+- 19 Python request types marked a field optional that the server requires, so a body missing `chatId` or `text` type-checked and then failed at the API. `UpdateWebhookRequest` no longer derives from the create type, whose `url` is required only on create.
+- The Go client types six request enums that were plain strings and numbers, and the Java client three, so an invalid proxy scheme, call kind, membership method, chat state, pin window or status font fails to compile rather than returning a 400. Assigning a bare string or number to one of those fields no longer compiles.
+- The webhook response declares the event vocabulary it returns instead of a bare string array, which is what every client already models.
+
+### Tests
+
+- The client shape gate covers request bodies on the Python, Go and Java clients, not only responses: 152 new pairs, and the per-client mapping floors rise with them.
+- The gate reads vocabularies it previously skipped, so a wrong wire value fails instead of passing unread: numeric `Literal` and const-block enums, Java enum constants by their `@SerializedName`, and enum members carried inside a list.
+- The gate no longer loses a Java component to its own spelling: a package-qualified generic, a boxed numeric and a generic carrying a comma each resolved to something uncomparable, so the field counted as present with its type unchecked.
+
 ### Documentation
 
 - The API reference and capability matrix record where the two engines differ on calls both support: read receipts, edit, pin and unpin, the profile writes, mute, and the channel lookup.
+- The per-client half of the in-flight body budget is documented: one IP is refused with `503` past it even while the gateway has room, and without `TRUSTED_PROXIES` every caller shares that half.
 
 ## [0.21.0] - 2026-08-18
 

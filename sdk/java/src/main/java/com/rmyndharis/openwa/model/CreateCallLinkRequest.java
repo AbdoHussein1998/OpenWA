@@ -6,17 +6,17 @@ package com.rmyndharis.openwa.model;
  * @param type {@code "audio"} or {@code "video"}; WhatsApp's own URL path for audio is {@code /voice/}
  * @param startTime absolute epoch MILLISECONDS the call is scheduled to start at
  */
-public record CreateCallLinkRequest(String type, Double startTime) {
+public record CreateCallLinkRequest(CallLinkType type, Double startTime) {
     public static Builder builder() {
         return new Builder();
     }
 
     public static final class Builder {
-        private String type;
+        private CallLinkType type;
         private Double startTime;
 
         /** {@code "audio"} or {@code "video"}. */
-        public Builder type(String v) {
+        public Builder type(CallLinkType v) {
             this.type = v;
             return this;
         }

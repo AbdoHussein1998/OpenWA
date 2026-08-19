@@ -10714,7 +10714,33 @@
           "events": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "message.received",
+                "message.sent",
+                "message.ack",
+                "message.failed",
+                "message.revoked",
+                "message.reaction",
+                "message.edited",
+                "status.received",
+                "session.status",
+                "session.qr",
+                "session.authenticated",
+                "session.disconnected",
+                "session.reconnect_loop",
+                "session.restriction",
+                "presence.update",
+                "group.join",
+                "group.leave",
+                "group.update",
+                "group.join_request",
+                "call.received",
+                "call.accepted",
+                "call.rejected",
+                "call.missed",
+                "*"
+              ]
             }
           },
           "filters": {

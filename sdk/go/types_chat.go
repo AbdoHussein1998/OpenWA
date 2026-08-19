@@ -24,10 +24,19 @@ type MarkChatRequest struct {
 	ChatID string `json:"chatId"`
 }
 
+// ChatState is the typing indicator a chat shows.
+type ChatState string
+
+const (
+	ChatStateTyping    ChatState = "typing"
+	ChatStateRecording ChatState = "recording"
+	ChatStatePaused    ChatState = "paused"
+)
+
 // SendChatStateRequest sets typing state. State is one of: typing, recording, paused.
 type SendChatStateRequest struct {
-	ChatID string `json:"chatId"`
-	State  string `json:"state"`
+	ChatID string    `json:"chatId"`
+	State  ChatState `json:"state"`
 }
 
 // DeleteChatRequest deletes a chat.

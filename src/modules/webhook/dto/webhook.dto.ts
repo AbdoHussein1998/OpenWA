@@ -264,7 +264,10 @@ export class WebhookResponseDto {
   url!: string;
 
   @Expose()
-  @ApiProperty()
+  // Same vocabulary the create and update bodies validate against: the stored list can only hold
+  // values those routes accepted. Publishing a bare string[] understated the response, and left
+  // every client's typed event list comparing against `array<string>` instead of the enum.
+  @ApiProperty({ enum: [...WEBHOOK_EVENTS, '*'], type: String, isArray: true })
   events!: string[];
 
   @Expose()

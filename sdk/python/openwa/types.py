@@ -38,6 +38,10 @@ SessionStatus = Literal[
 ChatState = Literal["typing", "recording", "paused"]
 MessageDirection = Literal["incoming", "outgoing"]
 DeliveryStatus = Literal["pending", "sent", "delivered", "read", "failed"]
+# The three windows WhatsApp accepts for a pinned message: 24 hours, 7 days, 30 days.
+PinDurationSeconds = Literal[86400, 604800, 2592000]
+# WhatsApp status font family: 0 (default), 1, 2, 6 (bold), 7, 8, 9, 10.
+StatusFont = Literal[0, 1, 2, 6, 7, 8, 9, 10]
 BulkMessageType = Literal["text", "image", "video", "audio", "document"]
 BatchMessageStatus = Literal["pending", "sent", "failed", "cancelled"]
 BatchLifecycleStatus = Literal["pending", "processing", "completed", "failed", "cancelled"]
@@ -153,11 +157,11 @@ class UpsertLabelRequest(TypedDict, total=False):
     color: int
 
 
-class CreateChannelRequest(TypedDict, total=False):
+class CreateChannelRequest(TypedDict):
     """Body for creating a channel."""
 
     name: str
-    description: str
+    description: NotRequired[str]
 
 
 class MuteChannelRequest(TypedDict):
@@ -254,11 +258,11 @@ class UpdateSessionConfigRequest(TypedDict, total=False):
     reconnectBaseDelay: int | None
 
 
-class CreateSessionRequest(TypedDict, total=False):
+class CreateSessionRequest(TypedDict):
     name: str
-    config: dict[str, Any]
-    proxyUrl: str
-    proxyType: Literal["http", "https", "socks4", "socks5"]
+    config: NotRequired[dict[str, Any]]
+    proxyUrl: NotRequired[str]
+    proxyType: NotRequired[Literal['http', 'https', 'socks4', 'socks5']]
 
 
 class QrCodeResponse(TypedDict):
@@ -298,41 +302,41 @@ class MessageResponse(TypedDict):
     timestamp: int
 
 
-class SendTextRequest(TypedDict, total=False):
+class SendTextRequest(TypedDict):
     # chatId/text required; mentions optional.
     chatId: Jid
     text: str
     # WIDs to @mention (e.g. ["62811@c.us"]). The text must also contain the @<number> token.
-    mentions: list[str]
+    mentions: NotRequired[list[str]]
     # Controls the URL preview. False suppresses it on both engines. Otherwise the engines differ:
     # whatsapp-web.js builds one in-page by default, while on Baileys a preview is OPT-IN -- it needs
     # True, because generating one is a blocking outbound fetch per URL.
-    linkPreview: bool
+    linkPreview: NotRequired[bool]
     # Attach a preview you supply yourself instead of one fetched from the URL. Nothing is fetched,
     # so this works even for a URL the gateway cannot reach. Baileys only -- whatsapp-web.js takes a
     # boolean and answers 501. Cannot be combined with linkPreview=False.
-    customLinkPreview: CustomLinkPreview
+    customLinkPreview: NotRequired[CustomLinkPreview]
     # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
     # matches the serialized message id, Baileys the raw key id of a message it has already stored.
-    quotedMessageId: str
+    quotedMessageId: NotRequired[str]
 
 
-class SendMediaRequest(TypedDict, total=False):
+class SendMediaRequest(TypedDict):
     chatId: Jid
-    url: str
-    base64: str
-    mimetype: str
-    filename: str
-    caption: str
+    url: NotRequired[str]
+    base64: NotRequired[str]
+    mimetype: NotRequired[str]
+    filename: NotRequired[str]
+    caption: NotRequired[str]
     # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
     # matches the serialized message id, Baileys the raw key id of a message it has already stored.
-    quotedMessageId: str
+    quotedMessageId: NotRequired[str]
     # WIDs to @mention; the caption must also contain the @<number> token.
-    mentions: list[str]
+    mentions: NotRequired[list[str]]
 
 
-class SendAudioRequest(SendMediaRequest, total=False):
-    ptt: bool  # audio only: send as a WhatsApp voice note (PTT)
+class SendAudioRequest(SendMediaRequest):
+    ptt: NotRequired[bool]
 
 
 class BulkMediaRequest(TypedDict, total=False):
@@ -345,16 +349,16 @@ class BulkMediaRequest(TypedDict, total=False):
     ptt: bool
 
 
-class SendLocationRequest(TypedDict, total=False):
+class SendLocationRequest(TypedDict):
     # chatId/latitude/longitude required; description/address optional.
     chatId: Jid
     latitude: float
     longitude: float
-    description: str
-    address: str
+    description: NotRequired[str]
+    address: NotRequired[str]
     # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
     # matches the serialized message id, Baileys the raw key id of a message it has already stored.
-    quotedMessageId: str
+    quotedMessageId: NotRequired[str]
 
 
 class _SendContactRequired(TypedDict):
@@ -365,10 +369,10 @@ class _SendContactRequired(TypedDict):
 
 # Split so the optional key can be added without loosening the three required ones — the same
 # inheritance shape SendAudioRequest already uses.
-class SendContactRequest(_SendContactRequired, total=False):
+class SendContactRequest(_SendContactRequired):
     # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
     # matches the serialized message id, Baileys the raw key id of a message it has already stored.
-    quotedMessageId: str
+    quotedMessageId: NotRequired[str]
 
 
 class ReplyMessageRequest(TypedDict):
@@ -389,11 +393,11 @@ class ReactMessageRequest(TypedDict):
     emoji: str
 
 
-class DeleteMessageRequest(TypedDict, total=False):
+class DeleteMessageRequest(TypedDict):
     # chatId/messageId required; forEveryone optional (default true).
     chatId: Jid
     messageId: str
-    forEveryone: bool
+    forEveryone: NotRequired[bool]
 
 
 class EditMessageRequest(TypedDict):
@@ -403,26 +407,26 @@ class EditMessageRequest(TypedDict):
     body: str
 
 
-class SendTemplateRequest(TypedDict, total=False):
+class SendTemplateRequest(TypedDict):
     # chatId required; provide exactly one of templateId / templateName.
     # Modeled total=False (callers pass plain dicts); the backend validates.
     chatId: Jid
-    templateId: str
-    templateName: str
-    vars: dict[str, str]
+    templateId: NotRequired[str]
+    templateName: NotRequired[str]
+    vars: NotRequired[dict[str, str]]
 
 
-class SendPollRequest(TypedDict, total=False):
+class SendPollRequest(TypedDict):
     # chatId/name/options required; allowMultipleAnswers optional (default single choice).
     chatId: Jid
     # Poll question / title (max 255 chars).
     name: str
     # Options to vote on (WhatsApp allows between 2 and 12).
     options: list[str]
-    allowMultipleAnswers: bool
+    allowMultipleAnswers: NotRequired[bool]
     # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
     # matches the serialized message id, Baileys the raw key id of a message it has already stored.
-    quotedMessageId: str
+    quotedMessageId: NotRequired[str]
 
 
 # ``from`` is a Python keyword, so use the functional TypedDict form.
@@ -599,10 +603,10 @@ class _SendBulkRequired(TypedDict):
     messages: list[BulkMessageItem]
 
 
-class SendBulkRequest(_SendBulkRequired, total=False):
+class SendBulkRequest(_SendBulkRequired):
     # `options` and `batchId` are optional; the backend applies defaults.
-    options: BulkOptions
-    batchId: str
+    options: NotRequired[BulkOptions]
+    batchId: NotRequired[str]
 
 
 class BulkMessageResponse(TypedDict):
@@ -712,7 +716,7 @@ class GroupSummary(TypedDict):
 GroupMembershipRequestMethod = Literal["invite_link", "non_admin_add", "linked_group_join"]
 
 
-class GroupMembershipRequest(TypedDict, total=False):
+class GroupMembershipRequest(TypedDict):
     """A pending request to join a group.
 
     Only ``participantId`` is always present; the engine reports the rest when it has it, so treat
@@ -720,9 +724,9 @@ class GroupMembershipRequest(TypedDict, total=False):
     """
 
     participantId: str
-    addedById: str
-    method: GroupMembershipRequestMethod
-    requestedAt: float
+    addedById: NotRequired[str]
+    method: NotRequired[GroupMembershipRequestMethod]
+    requestedAt: NotRequired[float]
 
 
 class GroupInfo(TypedDict):
@@ -818,17 +822,27 @@ class WebhookFilters(TypedDict):
     conditions: list[WebhookFilterCondition]
 
 
-class CreateWebhookRequest(TypedDict, total=False):
+class CreateWebhookRequest(TypedDict):
+    url: str
+    events: NotRequired[list[WebhookEvent]]
+    secret: NotRequired[str]
+    headers: NotRequired[dict[str, str]]
+    filters: NotRequired[WebhookFilters | None]
+    # Server DTO field is ``retryCount`` (0–5; default 3).
+    retryCount: NotRequired[int]
+
+
+class UpdateWebhookRequest(TypedDict, total=False):
+    # Deliberately NOT derived from CreateWebhookRequest: `url` is required to create a webhook and
+    # optional to update one, and a TypedDict subclass cannot relax an inherited key back to
+    # optional. Every field here is a partial update.
     url: str
     events: list[WebhookEvent]
     secret: str
     headers: dict[str, str]
     filters: WebhookFilters | None
-    # Server DTO field is ``retryCount`` (0–5; default 3).
+    # Server DTO field is ``retryCount`` (0-5; default 3).
     retryCount: int
-
-
-class UpdateWebhookRequest(CreateWebhookRequest, total=False):
     active: bool
 
 
@@ -925,12 +939,12 @@ class StatusMedia(TypedDict):
     contentType: str | None
 
 
-class PinMessageRequest(TypedDict, total=False):
+class PinMessageRequest(TypedDict):
     """Pin a message. ``durationSeconds`` is 86400 (24h), 604800 (7d) or 2592000 (30d)."""
 
     chatId: str
     messageId: str
-    durationSeconds: int
+    durationSeconds: NotRequired[PinDurationSeconds]
 
 
 class SetGroupPictureRequest(TypedDict, total=False):
@@ -941,11 +955,11 @@ class SetGroupPictureRequest(TypedDict, total=False):
     mimetype: str
 
 
-class UpsertContactRequest(TypedDict, total=False):
+class UpsertContactRequest(TypedDict):
     """Save or edit an addressbook contact. lastName is optional."""
 
     firstName: str
-    lastName: str
+    lastName: NotRequired[str]
 
 
 class ArchiveChatRequest(TypedDict):
@@ -1003,13 +1017,13 @@ class MessageMedia(TypedDict):
     contentType: str | None
 
 
-class SendTextStatusRequest(TypedDict, total=False):
+class SendTextStatusRequest(TypedDict):
     # text always required; recipients required on the Baileys engine only.
     text: str
     # Recipient JIDs. Required on the Baileys engine (absent/empty -> 400); omit on whatsapp-web.js.
-    recipients: list[str]
-    backgroundColor: str
-    font: int
+    recipients: NotRequired[list[str]]
+    backgroundColor: NotRequired[str]
+    font: NotRequired[StatusFont]
 
 
 class StatusMediaInput(TypedDict, total=False):
@@ -1020,25 +1034,25 @@ class StatusMediaInput(TypedDict, total=False):
     mimetype: str
 
 
-class SendImageStatusRequest(TypedDict, total=False):
+class SendImageStatusRequest(TypedDict):
     """Server expects a nested ``{ image: { url|base64 } }`` body."""
 
     image: StatusMediaInput
     # Recipient JIDs. Required on the Baileys engine (absent/empty -> 400); omit on whatsapp-web.js.
-    recipients: list[str]
-    caption: str
+    recipients: NotRequired[list[str]]
+    caption: NotRequired[str]
 
 
-class SendVideoStatusRequest(TypedDict, total=False):
+class SendVideoStatusRequest(TypedDict):
     """Server expects a nested ``{ video: { url|base64 } }`` body."""
 
     video: StatusMediaInput
     # Recipient JIDs. Required on the Baileys engine (absent/empty -> 400); omit on whatsapp-web.js.
-    recipients: list[str]
-    caption: str
+    recipients: NotRequired[list[str]]
+    caption: NotRequired[str]
 
 
-class SendVoiceStatusRequest(TypedDict, total=False):
+class SendVoiceStatusRequest(TypedDict):
     """Post an audio status as a voice note.
 
     No caption: WhatsApp has nowhere to render one on a status voice note. ``audio.mimetype``
@@ -1048,9 +1062,9 @@ class SendVoiceStatusRequest(TypedDict, total=False):
 
     audio: StatusMediaInput
     #: Required on the Baileys engine (absent/empty -> 400); omit on whatsapp-web.js.
-    recipients: list[str]
+    recipients: NotRequired[list[str]]
     #: Background colour as "#RRGGBB", behind the voice-note bubble. Baileys only; wwjs ignores it.
-    backgroundColor: str
+    backgroundColor: NotRequired[str]
 
 
 # ── Health ────────────────────────────────────────────────────────
@@ -1089,13 +1103,13 @@ class TemplateRecord(TypedDict, total=False):
     updatedAt: str
 
 
-class CreateTemplateRequest(TypedDict, total=False):
+class CreateTemplateRequest(TypedDict):
     # name + body required; header/footer optional. Modeled total=False
     # (callers pass plain dicts); the backend validates the required fields.
     name: str
     body: str
-    header: str
-    footer: str
+    header: NotRequired[str]
+    footer: NotRequired[str]
 
 
 class UpdateTemplateRequest(TypedDict, total=False):
@@ -1213,10 +1227,10 @@ class ProductMessageResponse(TypedDict):
 
 # chatId + productId required; body optional. Modeled total=False for 3.9 compat
 # (callers pass plain dicts); the backend validates the required fields.
-class SendProductRequest(TypedDict, total=False):
+class SendProductRequest(TypedDict):
     chatId: Jid
     productId: str
-    body: str
+    body: NotRequired[str]
 
 
 # ── Search ────────────────────────────────────────────────────────
