@@ -2,7 +2,11 @@ import { z } from 'zod';
 import { ApiKeyRole } from '../../../modules/auth/entities/api-key.entity';
 import type { SessionService } from '../../../modules/session/session.service';
 import { SessionResponseDto } from '../../../modules/session/dto/session-response.dto';
-import { MARK_READ_MESSAGE_IDS_MAX } from '../../../modules/session/dto/mark-chat-read.dto';
+import {
+  MARK_READ_MESSAGE_IDS_MAX,
+  MARK_READ_MESSAGE_ID_MESSAGE,
+  MARK_READ_MESSAGE_ID_PATTERN,
+} from '../../../modules/session/dto/mark-chat-read.dto';
 import { defineTool, type AnyToolDescriptor } from '../tool-descriptor';
 
 const sessionId = z.string().min(1).describe('Session UUID (the session id, not the name)');
@@ -91,7 +95,9 @@ export function sessionTools(session: SessionService): AnyToolDescriptor[] {
         sessionId,
         chatId: z.string().describe('Chat JID (e.g. 1234567890@c.us)'),
         messageIds: z
-          .array(z.string())
+          // The element rule comes from the DTO rather than being restated here: the REST body
+          // rejects a whitespace-only id, and this path reaches the engine without the DTO at all.
+          .array(z.string().regex(MARK_READ_MESSAGE_ID_PATTERN, MARK_READ_MESSAGE_ID_MESSAGE))
           .nonempty()
           .max(MARK_READ_MESSAGE_IDS_MAX)
           .optional()

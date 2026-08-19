@@ -9,20 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `POST /sessions/{sessionId}/chats/read` accepts an optional `messageIds` array (up to 100) naming exactly which messages to acknowledge. Baileys acknowledges individual messages, so without it only the newest message still held in memory got a receipt: a burst left its earlier messages unread, and a session restarted since the message arrived had nothing to acknowledge and answered `false` under a `200`. Each id is resolved through the message store, so a group receipt carries the `participant` that attributes it. Omitting the field keeps the previous behaviour, an empty array is refused with a `400` rather than silently acknowledging the newest message, and the whatsapp-web.js engine ignores the field because its own receipt is chat-level. The `SessionMarkChatRead` agent tool takes the same list, and all five clients expose the field through a dedicated read-request type. Thanks @m7fz7.
+- `POST /sessions/{sessionId}/chats/read` takes an optional `messageIds` array (up to 100) naming which messages to acknowledge. Baileys acknowledges individual messages, so without it a burst left its earlier messages unread. Ids resolve through the message store, so a group receipt carries its `participant`. Available on the agent tool and all five clients; ignored by whatsapp-web.js. Thanks @m7fz7.
 
 ### Changed
 
-- `POST /sessions/{sessionId}/chats/unread` publishes its own `MarkChatUnreadDto` instead of sharing `MarkChatReadDto` with the read route. The request body is unchanged (`chatId` alone), but a client generated from the contract sees the schema under a new name. Sharing the class would have advertised `messageIds` on a route that discards it.
+- `POST /sessions/{sessionId}/chats/unread` publishes its own `MarkChatUnreadDto` rather than sharing `MarkChatReadDto`. The body is unchanged (`chatId` alone), but a generated client sees the schema under a new name.
 
 ### Fixed
 
 - The dashboard CSP nonce is substituted at every occurrence in the served document, not only the first. One placeholder exists today, so a second would have been left reading the literal text and its script refused by the browser.
-- Outbound webhook deliveries survive a hard crash. Fan-out is fire-and-forget, so a crash between persisting a message and completing its POST lost the delivery with no record in either mode, while the documented contract promises at-least-once. Each delivery is now recorded before it is attempted, retired once the queue or the inline send owns it, and a bounded sweep replays whatever is left stranded using the stored idempotency key so the retry stays deduplicable at the receiver.
+- Outbound webhook deliveries survive a hard crash. Fan-out was fire-and-forget, so a crash between persisting a message and completing its POST lost the delivery, against a documented at-least-once contract. Deliveries are now recorded before they are attempted, and a bounded sweep replays whatever is stranded under its stored idempotency key.
 - Settled outbound delivery records are pruned after `WEBHOOK_OUTBOX_RETENTION_DAYS` (default 7). A record that can still be replayed is never pruned on age, and a non-positive window falls back to the default rather than letting the table grow without bound.
-- `PLUGIN_STATE_DIR` moves the plugin registry and per-plugin storage off the default `./data`. It was the one piece of state with no path knob, so a test run rewrote the developer's own registry and every suite in that run inherited whatever the previous one left in it.
+- `PLUGIN_STATE_DIR` moves the plugin registry and per-plugin storage off the default `./data`. It was the one piece of state with no path knob, so a test run rewrote the developer's own registry.
 - The e2e lane sweeps the throwaway state roots it creates. Each suite gets its own, nothing removed them, and the temp directory accumulated hundreds of entries over a few days of runs.
-- e2e assertions are no longer answered by unrelated processes on the host. supertest starts a listener per request on the wildcard address and then dials 127.0.0.1, and macOS both permits that bind over a port another process holds on 127.0.0.1 specifically and routes the connection to the more specific holder, so a run could assert against a status the app has no route for. Each suite's server now listens on loopback while it initialises, which supertest reuses instead of opening one, taking the lane from 230 listeners a run to 27.
+- e2e assertions are no longer answered by unrelated processes on the host. supertest binds its per-request listener to the wildcard address and then dials 127.0.0.1, which on macOS lets a process holding that port on 127.0.0.1 answer instead. Each suite's server now listens on loopback during init, which supertest reuses.
 
 ### Tests
 
