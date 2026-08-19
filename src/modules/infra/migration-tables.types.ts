@@ -173,6 +173,20 @@ export interface WebhookDeliveryFailureRow {
   createdAt: string;
 }
 
+export interface WebhookOutboxEventRow {
+  id: string;
+  webhookId: string;
+  sessionId: string;
+  event: string;
+  idempotencyKey: string;
+  deliveryId: string;
+  payload: string | null;
+  state: string | null;
+  attempts: number;
+  lastAttemptAt: string | null;
+  createdAt: string;
+}
+
 export interface IntegrationDeliveryFailureRow {
   id: string;
   direction: string;
@@ -240,6 +254,7 @@ export interface MigrationTables {
   conversationMappings: ConversationMappingRow[];
   ingressEvents: IngressEventRow[];
   webhookDeliveryFailures: WebhookDeliveryFailureRow[];
+  webhookOutboxEvents: WebhookOutboxEventRow[];
   integrationDeliveryFailures: IntegrationDeliveryFailureRow[];
   statusUpdates: StatusUpdateRow[];
   automationRules: AutomationRuleRow[];

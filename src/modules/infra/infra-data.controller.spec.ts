@@ -38,6 +38,7 @@ import { PluginInstance } from '../integration/entities/plugin-instance.entity';
 import { ConversationMapping } from '../integration/entities/conversation-mapping.entity';
 import { IngressEvent } from '../integration/entities/ingress-event.entity';
 import { WebhookDeliveryFailure } from '../webhook/entities/webhook-delivery-failure.entity';
+import { WebhookOutboxEvent } from '../webhook/entities/webhook-outbox-event.entity';
 import { IntegrationDeliveryFailure } from '../integration/entities/integration-delivery-failure.entity';
 import { StatusUpdate } from '../status-store/entities/status-update.entity';
 import { AutomationRule } from '../automation/entities/automation-rule.entity';
@@ -74,6 +75,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
         ConversationMapping,
         IngressEvent,
         WebhookDeliveryFailure,
+        WebhookOutboxEvent,
         IntegrationDeliveryFailure,
         StatusUpdate,
         AutomationRule,
@@ -1213,6 +1215,7 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
         ConversationMapping,
         IngressEvent,
         WebhookDeliveryFailure,
+        WebhookOutboxEvent,
         IntegrationDeliveryFailure,
         StatusUpdate,
         AutomationRule,
@@ -1444,6 +1447,7 @@ describe('InfraDataController audit trail — import emits only on a committed r
         ConversationMapping,
         IngressEvent,
         WebhookDeliveryFailure,
+        WebhookOutboxEvent,
         IntegrationDeliveryFailure,
         StatusUpdate,
         AutomationRule,
@@ -1588,6 +1592,7 @@ describe('InfraDataController.importData status_updates + runtime reconciliation
         ConversationMapping,
         IngressEvent,
         WebhookDeliveryFailure,
+        WebhookOutboxEvent,
         IntegrationDeliveryFailure,
         StatusUpdate,
         AutomationRule,

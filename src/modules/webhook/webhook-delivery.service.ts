@@ -7,6 +7,7 @@ import { Queue } from 'bullmq';
 import * as crypto from 'crypto';
 import { setTimeout } from 'node:timers/promises';
 import { Webhook } from './entities/webhook.entity';
+import { WebhookOutboxService } from './webhook-outbox.service';
 import { WebhookDeliveryFailure } from './entities/webhook-delivery-failure.entity';
 import { recordWebhookDeliveryFailure } from './utils/record-delivery-failure';
 import { postWebhookPayload, recordTerminalFailure } from './utils/deliver-once';
@@ -96,6 +97,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     private readonly failureRepository: Repository<WebhookDeliveryFailure>,
     private readonly configService: ConfigService,
     private readonly hookManager: HookManager,
+    private readonly outbox: WebhookOutboxService,
     @Optional()
     private readonly lidMappingStore?: LidMappingStoreService,
     @Optional()
@@ -572,6 +574,16 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     const deliveryId = generateDeliveryId();
     // Salt per webhook so sibling subscriptions cannot collide at the receiver's dedup boundary.
     const idempotencyKey = `${baseIdempotencyKey}_${webhook.id}`;
+    // Durable record BEFORE anything is attempted. A hard crash from here until the delivery
+    // reaches a durable owner leaves this row 'pending', which is what the reconciler replays.
+    await this.outbox.open({
+      webhookId: webhook.id,
+      sessionId,
+      event,
+      idempotencyKey,
+      deliveryId,
+      payload: ctx.baseData,
+    });
     await this.dispatchLimiter
       .run(async () => {
         this.inFlightDeliveries.set(deliveryId, {
@@ -583,6 +595,9 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
         });
         try {
           await this.deliverOne(webhook, deliveryId, idempotencyKey, ctx);
+          // Reached a durable owner: handed to the queue, or completed inline. A failure inside
+          // either owner dead-letters through the failure row, so this is never replayed.
+          await this.outbox.close(webhook.id, idempotencyKey, 'dispatched');
         } finally {
           this.inFlightDeliveries.delete(deliveryId);
         }
@@ -621,6 +636,24 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
         }
         throw error;
       });
+  }
+
+  /**
+   * Replay one recorded delivery, reusing its STORED idempotency key.
+   *
+   * Deriving a fresh key would defeat the point: the receiver dedups on that value, so a replay
+   * carrying a new one reads as a second event rather than a retry of the first. A new deliveryId
+   * IS issued, because that identifies the attempt rather than the event.
+   */
+  async redeliver(
+    webhook: Webhook,
+    sessionId: string,
+    event: string,
+    idempotencyKey: string,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    const deliveryId = generateDeliveryId();
+    await this.deliverOne(webhook, deliveryId, idempotencyKey, { sessionId, event, baseData: data });
   }
 
   /**

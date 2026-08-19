@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The dashboard CSP nonce is substituted at every occurrence in the served document, not only the first. One placeholder exists today, so a second would have been left reading the literal text and its script refused by the browser.
+- Outbound webhook deliveries survive a hard crash. Fan-out is fire-and-forget, so a crash between persisting a message and completing its POST lost the delivery with no record in either mode, while the documented contract promises at-least-once. Each delivery is now recorded before it is attempted, retired once the queue or the inline send owns it, and a bounded sweep replays whatever is left stranded using the stored idempotency key so the retry stays deduplicable at the receiver.
 
 ### Tests
 

@@ -217,6 +217,7 @@ export const EXPORT_TABLES: AnyExportTable[] = [
   defineExportTable({ key: 'conversationMappings', table: 'conversation_mappings', optional: true }),
   defineExportTable({ key: 'ingressEvents', table: 'ingress_events', optional: true }),
   defineExportTable({ key: 'webhookDeliveryFailures', table: 'webhook_delivery_failures', optional: true }),
+  defineExportTable({ key: 'webhookOutboxEvents', table: 'webhook_outbox_events', optional: true }),
   defineExportTable({
     key: 'integrationDeliveryFailures',
     table: 'integration_delivery_failures',
