@@ -117,6 +117,15 @@ describe.each([
     expect(res.headers['content-type']).toMatch(/html/);
   });
 
+  it('never answers an /assets path with the SPA shell, even extensionless', async () => {
+    // The handler excludes /assets/ explicitly. Every other case is already covered by the
+    // extension check, so deleting the exclusion breaks nothing visible: an extensionless asset
+    // path asking for HTML is the one request that tells the two apart, and without it the guard
+    // is unprotected.
+    const res = await request(app.getHttpServer()).get('/assets/app').set('Accept', 'text/html');
+    expect(res.status).toBe(404);
+  });
+
   it('serves built assets with their own content-type (not the SPA shell)', async () => {
     const res = await request(app.getHttpServer()).get('/assets/app.js');
     expect(res.status).toBe(200);
