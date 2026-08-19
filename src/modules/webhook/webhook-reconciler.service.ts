@@ -48,6 +48,12 @@ export interface WebhookReconcileStats {
  *
  * Mirrors IngressReconcilerService on the inbound side: an unref'd interval started on module init,
  * an overlap guard so a slow pass never stacks, a bounded batch, and a per-row replay budget.
+ *
+ * The sweep does NOT claim a row, so two nodes running against one database can both replay the
+ * same delivery. That is deliberate and matches the inbound reconciler: the replay carries the
+ * stored idempotency key, which is exactly the header a receiver dedups on, so the cost of the
+ * race is a duplicate the contract already tells consumers to expect. Claiming would trade that
+ * for a lock whose holder can die mid-flight.
  */
 @Injectable()
 export class WebhookReconcilerService implements OnModuleInit, OnModuleDestroy {

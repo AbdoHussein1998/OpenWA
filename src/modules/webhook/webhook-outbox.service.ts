@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThan, Repository } from 'typeorm';
+import { LessThan, Not, Repository } from 'typeorm';
 import { WebhookOutboxEvent, WebhookOutboxState } from './entities/webhook-outbox-event.entity';
 import { createLogger } from '../../common/services/logger.service';
 import { isUniqueViolation } from '../../common/utils/db-errors';
+
+const DEFAULT_OUTBOX_RETENTION_DAYS = 7;
 
 /** What a replay needs to redispatch one delivery without deriving a new idempotency key. */
 export interface ReplayableDelivery {
@@ -24,13 +26,60 @@ export interface ReplayableDelivery {
  * otherwise succeed. Losing the record degrades to the behaviour that existed before it.
  */
 @Injectable()
-export class WebhookOutboxService {
+export class WebhookOutboxService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = createLogger('WebhookOutboxService');
+  private pruneTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     @InjectRepository(WebhookOutboxEvent, 'data')
     private readonly outbox: Repository<WebhookOutboxEvent>,
   ) {}
+
+  /**
+   * Prune settled rows daily, so the record of every delivery this gateway ever made does not
+   * become the largest table in the database.
+   *
+   * Deliberately NOT tied to the delivery-failure retention switch: a settled row carries no
+   * payload and no audit value (the failure table is the record that matters), so letting an
+   * operator opt into unbounded growth here buys nothing. A non-positive value falls back to the
+   * default with a warning, the same call the ingress dedup log makes.
+   *
+   * Only SETTLED rows are pruned. A 'pending' row is a delivery that can still be replayed, and
+   * deleting one on age would discard the very thing this table exists to protect.
+   */
+  onModuleInit(): void {
+    const parsed = Number.parseInt(process.env.WEBHOOK_OUTBOX_RETENTION_DAYS ?? '', 10);
+    let days = Number.isInteger(parsed) ? parsed : DEFAULT_OUTBOX_RETENTION_DAYS;
+    if (days <= 0) {
+      this.logger.warn(
+        `WEBHOOK_OUTBOX_RETENTION_DAYS=${String(process.env.WEBHOOK_OUTBOX_RETENTION_DAYS)} would let the ` +
+          `outbound delivery record grow without bound; falling back to ${DEFAULT_OUTBOX_RETENTION_DAYS} days`,
+      );
+      days = DEFAULT_OUTBOX_RETENTION_DAYS;
+    }
+    const run = (): void => {
+      this.pruneSettled(days)
+        .then(n => {
+          if (n > 0) this.logger.log(`Pruned ${n} settled outbound delivery record(s) older than ${days} day(s)`);
+        })
+        .catch(err => this.logger.error('Outbound delivery record prune failed', String(err)));
+    };
+    run();
+    this.pruneTimer = setInterval(run, 24 * 60 * 60 * 1000);
+    this.pruneTimer.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
+  }
+
+  /** Delete settled rows older than the window. Returns the number removed. */
+  async pruneSettled(olderThanDays: number): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - olderThanDays);
+    const result = await this.outbox.delete({ state: Not('pending'), createdAt: LessThan(cutoff) });
+    return result.affected || 0;
+  }
 
   /**
    * Record the delivery as pending, before anything durable owns it.

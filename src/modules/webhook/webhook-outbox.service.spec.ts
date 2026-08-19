@@ -80,3 +80,41 @@ describe('WebhookOutboxService', () => {
     expect(repo.update).toHaveBeenCalledWith({ id: 'row-1' }, expect.objectContaining({ attempts: 3 }));
   });
 });
+
+describe('WebhookOutboxService retention', () => {
+  let repo: { delete: jest.Mock };
+  let service: WebhookOutboxService;
+
+  beforeEach(() => {
+    repo = { delete: jest.fn().mockResolvedValue({ affected: 3 }) };
+    service = new WebhookOutboxService(repo as never);
+  });
+
+  it('prunes settled rows only, never one that can still be replayed', async () => {
+    const removed = await service.pruneSettled(7);
+
+    expect(removed).toBe(3);
+    const [[where]] = repo.delete.mock.calls as unknown as [
+      [{ state: { type: string; value: unknown }; createdAt: { type: string } }],
+    ];
+    // Deleting a 'pending' row on age would discard the delivery this table exists to protect.
+    expect(where.state.type).toBe('not');
+    expect(where.state.value).toBe('pending');
+    expect(where.createdAt.type).toBe('lessThan');
+  });
+
+  it('refuses a retention window that would let the table grow without bound', () => {
+    const prev = process.env.WEBHOOK_OUTBOX_RETENTION_DAYS;
+    process.env.WEBHOOK_OUTBOX_RETENTION_DAYS = '0';
+    try {
+      service.onModuleInit();
+      // A settled row carries no payload and no audit value, so opting into unbounded growth buys
+      // nothing: the value falls back rather than disabling the prune.
+      expect(repo.delete).toHaveBeenCalled();
+    } finally {
+      service.onModuleDestroy();
+      if (prev === undefined) delete process.env.WEBHOOK_OUTBOX_RETENTION_DAYS;
+      else process.env.WEBHOOK_OUTBOX_RETENTION_DAYS = prev;
+    }
+  });
+});
