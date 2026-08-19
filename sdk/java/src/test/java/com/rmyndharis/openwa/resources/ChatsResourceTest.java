@@ -12,6 +12,7 @@ import com.rmyndharis.openwa.model.DeleteChatRequest;
 import com.rmyndharis.openwa.model.MuteChatRequest;
 import com.rmyndharis.openwa.model.PinChatRequest;
 import com.rmyndharis.openwa.model.ListChatsQuery;
+import com.rmyndharis.openwa.model.MarkChatReadRequest;
 import com.rmyndharis.openwa.model.MarkChatRequest;
 import com.rmyndharis.openwa.model.SendChatStateRequest;
 import com.rmyndharis.openwa.support.MockTransport;
@@ -48,7 +49,7 @@ class ChatsResourceTest {
     @Test
     void markReadSendsBody() {
         tx.respond(200, "{\"success\":true}");
-        client.chats.markRead("s", MarkChatRequest.builder().chatId("628123@c.us").build());
+        client.chats.markRead("s", MarkChatReadRequest.builder().chatId("628123@c.us").build());
         assertEquals("http://h/api/sessions/s/chats/read", tx.lastRequest().url());
         assertEquals(HttpMethod.POST, tx.lastRequest().method());
         assertTrue(tx.lastRequest().body().contains("628123@c.us"));

@@ -882,7 +882,17 @@ class ChatSummary(TypedDict):
 
 
 class MarkChatRequest(TypedDict):
+    # Body for mark_unread and subscribe_presence, both of which take the chat id alone.
     chatId: Jid
+
+
+class MarkChatReadRequest(TypedDict):
+    # Body for mark_read.
+    chatId: Jid
+    # Messages to acknowledge (at most 100; an empty list is refused). Baileys acknowledges
+    # individual messages, so without this only the newest message the engine still holds in
+    # memory gets a receipt. Ignored by whatsapp-web.js, whose own sendSeen is chat-level.
+    messageIds: NotRequired[list[str]]
 
 
 class SendChatStateRequest(TypedDict):

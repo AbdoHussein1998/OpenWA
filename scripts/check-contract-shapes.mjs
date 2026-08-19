@@ -167,9 +167,9 @@ const MAPPINGS = {
 const MINIMUM_MAPPED = {
   'sdk/javascript/src/types.ts': 79,
   'dashboard/src/services/api.ts': 20,
-  'sdk/python/openwa/types.py': 73,
-  'sdk/go': 74,
-  'sdk/java': 78,
+  'sdk/python/openwa/types.py': 74,
+  'sdk/go': 75,
+  'sdk/java': 79,
 };
 
 /** Known drift, deliberately not gated yet — each line is a to-adjudicate follow-up. */
@@ -231,7 +231,8 @@ const PYTHON_MAPPING = {
   GroupParticipant: 'GroupParticipantDto',
   GroupSummary: 'GroupSummaryDto',
   JoinGroupRequest: 'JoinGroupDto',
-  MarkChatRequest: 'MarkChatReadDto',
+  MarkChatReadRequest: 'MarkChatReadDto',
+  MarkChatRequest: 'MarkChatUnreadDto',
   MessageListResponse: 'MessageListResponseDto',
   MessageRecord: 'MessageListItemDto',
   MessageResponse: 'MessageResponseDto',
@@ -308,7 +309,8 @@ const GO_MAPPING = {
   GroupParticipant: 'GroupParticipantDto',
   GroupSummary: 'GroupSummaryDto',
   JoinGroupRequest: 'JoinGroupDto',
-  MarkChatRequest: 'MarkChatReadDto',
+  MarkChatReadRequest: 'MarkChatReadDto',
+  MarkChatRequest: 'MarkChatUnreadDto',
   MessageListResponse: 'MessageListResponseDto',
   MessageRecord: 'MessageListItemDto',
   MessageResponse: 'MessageResponseDto',
@@ -389,7 +391,8 @@ const JAVA_MAPPING = {
   GroupSubjectRequest: 'GroupSubjectDto',
   GroupSummary: 'GroupSummaryDto',
   JoinGroupRequest: 'JoinGroupDto',
-  MarkChatRequest: 'MarkChatReadDto',
+  MarkChatReadRequest: 'MarkChatReadDto',
+  MarkChatRequest: 'MarkChatUnreadDto',
   MessageListResponse: 'MessageListResponseDto',
   MessageRecord: 'MessageListItemDto',
   MessageResponse: 'MessageResponseDto',

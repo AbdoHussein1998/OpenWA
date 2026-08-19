@@ -16,6 +16,7 @@ from ..types import (
     MuteChatRequest,
     ChatSummary,
     DeleteChatRequest,
+    MarkChatReadRequest,
     MarkChatRequest,
     SendChatStateRequest,
     SuccessResult,
@@ -59,7 +60,7 @@ class ChatsResource:
             "GET", f"/api/sessions/{quote_segment(session_id)}/presence/{quote_segment(chat_id)}"
         )
 
-    def mark_read(self, session_id: str, body: MarkChatRequest) -> SuccessResult:
+    def mark_read(self, session_id: str, body: MarkChatReadRequest) -> SuccessResult:
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/chats/read", body=body)
 
     def mark_unread(self, session_id: str, body: MarkChatRequest) -> SuccessResult:

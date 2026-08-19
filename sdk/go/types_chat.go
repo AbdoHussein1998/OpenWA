@@ -19,9 +19,18 @@ type SetOwnPresenceRequest struct {
 	Available bool `json:"available"`
 }
 
-// MarkChatRequest marks a chat read/unread.
+// MarkChatRequest marks a chat unread, or subscribes to its presence.
 type MarkChatRequest struct {
 	ChatID string `json:"chatId"`
+}
+
+// MarkChatReadRequest marks a chat read, optionally naming the messages to acknowledge.
+type MarkChatReadRequest struct {
+	ChatID string `json:"chatId"`
+	// MessageIDs are the messages to acknowledge (at most 100; an empty list is refused). Baileys
+	// acknowledges individual messages, so without this only the newest message the engine still
+	// holds in memory gets a receipt. Ignored by whatsapp-web.js, whose own sendSeen is chat-level.
+	MessageIDs []string `json:"messageIds,omitempty"`
 }
 
 // ChatState is the typing indicator a chat shows.
