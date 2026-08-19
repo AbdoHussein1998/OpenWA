@@ -8,6 +8,16 @@ import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsString,
  */
 export const MARK_READ_MESSAGE_IDS_MAX = 100;
 
+/**
+ * The shape of one message id: a single non-whitespace token. Exported for the same reason as the
+ * cap above, so the agent tool holds the rule rather than restating it. Restating it is how the two
+ * surfaces drifted: the tool copied the count and left `['  ']` reaching the engine as a receipt key.
+ */
+export const MARK_READ_MESSAGE_ID_PATTERN = /^\S{1,128}$/;
+
+/** Rejection message for {@link MARK_READ_MESSAGE_ID_PATTERN}, shared so both surfaces answer alike. */
+export const MARK_READ_MESSAGE_ID_MESSAGE = 'each messageIds entry must be a non-empty id with no whitespace';
+
 export class MarkChatReadDto {
   @ApiProperty({
     description: "Chat ID in the active engine's native format (e.g. 1234567890@c.us on whatsapp-web.js)",
@@ -46,8 +56,6 @@ export class MarkChatReadDto {
   @ArrayMaxSize(MARK_READ_MESSAGE_IDS_MAX)
   @IsString({ each: true })
   @IsNotEmpty({ each: true })
-  // Engine-neutral structural check: a message id is one non-whitespace token. @IsNotEmpty alone
-  // accepts '   ', which would reach sendNode as a receipt key.
-  @Matches(/^\S{1,128}$/, { each: true, message: 'each messageIds entry must be a non-empty id with no whitespace' })
+  @Matches(MARK_READ_MESSAGE_ID_PATTERN, { each: true, message: MARK_READ_MESSAGE_ID_MESSAGE })
   messageIds?: string[];
 }
