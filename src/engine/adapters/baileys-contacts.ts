@@ -368,13 +368,17 @@ export class BaileysContacts {
     const stored = (await this.host.getStoredMessages(messageIds)) ?? [];
     // A stored key is only usable when it belongs to THIS chat. Without the check, an id from
     // another chat in the same session carried that chat's remoteJid into readMessages, so the
-    // receipt landed there while the route answered success for the chat the caller named. Both
-    // sides fold through toEngineJid so the @c.us and @s.whatsapp.net spellings of one chat still
-    // match; anything that still differs falls back to the synthesised key for the ADDRESSED chat,
-    // which is exactly what every id ran on before stored keys existed.
+    // receipt landed there while the route answered success for the chat the caller named.
+    // The comparison runs in the NEUTRAL dialect rather than the engine one: toEngineJid folds
+    // @c.us and @s.whatsapp.net together but returns @lid untouched, and Baileys stores a DM key
+    // under the peer's lid once WhatsApp addresses the chat that way. toNeutralJid resolves that
+    // lid to its phone user-part through the session's lid mapping, so both spellings of one chat
+    // still meet. Anything that still differs falls back to the synthesised key for the ADDRESSED
+    // chat, which is exactly what every id ran on before stored keys existed.
+    const chatKey = this.host.toNeutralJid(chatId);
     const keyById = new Map(
       stored
-        .filter(msg => msg.key?.id && msg.key.remoteJid && this.host.toEngineJid(msg.key.remoteJid) === remoteJid)
+        .filter(msg => msg.key?.id && msg.key.remoteJid && this.host.toNeutralJid(msg.key.remoteJid) === chatKey)
         .map(msg => [msg.key.id as string, msg.key]),
     );
     return messageIds.map(id => keyById.get(id) ?? { remoteJid, id, fromMe: false });
