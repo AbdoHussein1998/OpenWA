@@ -186,10 +186,10 @@ subdirectory rather than at the repository root:
 
 ```bash
 # Correct — `sdk/go/` prefix, matching `module github.com/rmyndharis/OpenWA/sdk/go`
-git tag sdk/go/v0.4.0 && git push origin sdk/go/v0.4.0
+git tag sdk/go/v0.5.0 && git push origin sdk/go/v0.5.0
 ```
 
-A bare `v0.4.0` tag is the _app_ version and does nothing for this module.
+A bare `v0.5.0` tag is the _app_ version and does nothing for this module.
 Without a prefixed tag, `go get` resolves a pseudo-version
 (`v0.0.0-<date>-<commit>`) — usable, but callers cannot pin a release.
 
