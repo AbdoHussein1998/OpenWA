@@ -69,6 +69,48 @@ describe('sendSeen', () => {
     ]);
   });
 
+  it('never sends the receipt to another chat, even when the store resolves the id', async () => {
+    // The stored key carries its own remoteJid. Used unchecked, an id belonging to a different chat
+    // in the same session acknowledged THAT chat while the route answered success for the one the
+    // caller named, and the caller's own chat stayed unread.
+    const readMessages = jest.fn().mockResolvedValue(undefined);
+    const host = makeHost({
+      getSocket: () => ({ readMessages }) as unknown as WASocket,
+      getStoredMessages: () =>
+        Promise.resolve([stored({ id: 'X1', remoteJid: '628999@s.whatsapp.net', fromMe: false })]),
+    });
+
+    await expect(new BaileysContacts(host, 500).sendSeen('628123@c.us', ['X1'])).resolves.toBe(true);
+
+    // Falls back to the synthesised key for the ADDRESSED chat rather than the stored one.
+    expect(readMessages).toHaveBeenCalledWith([{ remoteJid: '628123@s.whatsapp.net', id: 'X1', fromMe: false }]);
+  });
+
+  it('still uses a stored key whose chat is spelled in the other dialect', async () => {
+    // Control for the check above: the same chat written @c.us must still resolve, or the fix would
+    // have cost every receipt its participant and fromMe.
+    const readMessages = jest.fn().mockResolvedValue(undefined);
+    const host = makeHost({
+      getSocket: () => ({ readMessages }) as unknown as WASocket,
+      getStoredMessages: () => Promise.resolve([stored({ id: 'D1', remoteJid: '628123@c.us', fromMe: true })]),
+    });
+
+    await expect(new BaileysContacts(host, 500).sendSeen('628123@s.whatsapp.net', ['D1'])).resolves.toBe(true);
+    expect(readMessages).toHaveBeenCalledWith([{ id: 'D1', remoteJid: '628123@c.us', fromMe: true }]);
+  });
+
+  it('treats a null id list as absent rather than dereferencing it', async () => {
+    // The REST body rejects an explicit null, but this is the engine boundary; it used to throw a
+    // TypeError here and surface as a 500.
+    const readMessages = jest.fn().mockResolvedValue(undefined);
+    const host = makeHost({ getSocket: () => ({ readMessages }) as unknown as WASocket });
+
+    await expect(new BaileysContacts(host, 500).sendSeen('628123@c.us', null as unknown as string[])).resolves.toBe(
+      true,
+    );
+    expect(readMessages).toHaveBeenCalledWith([{ id: 'M1', remoteJid: '628123@s.whatsapp.net' }]);
+  });
+
   it('carries the participant on a group receipt, which a synthesised key cannot', async () => {
     // A group receipt with no `participant` names no sender, so WhatsApp cannot attribute it and
     // the message stays unread on the sender's side while the API answers success: true.

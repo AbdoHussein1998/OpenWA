@@ -355,7 +355,9 @@ export class BaileysContacts {
    * synthesised key, which is what the 1:1 case ran on before.
    */
   private async receiptKeys(chatId: string, messageIds?: string[]): Promise<WAMessageKey[]> {
-    if (messageIds === undefined) {
+    // null as well as undefined: the REST body rejects an explicit null, but this is the engine
+    // boundary and an internal caller reaching it with one used to dereference it below as a 500.
+    if (messageIds === undefined || messageIds === null) {
       const last = this.host.lastMessage(chatId);
       return last ? [last.key] : [];
     }
@@ -364,7 +366,17 @@ export class BaileysContacts {
     }
     const remoteJid = this.host.toEngineJid(chatId);
     const stored = (await this.host.getStoredMessages(messageIds)) ?? [];
-    const keyById = new Map(stored.filter(msg => msg.key?.id).map(msg => [msg.key.id as string, msg.key]));
+    // A stored key is only usable when it belongs to THIS chat. Without the check, an id from
+    // another chat in the same session carried that chat's remoteJid into readMessages, so the
+    // receipt landed there while the route answered success for the chat the caller named. Both
+    // sides fold through toEngineJid so the @c.us and @s.whatsapp.net spellings of one chat still
+    // match; anything that still differs falls back to the synthesised key for the ADDRESSED chat,
+    // which is exactly what every id ran on before stored keys existed.
+    const keyById = new Map(
+      stored
+        .filter(msg => msg.key?.id && msg.key.remoteJid && this.host.toEngineJid(msg.key.remoteJid) === remoteJid)
+        .map(msg => [msg.key.id as string, msg.key]),
+    );
     return messageIds.map(id => keyById.get(id) ?? { remoteJid, id, fromMe: false });
   }
 
