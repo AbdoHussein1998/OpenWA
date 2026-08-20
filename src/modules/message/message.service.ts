@@ -5,6 +5,7 @@ import { EngineRegistry } from '../../engine/engine-registry.service';
 import { MessageProjector } from '../session/message-projector.service';
 import { SendTextMessageDto, SendMediaMessageDto, SendAudioMessageDto, MessageResponseDto } from './dto';
 import { SendTemplateMessageDto } from './dto/send-template.dto';
+import { ReplyMessageDto } from './dto/message-actions.dto';
 import { Message, MessageDirection } from './entities/message.entity';
 import { HookManager, applySendingGate } from '../../core/hooks';
 import { SendPacingService } from './send-pacing.service';
@@ -193,10 +194,10 @@ export class MessageService {
     return this.sender.sendSticker(sessionId, dto);
   }
 
-  reply(
-    sessionId: string,
-    dto: { chatId: string; quotedMessageId: string; text: string },
-  ): Promise<MessageResponseDto> {
+  // Typed by the DTO rather than an inline literal, like every sibling forwarder here. The literal
+  // listed three fields while the controller already handed it a fourth, so the declaration said
+  // less than what flowed through, and a non-REST caller (the agent tool) could not pass it at all.
+  reply(sessionId: string, dto: ReplyMessageDto): Promise<MessageResponseDto> {
     return this.sender.reply(sessionId, dto);
   }
 

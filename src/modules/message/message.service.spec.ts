@@ -115,6 +115,27 @@ describe('MessageService', () => {
       expect(sendText).toHaveBeenCalledWith('sess-1', { chatId: 'test@c.us', text: 'hi' });
       expect(result).toEqual({ messageId: 'wa-msg-1', timestamp: 1706868000 });
     });
+
+    it('passes a reply straight through with its tag list intact', async () => {
+      // This forwarder is the entry point the controller and the agent tool both call. Its parameter
+      // was an inline three-field literal while the controller already handed it a fourth, so the
+      // body reached the sender only because structural typing does not strip excess properties.
+      const reply = jest.fn().mockResolvedValue({ messageId: 'wa-msg-2', timestamp: 1706868001 });
+      const facade = new MessageService(
+        repository as Repository<Message>,
+        engines,
+        messageProjector as unknown as MessageProjector,
+        hookManager as HookManager,
+        lidMappingStore as unknown as LidMappingStoreService,
+        inertPacing(),
+        { reply } as unknown as MessageSendService,
+      );
+
+      const body = { chatId: 'g@g.us', quotedMessageId: 'Q1', text: 'hi @62811', mentions: ['62811@c.us'] };
+      await facade.reply('sess-1', body);
+
+      expect(reply).toHaveBeenCalledWith('sess-1', body);
+    });
   });
 
   // ── getMessages pagination guard ──────────────────────────────────
