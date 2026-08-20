@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `POST /messages/send-sticker` applies the `mentions` it accepts. The route shares `SendMediaMessageDto` and docs/06 lists it among the media sends that take the field, but both adapters built the sticker content without a tag list, so a documented capability did nothing on either engine.
+
 - `POST /chats/read` answers 400 for `"messageIds": null` instead of 500. `@IsOptional` skips every validator for null as well as undefined, so the value reached the Baileys adapter and was dereferenced there. The published schema now carries `minItems` too, so it no longer advertises an empty array the server refuses.
 - A read receipt goes only to the chat the caller named. A message id belonging to another chat in the same session carried that chat's address out of the message store, so the receipt landed there while the route reported success for the chat in the path.
 - The Go client can express an empty `messageIds` again. `omitempty` on a plain slice dropped it, so a caller asking for nothing to be acknowledged silently acknowledged the newest message; the field is a pointer, so absent and empty are distinct on the wire.

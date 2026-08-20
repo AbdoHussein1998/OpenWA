@@ -489,6 +489,9 @@ export class WwebjsMessaging {
         this.client().sendMessage(to, messageMedia, {
           sendMediaAsSticker: true,
           ...this.quoteOptions(media.quotedMessageId),
+          // Same options bag every other media send uses, so the library tags a sticker exactly as it
+          // tags an image. Omitted when empty to leave an untagged sticker call unchanged.
+          ...(media.mentions?.length ? { mentions: media.mentions } : {}),
         }),
       media.quotedMessageId,
     );

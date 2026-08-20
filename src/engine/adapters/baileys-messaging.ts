@@ -377,9 +377,13 @@ export class BaileysMessaging {
   async sendStickerMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
     this.host.ensureReady();
     const { data, mimetype } = await resolveMediaBuffer(media);
+    // A sticker has neither text nor caption, but stickerMessage carries a contextInfo like every
+    // other content type, so a mention still tags the participant. The route accepts the field
+    // (send-sticker shares SendMediaMessageDto) and docs/06 lists it among the media sends that
+    // take one, so dropping it here left a documented capability doing nothing.
     return this.sendContent(
       chatId,
-      { sticker: await toWebpSticker(data, mimetype) },
+      { sticker: await toWebpSticker(data, mimetype), ...this.withMentions(media.mentions) },
       await this.quoteOption(media.quotedMessageId),
     );
   }
