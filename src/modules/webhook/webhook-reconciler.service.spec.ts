@@ -95,6 +95,19 @@ describe('WebhookReconcilerService', () => {
     expect(stats).toMatchObject({ replayed: 1, failed: 0 });
   });
 
+  it('retires the row when a plugin cancelled the dispatch, instead of replaying it to death', async () => {
+    // A cancelled dispatch is a deliberate drop, not a loss. Reported as 'failed' it was replayed
+    // once per sweep until the budget ran out and then marked terminally lost, pointing operators
+    // at a delivery-failure row that was never written.
+    outbox.findStale.mockResolvedValue([row({ attempts: 1 })]);
+    delivery.redeliver.mockResolvedValue('cancelled');
+
+    const stats = await service.sweep(OPTS);
+
+    expect(outbox.close).toHaveBeenCalledWith('wh-1', 'stored-key_wh-1', 'dispatched');
+    expect(stats).toMatchObject({ replayed: 1, failed: 0 });
+  });
+
   it('keeps a row pending when the replay throws an unexpected fault', async () => {
     outbox.findStale.mockResolvedValue([row({ attempts: 1 })]);
     delivery.redeliver.mockRejectedValue(new Error('boom'));

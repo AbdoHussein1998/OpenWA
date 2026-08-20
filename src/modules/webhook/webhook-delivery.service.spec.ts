@@ -65,8 +65,24 @@ describe('WebhookDeliveryService', () => {
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
 
+    // Backed by the rows it accepts, not a constant: the dedupe guard reads count() before every
+    // insert, and a jest.fn() returning undefined would make the guard silently inert here while
+    // still passing every assertion.
+    const insertedFailures: Array<{ webhookId?: string; idempotencyKey?: string | null }> = [];
     failureRepository = {
-      insert: jest.fn().mockResolvedValue({}),
+      insert: jest.fn().mockImplementation((rowToInsert: { webhookId?: string; idempotencyKey?: string | null }) => {
+        insertedFailures.push(rowToInsert);
+        return Promise.resolve({});
+      }),
+      count: jest
+        .fn()
+        .mockImplementation((opts: { where: { webhookId?: string; idempotencyKey?: string } }) =>
+          Promise.resolve(
+            insertedFailures.filter(
+              r => r.webhookId === opts.where.webhookId && r.idempotencyKey === opts.where.idempotencyKey,
+            ).length,
+          ),
+        ),
       find: jest.fn().mockResolvedValue([]),
       delete: jest.fn().mockResolvedValue({ affected: 0 }),
     };
@@ -629,6 +645,52 @@ describe('WebhookDeliveryService', () => {
       await expect(
         service.redeliver(webhook, 'sess-1', 'message.received', 'stored-key-2', { from: 'x@c.us' }),
       ).resolves.toBe('delivered');
+    });
+
+    it('reports a plugin-cancelled dispatch as cancelled, recording no failure and sending nothing', async () => {
+      // A before-hook that stops the dispatch is a deliberate drop. Reported as 'failed' it looked
+      // identical to a lost delivery, so the reconciler replayed it once per sweep until the budget
+      // ran out and then marked it terminally lost against a failure row nothing ever wrote.
+      const webhook = createMockWebhook({ events: ['message.received'], retryCount: 1 });
+      (hookManager.execute as jest.Mock).mockResolvedValue({ continue: false, data: {} });
+      const failuresBefore = getWebhookDeliveryFailuresTotal();
+      mockFetch.mockReset();
+
+      await expect(
+        service.redeliver(webhook, 'sess-1', 'message.received', 'cancelled-key', { from: 'x@c.us' }),
+      ).resolves.toBe('cancelled');
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(failureRepository.insert).not.toHaveBeenCalled();
+      expect(getWebhookDeliveryFailuresTotal()).toBe(failuresBefore);
+    });
+
+    it('records one failure row per lost delivery however many times the reconciler replays it', async () => {
+      // The reconciler leaves a failed row pending and sweeps it again until the attempt budget is
+      // spent. Every replay reaching the dead-letter table turned one lost event into as many rows
+      // and as many increments of the loss metric as the budget allowed.
+      const webhook = createMockWebhook({ events: ['message.received'], retryCount: 1 });
+      (hookManager.execute as jest.Mock).mockResolvedValue({ continue: true, data: {} });
+      mockFetch.mockReset();
+      mockFetch.mockRejectedValue(new Error('receiver down'));
+      const failuresBefore = getWebhookDeliveryFailuresTotal();
+
+      for (let sweep = 0; sweep < 3; sweep++) {
+        await expect(
+          service.redeliver(webhook, 'sess-1', 'message.received', 'stranded-key', { from: 'x@c.us' }),
+        ).resolves.toBe('failed');
+      }
+
+      expect(failureRepository.insert).toHaveBeenCalledTimes(1);
+      expect(getWebhookDeliveryFailuresTotal()).toBe(failuresBefore + 1);
+
+      // Control: a genuinely different delivery must still be recorded, or the assertion above is
+      // satisfied by a guard that suppresses every row after the first.
+      await expect(
+        service.redeliver(webhook, 'sess-1', 'message.received', 'other-key', { from: 'x@c.us' }),
+      ).resolves.toBe('failed');
+      expect(failureRepository.insert).toHaveBeenCalledTimes(2);
+      expect(getWebhookDeliveryFailuresTotal()).toBe(failuresBefore + 2);
     });
 
     it("isolates each webhook's data so an in-place before-hook mutation cannot bleed across webhooks", async () => {

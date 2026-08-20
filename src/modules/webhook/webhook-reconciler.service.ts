@@ -127,6 +127,8 @@ export class WebhookReconcilerService implements OnModuleInit, OnModuleDestroy {
             stats.failed++;
             continue;
           }
+          // 'delivered', 'enqueued' and 'cancelled' all retire the row: the delivery either reached a
+          // durable owner or a plugin dropped it on purpose. Only 'failed' is worth another sweep.
           await this.outbox.close(row.webhookId, row.idempotencyKey, 'dispatched');
           stats.replayed++;
         } catch (error) {

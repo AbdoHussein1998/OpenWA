@@ -35,16 +35,17 @@ export async function postWebhookPayload(
 /**
  * Record a terminal webhook delivery failure (all retries exhausted) to the durable table. Shared
  * wrapper so both paths write the identical row shape. Best-effort: never throws back into the
- * delivery result (the caller's semantics depend on that).
+ * delivery result (the caller's semantics depend on that). Returns false when an identical failure
+ * was already recorded, so the caller can keep the failure metric in step with the table.
  */
 export async function recordTerminalFailure(
   failureRepository: Repository<WebhookDeliveryFailure>,
   logger: LoggerService,
   input: Omit<Parameters<typeof recordWebhookDeliveryFailure>[2], 'lastStatusCode' | 'lastError'> & { error: unknown },
-): Promise<void> {
+): Promise<boolean> {
   const { error, ...row } = input;
   const errMessage = redactSsrfError(error);
-  await recordWebhookDeliveryFailure(failureRepository, logger, {
+  return recordWebhookDeliveryFailure(failureRepository, logger, {
     ...row,
     lastStatusCode: statusCodeFromError(errMessage),
     lastError: errMessage,

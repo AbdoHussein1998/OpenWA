@@ -63,9 +63,10 @@ const DEFAULT_WEBHOOK_SHUTDOWN_DRAIN_MS = 5000;
 /**
  * The result of one delivery attempt. Reported, not thrown: every failure below is already handled
  * in place, so nothing reaches a caller as an exception and a try/catch cannot tell a delivered
- * event from a dead-lettered one.
+ * event from a dead-lettered one. 'cancelled' is a plugin suppressing the dispatch on purpose: it
+ * is terminal like 'delivered' and must never be replayed, but nothing left the process.
  */
-export type WebhookDeliveryOutcome = 'delivered' | 'enqueued' | 'failed';
+export type WebhookDeliveryOutcome = 'delivered' | 'enqueued' | 'cancelled' | 'failed';
 
 interface DispatchEventContext {
   sessionId: string;
@@ -255,7 +256,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const { sessionId, event } = ctx;
     const lastError = redactSsrfError(error, this.logger, 'webhook dispatch');
-    await recordWebhookDeliveryFailure(this.failureRepository, this.logger, {
+    const recorded = await recordWebhookDeliveryFailure(this.failureRepository, this.logger, {
       webhookId: webhook.id,
       sessionId,
       event,
@@ -266,7 +267,9 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
       lastStatusCode: null,
       lastError,
     });
-    incrementWebhookDeliveryFailures();
+    if (recorded) {
+      incrementWebhookDeliveryFailures();
+    }
     try {
       await this.hookManager.execute(
         'webhook:error',
@@ -297,7 +300,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     deliveryId: string,
     idempotencyKey: string,
     ctx: DispatchEventContext,
-  ): Promise<{ finalPayload: WebhookPayload; body: string; headers: Record<string, string> } | null> {
+  ): Promise<{ finalPayload: WebhookPayload; body: string; headers: Record<string, string> } | 'cancelled' | null> {
     const { sessionId, event, baseData } = ctx;
     try {
       const payload: WebhookPayload = {
@@ -325,7 +328,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
           webhookId: webhook.id,
           action: 'webhook_cancelled_by_plugin',
         });
-        return null;
+        return 'cancelled';
       }
 
       // Null/undefined hook results mean "no override", matching an object without payload.
@@ -415,8 +418,14 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     ctx: DispatchEventContext,
   ): Promise<WebhookDeliveryOutcome> {
     const preflight = await this.preflightDelivery(webhook, deliveryId, idempotencyKey, ctx);
+    if (preflight === 'cancelled') {
+      // A plugin suppressed this dispatch deliberately. There is no failure to record and nothing
+      // to retry: reporting it as failed made the reconciler replay a deliberately dropped event
+      // until the budget ran out, then mark it lost against a failure row that never existed.
+      return 'cancelled';
+    }
     if (!preflight) {
-      // Preflight records its own undelivered row and returns null; nothing left the process.
+      // The remaining bail-outs record their own undelivered row before returning null.
       return 'failed';
     }
     const { finalPayload, body, headers } = preflight;
@@ -738,7 +747,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
       }
       // All direct-path retries exhausted — persist a durable failure record before giving up, mirroring
       // the queued processor's final-attempt path so the queue-disabled path isn't a blind spot.
-      await recordTerminalFailure(this.failureRepository, this.logger, {
+      const recorded = await recordTerminalFailure(this.failureRepository, this.logger, {
         webhookId: webhook.id,
         sessionId: payload.sessionId,
         event: payload.event,
@@ -748,7 +757,9 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
         attempts: attempt,
         error,
       });
-      incrementWebhookDeliveryFailures();
+      if (recorded) {
+        incrementWebhookDeliveryFailures();
+      }
       throw error;
     }
   }
