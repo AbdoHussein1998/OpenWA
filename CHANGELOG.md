@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The dashboard chat room shrinks within its layout instead of overflowing it, so a long contact or group name no longer pushes the send button out of reach. Thanks @rainerigius.
+
 ## [0.23.0] - 2026-08-20
 
 ### Added
