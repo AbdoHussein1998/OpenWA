@@ -602,6 +602,12 @@ export class InfraDataService {
         await clearTable('conversation_mappings');
         await clearTable('ingress_events');
         await clearTable('webhook_delivery_failures');
+        // Same rule, and it bites harder here: webhook_outbox_events carries UNIQUE(webhookId,
+        // idempotencyKey), so without this clear a restore onto an instance that already holds the
+        // archive's rows collides on every one of them, and the all-or-nothing gate below rolls the
+        // whole import back. Restoring a backup onto the instance that produced it is exactly the
+        // rollback flow, so leaving it out broke the recovery path rather than a corner of it.
+        await clearTable('webhook_outbox_events');
         await clearTable('integration_delivery_failures');
         // status_updates has no FK to sessions; clear it explicitly so the replace is complete.
         await clearTable('status_updates');

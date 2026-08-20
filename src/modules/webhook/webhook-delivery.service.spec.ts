@@ -608,6 +608,29 @@ describe('WebhookDeliveryService', () => {
       expect(hookManager.execute).not.toHaveBeenCalledWith('webhook:error', expect.anything(), expect.anything());
     });
 
+    // The reconciler branches on this VALUE, never on a throw: every failing path inside redeliver
+    // dead-letters in place, so nothing reaches the caller as an exception. When this reported
+    // nothing, a replay that never delivered was retired 'dispatched' on the first sweep and the
+    // documented WEBHOOK_RECONCILE_MAX_ATTEMPTS budget was unreachable.
+    it('redeliver reports failed when the receiver never accepts, and delivered when it does', async () => {
+      const webhook = createMockWebhook({ events: ['message.received'], retryCount: 1 });
+      (hookManager.execute as jest.Mock).mockResolvedValue({ continue: true, data: {} });
+
+      mockFetch.mockReset();
+      mockFetch.mockRejectedValue(new Error('receiver down'));
+      await expect(
+        service.redeliver(webhook, 'sess-1', 'message.received', 'stored-key-1', { from: 'x@c.us' }),
+      ).resolves.toBe('failed');
+
+      // Control: the same call on a receiver that answers 2xx must NOT report 'failed', otherwise
+      // the assertion above is satisfied by a method that reports failure unconditionally.
+      mockFetch.mockReset();
+      mockFetch.mockResolvedValue({ ok: true, status: 200 });
+      await expect(
+        service.redeliver(webhook, 'sess-1', 'message.received', 'stored-key-2', { from: 'x@c.us' }),
+      ).resolves.toBe('delivered');
+    });
+
     it("isolates each webhook's data so an in-place before-hook mutation cannot bleed across webhooks", async () => {
       const a = createMockWebhook({ id: 'wh-a', events: ['message.received'] });
       const b = createMockWebhook({ id: 'wh-b', events: ['message.received'] });

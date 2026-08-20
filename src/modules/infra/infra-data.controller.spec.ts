@@ -1268,6 +1268,38 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
     expect((await lidRepo.findOneByOrFail({ lid: '222' })).phone).toBeNull();
   });
 
+  // Restoring ONTO the instance that produced the archive is the rollback flow, and it is the one the
+  // outbox broke. The table carries no FK to sessions, so the sessions DELETE never reached it, and
+  // UNIQUE(webhookId, idempotencyKey) then collided on every row until the all-or-nothing gate rolled
+  // the entire import back. Every other table's test clears first, which is why nothing caught it;
+  // this one deliberately does not.
+  it('restores webhook_outbox_events onto an instance that already holds them', async () => {
+    await seedSession('s1');
+    const outboxRepo = ds.getRepository(WebhookOutboxEvent);
+    await outboxRepo.save(
+      outboxRepo.create({
+        webhookId: 'wh-1',
+        sessionId: 's1',
+        event: 'message.received',
+        idempotencyKey: 'key-1',
+        deliveryId: 'del-1',
+        payload: { from: '628111@c.us' },
+        state: 'pending',
+        attempts: 0,
+      }),
+    );
+
+    const dump = await controller.exportData();
+    expect((dump.tables as unknown as { webhookOutboxEvents?: unknown[] }).webhookOutboxEvents).toHaveLength(1);
+
+    const res = await controller.importData({ tables: dump.tables });
+
+    expect(res.warnings).toEqual([]);
+    expect(res.imported).toBe(true);
+    expect(await outboxRepo.count()).toBe(1);
+    expect((await outboxRepo.findOneByOrFail({ idempotencyKey: 'key-1' })).state).toBe('pending');
+  });
+
   // The messages import column list must carry every later-added column; `author` (the group
   // sender identity) was the one that drifted — a restored backup silently lost all attribution.
   it('restores the group-sender author column on a backup→restore', async () => {
