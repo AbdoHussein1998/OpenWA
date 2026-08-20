@@ -311,6 +311,39 @@ describe('messageTools', () => {
     expect(sendText).not.toHaveBeenCalled();
   });
 
+  it('forwards a caller-supplied link preview, and enforces the title WhatsApp requires', async () => {
+    // REST declares customLinkPreview; the tool did not, so an agent's object was stripped before the
+    // handler ran and the send went out with whatever preview the engine chose on its own.
+    const sendText = jest.fn().mockResolvedValue({ id: 'm1' });
+    const tools = makeTools({ sendText } as unknown as MessageService);
+
+    await run(tools.get('MessageSendText')!, {
+      sessionId: 's1',
+      chatId: '628111@c.us',
+      text: 'see https://example.com/launch',
+      customLinkPreview: { url: 'https://example.com/launch', title: 'We just launched' },
+    });
+    expect(sendText).toHaveBeenCalledWith(
+      's1',
+      expect.objectContaining({
+        customLinkPreview: { url: 'https://example.com/launch', title: 'We just launched' },
+      }),
+    );
+
+    // Control: the required title is enforced here, not left to the DTO, because this path never
+    // reaches the ValidationPipe.
+    sendText.mockClear();
+    await expect(
+      run(tools.get('MessageSendText')!, {
+        sessionId: 's1',
+        chatId: '628111@c.us',
+        text: 'see https://example.com/launch',
+        customLinkPreview: { url: 'https://example.com/launch' },
+      }),
+    ).rejects.toBeDefined();
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
   it('does not offer mentions on the sticker tool, whose adapters build no tag list', async () => {
     // Control for the additions above: the field is added where the layer behind it carries the value,
     // not everywhere. Both adapters build the sticker content without mentions, so declaring it here

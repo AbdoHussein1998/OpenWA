@@ -29,6 +29,14 @@ export const MENTIONS_DESCRIPTION =
 export const MENTIONS_MAX = 1024;
 export const MENTION_WID_MAX_LENGTH = 64;
 
+/**
+ * Caps for a custom link preview, exported for the same reason as the mentions pair above: the
+ * agent-tool schema restates nothing, and that path never reaches the ValidationPipe.
+ */
+export const CUSTOM_PREVIEW_URL_MAX_LENGTH = 2048;
+export const CUSTOM_PREVIEW_TITLE_MAX_LENGTH = 256;
+export const CUSTOM_PREVIEW_DESCRIPTION_MAX_LENGTH = 1024;
+
 // Single source of truth for the text-body cap, shared with the agent-tool input schemas
 // (src/core/agent-tools/tools/message.tools.ts) so MCP and REST enforce the same limit.
 export const MESSAGE_TEXT_MAX_LENGTH = 4096;
@@ -52,7 +60,7 @@ export class CustomLinkPreviewDto {
   })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(2048)
+  @MaxLength(CUSTOM_PREVIEW_URL_MAX_LENGTH)
   url!: string;
 
   @ApiProperty({
@@ -62,13 +70,13 @@ export class CustomLinkPreviewDto {
   })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(256)
+  @MaxLength(CUSTOM_PREVIEW_TITLE_MAX_LENGTH)
   title!: string;
 
   @ApiPropertyOptional({ description: 'Preview description', example: 'Read the announcement.', maxLength: 1024 })
   @IsOptional()
   @IsString()
-  @MaxLength(1024)
+  @MaxLength(CUSTOM_PREVIEW_DESCRIPTION_MAX_LENGTH)
   description?: string;
 }
 

@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { ApiKeyRole } from '../../../modules/auth/entities/api-key.entity';
 import type { MessageService } from '../../../modules/message/message.service';
 import {
+  CUSTOM_PREVIEW_DESCRIPTION_MAX_LENGTH,
+  CUSTOM_PREVIEW_TITLE_MAX_LENGTH,
+  CUSTOM_PREVIEW_URL_MAX_LENGTH,
   MENTIONS_MAX,
   MENTION_WID_MAX_LENGTH,
   MESSAGE_TEXT_MAX_LENGTH,
@@ -45,6 +48,31 @@ const mentionsSchema = z
   .describe(
     'WIDs to @mention (e.g. ["62811@c.us"]). The text or caption must also carry the matching ' +
       '@<number> token for WhatsApp to render the tag.',
+  );
+
+/**
+ * Mirrors the REST `customLinkPreview` field, whose caps come from the DTO for the same reason as
+ * `mentionsSchema` above. Baileys only: whatsapp-web.js takes a boolean and answers 501, and the
+ * field cannot be combined with `linkPreview: false`, which asks for the opposite.
+ */
+const customLinkPreviewSchema = z
+  .object({
+    url: z
+      .string()
+      .min(1)
+      .max(CUSTOM_PREVIEW_URL_MAX_LENGTH)
+      .describe('The URL as it appears in the message text; WhatsApp anchors the preview to it.'),
+    title: z
+      .string()
+      .min(1)
+      .max(CUSTOM_PREVIEW_TITLE_MAX_LENGTH)
+      .describe('Required: WhatsApp renders no preview without a title.'),
+    description: z.string().max(CUSTOM_PREVIEW_DESCRIPTION_MAX_LENGTH).optional(),
+  })
+  .optional()
+  .describe(
+    'Attach a preview you supply instead of one fetched from the URL, so nothing is fetched and it ' +
+      'works for a URL the gateway cannot reach. Baileys only: whatsapp-web.js answers 501.',
   );
 
 export function messageTools(message: MessageService): AnyToolDescriptor[] {
@@ -123,6 +151,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           ),
         quotedMessageId: quotedMessageIdSchema,
         mentions: mentionsSchema,
+        customLinkPreview: customLinkPreviewSchema,
       }),
       handler: input =>
         message.sendText(input.sessionId, {
@@ -131,6 +160,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           ...(input.linkPreview === undefined ? {} : { linkPreview: input.linkPreview }),
           quotedMessageId: input.quotedMessageId,
           mentions: input.mentions,
+          customLinkPreview: input.customLinkPreview,
         }),
     }),
     defineTool({
