@@ -163,7 +163,7 @@ There is a **single shared media byte cap**, not a per-type table. A base64 (or 
 
 ### Mentions
 
-`send-text` and the media send routes accept an optional `mentions` array of WIDs (`<phone>@c.us`) to tag participants — most useful in groups. Two things are required for WhatsApp to render a tag and notify the participant:
+`send-text`, the media send routes, `send-template`, `send-bulk` (per item), `reply` and `edit` all accept an optional `mentions` array of WIDs (`<phone>@c.us`) to tag participants — most useful in groups. On `edit` the tags are re-applied rather than preserved: an edit replaces the message content, so a rewritten body that still reads `@62811` loses the tag unless the list is sent again. Two things are required for WhatsApp to render a tag and notify the participant:
 
 1. The `mentions` array lists the WID(s), e.g. `["62811@c.us"]`.
 2. The `text`/`caption` contains the matching `@<number>` token, e.g. `Hello @62811`.
@@ -1571,8 +1571,8 @@ rejected with `400` rather than guessing which half was meant.
 Nine `send-*` routes accept an optional `quotedMessageId`: `send-text` above, and `send-image`,
 `send-video`, `send-audio`, `send-document`, `send-sticker`, `send-location`, `send-contact` and
 `send-poll` below. Supplying it turns that send into a reply, so a reply can carry media, a location,
-a contact card or a poll — not only text. `POST .../messages/reply` is unchanged and remains the text
-shorthand.
+a contact card or a poll — not only text. `POST .../messages/reply` remains the text shorthand, and
+like the send routes it accepts `mentions`.
 
 `send-template`, `send-bulk` and `send-product` do NOT accept the field, and reject it
 as an unknown property.
@@ -1626,6 +1626,8 @@ Render a stored text template (header/body/footer joined by blank lines, `{{vars
 | templateId   | string                  | Conditional | non-empty; required when `templateName` is absent | Stored template id                                          |
 | templateName | string                  | Conditional | non-empty; required when `templateId` is absent   | Stored template name                                        |
 | vars         | Record\<string,string\> | No          | object                                            | Substituted into `{{placeholder}}` tokens; defaults to `{}` |
+| mentions     | string[]                | No          | array of WIDs                                     | WIDs to @mention in the rendered body                       |
+| linkPreview  | boolean                 | No          | —                                                 | Same engine split as `send-text`; see **Link previews**     |
 
 ```json
 {
@@ -1919,11 +1921,12 @@ Reply to a message, quoting a prior message.
 
 **Request body** — `ReplyMessageDto`
 
-| Field           | Type   | Required | Constraints | Description                             |
-| --------------- | ------ | -------- | ----------- | --------------------------------------- |
-| chatId          | string | Yes      | non-empty   | Target chat                             |
-| quotedMessageId | string | Yes      | non-empty   | WhatsApp id of the message being quoted |
-| text            | string | Yes      | non-empty   | Reply text                              |
+| Field           | Type     | Required | Constraints   | Description                              |
+| --------------- | -------- | -------- | ------------- | ---------------------------------------- |
+| chatId          | string   | Yes      | non-empty     | Target chat                              |
+| quotedMessageId | string   | Yes      | non-empty     | WhatsApp id of the message being quoted  |
+| text            | string   | Yes      | non-empty     | Reply text                               |
+| mentions        | string[] | No       | array of WIDs | WIDs to @mention. See **Mentions** above |
 
 ```json
 { "chatId": "628123456789@c.us", "quotedMessageId": "true_628123456789@c.us_3EB0ABCD", "text": "Replying to you" }
@@ -2055,11 +2058,12 @@ Edit the text of a message sent by this account; also updates the stored record'
 
 **Request body** — `EditMessageDto`
 
-| Field     | Type   | Required | Constraints             | Description                                       |
-| --------- | ------ | -------- | ----------------------- | ------------------------------------------------- |
-| chatId    | string | Yes      | non-empty               | Chat containing the message                       |
-| messageId | string | Yes      | non-empty               | Message to edit (the send response's `messageId`) |
-| body      | string | Yes      | non-empty, ≤ 4096 chars | New text content                                  |
+| Field     | Type     | Required | Constraints             | Description                                       |
+| --------- | -------- | -------- | ----------------------- | ------------------------------------------------- |
+| chatId    | string   | Yes      | non-empty               | Chat containing the message                       |
+| messageId | string   | Yes      | non-empty               | Message to edit (the send response's `messageId`) |
+| body      | string   | Yes      | non-empty, ≤ 4096 chars | New text content                                  |
+| mentions  | string[] | No       | array of WIDs           | Re-applies participant tags to the new body       |
 
 ```json
 { "chatId": "628123456789@c.us", "messageId": "true_628123456789@c.us_3EB0ABCD", "body": "Corrected text" }
@@ -2095,7 +2099,7 @@ Send messages to multiple recipients as an async batch — returns immediately a
 | messages | BulkMessageItemDto[]  | Yes      | array, max 100, nested-validated | The batch items (see below); duplicate `chatId`s are collapsed before processing — first occurrence wins, order preserved |
 | options  | BulkMessageOptionsDto | No       | nested-validated                 | Pacing/error options (see below)                                                                                          |
 
-Each `BulkMessageItemDto`: `{ chatId: string, type: 'text'|'image'|'video'|'audio'|'document', content: BulkMessageContentDto, variables?: Record<string,string> }`. `content` (all fields optional, nested-validated): `text?: string`, `image?`/`video?`/`audio?`/`document?`: `{ url?, base64?, mimetype?, filename? }`, `caption?: string`.
+Each `BulkMessageItemDto`: `{ chatId: string, type: 'text'|'image'|'video'|'audio'|'document', content: BulkMessageContentDto, variables?: Record<string,string> }`. `content` (all fields optional, nested-validated): `text?: string`, `image?`/`video?`/`audio?`/`document?`: `{ url?, base64?, mimetype?, filename? }`, `caption?: string`, `mentions?: string[]` (per item; a batch fans out to many chats, and a WID is only taggable in a chat the participant is in).
 
 `BulkMessageOptionsDto`: `{ delayBetweenMessages?: number (1000–60000, default 3000), randomizeDelay?: boolean (default true), stopOnError?: boolean (default false) }`.
 

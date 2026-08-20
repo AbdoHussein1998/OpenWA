@@ -5,6 +5,7 @@ import { EngineRegistry } from '../../engine/engine-registry.service';
 import { MessageProjector } from '../session/message-projector.service';
 import { SendTextMessageDto, SendMediaMessageDto, SendAudioMessageDto, MessageResponseDto } from './dto';
 import { SendTemplateMessageDto } from './dto/send-template.dto';
+import { ReplyMessageDto } from './dto/message-actions.dto';
 import { Message, MessageDirection } from './entities/message.entity';
 import { HookManager, applySendingGate } from '../../core/hooks';
 import { SendPacingService } from './send-pacing.service';
@@ -193,10 +194,10 @@ export class MessageService {
     return this.sender.sendSticker(sessionId, dto);
   }
 
-  reply(
-    sessionId: string,
-    dto: { chatId: string; quotedMessageId: string; text: string },
-  ): Promise<MessageResponseDto> {
+  // Typed by the DTO rather than an inline literal, like every sibling forwarder here. The literal
+  // listed three fields while the controller already handed it a fourth, so the declaration said
+  // less than what flowed through, and a non-REST caller (the agent tool) could not pass it at all.
+  reply(sessionId: string, dto: ReplyMessageDto): Promise<MessageResponseDto> {
     return this.sender.reply(sessionId, dto);
   }
 
@@ -480,14 +481,16 @@ export class MessageService {
 
   async editMessage(
     sessionId: string,
-    dto: { chatId: string; messageId: string; body: string },
+    dto: { chatId: string; messageId: string; body: string; mentions?: string[] },
   ): Promise<MessageResponseDto> {
     const engine = this.getEngine(sessionId);
     // An edit replaces the text the recipient sees, so it is content leaving the account and goes
     // through the same moderation chokepoint as every other sender. A plugin can rewrite `body`
     // here exactly as it can for a first send.
     const finalDto = await this.applySendingGate(sessionId, 'edit', dto);
-    const result = await engine.editMessage(finalDto.chatId, finalDto.messageId, finalDto.body);
+    const result = finalDto.mentions?.length
+      ? await engine.editMessage(finalDto.chatId, finalDto.messageId, finalDto.body, finalDto.mentions)
+      : await engine.editMessage(finalDto.chatId, finalDto.messageId, finalDto.body);
 
     // Best-effort: reflect the new body in the stored copy (mirrors deleteMessage's revoked flag),
     // serialized with the inbound edit/reaction writers through the session's per-message mutation

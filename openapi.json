@@ -11363,6 +11363,21 @@
               "customer": "Alice",
               "orderId": "1234"
             }
+          },
+          "mentions": {
+            "description": "WIDs to @mention (e.g. [\"62811@c.us\"]). The text/caption must also contain the @<number> token.",
+            "example": [
+              "628123456789@c.us"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkPreview": {
+            "type": "boolean",
+            "description": "Controls the URL preview on the rendered body, with the same engine split as send-text: whatsapp-web.js builds one by default and `false` suppresses it, while on Baileys previews are opt-in and only `true` attaches one.",
+            "example": false
           }
         },
         "required": [
@@ -11593,6 +11608,16 @@
           "text": {
             "type": "string",
             "maxLength": 4096
+          },
+          "mentions": {
+            "description": "WIDs to @mention (e.g. [\"62811@c.us\"]). The text/caption must also contain the @<number> token.",
+            "example": [
+              "628123456789@c.us"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -12130,6 +12155,16 @@
             "type": "string",
             "description": "New text body for the message",
             "maxLength": 4096
+          },
+          "mentions": {
+            "description": "WIDs to @mention (e.g. [\"62811@c.us\"]). The text/caption must also contain the @<number> token.",
+            "example": [
+              "628123456789@c.us"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -12207,6 +12242,16 @@
             "type": "string",
             "description": "Caption for media messages",
             "maxLength": 1024
+          },
+          "mentions": {
+            "description": "WIDs to @mention (e.g. [\"62811@c.us\"]). The text/caption must also contain the @<number> token.",
+            "example": [
+              "628123456789@c.us"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

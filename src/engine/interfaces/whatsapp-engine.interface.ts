@@ -909,7 +909,11 @@ export interface MessagingCapability {
 
   sendPollMessage(chatId: string, poll: PollInput): Promise<MessageResult>;
 
-  replyToMessage(chatId: string, quotedMsgId: string, text: string): Promise<MessageResult>;
+  /**
+   * Reply to a message, quoting it. `mentions` tags participants exactly as on the send routes: the
+   * text must also carry the matching `@<number>` token for WhatsApp to render the tag.
+   */
+  replyToMessage(chatId: string, quotedMsgId: string, text: string, mentions?: string[]): Promise<MessageResult>;
 
   forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult>;
 }
@@ -930,8 +934,11 @@ export interface MessageOperationsCapability {
   /**
    * Edit the body of a text message. Only the account's OWN messages can be edited; engines reject
    * non-text or foreign messages at their own layer — the engine's error is surfaced as-is.
+   *
+   * `mentions` re-applies participant tags to the new body. An edit REPLACES the message content, so
+   * omitting it drops whatever tags the original carried rather than preserving them.
    */
-  editMessage(chatId: string, messageId: string, body: string): Promise<MessageResult>;
+  editMessage(chatId: string, messageId: string, body: string, mentions?: string[]): Promise<MessageResult>;
 
   /**
    * Star (bookmark) a message, or remove its star. Starring is a private, account-local marker —

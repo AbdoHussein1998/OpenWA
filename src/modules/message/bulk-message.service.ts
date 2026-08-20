@@ -40,6 +40,7 @@ import { resolveNonNegativeIntEnv } from '../../config/configuration';
 interface BulkMessageContent {
   text?: string;
   caption?: string;
+  mentions?: string[];
   image?: { url?: string; base64?: string; mimetype?: string; filename?: string };
   video?: { url?: string; base64?: string; mimetype?: string; filename?: string };
   audio?: { url?: string; base64?: string; mimetype?: string; filename?: string; ptt?: boolean };
@@ -767,24 +768,33 @@ export class BulkMessageService implements OnApplicationBootstrap {
   ): Promise<MessageResult> {
     switch (type) {
       case 'text':
-        return engine.sendTextMessage(chatId, content.text || '');
+        return content.mentions?.length
+          ? engine.sendTextMessage(chatId, content.text || '', content.mentions)
+          : engine.sendTextMessage(chatId, content.text || '');
       case 'image':
         return engine.sendImageMessage(chatId, {
           mimetype: content.image?.mimetype || 'image/jpeg',
           data: stripBase64DataUri(content.image?.base64) || content.image?.url || '',
           caption: content.caption,
+          mentions: content.mentions,
         });
       case 'video':
         return engine.sendVideoMessage(chatId, {
           mimetype: content.video?.mimetype || 'video/mp4',
           data: stripBase64DataUri(content.video?.base64) || content.video?.url || '',
           caption: content.caption,
+          mentions: content.mentions,
         });
       case 'audio':
+        // Forwarded even though audio carries no caption: a mention tags the recipient through
+        // contextInfo without visible @text, which is why the single-send audio route accepts it too
+        // (see sendAudioMessage in baileys-messaging.ts). Dropping it here would accept the field and
+        // then deliver an untagged voice note with nothing to say so.
         return engine.sendAudioMessage(chatId, {
           mimetype: content.audio?.mimetype || (content.audio?.ptt ? 'audio/ogg; codecs=opus' : 'audio/mpeg'),
           data: stripBase64DataUri(content.audio?.base64) || content.audio?.url || '',
           ptt: content.audio?.ptt,
+          mentions: content.mentions,
         });
       case 'document':
         return engine.sendDocumentMessage(chatId, {
@@ -792,6 +802,7 @@ export class BulkMessageService implements OnApplicationBootstrap {
           data: stripBase64DataUri(content.document?.base64) || content.document?.url || '',
           filename: content.document?.filename,
           caption: content.caption,
+          mentions: content.mentions,
         });
       default:
         return Promise.reject(new Error(`Unsupported message type: ${type}`));

@@ -11,9 +11,18 @@ import {
   ArrayMaxSize,
   MaxLength,
   IsIn,
+  Validate,
 } from 'class-validator';
 import { ToStrictBoolean, ToStrictNumber } from '../../../common/utils/strict-boolean';
-import { MESSAGE_TEXT_MAX_LENGTH, QUOTED_MESSAGE_ID_DESCRIPTION, QUOTED_MESSAGE_ID_EXAMPLE } from './send-message.dto';
+import {
+  MENTIONS_DESCRIPTION,
+  MENTIONS_MAX,
+  MENTION_WID_MAX_LENGTH,
+  MESSAGE_TEXT_MAX_LENGTH,
+  QUOTED_MESSAGE_ID_DESCRIPTION,
+  QUOTED_MESSAGE_ID_EXAMPLE,
+} from './send-message.dto';
+import { IsMentionWidConstraint } from './is-mention-wid.validator';
 
 /**
  * Validated DTOs for the message action endpoints. These replaced inline
@@ -148,6 +157,15 @@ export class ReplyMessageDto {
   @IsNotEmpty()
   @MaxLength(MESSAGE_TEXT_MAX_LENGTH)
   text!: string;
+
+  @ApiPropertyOptional({ description: MENTIONS_DESCRIPTION, example: ['628123456789@c.us'], type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MENTIONS_MAX)
+  @IsString({ each: true })
+  @MaxLength(MENTION_WID_MAX_LENGTH, { each: true })
+  @Validate(IsMentionWidConstraint, { each: true })
+  mentions?: string[];
 }
 
 export class ForwardMessageDto {
@@ -311,10 +329,22 @@ export class EditMessageDto {
   @IsNotEmpty()
   messageId!: string;
 
-  // Same body cap as SendTextMessageDto.text — an edit cannot exceed what a send allows.
-  @ApiProperty({ description: 'New text body for the message', maxLength: 4096 })
+  // Same body cap as SendTextMessageDto.text — an edit cannot exceed what a send allows. Bound to the
+  // shared constant rather than restated, so the two cannot drift apart.
+  @ApiProperty({ description: 'New text body for the message', maxLength: MESSAGE_TEXT_MAX_LENGTH })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(4096)
+  @MaxLength(MESSAGE_TEXT_MAX_LENGTH)
   body!: string;
+
+  // An edit REPLACES the message content, so tags are re-applied rather than preserved: omitting
+  // this drops whatever the original body carried.
+  @ApiPropertyOptional({ description: MENTIONS_DESCRIPTION, example: ['628123456789@c.us'], type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MENTIONS_MAX)
+  @IsString({ each: true })
+  @MaxLength(MENTION_WID_MAX_LENGTH, { each: true })
+  @Validate(IsMentionWidConstraint, { each: true })
+  mentions?: string[];
 }

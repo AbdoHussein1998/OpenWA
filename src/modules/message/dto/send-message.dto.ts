@@ -16,8 +16,17 @@ import { Type } from 'class-transformer';
 import { IsMentionWidConstraint } from './is-mention-wid.validator';
 import { ToStrictBoolean } from '../../../common/utils/strict-boolean';
 
-const MENTIONS_DESCRIPTION =
+export const MENTIONS_DESCRIPTION =
   'WIDs to @mention (e.g. ["62811@c.us"]). The text/caption must also contain the @<number> token.';
+
+/**
+ * Caps for a `mentions` array, exported because the field now appears on every REST route whose
+ * engine can carry it: send, reply, edit, template and bulk. Inline literals repeated per site is
+ * how the two numbers would drift apart between endpoints that share one documented contract. The
+ * agent-tool schemas do NOT declare mentions on any tool yet, so nothing there reads these.
+ */
+export const MENTIONS_MAX = 1024;
+export const MENTION_WID_MAX_LENGTH = 64;
 
 // Single source of truth for the text-body cap, shared with the agent-tool input schemas
 // (src/core/agent-tools/tools/message.tools.ts) so MCP and REST enforce the same limit.
@@ -84,9 +93,9 @@ export class SendTextMessageDto {
   @ApiPropertyOptional({ description: MENTIONS_DESCRIPTION, example: ['628123456789@c.us'], type: [String] })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(1024)
+  @ArrayMaxSize(MENTIONS_MAX)
   @IsString({ each: true })
-  @MaxLength(64, { each: true })
+  @MaxLength(MENTION_WID_MAX_LENGTH, { each: true })
   @Validate(IsMentionWidConstraint, { each: true })
   mentions?: string[];
 
@@ -212,9 +221,9 @@ export class SendMediaMessageDto {
   @ApiPropertyOptional({ description: MENTIONS_DESCRIPTION, example: ['628123456789@c.us'], type: [String] })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(1024)
+  @ArrayMaxSize(MENTIONS_MAX)
   @IsString({ each: true })
-  @MaxLength(64, { each: true })
+  @MaxLength(MENTION_WID_MAX_LENGTH, { each: true })
   @Validate(IsMentionWidConstraint, { each: true })
   mentions?: string[];
 

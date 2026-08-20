@@ -115,6 +115,27 @@ describe('MessageService', () => {
       expect(sendText).toHaveBeenCalledWith('sess-1', { chatId: 'test@c.us', text: 'hi' });
       expect(result).toEqual({ messageId: 'wa-msg-1', timestamp: 1706868000 });
     });
+
+    it('passes a reply straight through with its tag list intact', async () => {
+      // This forwarder is the entry point the controller and the agent tool both call. Its parameter
+      // was an inline three-field literal while the controller already handed it a fourth, so the
+      // body reached the sender only because structural typing does not strip excess properties.
+      const reply = jest.fn().mockResolvedValue({ messageId: 'wa-msg-2', timestamp: 1706868001 });
+      const facade = new MessageService(
+        repository as Repository<Message>,
+        engines,
+        messageProjector as unknown as MessageProjector,
+        hookManager as HookManager,
+        lidMappingStore as unknown as LidMappingStoreService,
+        inertPacing(),
+        { reply } as unknown as MessageSendService,
+      );
+
+      const body = { chatId: 'g@g.us', quotedMessageId: 'Q1', text: 'hi @62811', mentions: ['62811@c.us'] };
+      await facade.reply('sess-1', body);
+
+      expect(reply).toHaveBeenCalledWith('sess-1', body);
+    });
   });
 
   // ── getMessages pagination guard ──────────────────────────────────
@@ -620,6 +641,25 @@ describe('MessageService', () => {
 
       expect(mockEngine.editMessage).toHaveBeenCalledWith('test@c.us', 'wa-msg-1', 'redacted');
       expect(messageProjector.recordOutboundMessageEdit).toHaveBeenCalledWith('sess-1', 'wa-msg-1', 'redacted');
+    });
+
+    it('honours a plugin that rewrites the tag list, not the list the caller sent', async () => {
+      // message:sending is a moderation chokepoint, so a handler that drops a WID from the list must
+      // win. Reading the caller's own dto here instead of the gated one would send the unredacted
+      // tags while the hook reported success, and no other assertion in this file would notice.
+      (hookManager.execute as jest.Mock).mockResolvedValueOnce({
+        continue: true,
+        data: { input: { chatId: 'g@g.us', messageId: 'wa-msg-1', body: 'hi @62811', mentions: ['62811@c.us'] } },
+      });
+
+      await service.editMessage('sess-1', {
+        chatId: 'g@g.us',
+        messageId: 'wa-msg-1',
+        body: 'hi @62811 @62999',
+        mentions: ['62811@c.us', '62999@c.us'],
+      });
+
+      expect(mockEngine.editMessage).toHaveBeenCalledWith('g@g.us', 'wa-msg-1', 'hi @62811', ['62811@c.us']);
     });
   });
 

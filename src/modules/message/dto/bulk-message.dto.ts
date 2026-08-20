@@ -14,7 +14,15 @@ import {
   ArrayMaxSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { Validate } from 'class-validator';
 import { ToStrictBoolean } from '../../../common/utils/strict-boolean';
+import {
+  MENTIONS_DESCRIPTION,
+  MENTIONS_MAX,
+  MENTION_WID_MAX_LENGTH,
+  MESSAGE_TEXT_MAX_LENGTH,
+} from './send-message.dto';
+import { IsMentionWidConstraint } from './is-mention-wid.validator';
 import { BatchMessageStatus, BatchStatus } from '../entities/message-batch.entity';
 
 class BulkMediaDto {
@@ -46,10 +54,10 @@ class BulkMediaDto {
 }
 
 class BulkMessageContentDto {
-  @ApiPropertyOptional({ description: 'Text content for text messages', maxLength: 4096 })
+  @ApiPropertyOptional({ description: 'Text content for text messages', maxLength: MESSAGE_TEXT_MAX_LENGTH })
   @IsOptional()
   @IsString()
-  @MaxLength(4096)
+  @MaxLength(MESSAGE_TEXT_MAX_LENGTH)
   text?: string;
 
   // Typed nested DTOs (not bare object literals) so the global ValidationPipe's whitelist /
@@ -84,6 +92,18 @@ class BulkMessageContentDto {
   @IsString()
   @MaxLength(1024)
   caption?: string;
+
+  // Applies to the text body and to a media caption alike, matching the single-send routes. Every
+  // item in a batch names its own list: a batch fans out to many chats, and a WID is only taggable
+  // in a chat the participant is in.
+  @ApiPropertyOptional({ description: MENTIONS_DESCRIPTION, example: ['628123456789@c.us'], type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MENTIONS_MAX)
+  @IsString({ each: true })
+  @MaxLength(MENTION_WID_MAX_LENGTH, { each: true })
+  @Validate(IsMentionWidConstraint, { each: true })
+  mentions?: string[];
 }
 
 class BulkMessageItemDto {
