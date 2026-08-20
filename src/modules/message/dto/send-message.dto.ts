@@ -20,10 +20,11 @@ export const MENTIONS_DESCRIPTION =
   'WIDs to @mention (e.g. ["62811@c.us"]). The text/caption must also contain the @<number> token.';
 
 /**
- * Caps for a `mentions` array, exported because the field now appears on every REST route whose
- * engine can carry it: send, reply, edit, template and bulk. Inline literals repeated per site is
- * how the two numbers would drift apart between endpoints that share one documented contract. The
- * agent-tool schemas do NOT declare mentions on any tool yet, so nothing there reads these.
+ * Caps for a `mentions` array, exported because the field appears on every REST route whose engine
+ * can carry it (send, reply, edit, template, bulk) and on the matching agent-tool schemas. Inline
+ * literals repeated per site is how the two numbers would drift apart between endpoints that share
+ * one documented contract, and the tool path needs them most: it calls the service directly, so the
+ * ValidationPipe never runs and the zod schema is the only cap there is.
  */
 export const MENTIONS_MAX = 1024;
 export const MENTION_WID_MAX_LENGTH = 64;

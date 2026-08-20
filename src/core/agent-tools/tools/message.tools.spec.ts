@@ -267,6 +267,69 @@ describe('messageTools', () => {
     expect(out).toEqual({ id: 'm2' });
   });
 
+  it('forwards a tag list on the text and reply tools', async () => {
+    const sendText = jest.fn().mockResolvedValue({ id: 'm1' });
+    const reply = jest.fn().mockResolvedValue({ id: 'm2' });
+    const tools = makeTools({ sendText, reply } as unknown as MessageService);
+
+    await run(tools.get('MessageSendText')!, {
+      sessionId: 's1',
+      chatId: '120363@g.us',
+      text: 'hi @62811',
+      mentions: ['62811@c.us'],
+    });
+    expect(sendText).toHaveBeenCalledWith('s1', expect.objectContaining({ mentions: ['62811@c.us'] }));
+
+    await run(tools.get('MessageReply')!, {
+      sessionId: 's1',
+      chatId: '120363@g.us',
+      quotedMessageId: 'm1',
+      text: 'hi @62811',
+      mentions: ['62811@c.us'],
+    });
+    expect(reply).toHaveBeenCalledWith('s1', expect.objectContaining({ mentions: ['62811@c.us'] }));
+  });
+
+  it('refuses a tag that is not an individual WID, instead of dropping it', async () => {
+    // The whole point of declaring the field here. A tool schema is a plain z.object, so before it was
+    // declared an agent's `mentions` was stripped silently and the send reported success; and this path
+    // calls the service directly, so no ValidationPipe ever sees the value.
+    const sendText = jest.fn().mockResolvedValue({ id: 'm1' });
+    const tools = makeTools({ sendText } as unknown as MessageService);
+
+    // The detail lives on the response, not on .message, which reads "Bad Request Exception".
+    await expect(
+      run(tools.get('MessageSendText')!, {
+        sessionId: 's1',
+        chatId: '120363@g.us',
+        text: 'hi',
+        mentions: ['120363000000000000@g.us'],
+      }),
+    ).rejects.toMatchObject({
+      response: { message: [expect.stringContaining('individual WID') as unknown as string] },
+    });
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it('does not offer mentions on the sticker tool, whose adapters build no tag list', async () => {
+    // Control for the additions above: the field is added where the layer behind it carries the value,
+    // not everywhere. Both adapters build the sticker content without mentions, so declaring it here
+    // would accept the field and drop it.
+    const sendSticker = jest.fn().mockResolvedValue({ id: 'm1' });
+    const tools = makeTools({ sendSticker } as unknown as MessageService);
+
+    await run(tools.get('MessageSendSticker')!, {
+      sessionId: 's1',
+      chatId: '120363@g.us',
+      url: 'https://example.test/s.webp',
+      mentions: ['62811@c.us'],
+    });
+    // The KEY must be absent, not merely undefined: a schema that declared the field and forwarded it
+    // would pass an `undefined` value here and satisfy a looser assertion.
+    const [, forwarded] = sendSticker.mock.calls[0] as [string, Record<string, unknown>];
+    expect(Object.keys(forwarded)).not.toContain('mentions');
+  });
+
   it('MessageForward delegates to forward', async () => {
     const forward = jest.fn().mockResolvedValue({ id: 'm2' });
     const tools = makeTools({ forward } as unknown as MessageService);
