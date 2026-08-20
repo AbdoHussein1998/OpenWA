@@ -1,6 +1,7 @@
 import type { WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { BaileysContacts, BaileysContactsHost } from './baileys-contacts';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
+import { toNeutralJid } from '../identity/wa-id';
 
 /**
  * `readMessages` reaches `fetchPrivacySettings`, whose body is
@@ -23,7 +24,7 @@ const toEngineJid = (jid: string): string => {
 };
 
 function makeHost(overrides: Partial<Record<keyof BaileysContactsHost, unknown>>): BaileysContactsHost {
-  return {
+  const host = {
     ensureReady: () => undefined,
     logger: { warn: jest.fn(), debug: jest.fn(), info: jest.fn(), error: jest.fn() },
     normalizedSelfJid: () => '628177@s.whatsapp.net',
@@ -36,6 +37,10 @@ function makeHost(overrides: Partial<Record<keyof BaileysContactsHost, unknown>>
     toEngineJid,
     ...overrides,
   } as unknown as BaileysContactsHost;
+  // Wired the way the adapter wires it: the real fold, reading the session's lid mapping through
+  // this host's own resolvePhone, so a test can hand it a mapping and exercise the lid dialect.
+  host.toNeutralJid = (jid: string): string => toNeutralJid(jid, id => host.resolvePhone(id));
+  return host;
 }
 
 function contacts(sock: Record<string, jest.Mock>, budgetMs: number): BaileysContacts {
@@ -84,6 +89,38 @@ describe('sendSeen', () => {
 
     // Falls back to the synthesised key for the ADDRESSED chat rather than the stored one.
     expect(readMessages).toHaveBeenCalledWith([{ remoteJid: '628123@s.whatsapp.net', id: 'X1', fromMe: false }]);
+  });
+
+  it('still uses a stored key stored under the peer lid for the addressed chat', async () => {
+    // Baileys addresses a DM by the peer's lid, so the stored key's remoteJid is `<lid>@lid` while
+    // the caller names the chat by phone number. Folding through the ENGINE dialect cannot reduce a
+    // lid, so every stored key was discarded and the receipt fell back to a synthesised key that
+    // lost the real fromMe and participant.
+    const readMessages = jest.fn().mockResolvedValue(undefined);
+    const host = makeHost({
+      getSocket: () => ({ readMessages }) as unknown as WASocket,
+      resolvePhone: (jid: string) => (jid === '9988@lid' ? '628123' : null),
+      getStoredMessages: () =>
+        Promise.resolve([stored({ id: 'L1', remoteJid: '9988@lid', fromMe: true, participant: '9988@lid' })]),
+    });
+
+    await expect(new BaileysContacts(host, 500).sendSeen('628123@c.us', ['L1'])).resolves.toBe(true);
+    expect(readMessages).toHaveBeenCalledWith([
+      { id: 'L1', remoteJid: '9988@lid', fromMe: true, participant: '9988@lid' },
+    ]);
+  });
+
+  it('still rejects a lid-addressed key from another chat', async () => {
+    // Negative twin of the case above: reducing through the neutral dialect must not turn the scope
+    // check into "accept anything spelled @lid". An unmapped lid stays itself and cannot match.
+    const readMessages = jest.fn().mockResolvedValue(undefined);
+    const host = makeHost({
+      getSocket: () => ({ readMessages }) as unknown as WASocket,
+      getStoredMessages: () => Promise.resolve([stored({ id: 'L2', remoteJid: '7777@lid', fromMe: true })]),
+    });
+
+    await expect(new BaileysContacts(host, 500).sendSeen('628123@c.us', ['L2'])).resolves.toBe(true);
+    expect(readMessages).toHaveBeenCalledWith([{ remoteJid: '628123@s.whatsapp.net', id: 'L2', fromMe: false }]);
   });
 
   it('still uses a stored key whose chat is spelled in the other dialect', async () => {
