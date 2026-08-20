@@ -14,10 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `POST /sessions/{sessionId}/chats/unread` publishes its own `MarkChatUnreadDto` rather than sharing `MarkChatReadDto`. The body is unchanged (`chatId` alone), but a generated client sees the schema under a new name.
-- ⚠️ **Breaking (Go and Java clients).** `subscribePresence` takes its own `SubscribePresenceRequest` rather than the shared `MarkChatRequest`, which now serves `markUnread` alone. Swap the type at the call site; the wire body is unchanged. `SubscribePresenceDto` had no contract-gate coverage while one type stood for two routes.
+- ⚠️ **Breaking (Go, Java and typed Python callers).** `markRead` and `subscribePresence` each take their own request type rather than the shared `MarkChatRequest`, which now serves `markUnread` alone. Swap the type at both call sites; the wire body is unchanged and the JavaScript and PHP clients are unaffected. `SubscribePresenceDto` had no contract-gate coverage while one type stood for two routes.
 
 ### Fixed
 
+- `POST /chats/read` answers 400 for `"messageIds": null` instead of 500. `@IsOptional` skips every validator for null as well as undefined, so the value reached the Baileys adapter and was dereferenced there. The published schema now carries `minItems` too, so it no longer advertises an empty array the server refuses.
+- A read receipt goes only to the chat the caller named. A message id belonging to another chat in the same session carried that chat's address out of the message store, so the receipt landed there while the route reported success for the chat in the path.
+- The Go client can express an empty `messageIds` again. `omitempty` on a plain slice dropped it, so a caller asking for nothing to be acknowledged silently acknowledged the newest message; the field is a pointer, so absent and empty are distinct on the wire.
 - The dashboard CSP nonce is substituted at every occurrence in the served document, not only the first. One placeholder exists today, so a second would have been left reading the literal text and its script refused by the browser.
 - Outbound webhook deliveries survive a hard crash. Fan-out was fire-and-forget, so a crash between persisting a message and completing its POST lost the delivery, against a documented at-least-once contract. Deliveries are now recorded before they are attempted, and a bounded sweep replays whatever is stranded under its stored idempotency key.
 - Settled outbound delivery records are pruned after `WEBHOOK_OUTBOX_RETENTION_DAYS` (default 7). A record that can still be replayed is never pruned on age, and a non-positive window falls back to the default rather than letting the table grow without bound.
