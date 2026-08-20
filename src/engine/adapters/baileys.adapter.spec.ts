@@ -2530,6 +2530,26 @@ describe('BaileysAdapter media sends', () => {
     expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', { sticker: webp });
   });
 
+  it('sendStickerMessage tags the participants it was given', async () => {
+    // A sticker has neither text nor caption, but stickerMessage carries a contextInfo like any other
+    // content type, so the tag still reaches the participant. The route accepts the field, so dropping
+    // it here left a documented capability doing nothing.
+    const adapter = await ready();
+    const webp = Buffer.from(
+      'UklGRlgAAABXRUJQVlA4WAoAAAAQAAAAAAAAAAAAQUxQSAIAAAAAf1ZQOCAwAAAA0AEAnQEqAQABAAFAJiWgAnS6AfgAA7AA/vLrf/zYFc1z7/f/0uD9Lg/S4P/SkAAA',
+      'base64',
+    );
+    await adapter.sendStickerMessage('628111@s.whatsapp.net', {
+      mimetype: 'image/webp',
+      data: webp,
+      mentions: ['62811@c.us'],
+    });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      sticker: webp,
+      mentions: ['62811@s.whatsapp.net'],
+    });
+  });
+
   it('uses the caller-declared mimetype over the fetched content-type for a URL', async () => {
     (loadRemoteMediaBuffer as jest.Mock).mockResolvedValue({
       data: Buffer.from([1]),
