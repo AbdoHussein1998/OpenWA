@@ -37,9 +37,6 @@ const quotedMessageIdSchema = z
  * Mirrors the REST `mentions` field. The element rule and both caps come from the DTO rather than
  * being restated here: a tool handler calls the service directly, so the ValidationPipe never runs
  * and this schema is the only thing standing between an agent and the engine.
- *
- * Not offered on the sticker tool: both adapters build the sticker content without a mention list,
- * so declaring it there would accept the field and drop it.
  */
 const mentionsSchema = z
   .array(z.string().max(MENTION_WID_MAX_LENGTH).refine(isMentionWid, 'must be an individual WID, e.g. 62811@c.us'))
@@ -346,6 +343,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
         filename: z.string().max(255).optional(),
         caption: z.string().max(1024).optional(),
         quotedMessageId: quotedMessageIdSchema,
+        mentions: mentionsSchema,
       }),
       handler: input =>
         message.sendSticker(input.sessionId, {
@@ -356,6 +354,7 @@ export function messageTools(message: MessageService): AnyToolDescriptor[] {
           filename: input.filename,
           caption: input.caption,
           quotedMessageId: input.quotedMessageId,
+          mentions: input.mentions,
         }),
     }),
     defineTool({

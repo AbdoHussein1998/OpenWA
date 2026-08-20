@@ -3937,9 +3937,6 @@ describe('outbound document mode (#989)', () => {
       );
     });
 
-    // A sticker's mimetype is an instruction, not a label: whatsapp-web.js returns the media
-    // unconverted once it reads as webp, so trusting a declared image/webp over bytes that are not
-    // webp ships raw bytes as a sticker. The response saw the bytes; the caller did not.
     it('passes a sticker tag list through the same options bag as any other media send', async () => {
       const sendMessage = jest.fn().mockResolvedValue(sentMessage);
 
@@ -3967,6 +3964,9 @@ describe('outbound document mode (#989)', () => {
       expect(Object.keys(opts)).not.toContain('mentions');
     });
 
+    // A sticker's mimetype is an instruction, not a label: whatsapp-web.js returns the media
+    // unconverted once it reads as webp, so trusting a declared image/webp over bytes that are not
+    // webp ships raw bytes as a sticker. The response saw the bytes; the caller did not.
     it('keeps the fetched type for a sticker, where the mimetype selects the conversion', async () => {
       (undiciFetch as jest.Mock).mockResolvedValue(remoteResponse({ 'content-type': 'image/png' }));
       const sendMessage = jest.fn().mockResolvedValue(sentMessage);

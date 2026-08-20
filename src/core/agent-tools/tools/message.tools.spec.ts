@@ -344,10 +344,10 @@ describe('messageTools', () => {
     expect(sendText).not.toHaveBeenCalled();
   });
 
-  it('does not offer mentions on the sticker tool, whose adapters build no tag list', async () => {
-    // Control for the additions above: the field is added where the layer behind it carries the value,
-    // not everywhere. Both adapters build the sticker content without mentions, so declaring it here
-    // would accept the field and drop it.
+  it('tags a sticker too, now that both adapters carry the list', async () => {
+    // Excluded when this tool set was written, because neither adapter built a mention list for a
+    // sticker. Both do now, and the route has always accepted the field, so withholding it here
+    // would leave the MCP surface silently weaker than REST for the same send.
     const sendSticker = jest.fn().mockResolvedValue({ id: 'm1' });
     const tools = makeTools({ sendSticker } as unknown as MessageService);
 
@@ -357,10 +357,8 @@ describe('messageTools', () => {
       url: 'https://example.test/s.webp',
       mentions: ['62811@c.us'],
     });
-    // The KEY must be absent, not merely undefined: a schema that declared the field and forwarded it
-    // would pass an `undefined` value here and satisfy a looser assertion.
-    const [, forwarded] = sendSticker.mock.calls[0] as [string, Record<string, unknown>];
-    expect(Object.keys(forwarded)).not.toContain('mentions');
+
+    expect(sendSticker).toHaveBeenCalledWith('s1', expect.objectContaining({ mentions: ['62811@c.us'] }));
   });
 
   it('MessageForward delegates to forward', async () => {
