@@ -214,7 +214,7 @@ export class WebhookProcessor extends WorkerHost {
         },
         { sessionId, source: 'WebhookProcessor' },
       );
-      await recordWebhookDeliveryFailure(this.failureRepository, this.logger, {
+      const recorded = await recordWebhookDeliveryFailure(this.failureRepository, this.logger, {
         webhookId,
         sessionId,
         event,
@@ -225,7 +225,9 @@ export class WebhookProcessor extends WorkerHost {
         lastStatusCode: statusCodeFromError(errorMessage),
         lastError: clientError,
       });
-      incrementWebhookDeliveryFailures();
+      if (recorded) {
+        incrementWebhookDeliveryFailures();
+      }
     }
   }
 
@@ -270,7 +272,7 @@ export class WebhookProcessor extends WorkerHost {
       { sessionId, source: 'WebhookProcessor' },
     );
 
-    await recordWebhookDeliveryFailure(this.failureRepository, this.logger, {
+    const recorded = await recordWebhookDeliveryFailure(this.failureRepository, this.logger, {
       webhookId,
       sessionId,
       event,
@@ -281,6 +283,8 @@ export class WebhookProcessor extends WorkerHost {
       lastStatusCode: null, // no HTTP exchange completed on the stalled attempts
       lastError: error.message,
     });
-    incrementWebhookDeliveryFailures();
+    if (recorded) {
+      incrementWebhookDeliveryFailures();
+    }
   }
 }
