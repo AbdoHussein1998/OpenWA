@@ -43,7 +43,7 @@ describe('WebhookReconcilerService', () => {
 
   beforeEach(() => {
     outbox = { findStale: jest.fn().mockResolvedValue([]), close: jest.fn(), countAttempt: jest.fn() };
-    delivery = { redeliver: jest.fn().mockResolvedValue(undefined) };
+    delivery = { redeliver: jest.fn().mockResolvedValue('delivered') };
     webhooks = { findOne: jest.fn().mockResolvedValue({ id: 'wh-1', active: true }) };
     service = new WebhookReconcilerService(webhooks as never, outbox as never, delivery as never);
   });
@@ -66,9 +66,13 @@ describe('WebhookReconcilerService', () => {
     expect(stats).toMatchObject({ scanned: 1, replayed: 1 });
   });
 
-  it('counts the attempt BEFORE replaying, so a delivery that always throws still exhausts its budget', async () => {
+  // The REAL shape of a delivery failure. redeliver resolves 'failed' rather than rejecting, because
+  // every failing path inside it already dead-letters and logs; an earlier version of this test
+  // mocked a rejection instead, which the collaborator cannot produce, so the budget it claimed to
+  // guard was never exercised and a dead-lettered event was retired as 'dispatched' on sweep one.
+  it('leaves a row pending when the replay did not deliver, so the budget is actually spent', async () => {
     outbox.findStale.mockResolvedValue([row({ attempts: 1 })]);
-    delivery.redeliver.mockRejectedValue(new Error('receiver down'));
+    delivery.redeliver.mockResolvedValue('failed');
 
     const stats = await service.sweep(OPTS);
 
@@ -77,6 +81,26 @@ describe('WebhookReconcilerService', () => {
       delivery.redeliver.mock.invocationCallOrder[0],
     );
     // Left pending on purpose: the next sweep picks it up again until the budget runs out.
+    expect(outbox.close).not.toHaveBeenCalled();
+    expect(stats).toMatchObject({ replayed: 0, failed: 1 });
+  });
+
+  it('retires the row when the replay was handed to the queue rather than delivered inline', async () => {
+    outbox.findStale.mockResolvedValue([row({ attempts: 1 })]);
+    delivery.redeliver.mockResolvedValue('enqueued');
+
+    const stats = await service.sweep(OPTS);
+
+    expect(outbox.close).toHaveBeenCalledWith('wh-1', 'stored-key_wh-1', 'dispatched');
+    expect(stats).toMatchObject({ replayed: 1, failed: 0 });
+  });
+
+  it('keeps a row pending when the replay throws an unexpected fault', async () => {
+    outbox.findStale.mockResolvedValue([row({ attempts: 1 })]);
+    delivery.redeliver.mockRejectedValue(new Error('boom'));
+
+    const stats = await service.sweep(OPTS);
+
     expect(outbox.close).not.toHaveBeenCalled();
     expect(stats).toMatchObject({ replayed: 0, failed: 1 });
   });

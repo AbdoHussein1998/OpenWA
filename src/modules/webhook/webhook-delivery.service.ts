@@ -60,6 +60,13 @@ const DEFAULT_WEBHOOK_MAX_PAYLOAD_BYTES = 1024 * 1024;
 const DEFAULT_WEBHOOK_SHUTDOWN_DRAIN_MS = 5000;
 
 /** Per-event-occurrence context threaded through the dispatch pipeline stages (was closure state). */
+/**
+ * The result of one delivery attempt. Reported, not thrown: every failure below is already handled
+ * in place, so nothing reaches a caller as an exception and a try/catch cannot tell a delivered
+ * event from a dead-lettered one.
+ */
+export type WebhookDeliveryOutcome = 'delivered' | 'enqueued' | 'failed';
+
 interface DispatchEventContext {
   sessionId: string;
   event: string;
@@ -392,23 +399,32 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * What became of one delivery attempt, reported rather than thrown.
+   *
+   * Every failure path here is already handled in place (a dead-letter row, a hook, a log), so none
+   * of them reach the caller as an exception. The reconciler has to tell a delivered event from a
+   * dead-lettered one to know whether the outbox row may be retired, and a caught throw cannot tell
+   * it: there is none. This mirrors the inbound twin, where `ingressEnqueue.enqueue` returns an
+   * outcome and the caller retires the payload only when it is not 'failed'.
+   */
   private async deliverOne(
     webhook: Webhook,
     deliveryId: string,
     idempotencyKey: string,
     ctx: DispatchEventContext,
-  ): Promise<void> {
+  ): Promise<WebhookDeliveryOutcome> {
     const preflight = await this.preflightDelivery(webhook, deliveryId, idempotencyKey, ctx);
     if (!preflight) {
-      return;
+      // Preflight records its own undelivered row and returns null; nothing left the process.
+      return 'failed';
     }
     const { finalPayload, body, headers } = preflight;
     // Use queue if available, otherwise fallback to direct delivery
     if (this.queueEnabled && this.webhookQueue) {
-      await this.enqueueWithFallback(webhook, finalPayload, body, headers, deliveryId, idempotencyKey, ctx);
-    } else {
-      await this.deliverDirect(webhook, finalPayload, body, headers, deliveryId, ctx);
+      return this.enqueueWithFallback(webhook, finalPayload, body, headers, deliveryId, idempotencyKey, ctx);
     }
+    return this.deliverDirect(webhook, finalPayload, body, headers, deliveryId, ctx);
   }
 
   private async enqueueWithFallback(
@@ -419,7 +435,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     deliveryId: string,
     idempotencyKey: string,
     ctx: DispatchEventContext,
-  ): Promise<void> {
+  ): Promise<WebhookDeliveryOutcome> {
     const { sessionId, event } = ctx;
     try {
       // Sign the exact pre-serialized body from preflight. The processor re-serializes the same
@@ -515,8 +531,13 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
           webhookId: webhook.id,
           action: 'webhook_queue_fallback_failed',
         });
+        return 'failed';
       }
+      // The queue never took it, but the fallback POST did.
+      return 'delivered';
     }
+    // Handed to BullMQ, which owns the retries and the dead-letter row from here.
+    return 'enqueued';
   }
 
   /** Direct delivery when the queue is disabled. */
@@ -527,7 +548,7 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     headers: Record<string, string>,
     deliveryId: string,
     ctx: DispatchEventContext,
-  ): Promise<void> {
+  ): Promise<WebhookDeliveryOutcome> {
     const { sessionId, event } = ctx;
     try {
       await this.deliverWebhook(webhook, finalPayload, headers, body);
@@ -557,7 +578,9 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
         webhookId: webhook.id,
         action: 'webhook_delivery_failed',
       });
+      return 'failed';
     }
+    return 'delivered';
   }
 
   /**
@@ -651,9 +674,9 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     event: string,
     idempotencyKey: string,
     data: Record<string, unknown>,
-  ): Promise<void> {
+  ): Promise<WebhookDeliveryOutcome> {
     const deliveryId = generateDeliveryId();
-    await this.deliverOne(webhook, deliveryId, idempotencyKey, { sessionId, event, baseData: data });
+    return this.deliverOne(webhook, deliveryId, idempotencyKey, { sessionId, event, baseData: data });
   }
 
   /**

@@ -110,11 +110,28 @@ export class WebhookReconcilerService implements OnModuleInit, OnModuleDestroy {
         }
         await this.outbox.countAttempt(row.id, row.attempts);
         try {
-          await this.delivery.redeliver(webhook, row.sessionId, row.event, row.idempotencyKey, row.payload);
+          // The outcome is a RETURN VALUE, not an exception. Every delivery failure is handled in
+          // place (dead-letter row, hook, log), so redeliver resolves either way and a catch here
+          // would see nothing: retiring on resolve alone marked dead-lettered events 'dispatched'
+          // and nulled their payload, spending the whole budget on one sweep.
+          const outcome = await this.delivery.redeliver(
+            webhook,
+            row.sessionId,
+            row.event,
+            row.idempotencyKey,
+            row.payload,
+          );
+          if (outcome === 'failed') {
+            // Left 'pending' on purpose: the next sweep retries it until the budget is spent.
+            this.logger.warn(`Replay of ${row.event} to webhook ${row.webhookId} did not deliver`);
+            stats.failed++;
+            continue;
+          }
           await this.outbox.close(row.webhookId, row.idempotencyKey, 'dispatched');
           stats.replayed++;
         } catch (error) {
-          // Left 'pending' on purpose: the next sweep retries it until the budget is spent.
+          // An exception is an unexpected fault rather than a delivery failure; the row stays
+          // pending either way.
           this.logger.warn(`Replay of ${row.event} to webhook ${row.webhookId} failed: ${String(error)}`);
           stats.failed++;
         }
