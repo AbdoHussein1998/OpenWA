@@ -480,14 +480,16 @@ export class MessageService {
 
   async editMessage(
     sessionId: string,
-    dto: { chatId: string; messageId: string; body: string },
+    dto: { chatId: string; messageId: string; body: string; mentions?: string[] },
   ): Promise<MessageResponseDto> {
     const engine = this.getEngine(sessionId);
     // An edit replaces the text the recipient sees, so it is content leaving the account and goes
     // through the same moderation chokepoint as every other sender. A plugin can rewrite `body`
     // here exactly as it can for a first send.
     const finalDto = await this.applySendingGate(sessionId, 'edit', dto);
-    const result = await engine.editMessage(finalDto.chatId, finalDto.messageId, finalDto.body);
+    const result = finalDto.mentions?.length
+      ? await engine.editMessage(finalDto.chatId, finalDto.messageId, finalDto.body, finalDto.mentions)
+      : await engine.editMessage(finalDto.chatId, finalDto.messageId, finalDto.body);
 
     // Best-effort: reflect the new body in the stored copy (mirrors deleteMessage's revoked flag),
     // serialized with the inbound edit/reaction writers through the session's per-message mutation

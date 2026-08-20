@@ -238,7 +238,12 @@ export class MessageSendService {
       );
     }
 
-    return this.sendText(sessionId, { chatId: dto.chatId, text });
+    return this.sendText(sessionId, {
+      chatId: dto.chatId,
+      text,
+      mentions: dto.mentions,
+      linkPreview: dto.linkPreview,
+    });
   }
 
   async sendImage(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
@@ -471,7 +476,7 @@ export class MessageSendService {
 
   async reply(
     sessionId: string,
-    dto: { chatId: string; quotedMessageId: string; text: string },
+    dto: { chatId: string; quotedMessageId: string; text: string; mentions?: string[] },
   ): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'reply', dto);
     const engine = this.getEngine(sessionId);
@@ -499,7 +504,11 @@ export class MessageSendService {
 
     let result: MessageResult;
     try {
-      result = await engine.replyToMessage(finalDto.chatId, finalDto.quotedMessageId, finalDto.text);
+      // Widened only as far as the caller asked, exactly like the send path: a reply with no tags
+      // keeps its three-argument shape.
+      result = finalDto.mentions?.length
+        ? await engine.replyToMessage(finalDto.chatId, finalDto.quotedMessageId, finalDto.text, finalDto.mentions)
+        : await engine.replyToMessage(finalDto.chatId, finalDto.quotedMessageId, finalDto.text);
     } catch (error) {
       return this.failSend(sessionId, 'reply', message, finalDto, error);
     }

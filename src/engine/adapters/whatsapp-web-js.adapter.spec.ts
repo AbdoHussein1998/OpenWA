@@ -4249,6 +4249,21 @@ describe('LID resolution for individual sends (#573 — WhatsApp @c.us → @lid 
     expect(reply).toHaveBeenCalledWith('hi', '628@c.us');
   });
 
+  it('reply passes the tag list through as send options, and omits the options bag without one', async () => {
+    const reply = jest.fn().mockResolvedValue(sentMessage);
+    const quoted = { id: { _serialized: 'Q1' }, reply };
+    const getChatById = jest.fn().mockResolvedValue({ fetchMessages: jest.fn().mockResolvedValue([quoted]) });
+    const getNumberId = jest.fn().mockResolvedValue({ _serialized: '628@c.us' });
+
+    await ready({ getChatById, getNumberId }).replyToMessage('628@c.us', 'Q1', 'hi @62811', ['62811@c.us']);
+    expect(reply).toHaveBeenCalledWith('hi @62811', '628@c.us', { mentions: ['62811@c.us'] });
+
+    // Control: an empty list must not start passing an options bag to every untagged reply.
+    reply.mockClear();
+    await ready({ getChatById, getNumberId }).replyToMessage('628@c.us', 'Q1', 'hi', []);
+    expect(reply).toHaveBeenCalledWith('hi', '628@c.us');
+  });
+
   it('forward routes to the resolved @lid and recovers the id from that chat (#583 R1)', async () => {
     const forward = jest.fn().mockResolvedValue(undefined);
     const srcMsg = { id: { _serialized: 'M1' }, forward };
@@ -4280,6 +4295,19 @@ describe('editMessage', () => {
     const res = await adapter.editMessage('628@c.us', 'M1', 'new body');
     expect(edit).toHaveBeenCalledWith('new body');
     expect(res).toEqual({ id: 'M1', timestamp: 1700000002 });
+  });
+
+  it('edit re-applies participant tags, and sends no options bag when none were asked for', async () => {
+    const edit = jest.fn().mockResolvedValue({ id: { _serialized: 'M1' }, timestamp: 1700000002 });
+    const adapter = ready(chatWith([{ id: { _serialized: 'M1', id: 'RAW1' }, edit }]));
+
+    await adapter.editMessage('628@c.us', 'M1', 'new @62811', ['62811@c.us']);
+    expect(edit).toHaveBeenCalledWith('new @62811', { mentions: ['62811@c.us'] });
+
+    // Control: without tags the library call keeps its single-argument shape.
+    edit.mockClear();
+    await adapter.editMessage('628@c.us', 'M1', 'new body', []);
+    expect(edit).toHaveBeenCalledWith('new body');
   });
 
   it('also matches the bare id.id fallback (like deleteMessage)', async () => {

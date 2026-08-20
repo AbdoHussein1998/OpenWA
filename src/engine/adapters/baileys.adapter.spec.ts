@@ -2595,6 +2595,30 @@ describe('BaileysAdapter store-backed ops', () => {
     );
   });
 
+  it('replyToMessage tags the participants it was given, de-normalized to the engine dialect', async () => {
+    fakeStore.getMessage.mockResolvedValue(stored);
+    const adapter = await ready();
+    await adapter.replyToMessage('628111@s.whatsapp.net', 'TARGET', 'hi @62811', ['62811@c.us']);
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '628111@s.whatsapp.net',
+      { text: 'hi @62811', mentions: ['62811@s.whatsapp.net'], linkPreview: null },
+      expect.objectContaining({ quoted: stored }),
+    );
+  });
+
+  it('replyToMessage sends no mentions key for an empty list, keeping an untagged reply byte-identical', async () => {
+    // Control for the case above: an empty array must not add the key, or every untagged reply would
+    // start carrying an empty contextInfo tag list.
+    fakeStore.getMessage.mockResolvedValue(stored);
+    const adapter = await ready();
+    await adapter.replyToMessage('628111@s.whatsapp.net', 'TARGET', 'my reply', []);
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '628111@s.whatsapp.net',
+      { text: 'my reply', linkPreview: null },
+      expect.objectContaining({ quoted: stored }),
+    );
+  });
+
   // The one requireStored path that had no chat check, while whatsapp-web.js resolves the quote by
   // fetching from the named chat and 404s when the id is not in it.
   it('replyToMessage throws MessageNotFoundError when the quoted key belongs to another chat', async () => {
@@ -2757,6 +2781,25 @@ describe('BaileysAdapter store-backed ops', () => {
       '628111@s.whatsapp.net',
     );
     expect(fakeSock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('editMessage re-applies participant tags to the new body', async () => {
+    // An edit REPLACES the content, so a body that still reads "@62811" needs the tag list resent or
+    // the rewritten message loses the tag the original had.
+    fakeStore.getMessage.mockResolvedValue(ownStored);
+    fakeSock.sendMessage.mockResolvedValue({ key: { ...ownStored.key }, messageTimestamp: 1700000010 });
+    const adapter = await ready();
+    await adapter.editMessage('628111@s.whatsapp.net', 'TARGET', 'edited @62811', ['62811@c.us']);
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith(
+      '628111@s.whatsapp.net',
+      {
+        text: 'edited @62811',
+        mentions: ['62811@s.whatsapp.net'],
+        edit: ownStored.key,
+        linkPreview: null,
+      },
+      expect.objectContaining({ getUrlInfo: expect.any(Function) as unknown }) as unknown,
+    );
   });
 
   it('editMessage edits via the stored key and returns the (unchanged) message id', async () => {

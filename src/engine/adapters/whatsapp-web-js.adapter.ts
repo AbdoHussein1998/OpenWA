@@ -591,8 +591,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.messaging.sendPollMessage(chatId, poll);
   }
 
-  replyToMessage(chatId: string, quotedMsgId: string, text: string): Promise<MessageResult> {
-    return this.messaging.replyToMessage(chatId, quotedMsgId, text);
+  replyToMessage(chatId: string, quotedMsgId: string, text: string, mentions?: string[]): Promise<MessageResult> {
+    return this.messaging.replyToMessage(chatId, quotedMsgId, text, mentions);
   }
 
   forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult> {
@@ -722,8 +722,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   }
 
   // Edit Message
-  editMessage(chatId: string, messageId: string, body: string): Promise<MessageResult> {
-    return this.messaging.editMessage(chatId, messageId, body);
+  editMessage(chatId: string, messageId: string, body: string, mentions?: string[]): Promise<MessageResult> {
+    return this.messaging.editMessage(chatId, messageId, body, mentions);
   }
 
   // Get Profile Picture

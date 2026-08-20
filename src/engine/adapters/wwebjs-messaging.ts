@@ -521,7 +521,7 @@ export class WwebjsMessaging {
     return toMessageResult(msg);
   }
 
-  async replyToMessage(chatId: string, quotedMsgId: string, text: string): Promise<MessageResult> {
+  async replyToMessage(chatId: string, quotedMsgId: string, text: string, mentions?: string[]): Promise<MessageResult> {
     this.host.ensureReady();
     try {
       // Find the message to quote
@@ -536,7 +536,13 @@ export class WwebjsMessaging {
       // Reply's send leg hits the same `No LID for user` path as a normal send for a migrated contact,
       // so route it through sendResolved (resolve @c.us->@lid, cache, self-heal). reply(content, chatId)
       // accepts an explicit target (#583 R1).
-      const msg = await this.sendResolved(chatId, to => quotedMsg.reply(text, to));
+      // reply(content, chatId, options) takes the same options bag as sendMessage, so a quoted send
+      // tags participants exactly as a plain one does. The options argument is omitted entirely when
+      // no tags were asked for, keeping an ordinary reply's call shape untouched (same rule as the
+      // send path).
+      const msg = await this.sendResolved(chatId, to =>
+        mentions?.length ? quotedMsg.reply(text, to, { mentions }) : quotedMsg.reply(text, to),
+      );
       return toMessageResult(msg);
     } catch (error) {
       this.host.reportIfPageTransportError(error, 'replyToMessage');
@@ -750,7 +756,7 @@ export class WwebjsMessaging {
     this.host.logger.log(`Deleted message ${messageId} from chat ${chatId} (forEveryone: ${forEveryone})`);
   }
 
-  async editMessage(chatId: string, messageId: string, body: string): Promise<MessageResult> {
+  async editMessage(chatId: string, messageId: string, body: string, mentions?: string[]): Promise<MessageResult> {
     this.host.ensureReady();
     // Same lookup window as react/delete: fetchMessages sees only the 100 most recent messages.
     // NOTE: do NOT resolve chatId to @lid here — edit operates on the found message's own key, not
@@ -767,7 +773,9 @@ export class WwebjsMessaging {
     if (!message) {
       throw new MessageNotFoundError(messageId, chatId);
     }
-    const edited = await message.edit(body);
+    // An edit REPLACES the content, so tags are re-applied rather than preserved: omitting mentions
+    // drops whatever the original carried. Options omitted entirely when none were asked for.
+    const edited = mentions?.length ? await message.edit(body, { mentions }) : await message.edit(body);
     if (!edited) {
       // wwebjs RESOLVES null (instead of throwing) when the page-side edit is refused — only the
       // account's own text messages are editable; surface the refusal, not a phantom success.

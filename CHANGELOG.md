@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `mentions` reaches every route whose engine can carry it: `reply`, `edit`, `send-template` and each `send-bulk` item, alongside the send routes that already had it. `send-template` also gained `linkPreview`. On `edit` the tags are re-applied rather than preserved, because an edit replaces the message content. Thanks @Magnarks for the report.
 - `POST /sessions/{sessionId}/chats/unread` publishes its own `MarkChatUnreadDto` rather than sharing `MarkChatReadDto`. The body is unchanged (`chatId` alone), but a generated client sees the schema under a new name.
 - ⚠️ **Breaking (Go, Java and typed Python callers).** `markRead` and `subscribePresence` each take their own request type rather than the shared `MarkChatRequest`, which now serves `markUnread` alone. Swap the type at both call sites; the wire body is unchanged and the JavaScript and PHP clients are unaffected. `SubscribePresenceDto` had no contract-gate coverage while one type stood for two routes.
 

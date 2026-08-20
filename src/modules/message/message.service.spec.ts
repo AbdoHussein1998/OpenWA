@@ -621,6 +621,25 @@ describe('MessageService', () => {
       expect(mockEngine.editMessage).toHaveBeenCalledWith('test@c.us', 'wa-msg-1', 'redacted');
       expect(messageProjector.recordOutboundMessageEdit).toHaveBeenCalledWith('sess-1', 'wa-msg-1', 'redacted');
     });
+
+    it('honours a plugin that rewrites the tag list, not the list the caller sent', async () => {
+      // message:sending is a moderation chokepoint, so a handler that drops a WID from the list must
+      // win. Reading the caller's own dto here instead of the gated one would send the unredacted
+      // tags while the hook reported success, and no other assertion in this file would notice.
+      (hookManager.execute as jest.Mock).mockResolvedValueOnce({
+        continue: true,
+        data: { input: { chatId: 'g@g.us', messageId: 'wa-msg-1', body: 'hi @62811', mentions: ['62811@c.us'] } },
+      });
+
+      await service.editMessage('sess-1', {
+        chatId: 'g@g.us',
+        messageId: 'wa-msg-1',
+        body: 'hi @62811 @62999',
+        mentions: ['62811@c.us', '62999@c.us'],
+      });
+
+      expect(mockEngine.editMessage).toHaveBeenCalledWith('g@g.us', 'wa-msg-1', 'hi @62811', ['62811@c.us']);
+    });
   });
 
   // ── pin / unpin ───────────────────────────────────────────────────

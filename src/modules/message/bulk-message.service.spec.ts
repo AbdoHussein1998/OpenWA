@@ -267,7 +267,11 @@ describe('BulkMessageService.processBatch', () => {
     }) as unknown as MessageBatch;
 
   beforeEach(async () => {
-    engine = { sendTextMessage: jest.fn().mockResolvedValue({ id: 'wa1', timestamp: 111 }) };
+    engine = {
+      sendTextMessage: jest.fn().mockResolvedValue({ id: 'wa1', timestamp: 111 }),
+      sendImageMessage: jest.fn().mockResolvedValue({ id: 'wa1', timestamp: 111 }),
+      sendAudioMessage: jest.fn().mockResolvedValue({ id: 'wa1', timestamp: 111 }),
+    };
     engines = new EngineRegistry();
     engines.set('s1', engine as unknown as IWhatsAppEngine);
     messageService = { saveOutgoingMessage: jest.fn().mockResolvedValue(undefined) };
@@ -770,6 +774,76 @@ describe('BulkMessageService.processBatch', () => {
     await runProcessBatch();
 
     expect(engine.sendTextMessage).toHaveBeenCalledWith('c0@c.us', 'Hi Sam');
+  });
+
+  it('tags participants per item, on the text body and on a media caption alike', async () => {
+    // Each item names its own list: a batch fans out to many chats, and a WID is only taggable in a
+    // chat the participant is actually in.
+    const batch = makeBatch(1);
+    batch.messages[0].content = { text: 'Hi @62811', mentions: ['62811@c.us'] };
+    repo.findOne.mockResolvedValue(batch);
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).toHaveBeenCalledWith('c0@c.us', 'Hi @62811', ['62811@c.us']);
+
+    const media = makeBatch(1);
+    media.messages[0].type = 'image';
+    media.messages[0].content = {
+      image: { base64: 'AAAA', mimetype: 'image/jpeg' },
+      caption: 'look @62811',
+      mentions: ['62811@c.us'],
+    };
+    repo.findOne.mockResolvedValue(media);
+
+    await runProcessBatch();
+
+    expect(engine.sendImageMessage).toHaveBeenCalledWith(
+      'c0@c.us',
+      expect.objectContaining({ caption: 'look @62811', mentions: ['62811@c.us'] }),
+    );
+  });
+
+  it('substitutes variables inside mentions, so a campaign can tag a different participant per item', async () => {
+    // applyVariables walks the whole content tree, so a placeholder in a WID is rendered like one in
+    // the body. That is load-bearing for a personalised batch, and nothing else pins it: a future
+    // rewrite of applyVariables that rebuilt the object field by field would drop mentions silently.
+    const batch = makeBatch(1);
+    batch.messages[0].content = { text: 'Hi @{{num}}', mentions: ['{{num}}@c.us'] };
+    batch.messages[0].variables = { num: '62811' };
+    repo.findOne.mockResolvedValue(batch);
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).toHaveBeenCalledWith('c0@c.us', 'Hi @62811', ['62811@c.us']);
+  });
+
+  it('tags an audio item too, which has no caption to anchor a visible @token', async () => {
+    // Audio carries no caption, but a mention still tags through contextInfo, which is why the
+    // single-send audio route accepts the field. Skipping it here would accept the list and deliver
+    // an untagged voice note, turning a clear 400 into a silent no-op for one bulk type only.
+    const batch = makeBatch(1);
+    batch.messages[0].type = 'audio';
+    batch.messages[0].content = { audio: { base64: 'AAAA', mimetype: 'audio/mpeg' }, mentions: ['62811@c.us'] };
+    repo.findOne.mockResolvedValue(batch);
+
+    await runProcessBatch();
+
+    expect(engine.sendAudioMessage).toHaveBeenCalledWith(
+      'c0@c.us',
+      expect.objectContaining({ mentions: ['62811@c.us'] }),
+    );
+  });
+
+  it('leaves an untagged batch item on its two-argument send', async () => {
+    // Control: without a list the call shape every existing batch makes is untouched.
+    const batch = makeBatch(1);
+    batch.messages[0].content = { text: 'Hi there', mentions: [] };
+    repo.findOne.mockResolvedValue(batch);
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).toHaveBeenCalledWith('c0@c.us', 'Hi there');
   });
 
   it('fails an item whose rendered variables grow its base64 media past the cap (no send, explicit failure)', async () => {

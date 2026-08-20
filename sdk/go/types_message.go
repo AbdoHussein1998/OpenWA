@@ -99,6 +99,11 @@ type SendTemplateRequest struct {
 	TemplateID   string            `json:"templateId,omitempty"`
 	TemplateName string            `json:"templateName,omitempty"`
 	Vars         map[string]string `json:"vars,omitempty"`
+	// Mentions lists WIDs to @mention in the rendered body, which must carry the @<number> token.
+	Mentions []string `json:"mentions,omitempty"`
+	// LinkPreview controls the URL preview on the rendered body, with the same engine split as
+	// SendTextRequest. A pointer so an explicit false is distinguishable from "not set".
+	LinkPreview *bool `json:"linkPreview,omitempty"`
 }
 
 // SendPollRequest sends a native WhatsApp poll. Options holds the choices to
@@ -121,6 +126,8 @@ type ReplyMessageRequest struct {
 	ChatID          string `json:"chatId"`
 	QuotedMessageID string `json:"quotedMessageId"`
 	Text            string `json:"text"`
+	// Mentions lists WIDs to @mention. The text must also contain the @<number> token.
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // ForwardMessageRequest forwards a message between chats.
@@ -151,6 +158,9 @@ type EditMessageRequest struct {
 	ChatID    string `json:"chatId"`
 	MessageID string `json:"messageId"`
 	Body      string `json:"body"`
+	// Mentions re-applies participant tags: an edit REPLACES the body rather than amending it, so
+	// tags the original carried are lost unless resent.
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // ListMessagesQuery filters GET /sessions/:id/messages.
@@ -340,6 +350,9 @@ type BulkMessageContent struct {
 	Audio    *BulkMediaContent `json:"audio,omitempty"`
 	Document *BulkMediaContent `json:"document,omitempty"`
 	Caption  string            `json:"caption,omitempty"`
+	// Mentions is per item: a batch fans out to many chats, and a WID is only taggable in a chat
+	// the participant is in.
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // BulkMessageItem is one message in a bulk send. Type is one of: text, image,

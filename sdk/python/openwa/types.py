@@ -379,6 +379,8 @@ class ReplyMessageRequest(TypedDict):
     chatId: Jid
     quotedMessageId: str
     text: str
+    # WIDs to @mention; the text must also contain the matching @<number> token.
+    mentions: NotRequired[list[str]]
 
 
 class ForwardMessageRequest(TypedDict):
@@ -405,6 +407,8 @@ class EditMessageRequest(TypedDict):
     messageId: str
     # Same 4096-char cap as SendTextRequest.text — an edit cannot exceed what a send allows.
     body: str
+    # An edit REPLACES the body, so tags are re-applied rather than preserved.
+    mentions: NotRequired[list[str]]
 
 
 class SendTemplateRequest(TypedDict):
@@ -414,6 +418,9 @@ class SendTemplateRequest(TypedDict):
     templateId: NotRequired[str]
     templateName: NotRequired[str]
     vars: NotRequired[dict[str, str]]
+    # The rendered body is dispatched like a send-text, so it carries the same two optionals.
+    mentions: NotRequired[list[str]]
+    linkPreview: NotRequired[bool]
 
 
 class SendPollRequest(TypedDict):
@@ -583,6 +590,8 @@ class BulkMessageContent(TypedDict, total=False):
     audio: BulkMediaRequest
     document: BulkMediaRequest
     caption: str
+    # Per item: a batch fans out to many chats, and a WID is only taggable in a chat it is in.
+    mentions: list[str]
 
 
 class BulkMessageItem(TypedDict):

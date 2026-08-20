@@ -314,6 +314,8 @@ export interface ReplyMessageRequest {
   chatId: Jid;
   quotedMessageId: string;
   text: string;
+  /** WIDs to @mention (e.g. `["62811@c.us"]`). The text/caption must also contain the `@<number>` token. */
+  mentions?: string[];
 }
 
 export interface ForwardMessageRequest {
@@ -414,6 +416,8 @@ export interface EditMessageRequest {
   messageId: string;
   /** New text body; max 4096 chars (same cap as a send). Own messages only — 404 if not found. */
   body: string;
+  /** WIDs to @mention. An edit REPLACES the body, so tags are re-applied rather than preserved. */
+  mentions?: string[];
 }
 
 export interface SendTemplateRequest {
@@ -424,6 +428,10 @@ export interface SendTemplateRequest {
   templateName?: string;
   /** Template variables (server DTO field is `vars`). */
   vars?: Record<string, string>;
+  /** WIDs to @mention (e.g. `["62811@c.us"]`). The text/caption must also contain the `@<number>` token. */
+  mentions?: string[];
+  /** Controls the URL preview on the rendered body, with the same engine split as `send-text`. */
+  linkPreview?: boolean;
 }
 
 export interface SendPollRequest {
@@ -600,6 +608,8 @@ export interface BulkMessageContent {
   audio?: BulkMediaRequest;
   document?: BulkMediaRequest;
   caption?: string;
+  /** WIDs to @mention (e.g. `["62811@c.us"]`). The text/caption must also contain the `@<number>` token. */
+  mentions?: string[];
 }
 
 export interface BulkMessageItem {

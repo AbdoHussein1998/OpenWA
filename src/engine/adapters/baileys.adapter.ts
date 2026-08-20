@@ -317,8 +317,8 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.messaging.sendPollMessage(chatId, poll);
   }
 
-  async replyToMessage(chatId: string, quotedMsgId: string, text: string): Promise<MessageResult> {
-    return this.messaging.replyToMessage(chatId, quotedMsgId, text);
+  async replyToMessage(chatId: string, quotedMsgId: string, text: string, mentions?: string[]): Promise<MessageResult> {
+    return this.messaging.replyToMessage(chatId, quotedMsgId, text, mentions);
   }
 
   async forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult> {
@@ -345,8 +345,8 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.messaging.unpinMessage(chatId, messageId);
   }
 
-  async editMessage(chatId: string, messageId: string, body: string): Promise<MessageResult> {
-    return this.messaging.editMessage(chatId, messageId, body);
+  async editMessage(chatId: string, messageId: string, body: string, mentions?: string[]): Promise<MessageResult> {
+    return this.messaging.editMessage(chatId, messageId, body, mentions);
   }
 
   // ----- Groups -----

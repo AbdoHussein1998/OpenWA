@@ -428,7 +428,7 @@ export class BaileysMessaging {
     );
   }
 
-  async replyToMessage(chatId: string, quotedMsgId: string, text: string): Promise<MessageResult> {
+  async replyToMessage(chatId: string, quotedMsgId: string, text: string, mentions?: string[]): Promise<MessageResult> {
     this.host.ensureReady();
     const quoted = await this.requireStored(quotedMsgId);
     // The one requireStored path that had no chat check. whatsapp-web.js resolves the quote by
@@ -438,7 +438,7 @@ export class BaileysMessaging {
     // NOT applied to quoteOption: cross-chat quoting on the send-* routes is deliberate and
     // published in docs/06.
     this.assertStoredInChat(quoted, chatId, quotedMsgId);
-    return this.sendContent(chatId, { text }, { quoted });
+    return this.sendContent(chatId, { text, ...this.withMentions(mentions) }, { quoted });
   }
 
   async forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult> {
@@ -484,7 +484,7 @@ export class BaileysMessaging {
     );
   }
 
-  async editMessage(chatId: string, messageId: string, body: string): Promise<MessageResult> {
+  async editMessage(chatId: string, messageId: string, body: string, mentions?: string[]): Promise<MessageResult> {
     this.host.ensureReady();
     const target = await this.requireStored(messageId);
     // Only the account's own messages are editable: WhatsApp refuses the edit of an inbound message
@@ -502,10 +502,14 @@ export class BaileysMessaging {
     const jid = await this.toDeliverableJid(chatId);
     // Same guard as sendContent: an edit carries text, so without it the library would fetch
     // every URL in the new body through its own vulnerable generator.
+    // Tags are applied to the inner message's contextInfo BEFORE the library wraps it in the
+    // protocolMessage edit envelope, so an edit can re-tag participants. An edit REPLACES the
+    // content, so omitting mentions drops whatever tags the original carried.
+    const editContent = { text: body, ...this.withMentions(mentions), edit: target.key };
     const sent = await this.sock().sendMessage(
       jid,
-      this.previewSafe({ text: body, edit: target.key }),
-      this.previewSafeOptions({ text: body, edit: target.key }),
+      this.previewSafe(editContent),
+      this.previewSafeOptions(editContent),
     );
     return { id: sent?.key?.id ?? messageId, timestamp: this.host.toUnixSeconds(sent?.messageTimestamp) };
   }
