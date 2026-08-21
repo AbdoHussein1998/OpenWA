@@ -171,7 +171,7 @@ describe('mentions WID shape', () => {
   const accepted: Array<[string, string]> = [
     ['phone @c.us (the documented form)', '628123456789@c.us'],
     ['raw protocol @s.whatsapp.net (the #156 workaround)', '628123456789@s.whatsapp.net'],
-    ['privacy id @lid (phone genuinely unknown)', '148004841455867@lid'],
+    ['privacy id @lid (phone genuinely unknown)', '100000000000000@lid'],
     ['multi-device suffix', '628123456789:12@c.us'],
   ];
 
