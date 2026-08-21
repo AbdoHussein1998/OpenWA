@@ -616,9 +616,10 @@
 .chats-page .message-text-input {
   flex: 1;
   /* An input keeps its intrinsic width as its automatic minimum, which pinned the whole composer to
-     369px and pushed the send button outside the layout's clip on a narrow desktop window. Shrinking
-     stops at the input's own padding, so a very narrow room leaves a stub rather than a usable field. */
-  min-width: 0;
+     369px and pushed the send button outside the layout's clip. The floor replaces that with one small
+     enough to let the composer fit a narrow pane and large enough to keep a caret and a few characters
+     visible; without it the box shrinks to its own padding and shows nothing at all. */
+  min-width: 64px;
   padding: 0.75rem 1rem;
   border: 1px solid var(--border);
   border-radius: 24px;
@@ -897,6 +898,38 @@
 
   .chats-page .room-header {
     height: 60px;
+  }
+}
+
+/* Between the mobile breakpoint and 888px the two-pane layout leaves the room narrower than the
+   composer's 244px minimum, so the send button fell outside the panel's clip with no scrollbar to
+   recover it. In that band the panes swap one at a time instead, the way they already do on a phone.
+   Bounded on both sides on purpose: at 768px and below the mobile shell owns the layout, and from 889px
+   the room fits the composer again. The upper bound tracks that minimum, so it moves if the composer's
+   own width does. Keyed to the navigation as well as the viewport, because the room is `viewport - 646`
+   only while the nav is expanded; collapsed it already fits and none of this should apply.
+   `.main-content.expanded` is Layout's class for the COLLAPSED nav. */
+@media (min-width: 769px) and (max-width: 888px) {
+  .main-content:not(.expanded) .chats-page .chats-layout {
+    flex-direction: column;
+  }
+
+  .main-content:not(.expanded) .chats-page .chats-sidebar {
+    width: 100%;
+    height: 100%;
+    border-right: none;
+  }
+
+  .main-content:not(.expanded) .chats-page .chats-layout.has-active-chat .chats-sidebar {
+    display: none;
+  }
+
+  .main-content:not(.expanded) .chats-page .chats-layout:not(.has-active-chat) .chats-room {
+    display: none;
+  }
+
+  .main-content:not(.expanded) .chats-page .room-back {
+    display: inline-flex;
   }
 }
 
