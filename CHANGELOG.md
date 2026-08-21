@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The dashboard chat room shrinks within its layout instead of overflowing it, so a long contact or group name no longer pushes the send button out of reach. Thanks @rainerigius.
-- The chat composer shrinks with its pane, so the send button stays reachable. It sat outside the layout's clip below a 1014px viewport with the navigation expanded, and on any phone 402 CSS px or narrower.
+- The chat composer shrinks with its pane, so the send button stays reachable. It sat outside the layout's clip below a 1015px viewport with the navigation expanded, and on any phone 403 CSS px or narrower.
 - The channel and status pane heading truncates with an ellipsis and carries its full text in a tooltip. A long title previously ran past the panel edge, cut mid-glyph with nothing to signal it.
-- The Chats page shows one pane at a time from 769px to 888px with the navigation expanded, where two panes left the room narrower than the composer and pushed the send button out of the panel. The message field now keeps a floor rather than shrinking to nothing.
+- The Chats page shows one pane at a time from 769px to 889px with the navigation expanded, where two panes left the room narrower than the composer and pushed the send button out of the panel. The message field now keeps a floor rather than shrinking to nothing.
 - The reply banner's quoted name truncates with an ellipsis, and a location message's map preview is bounded by its bubble. Both previously painted outside the chat panel when the room was narrow.
 - API examples and test fixtures use synthetic identifiers throughout, so the published schema and the specs no longer carry values copied from a live account.
 

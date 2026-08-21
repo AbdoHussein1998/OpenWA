@@ -901,15 +901,15 @@
   }
 }
 
-/* Between the mobile breakpoint and 888px the two-pane layout leaves the room narrower than the
+/* Between the mobile breakpoint and 889px the two-pane layout leaves the room narrower than the
    composer's 244px minimum, so the send button fell outside the panel's clip with no scrollbar to
    recover it. In that band the panes swap one at a time instead, the way they already do on a phone.
-   Bounded on both sides on purpose: at 768px and below the mobile shell owns the layout, and from 889px
-   the room fits the composer again. The upper bound tracks that minimum, so it moves if the composer's
-   own width does. Keyed to the navigation as well as the viewport, because the room is `viewport - 646`
-   only while the nav is expanded; collapsed it already fits and none of this should apply.
-   `.main-content.expanded` is Layout's class for the COLLAPSED nav. */
-@media (min-width: 769px) and (max-width: 888px) {
+   Bounded on both sides on purpose: at 768px and below the mobile shell owns the layout, and from 890px
+   the room fits the composer again. The room is `viewport - 646`, so the bound is 646 + 244 - 1; it
+   moves if the composer's own minimum does. Keyed to the navigation as well as the viewport, because
+   that arithmetic only holds while the nav is expanded; collapsed it already fits and none of this
+   should apply. `.main-content.expanded` is Layout's class for the COLLAPSED nav. */
+@media (min-width: 769px) and (max-width: 889px) {
   .main-content:not(.expanded) .chats-page .chats-layout {
     flex-direction: column;
   }
