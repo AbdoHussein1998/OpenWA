@@ -14774,12 +14774,12 @@
           "inviteCode": {
             "type": "string",
             "description": "The invite code on its own.",
-            "example": "GTvX9c8H8l718ewOH22Zk5"
+            "example": "EXAMPLEINVITECODE12345"
           },
           "inviteLink": {
             "type": "string",
             "description": "The same code as a joinable link.",
-            "example": "https://chat.whatsapp.com/GTvX9c8H8l718ewOH22Zk5"
+            "example": "https://chat.whatsapp.com/EXAMPLEINVITECODE12345"
           }
         },
         "required": [
@@ -14793,12 +14793,12 @@
           "inviteCode": {
             "type": "string",
             "description": "The invite code on its own.",
-            "example": "GTvX9c8H8l718ewOH22Zk5"
+            "example": "EXAMPLEINVITECODE12345"
           },
           "inviteLink": {
             "type": "string",
             "description": "The same code as a joinable link.",
-            "example": "https://chat.whatsapp.com/GTvX9c8H8l718ewOH22Zk5"
+            "example": "https://chat.whatsapp.com/EXAMPLEINVITECODE12345"
           },
           "message": {
             "type": "string",

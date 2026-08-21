@@ -18,7 +18,7 @@
  *    `[blocklist] trying to block a pn contact without a chat`. Blocking requires an identity that
  *    owns a chat.
  * 3. Individual chats are keyed by LID now, while whatsapp-web.js folds every identity back to a
- *    phone number: `getContactById('148004841455867@lid')` answers `id: 6281770008896@c.us`. So the
+ *    phone number: `getContactById('100000000000000@lid')` answers `id: 628123456789@c.us`. So the
  *    id `Contact.block()` had in hand was precisely the one WhatsApp refuses.
  *
  * The fix therefore resolves the contact to the identity that actually owns the chat, and calls the
