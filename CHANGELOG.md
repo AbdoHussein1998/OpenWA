@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The dashboard chat room shrinks within its layout instead of overflowing it, so a long contact or group name no longer pushes the send button out of reach. Thanks @rainerigius.
 - The chat composer shrinks with its pane, so the send button stays reachable. It sat outside the layout's clip below a 1014px viewport with the navigation expanded, and on any phone 402 CSS px or narrower.
+- The channel and status pane heading truncates with an ellipsis and carries its full text in a tooltip. A long title previously ran past the panel edge, cut mid-glyph with nothing to signal it.
 
 ## [0.23.0] - 2026-08-20
 
