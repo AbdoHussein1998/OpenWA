@@ -1296,9 +1296,9 @@
   color: var(--text-secondary);
 }
 
-/* The pane icon sits between the back button and an unbreakable title. Both of its siblings opt out
-   of shrinking already; without the same opt-out the icon is the only flexible item in the row and a
-   long title collapses it to nothing. */
+/* The pane icon's only in-flow sibling here is the heading, which has never opted out of shrinking,
+   so without this opt-out the row takes width from the icon as well. The heading absorbs most of the
+   deficit but not all of it, and on the narrowest pane the icon is squeezed to a couple of pixels. */
 .chats-page .chats-room-header > svg {
   flex-shrink: 0;
 }
@@ -1310,6 +1310,12 @@
   text-transform: none;
   letter-spacing: normal;
   margin: 0;
+  /* Same treatment as the chat header's h3. `overflow: hidden` is the load-bearing declaration: it
+     both clips and zeroes this flex item's automatic minimum, so no min-width is needed here or on
+     an ancestor. Without it the other two are inert and a long title runs past the panel edge. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chats-page .messages-list {

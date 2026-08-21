@@ -774,6 +774,11 @@ export function Chats() {
     ? (groupedStatuses.find(g => g.contact.id === activeStatusContactId) ?? null)
     : null;
 
+  // The pane heading truncates with an ellipsis, so the untruncated text has to reach the tooltip.
+  const activeStatusTitle = activeStatusGroup
+    ? (activeStatusGroup.contact.name ?? activeStatusGroup.contact.pushName ?? activeStatusGroup.contact.id)
+    : '';
+
   // Same open-at-newest behavior for the status viewer pane, keyed off the active contact and its
   // item list. Declared after activeStatusGroup: the viewer follows refetches because the deps are
   // the derived group's items, not a click-time snapshot.
@@ -955,7 +960,7 @@ export function Chats() {
                     <ArrowLeft size={20} />
                   </button>
                   <Megaphone size={20} />
-                  <h2>{activeChannel.name}</h2>
+                  <h2 title={activeChannel.name}>{activeChannel.name}</h2>
                 </header>
                 <div className="messages-list" ref={channelFeedRef}>
                   {channelMessages.isLoading ? (
@@ -997,11 +1002,7 @@ export function Chats() {
                     <ArrowLeft size={20} />
                   </button>
                   <CircleDashed size={20} />
-                  <h2>
-                    {activeStatusGroup.contact.name ??
-                      activeStatusGroup.contact.pushName ??
-                      activeStatusGroup.contact.id}
-                  </h2>
+                  <h2 title={activeStatusTitle}>{activeStatusTitle}</h2>
                 </header>
                 <div className="messages-list" ref={statusFeedRef}>
                   {activeStatusGroup.items.map(item => (
