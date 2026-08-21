@@ -615,6 +615,10 @@
 
 .chats-page .message-text-input {
   flex: 1;
+  /* An input keeps its intrinsic width as its automatic minimum, which pinned the whole composer to
+     369px and pushed the send button outside the layout's clip on a narrow desktop window. Shrinking
+     stops at the input's own padding, so a very narrow room leaves a stub rather than a usable field. */
+  min-width: 0;
   padding: 0.75rem 1rem;
   border: 1px solid var(--border);
   border-radius: 24px;
