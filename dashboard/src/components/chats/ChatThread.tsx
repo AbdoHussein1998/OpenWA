@@ -186,14 +186,7 @@ function ChatThread({
               const thumb = msg.body && msg.body.length > 100 ? `data:image/jpeg;base64,${msg.body}` : '';
               return (
                 <div className="message-location">
-                  {thumb && (
-                    <img
-                      src={thumb}
-                      alt=""
-                      onLoad={onMediaLoad}
-                      style={{ maxWidth: 220, borderRadius: 8, display: 'block', marginBottom: 4 }}
-                    />
-                  )}
+                  {thumb && <img src={thumb} alt="" onLoad={onMediaLoad} className="chat-location-media" />}
                   <span className="message-media-omitted">📍 {t('chats.media.location')}</span>
                 </div>
               );

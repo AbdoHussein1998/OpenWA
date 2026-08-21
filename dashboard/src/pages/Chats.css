@@ -970,6 +970,15 @@
   text-decoration: none;
 }
 
+/* The map preview keeps its own modest cap, but bounded by the bubble the way every other media type
+   here is. As a bare pixel width it stayed 220px wide in a narrower room and ran past the panel edge. */
+.chats-page .chat-location-media {
+  max-width: min(220px, 100%);
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
 .chats-page .chat-video-media {
   max-width: 100%;
   max-height: 250px;
@@ -1228,6 +1237,11 @@
   font-size: 0.8125rem;
   font-weight: 700;
   color: var(--primary-text);
+  /* Same treatment as `.replying-to-body` below. Without it a quoted name with no break opportunity
+     keeps its box but paints straight through the close button and out of the panel. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chats-page .replying-to-body {
