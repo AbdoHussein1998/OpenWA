@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Baileys: requesting a pairing code in the first second or two after `POST /sessions/{id}/start` returns the
+  documented 409 instead of a 500 with a `Connection Closed` stack trace. The socket object exists before its
+  WebSocket has finished connecting, so the send threw a raw Boom 428; the request is now gated on the session
+  reaching `qr_ready`, the same guard the whatsapp-web.js engine already carried. Clients that retry on 409 ride
+  through the window instead of surfacing an error.
+
 ## [0.23.2] - 2026-08-23
 
 ### Fixed
