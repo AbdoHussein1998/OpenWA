@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The message-type filter on webhooks and automation rules accepts `poll`. The dashboard offered the option but
+  saving was refused as invalid.
 - Baileys: inbound poll questions, shared event names and business button-reply selections now fill the message
   `body` instead of arriving empty. Webhook filters, search and the dashboard see this text on both engines now.
 - Baileys: quoting a contact card or poll keeps its text in the quoted-message preview instead of an empty
