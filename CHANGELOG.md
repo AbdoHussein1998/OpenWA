@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Baileys: an inbound shared contact card's vCard now populates the message `body`, matching what
+  whatsapp-web.js already returns for its `vcard` type. Several contacts shared
+  together (`contactsArrayMessage`) are newline-joined into one multi-vCard body, in the order they
+  were shared. Previously Baileys silently dropped this text. Thanks @memarius.
+
 ### Fixed
 
 - `docker compose up -d` builds from a Windows clone again. Git's default `core.autocrlf=true` gave the committed

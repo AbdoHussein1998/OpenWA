@@ -76,14 +76,23 @@ export interface BaileysBodyContent {
     hydratedFourRowTemplate?: { hydratedContentText?: string | null } | null;
   } | null;
   interactiveResponseMessage?: { body?: { text?: string | null } | null } | null;
+  /** A single shared contact card. */
+  contactMessage?: { vcard?: string | null } | null;
+  /** Several contact cards shared together; each carries its own vCard. */
+  contactsArrayMessage?: { contacts?: Array<{ vcard?: string | null }> | null } | null;
 }
 
 /**
  * Extract the display text of an inbound Baileys message: plain text first, then a media caption,
  * then the WhatsApp Business interactive shapes (interactive / buttons / template / interactive-
  * response) whose text was previously dropped — the OTP/verification text businesses send via these
- * shapes (#562). Returns `''` when the message carries no extractable text. Pass the NORMALIZED
- * content (ephemeral/viewOnce/documentWithCaption wrappers already unwrapped), as the adapter does.
+ * shapes (#562), then a shared contact card's vCard(s) - mirroring what whatsapp-web.js already
+ * exposes as `body` for its `vcard` type, so the neutral `body` field carries the same content on
+ * both engines for a single shared contact instead of Baileys silently dropping it. Multiple vCards from
+ * a `contactsArrayMessage` are newline-joined; RFC 6350 allows concatenated vCards in one stream, so
+ * this is a single valid multi-card body, not string mangling. Returns `''` when the message carries
+ * no extractable text. Pass the NORMALIZED content (ephemeral/viewOnce/documentWithCaption wrappers
+ * already unwrapped), as the adapter does.
  */
 export function extractBaileysBody(content: BaileysBodyContent): string {
   return (
@@ -97,8 +106,25 @@ export function extractBaileysBody(content: BaileysBodyContent): string {
     content.templateMessage?.hydratedTemplate?.hydratedContentText ??
     content.templateMessage?.hydratedFourRowTemplate?.hydratedContentText ??
     content.interactiveResponseMessage?.body?.text ??
+    content.contactMessage?.vcard ??
+    extractContactsArrayVcards(content.contactsArrayMessage) ??
     ''
   );
+}
+
+/**
+ * Joins the vCards of a `contactsArrayMessage` into one string, in the order they were shared.
+ * Returns `undefined` (not `''`) when there are no vCards to join, so it composes with `??` in
+ * {@link extractBaileysBody} the same way every other optional-field lookup there does.
+ */
+function extractContactsArrayVcards(
+  contactsArrayMessage: BaileysBodyContent['contactsArrayMessage'],
+): string | undefined {
+  const vcards = (contactsArrayMessage?.contacts ?? [])
+    .map(contact => contact.vcard)
+    .filter((vcard): vcard is string => !!vcard);
+
+  return vcards.length > 0 ? vcards.join('\n') : undefined;
 }
 
 /**
