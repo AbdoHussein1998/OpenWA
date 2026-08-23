@@ -762,9 +762,19 @@ export class BaileysLifecycle {
     return this.qrCode;
   }
 
+  /**
+   * Gated on QR_READY, not on the socket merely existing — the same guard, for the same reason, as
+   * the whatsapp-web.js engine's requestPairingCode. `this.sock` is assigned the moment
+   * makeWASocket returns, seconds before the WebSocket finishes connecting, and Baileys' sendNode
+   * throws a raw Boom 428 ('Connection Closed') whenever `ws.isOpen` is false — which surfaced as a
+   * 500 with a stack trace on every cold-start pairing request. QR_READY is exactly the window this
+   * can work in: it is set from the `connection.update { qr }` event, which WhatsApp only sends
+   * once the noise handshake is done, and every transient close drops the status back to
+   * INITIALIZING for the reconnect, so it also covers a socket that died after a QR was published.
+   */
   async requestPairingCode(phoneNumber: string): Promise<string> {
-    if (!this.sock) {
-      throw new EngineNotReadyError('Cannot request a pairing code before the engine is initialized.');
+    if (!this.sock || this.status !== EngineStatus.QR_READY) {
+      throw new EngineNotReadyError('Session is not waiting to be linked. Start it and wait for the QR stage.');
     }
     return this.sock.requestPairingCode(phoneNumber);
   }
