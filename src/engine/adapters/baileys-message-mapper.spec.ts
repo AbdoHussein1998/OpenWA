@@ -114,6 +114,32 @@ describe('extractBaileysBody (inbound text/caption + interactive shapes)', () =>
     expect(extractBaileysBody({ interactiveMessage: {} })).toBe('');
     expect(extractBaileysBody({ templateMessage: {} })).toBe('');
   });
+
+  it('extracts a single shared contact card as its raw vCard', () => {
+    const vcard = 'BEGIN:VCARD\nVERSION:3.0\nFN:Alice\nEND:VCARD';
+    expect(extractBaileysBody({ contactMessage: { vcard } })).toBe(vcard);
+  });
+
+  it('joins multiple shared contact cards, one vCard per line, in order', () => {
+    const alice = 'BEGIN:VCARD\nFN:Alice\nEND:VCARD';
+    const bob = 'BEGIN:VCARD\nFN:Bob\nEND:VCARD';
+    expect(extractBaileysBody({ contactsArrayMessage: { contacts: [{ vcard: alice }, { vcard: bob }] } })).toBe(
+      `${alice}\n${bob}`,
+    );
+  });
+
+  it('skips a contactsArrayMessage entry with no vCard rather than injecting an empty line', () => {
+    const alice = 'BEGIN:VCARD\nFN:Alice\nEND:VCARD';
+    expect(extractBaileysBody({ contactsArrayMessage: { contacts: [{ vcard: alice }, { vcard: null }] } })).toBe(alice);
+  });
+
+  it('falls through to empty string for an empty contactsArrayMessage', () => {
+    expect(extractBaileysBody({ contactsArrayMessage: { contacts: [] } })).toBe('');
+  });
+
+  it('prefers plain text over a contact card when somehow both are present', () => {
+    expect(extractBaileysBody({ conversation: 'plain', contactMessage: { vcard: 'ignored' } })).toBe('plain');
+  });
 });
 
 describe('buildIncomingMessageFromBaileys', () => {
