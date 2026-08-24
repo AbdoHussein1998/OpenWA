@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Session auto-start no longer runs twice at boot. The plugin port for `SessionService` was a factory returning
+  the same instance, which made Nest dispatch its lifecycle hooks twice: two auto-start loops raced, each
+  session logged `Auto-start failed` with `Session is already starting`, and the 2 s launch stagger was lost.
 - Baileys: requesting a pairing code before the session reaches `qr_ready` answers the documented 409 instead
   of a 500 with a `Connection Closed` stack trace, the same guard the whatsapp-web.js engine already carried.
   Thanks @m7fz7.
