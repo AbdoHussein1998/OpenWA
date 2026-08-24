@@ -211,6 +211,10 @@ export default () => ({
       // uses Puppeteer's bundled Chromium. Required on hosts where the bundled binary
       // is missing or incompatible (Alpine, ARM, custom base images).
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      // How long one CDP command may take. Above Puppeteer's own 180 000 ms, which a single
+      // `client.getChats()` can exceed on an account with thousands of chats. Bounded, never
+      // disabled — see wwebjs-lifecycle.ts for why a falsy value is not "no limit".
+      protocolTimeoutMs: parseInt(process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS || '300000', 10),
     },
     sessionDataPath: process.env.SESSION_DATA_PATH || './data/sessions',
     // Baileys engine (used when ENGINE_TYPE=baileys). Multi-file auth state base dir; each session

@@ -76,6 +76,8 @@ export interface WhatsAppWebJsConfig {
     headless?: boolean;
     args?: string[];
     executablePath?: string;
+    /** Per-CDP-command budget handed to Puppeteer. Must be positive — see wwebjs-lifecycle. */
+    protocolTimeoutMs?: number;
   };
   // Phase 3: Proxy per session
   proxy?: {

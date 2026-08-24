@@ -466,6 +466,8 @@ SESSION_DATA_PATH=./data/sessions
 PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 PUPPETEER_HEADLESS=true
 PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox
+# Per-browser-command budget, ms. Default 300000. Raise for very large accounts; must stay positive.
+PUPPETEER_PROTOCOL_TIMEOUT_MS=300000
 
 # ===========================================
 # SECURITY

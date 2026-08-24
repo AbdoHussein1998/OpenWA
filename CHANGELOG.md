@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `PUPPETEER_PROTOCOL_TIMEOUT_MS` sets how long a single browser command may take on the
+  whatsapp-web.js engine, defaulting to 300 000 ms, above Puppeteer's own 180 000 ms. A read that
+  walks the whole store, such as `GET /sessions/{sessionId}/chats` on an account with thousands of
+  chats, could run past the stock budget and fail with `Runtime.callFunctionOn timed out` while the
+  renderer was still working. The value must be positive: Puppeteer only arms its timer for a
+  truthy one, so `0` drops the bound instead of raising it and lets a wedged renderer hold the
+  request forever.
+
+### Changed
+
+- The whatsapp-web.js transport classifier now rules out a protocol timeout explicitly. That
+  message carries no transport-death signature on the current Puppeteer, so nothing was
+  misreporting it and behaviour is unchanged; the point is the spec, which pins the invariant in
+  both directions against the verbatim Puppeteer string so a future bump cannot start reading a
+  slow command as a dead page.
+
 ## [0.23.3] - 2026-08-24
 
 ### Added

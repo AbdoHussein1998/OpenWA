@@ -339,6 +339,15 @@ export class WwebjsLifecycle {
         ...(this.host.config.puppeteer?.executablePath
           ? { executablePath: this.host.config.puppeteer.executablePath }
           : {}),
+        // Per-CDP-command budget, spread only for a POSITIVE value so an unset or malformed config
+        // keeps Puppeteer's own 180 000 ms default rather than being handed a falsy one:
+        // `common/CallbackRegistry.js` arms the timer under `if (timeout)`, so 0 or NaN arms none
+        // and a wedged renderer holds the command — and the request behind it — indefinitely.
+        // A dead page must surface as a 503, never as a hang.
+        ...(typeof this.host.config.puppeteer?.protocolTimeoutMs === 'number' &&
+        this.host.config.puppeteer.protocolTimeoutMs > 0
+          ? { protocolTimeout: this.host.config.puppeteer.protocolTimeoutMs }
+          : {}),
       },
       ...(authTimeoutMs !== undefined ? { authTimeoutMs } : {}),
       ...(proxyAuthentication ? { proxyAuthentication } : {}),
@@ -646,9 +655,22 @@ export class WwebjsLifecycle {
   private static readonly PAGE_TRANSPORT_ERROR_PATTERN =
     /protocol error|target closed|targetclosederror|detached frame|session closed|connection closed/i;
 
+  /**
+   * A per-command CDP timeout is NOT a death: the renderer is merely slower than the budget, and
+   * the next command may succeed. On Puppeteer 24.38.0 this message carries none of the signatures
+   * above, so the guard changes no current behaviour — it pins the intent.
+   *
+   * Matched on the FULL puppeteer phrase, not a bare `timed out`: a broad exclusion would also
+   * swallow a genuine death whose message happens to mention a timeout.
+   */
+  private static readonly PROTOCOL_TIMEOUT_PATTERN = /timed out\. increase the 'protocoltimeout'/i;
+
   /** Whether the error carries a dead page/transport signature (see PAGE_TRANSPORT_ERROR_PATTERN). */
   isPageTransportError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
+    if (WwebjsLifecycle.PROTOCOL_TIMEOUT_PATTERN.test(message)) {
+      return false;
+    }
     return WwebjsLifecycle.PAGE_TRANSPORT_ERROR_PATTERN.test(message);
   }
 

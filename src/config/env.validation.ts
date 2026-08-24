@@ -284,6 +284,9 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'SESSION_LEASE_HEARTBEAT_MS',
     'SESSION_TAKEOVER_SWEEP_MS',
     'SESSION_PROXY_TIMEOUT_MS',
+    // Positive-only is the POINT here, not a convention: 0 arms no Puppeteer timer at all, so a
+    // wedged renderer holds the request forever (see wwebjs-lifecycle.ts).
+    'PUPPETEER_PROTOCOL_TIMEOUT_MS',
   ]) {
     checkPositiveInt(key);
   }

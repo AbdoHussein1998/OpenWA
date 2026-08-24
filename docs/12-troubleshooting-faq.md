@@ -665,6 +665,33 @@ rm -rf node_modules/whatsapp-web.js && npm ci
 > Pinning `WWEBJS_WEB_VERSION` does **not** work around this — the rename is present in every
 > current WhatsApp Web build, so no pin avoids it.
 
+### Issue: Reads on a large account fail with `Runtime.callFunctionOn timed out`
+
+> **Engine:** This issue applies to the `whatsapp-web.js` engine only (Chromium/Puppeteer-based). It does not affect `ENGINE_TYPE=baileys`.
+
+**Symptoms:**
+
+- `GET /api/sessions/{id}/chats` (or another read that walks the whole store) fails on an account
+  with thousands of chats, while smaller accounts on the same deployment are fine
+- The error names a CDP method and the setting: `Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.`
+- The session stays `ready` and the next request works, so the page did not die
+
+**Cause:** Puppeteer gives every browser command a time budget, 180 000 ms by default, and one
+`getChats()` over a very large store can run past it. The renderer is still working; only the
+command is dropped. That is also why this is **not** treated as a dead page — a transport death
+answers `503` and takes the session down with it, and this is just a slow command on a live page.
+
+**Solution:** raise the budget for that deployment.
+
+```bash
+# 10 minutes, in .env or the environment
+PUPPETEER_PROTOCOL_TIMEOUT_MS=600000
+```
+
+> Do not set it to `0`. The gateway refuses to boot on a non-positive value: Puppeteer only arms
+> its timer for a truthy one, so `0` drops the bound altogether and a wedged renderer will hold the
+> command, and the request waiting on it, forever. A hung request is worse than a failed one.
+
 ### Issue: Media Upload Fails
 
 **Symptoms:**
