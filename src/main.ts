@@ -240,11 +240,13 @@ async function bootstrap() {
 }
 
 // A failed bootstrap MUST terminate the process with a non-zero code, not just set `process.exitCode`:
-// listen() runs the FULL init (sessions, Redis, pg, Chromium) before binding the port, so a bind failure
-// (EADDRINUSE) would otherwise leave a zombie process — no HTTP port, yet still holding the event loop
-// open and running WhatsApp sessions, invisible to Docker's restart policy. runBootstrapOrExit logs the
-// failure, runs a bounded best-effort app.close() teardown, then exits(1); a successful boot returns
-// without touching exit. Puppeteer's own `exit` handlers kill any browser children still up.
+// listen() runs the full module init (database, Redis, plugin registration) before binding the port, and
+// the detached session auto-start (SessionService.onApplicationBootstrap) is already launching engines by
+// then, so a bind failure (EADDRINUSE) would otherwise leave a zombie process: no HTTP port, yet still
+// holding the event loop open and running WhatsApp sessions, invisible to Docker's restart policy.
+// runBootstrapOrExit logs the failure, runs a bounded best-effort app.close() teardown, then exits(1); a
+// successful boot returns without touching exit. Puppeteer's own `exit` handlers kill any browser
+// children still up.
 void runBootstrapOrExit(bootstrap, {
   logger: createLogger('Bootstrap'),
   closeApp: () => (appInstance ? appInstance.close() : Promise.resolve()),
