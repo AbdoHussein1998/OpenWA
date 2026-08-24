@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GET /search` declares the plugin provider's failure answers in the contract: `502` for an invalid result
+  shape and `503` when the provider does not answer; the built-in provider never returns either.
 - `POST /sessions/{sessionId}/pairing-code`: the 409 description in the OpenAPI contract and API reference
   now says to wait for `qr_ready`, not `ready`, which on this route means the session is already linked, and
   to wait for `ready` once a code was accepted.

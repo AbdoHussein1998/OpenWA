@@ -9410,6 +9410,12 @@
           },
           "501": {
             "description": "No search provider configured"
+          },
+          "502": {
+            "description": "The active plugin search provider returned a result shape that failed validation, so nothing trustworthy could be forwarded. The built-in provider never returns this."
+          },
+          "503": {
+            "description": "The active plugin search provider did not answer: its worker is not running, timed out, or reported a failure. The built-in provider never returns this. Retryable."
           }
         },
         "summary": "Search messages across sessions (active search provider)",
