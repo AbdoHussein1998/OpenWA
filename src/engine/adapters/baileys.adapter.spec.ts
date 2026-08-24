@@ -624,6 +624,42 @@ describe('BaileysAdapter lifecycle & status', () => {
     return adapter;
   }
 
+  // Baileys emits its close update only after `await ws.close()` resolves, and ws parks a black-holed
+  // socket in CLOSING for its 30 s close timeout, so QR_READY outlives the usable connection. Sending in
+  // that window makes Baileys throw a raw Boom 428, which with no global exception filter surfaces as a
+  // 500 instead of the documented 409, after it has already written creds.me and emitted creds.update.
+  it('requestPairingCode rejects on a closing socket while the status still reads QR_READY', async () => {
+    const adapter = await initializeAtQrReady();
+    fakeSock.ws.isOpen = false; // ws.close() has run; the close event has not landed yet
+
+    // The status is genuinely still QR_READY, so the rejection can only come from the liveness check.
+    expect(adapter.getStatus()).toBe(EngineStatus.QR_READY);
+    await expect(adapter.requestPairingCode('628999')).rejects.toBeInstanceOf(EngineNotReadyError);
+    // Proves the library is never entered, so creds.me / creds.update / saveCreds never fire.
+    expect(fakeSock.requestPairingCode).not.toHaveBeenCalled();
+  });
+
+  // The cached QR belongs to the socket that produced it: once the socket closes nothing can accept that
+  // scan, so GET /qr must answer its documented 400 rather than 200 with a code that can never link.
+  it.each([
+    ['a transient close', 515, EngineStatus.INITIALIZING],
+    ['a terminal close', 403, EngineStatus.FAILED],
+  ])('drops the cached QR on %s', async (_label, statusCode, expected) => {
+    const adapter = await initializeAtQrReady();
+    expect(adapter.getQRCode()).not.toBeNull();
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      fakeSock.fire('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode } } },
+      });
+      expect(adapter.getStatus()).toBe(expected);
+      expect(adapter.getQRCode()).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('a drop after the QR was published moves the status off QR_READY, so requestPairingCode rejects again', async () => {
     const adapter = await initializeAtQrReady();
     jest.useFakeTimers({ doNotFake: ['setImmediate'] });

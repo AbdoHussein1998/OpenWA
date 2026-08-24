@@ -2118,6 +2118,31 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     expect(onQRCode).toHaveBeenCalledTimes(1);
   });
 
+  // The cached QR belongs to the page that produced it. A Chromium crash or tab close while the operator
+  // is looking at the QR is the reachable vector: handlePuppeteerDeath fires at QR_READY, the session
+  // keeps the engine registered across its reconnect backoff, and GET /qr kept answering 200 with a code
+  // whose page is gone instead of the documented 400.
+  it('drops the cached QR when the page dies at QR_READY', async () => {
+    (qrcode.toDataURL as unknown as jest.Mock).mockClear();
+    const adapter = newAdapter();
+    const pupPage = Object.assign(new EventEmitter(), { evaluate: jest.fn().mockResolvedValue(true) });
+    const { client } = attachFakeClient(adapter, { pupPage: pupPage as unknown as FakeClient['pupPage'] });
+    // The death listeners are armed by runInitAttempt, not by setupEventHandlers.
+    (adapter as unknown as { attachPuppeteerLifecycleListeners: () => void }).attachPuppeteerLifecycleListeners();
+    const qrDone = deferredVoid();
+    (adapter as unknown as { callbacks: { onQRCode: jest.Mock } }).callbacks.onQRCode = jest.fn(() => qrDone.resolve());
+
+    client.emit('qr', '2@abc');
+    await qrDone.promise;
+    expect(adapter.getStatus()).toBe(EngineStatus.QR_READY);
+    expect(adapter.getQRCode()).not.toBeNull();
+
+    pupPage.emit('close');
+
+    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+    expect(adapter.getQRCode()).toBeNull();
+  });
+
   // #982: whatsapp-web.js does NOT destroy the client on LOGOUT — it deletes the auth profile and
   // re-runs inject() on the SAME browser, which re-arms the QR handler. The session lifecycle only
   // tears the engine down after the reconnect backoff (~5s by default, operator-raisable to 300s), so
