@@ -1268,10 +1268,13 @@ curl -X POST "$BASE/api/auth/validate" \
 
 #### GET /api/health
 
-Basic health check (status, timestamp, version). Public.
+Basic health check (status, timestamp). Public. The running `version` is added only when the request carries a valid API key, so an unauthenticated probe gets `status` and `timestamp` alone.
 
 ```bash
 curl "$BASE/api/health"
+
+# With the version field:
+curl -H "X-API-Key: $API_KEY" "$BASE/api/health"
 ```
 
 #### GET /api/health/live

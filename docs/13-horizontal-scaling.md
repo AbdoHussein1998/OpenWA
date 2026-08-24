@@ -653,7 +653,7 @@ groups:
 
 | Endpoint            | Purpose                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `/api/health`       | Basic health check — returns `status`, `timestamp`, `version`                                                |
+| `/api/health`       | Basic health check — returns `status` and `timestamp`; `version` only for an authenticated caller            |
 | `/api/health/live`  | Liveness probe (static `ok`; reflects process liveness only)                                                 |
 | `/api/health/ready` | Readiness probe — verifies the main + data databases respond (returns 503 while draining or if a DB is down) |
 
