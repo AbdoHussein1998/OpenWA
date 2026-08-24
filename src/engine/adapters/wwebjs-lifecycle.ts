@@ -722,6 +722,13 @@ export class WwebjsLifecycle {
     if (status === EngineStatus.DISCONNECTED) {
       this.disconnectReported = true;
     }
+    // The cached QR belongs to the page that produced it, so it dies with the QR_READY window. Same
+    // funnel placement as the Baileys engine: only the 'authenticated' and init-retry exits cleared the
+    // cache by hand, so a browser or page death, a failed init, an auth failure and teardown all left a
+    // dead QR to be served over GET /qr for the whole reconnect backoff.
+    if (status !== EngineStatus.QR_READY) {
+      this.qrCode = null;
+    }
     this.status = status;
     this.host.getCallbacks().onStateChanged?.(status);
     this.host.emitState(status);

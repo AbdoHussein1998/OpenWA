@@ -770,8 +770,12 @@ export class BaileysLifecycle {
   /**
    * Cheap local liveness check for the session watchdog. Genuine dead-connection detection is owned
    * by Baileys' built-in keepalive, which surfaces a close event (408) within ~35 s of a silent
-   * drop — and the close handler above drops the status to INITIALIZING for the whole reconnect
-   * backoff, so READY + a live socket is sufficient here.
+   * drop — and the close handler above then drops the status to INITIALIZING for the whole reconnect
+   * backoff, so READY + a live socket is sufficient here. Note the status trails the dead transport:
+   * Baileys emits that close only after `await ws.close()` resolves, which on a black-holed socket
+   * waits out ws's 30 s close timeout, so this reports live for that window too. Acceptable for the
+   * watchdog, whose next interval catches it; NOT sufficient for a request guard, which is why
+   * requestPairingCode below also tests `ws.isOpen`.
    */
   // eslint-disable-next-line @typescript-eslint/require-await
   async probeLiveness(): Promise<boolean> {
@@ -783,14 +787,22 @@ export class BaileysLifecycle {
   }
 
   /**
-   * Gated on QR_READY, not on the socket merely existing: `this.sock` is assigned the moment makeWASocket
-   * returns, before the WebSocket is open, and Baileys' sendNode throws a raw Boom 428 until it is. QR_READY
-   * is set from the post-handshake `connection.update { qr }` event and every close drops it, so it is the
-   * exact window a pairing request can succeed in. Same guard, for the same reason, as the whatsapp-web.js
-   * engine's requestPairingCode.
+   * Gated on QR_READY AND a live WebSocket, not on the socket merely existing: `this.sock` is assigned the
+   * moment makeWASocket returns, before the WebSocket is open, and Baileys' sendNode throws a raw Boom 428
+   * until it is. QR_READY is set from the post-handshake `connection.update { qr }` event, so it opens the
+   * window; it does not close it promptly, which is why the status alone is not enough. Baileys emits its
+   * `connection.update { connection: 'close' }` only after `await ws.close()` resolves, and `ws` leaves a
+   * black-holed socket in CLOSING for its 30 s close timeout, so the status keeps reading QR_READY for up to
+   * half a minute after the connection stopped carrying anything. `ws.isOpen` is the same predicate Baileys'
+   * own sendRawMessage tests and the same liveness check handleQrCode makes before publishing. It matters
+   * beyond the status code here: requestPairingCode writes `creds.me` and emits `creds.update`, which we
+   * persist, BEFORE it sends, so a request in that window leaves the next connect trying to log in as a
+   * device that was never registered. The whatsapp-web.js engine needs no equivalent operand: its page and
+   * browser death listeners fire handlePuppeteerDeath, which drops the status in the same tick, so there
+   * the status is not the stale value it is here.
    */
   async requestPairingCode(phoneNumber: string): Promise<string> {
-    if (!this.sock || this.status !== EngineStatus.QR_READY) {
+    if (!this.sock?.ws.isOpen || this.status !== EngineStatus.QR_READY) {
       throw new EngineNotReadyError('Session is not waiting to be linked. Start it and wait for the QR stage.');
     }
     return this.sock.requestPairingCode(phoneNumber);
@@ -813,6 +825,15 @@ export class BaileysLifecycle {
   private setStatus(status: EngineStatus): void {
     if (this.status === status) {
       return;
+    }
+    // The cached QR belongs to the socket that produced it, so it dies with the QR_READY window.
+    // Enforced in the funnel rather than at each exit: every close sub-branch (intentional, 401, 440,
+    // 403, transient), the accepted link and every teardown route through here, and the exits that
+    // did not clear it by hand kept serving a dead QR over GET /qr for the whole reconnect backoff.
+    // Safe after the no-op guard above: a non-null qrCode implies QR_READY, so an unchanged status
+    // that is not QR_READY already has a null cache.
+    if (status !== EngineStatus.QR_READY) {
+      this.qrCode = null;
     }
     this.status = status;
     this.host.getOnStateChanged()?.(status);

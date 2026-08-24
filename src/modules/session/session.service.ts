@@ -30,6 +30,9 @@ import { resolveFeatureFlags } from '../../config/feature-flags';
 import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
+// Type-only: the module binds this class to PLUGIN_SESSION_PORT with a `useExisting` alias, which
+// TypeScript does not check, so `implements` is what keeps the two in step.
+import type { PluginSessionPort } from '../../core/plugins/plugin-host-ports';
 
 /** Stagger before the single transient-launch retry; short - the claim is held while it waits. */
 const SESSION_START_RETRY_DELAY_MS = 2_000;
@@ -78,7 +81,7 @@ export const AUTOSTART_THROTTLE_MS = 2_000;
  * its public surface toward the controller and the feature modules is unchanged by the split.
  */
 @Injectable()
-export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicationBootstrap {
+export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicationBootstrap, PluginSessionPort {
   private readonly logger = createLogger('SessionService');
 
   // Live engine instances, owned by the shared EngineRegistry (the narrow port feature modules

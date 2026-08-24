@@ -38,6 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A WhatsApp-initiated unlink now clears the session's `phone` the way an operator logout does, so a restart
   no longer relaunches the unlinked session into a QR nobody asked for; the next successful link sets it
   again.
+- Baileys: a pairing request on a socket that has already begun closing answers the documented 409 instead of
+  a 500, and no longer writes a half-registered identity into the session's stored credentials.
+- Both engines drop the cached QR as soon as its socket or page dies, so `GET /sessions/{sessionId}/qr`
+  answers its documented 400 instead of 200 with a code that can no longer be scanned.
+
+### Documentation
+
+- The upgrade runbook and the migration guide state the `docker-compose.dev.yml` caveat before the first
+  `docker compose` command instead of after it, and name the `openwa` service substitution it needs.
 
 ## [0.23.2] - 2026-08-23
 

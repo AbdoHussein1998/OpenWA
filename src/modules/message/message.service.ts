@@ -15,6 +15,9 @@ import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
 import { StorageService, isMissingObjectError } from '../../common/storage/storage.service';
 import { MessageSendService, SaveOutgoingMessageData } from './message-send.service';
+// Type-only: the module binds this class to PLUGIN_MESSAGE_PORT with a `useExisting` alias, which
+// TypeScript does not check, so `implements` is what keeps the two in step.
+import type { PluginMessagePort } from '../../core/plugins/plugin-host-ports';
 
 // Re-exported for existing importers (bulk send shares the rendered-template cap with the send path).
 export { DEFAULT_TEMPLATE_RENDER_MAX_CHARS } from './message-send.service';
@@ -110,7 +113,7 @@ function inertMimetype(mimetype: string): string {
 }
 
 @Injectable()
-export class MessageService {
+export class MessageService implements PluginMessagePort {
   private readonly logger = createLogger('MessageService');
 
   constructor(
