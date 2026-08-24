@@ -865,7 +865,10 @@ export interface SessionLifecycleCapability {
 
   getQRCode(): string | null;
 
-  /** Request an 8-char pairing code to link via phone number instead of scanning the QR. */
+  /**
+   * Request an 8-char pairing code to link via phone number instead of scanning the QR. Only valid while
+   * the engine is QR_READY; both adapters throw EngineNotReadyError (409) in any other status.
+   */
   requestPairingCode(phoneNumber: string): Promise<string>;
 
   getPhoneNumber(): string | null;
