@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   emitting until then, so a repeat pairing request answers 409 instead of overwriting the linked identity.
 - Baileys: a QR that finishes rendering after its socket dropped is discarded instead of marking the session
   `qr_ready`.
+- A WhatsApp-initiated unlink now clears the session's `phone` the way an operator logout does, so a restart
+  no longer relaunches the unlinked session into a QR nobody asked for; the next successful link sets it
+  again.
 
 ## [0.23.2] - 2026-08-23
 
