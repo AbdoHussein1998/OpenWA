@@ -18,6 +18,18 @@ export class SearchController {
   @ApiResponse({ status: 200, description: 'Search results from the active provider', type: SearchResultsResponseDto })
   @ApiResponse({ status: 400, description: 'Empty or whitespace-only "q"' })
   @ApiResponse({ status: 501, description: 'No search provider configured' })
+  @ApiResponse({
+    status: 502,
+    description:
+      'The active plugin search provider returned a result shape that failed validation, so nothing ' +
+      'trustworthy could be forwarded. The built-in provider never returns this.',
+  })
+  @ApiResponse({
+    status: 503,
+    description:
+      'The active plugin search provider did not answer: its worker is not running, timed out, or reported ' +
+      'a failure. The built-in provider never returns this. Retryable.',
+  })
   @ApiQuery({ name: 'q', required: true, description: 'Search term (required, non-empty)' })
   @ApiQuery({ name: 'sessionId', required: false, description: 'Restrict to a single session' })
   @ApiQuery({ name: 'chatId', required: false, description: 'Restrict to a single chat id' })
