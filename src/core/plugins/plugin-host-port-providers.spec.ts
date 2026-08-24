@@ -20,6 +20,11 @@ import { SessionModule } from '../../modules/session/session.module';
  * hooks twice, launching two concurrent auto-start loops on every boot. The same applies to any other
  * factory that returns an injected instance (search.module.ts `SEARCH_BOOTSTRAP` returns the registry):
  * harmless while the target has no lifecycle hook, doubled the moment one is added.
+ *
+ * `useExisting` is typed `any`, so unlike the factory it replaced it does NOT check that the service
+ * still satisfies the port. That check lives on the classes instead: each one carries
+ * `implements Plugin*Port`, so a signature drift fails `tsc --noEmit` rather than surfacing as a
+ * runtime TypeError inside a plugin capability call.
  */
 describe('plugin host port providers', () => {
   const MODULES = [PluginsModule, IntegrationModule, MessageModule, SearchModule, SessionModule];
