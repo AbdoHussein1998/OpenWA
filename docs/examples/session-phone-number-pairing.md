@@ -15,6 +15,9 @@ This flow returns an 8-character pairing code that the user enters in WhatsApp o
 [Start Session]
       │
       ▼
+[Wait for status qr_ready]
+      │
+      ▼
 [Request Pairing Code]
       │
       ▼
@@ -44,9 +47,7 @@ curl -X POST http://localhost:2785/api/sessions/{sessionId}/start \
   -H "X-API-Key: $API_KEY"
 ```
 
-The session must be started before requesting a pairing code, and the engine needs a moment to
-connect after `start` returns. Poll `GET /api/sessions/{sessionId}` until `status` is `qr_ready` —
-that is the point the engine can accept a pairing request. Asking earlier returns 409.
+The session must be started before requesting a pairing code, and the engine needs a moment to connect after `start` returns. Poll `GET /api/sessions/{sessionId}` until `status` is `qr_ready`: that is the point the engine can accept a pairing request. Requesting a code before that returns 409.
 
 ## 3. Request a Pairing Code
 

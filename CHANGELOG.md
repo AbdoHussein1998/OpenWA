@@ -9,11 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Baileys: requesting a pairing code in the first second or two after `POST /sessions/{id}/start` returns the
-  documented 409 instead of a 500 with a `Connection Closed` stack trace. The socket object exists before its
-  WebSocket has finished connecting, so the send threw a raw Boom 428; the request is now gated on the session
-  reaching `qr_ready`, the same guard the whatsapp-web.js engine already carried. Clients that retry on 409 ride
-  through the window instead of surfacing an error.
+- Baileys: requesting a pairing code before the session reaches `qr_ready` answers the documented 409 instead
+  of a 500 with a `Connection Closed` stack trace, the same guard the whatsapp-web.js engine already carried.
+  Thanks @m7fz7.
 
 ## [0.23.2] - 2026-08-23
 
