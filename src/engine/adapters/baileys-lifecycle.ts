@@ -363,16 +363,19 @@ export class BaileysLifecycle {
       this.reportReachoutTimelock(reachoutTimeLock);
     }
 
-    if (qr) {
+    // Baileys keeps rotating the QR (every 20-60 s) until the socket ends, including after the link
+    // was accepted; a refresh in that window must not put the session back at QR_READY.
+    if (qr && this.status !== EngineStatus.AUTHENTICATING) {
       // Baileys hands us the raw QR ref string; render it to a PNG data URL so the stored
       // value matches the whatsapp-web.js engine's contract (the dashboard does <img src={qrCode}>).
       void this.handleQrCode(qr);
     }
 
     if (isNewLogin) {
-      // WhatsApp accepted the QR scan or pairing code: it closes with 515 next and the reconnect
-      // opens READY. Left at QR_READY, a repeat pairing request in that window would pass the guard
-      // and overwrite the just-linked creds.me. AUTHENTICATING is what whatsapp-web.js reports here.
+      // WhatsApp accepted the QR scan or pairing code. It asks for a restart next (a 515 close, which
+      // the branch below turns into INITIALIZING) and the reconnect opens READY. Left at QR_READY, a
+      // repeat pairing request in that window would pass the guard and overwrite the just-linked
+      // creds.me. AUTHENTICATING is what whatsapp-web.js reports at the same point.
       this.qrCode = null;
       this.setStatus(EngineStatus.AUTHENTICATING);
     }
@@ -562,9 +565,10 @@ export class BaileysLifecycle {
     const sock = this.sock;
     try {
       const rendered = await qrcode.toDataURL(qr);
-      // The socket can drop while the QR renders. The close handler has already moved the status on,
-      // and publishing now would stamp QR_READY on a dead socket until the backoff reconnect.
-      if (this.sock !== sock || !sock?.ws.isOpen) {
+      // The socket can drop, or the link be accepted, while the QR renders. The handler has already
+      // moved the status on, and publishing now would stamp QR_READY on a dead socket until the
+      // backoff reconnect, or reopen the pairing guard on a socket that is committed to a restart.
+      if (this.sock !== sock || !sock?.ws.isOpen || this.status === EngineStatus.AUTHENTICATING) {
         return;
       }
       this.qrCode = rendered;

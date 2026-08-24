@@ -89,7 +89,8 @@ export class SessionEngineEventWiring {
    * `previouslyLinked` is whether the session row carried a phone when this engine started, i.e.
    * it had completed a link before. A QR from such an engine means the stored credentials are gone
    * or no longer accepted, and when that happened while the engine was down nothing else in the
-   * log says so, hence the one-shot warning below.
+   * log says so, hence the warning below. One-shot per engine start: a lifecycle reconnect builds a
+   * new table from the row, which still carries the phone, and warns again.
    */
   buildCallbacks(
     id: string,

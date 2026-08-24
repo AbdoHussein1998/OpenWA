@@ -15,9 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `POST /sessions/{sessionId}/pairing-code`: the 409 description in the OpenAPI contract and API reference
-  now says to wait for `qr_ready`, not `ready`, which on this route means the session is already linked.
-- `GET /sessions/{sessionId}/qr` no longer declares a 409: the route reads the engine's cached QR and never
-  answers one. Its 400 already covers the not-ready case.
+  now says to wait for `qr_ready`, not `ready`, which on this route means the session is already linked, and
+  to wait for `ready` once a code was accepted.
+- `GET /sessions/{sessionId}/qr` no longer declares the engine-not-ready 409: the route reads the engine's
+  cached QR and never answers one. Its 400 already covers the not-ready case.
 
 ### Fixed
 
@@ -27,9 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Baileys: requesting a pairing code before the session reaches `qr_ready` answers the documented 409 instead
   of a 500 with a `Connection Closed` stack trace, the same guard the whatsapp-web.js engine already carried.
   Thanks @m7fz7.
-- Baileys: once WhatsApp accepts a QR scan or pairing code the session reports `authenticating` until the
-  restart completes, as whatsapp-web.js does, so a repeat pairing request in that window answers 409 instead
-  of overwriting the linked identity.
+- Baileys: once WhatsApp accepts a QR scan or pairing code the session leaves `qr_ready` (`authenticating`,
+  then `initializing` across the restart WhatsApp requests) and ignores the QR refreshes Baileys keeps
+  emitting until then, so a repeat pairing request answers 409 instead of overwriting the linked identity.
 - Baileys: a QR that finishes rendering after its socket dropped is discarded instead of marking the session
   `qr_ready`.
 
