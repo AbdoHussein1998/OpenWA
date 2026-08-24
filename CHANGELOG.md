@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Baileys: requesting a pairing code before the session reaches `qr_ready` answers the documented 409 instead
   of a 500 with a `Connection Closed` stack trace, the same guard the whatsapp-web.js engine already carried.
   Thanks @m7fz7.
+- Baileys: once WhatsApp accepts a QR scan or pairing code the session reports `authenticating` until the
+  restart completes, as whatsapp-web.js does, so a repeat pairing request in that window answers 409 instead
+  of overwriting the linked identity.
+- Baileys: a QR that finishes rendering after its socket dropped is discarded instead of marking the session
+  `qr_ready`.
 
 ## [0.23.2] - 2026-08-23
 
