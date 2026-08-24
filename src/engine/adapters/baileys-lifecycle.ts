@@ -350,10 +350,11 @@ export class BaileysLifecycle {
   private handleConnectionUpdate(update: {
     connection?: string;
     qr?: string;
+    isNewLogin?: boolean;
     lastDisconnect?: { error?: unknown };
     reachoutTimeLock?: { isActive?: boolean; timeEnforcementEnds?: Date; enforcementType?: string };
   }): void {
-    const { connection, qr, lastDisconnect, reachoutTimeLock } = update;
+    const { connection, qr, isNewLogin, lastDisconnect, reachoutTimeLock } = update;
 
     // Arrives on its own update (no `connection` key) both when WhatsApp pushes a change and when
     // probeAccountRestriction() pulls the current state — Baileys routes its own query result back
@@ -366,6 +367,14 @@ export class BaileysLifecycle {
       // Baileys hands us the raw QR ref string; render it to a PNG data URL so the stored
       // value matches the whatsapp-web.js engine's contract (the dashboard does <img src={qrCode}>).
       void this.handleQrCode(qr);
+    }
+
+    if (isNewLogin) {
+      // WhatsApp accepted the QR scan or pairing code: it closes with 515 next and the reconnect
+      // opens READY. Left at QR_READY, a repeat pairing request in that window would pass the guard
+      // and overwrite the just-linked creds.me. AUTHENTICATING is what whatsapp-web.js reports here.
+      this.qrCode = null;
+      this.setStatus(EngineStatus.AUTHENTICATING);
     }
 
     if (connection === 'connecting') {
@@ -550,8 +559,15 @@ export class BaileysLifecycle {
 
   /** Render the raw Baileys QR ref to a PNG data URL, then publish it (mirrors the whatsapp-web.js engine). */
   private async handleQrCode(qr: string): Promise<void> {
+    const sock = this.sock;
     try {
-      this.qrCode = await qrcode.toDataURL(qr);
+      const rendered = await qrcode.toDataURL(qr);
+      // The socket can drop while the QR renders. The close handler has already moved the status on,
+      // and publishing now would stamp QR_READY on a dead socket until the backoff reconnect.
+      if (this.sock !== sock || !sock?.ws.isOpen) {
+        return;
+      }
+      this.qrCode = rendered;
       this.setStatus(EngineStatus.QR_READY);
       this.host.getOnQRCode()?.(this.qrCode);
     } catch (error) {
