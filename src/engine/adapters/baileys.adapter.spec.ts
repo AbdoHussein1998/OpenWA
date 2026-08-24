@@ -569,9 +569,26 @@ describe('BaileysAdapter lifecycle & status', () => {
     await expect(adapter.requestPairingCode('628999')).rejects.toBeInstanceOf(EngineNotReadyError);
   });
 
-  it('requestPairingCode delegates to the socket', async () => {
+  // The socket object exists from the moment makeWASocket returns, but its WebSocket is still
+  // connecting: sending then makes Baileys throw a raw Boom 428 that surfaces as a 500.
+  it('requestPairingCode throws EngineNotReadyError while the socket is still connecting', async () => {
     const adapter = newAdapter();
     await adapter.initialize(noopCallbacks({}));
+    await expect(adapter.requestPairingCode('628999')).rejects.toBeInstanceOf(EngineNotReadyError);
+    expect(fakeSock.requestPairingCode).not.toHaveBeenCalled();
+  });
+
+  it('requestPairingCode delegates to the socket once a QR has been published', async () => {
+    let resolveQr!: () => void;
+    const qrPublished = new Promise<void>(resolve => {
+      resolveQr = resolve;
+    });
+    const onQRCode = jest.fn(() => resolveQr());
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onQRCode }));
+    fakeSock.fire('connection.update', { qr: 'QR-STRING' });
+    await qrPublished;
+
     await expect(adapter.requestPairingCode('628999')).resolves.toBe('ABCD-EFGH');
     expect(fakeSock.requestPairingCode).toHaveBeenCalledWith('628999');
   });

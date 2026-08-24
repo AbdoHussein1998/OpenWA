@@ -15,6 +15,9 @@ This flow returns an 8-character pairing code that the user enters in WhatsApp o
 [Start Session]
       │
       ▼
+[Wait for status qr_ready]
+      │
+      ▼
 [Request Pairing Code]
       │
       ▼
@@ -44,7 +47,7 @@ curl -X POST http://localhost:2785/api/sessions/{sessionId}/start \
   -H "X-API-Key: $API_KEY"
 ```
 
-The session must be started before requesting a pairing code.
+The session must be started before requesting a pairing code, and the engine needs a moment to connect after `start` returns. Poll `GET /api/sessions/{sessionId}` until `status` is `qr_ready`: that is the point the engine can accept a pairing request. Requesting a code before that returns 409.
 
 ## 3. Request a Pairing Code
 
@@ -92,5 +95,6 @@ After the code is accepted, the OpenWA session should move to a connected/ready 
 
 - If OpenWA returns `Session is not started`, call `POST /api/sessions/{sessionId}/start` first.
 - If OpenWA returns `Session is already authenticated`, the account is already linked and no pairing code is needed.
+- If OpenWA returns 409 `Session is not waiting to be linked`, the engine is still connecting (or reconnecting after a drop). Wait for `status` to read `qr_ready` and request again.
 - If the phone number is rejected, send digits only in international format, without `+`, spaces, or punctuation.
 - If you want to create a brand-new WhatsApp account programmatically, that is outside OpenWA's scope. OpenWA only links an existing WhatsApp account.
