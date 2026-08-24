@@ -23,6 +23,16 @@ export const ENGINE_NOT_READY_409 =
   'into it — for those few seconds the answer is a `409` naming the reload; retry shortly.';
 
 /**
+ * `EngineNotReadyError` (409) on `POST /sessions/:sessionId/pairing-code`, where the generic wording
+ * above points the caller at the wrong state: both engines accept a pairing request only while the
+ * session is `qr_ready`, and a session that reads `ready` is already linked and answers `400`.
+ */
+export const PAIRING_NOT_READY_409 =
+  'The session is not waiting to be linked: the engine is still connecting, or reconnecting after a ' +
+  'drop, so the request never reached WhatsApp. Wait for `status` to read `qr_ready` and retry. A ' +
+  'session that reads `ready` is already linked and answers `400` instead.';
+
+/**
  * The catalog and status services pass a `NotFoundException` factory to `EngineRegistry.require()`
  * instead of taking its `BadRequestException` default, so on those routes an unstarted session is a
  * 404 rather than the 400 every other engine module answers. Documented rather than changed: the
