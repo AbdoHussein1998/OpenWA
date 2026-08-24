@@ -29,8 +29,10 @@ export const ENGINE_NOT_READY_409 =
  */
 export const PAIRING_NOT_READY_409 =
   'The session is not waiting to be linked: the engine is still connecting, or reconnecting after a ' +
-  'drop, so the request never reached WhatsApp. Wait for `status` to read `qr_ready` and retry. A ' +
-  'session that reads `ready` is already linked and answers `400` instead.';
+  'drop, so the request never reached WhatsApp. Wait for `status` to read `qr_ready` and retry. Once a ' +
+  'code has been accepted the session moves through `authenticating` and `initializing` to `ready` and ' +
+  'answers this until then; wait for `ready` in that case. A session that reads `ready` is already ' +
+  'linked and answers `400` instead.';
 
 /**
  * The catalog and status services pass a `NotFoundException` factory to `EngineRegistry.require()`

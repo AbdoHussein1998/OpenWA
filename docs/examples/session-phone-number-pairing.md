@@ -95,6 +95,6 @@ After the code is accepted, the OpenWA session should move to a connected/ready 
 
 - If OpenWA returns `Session is not started`, call `POST /api/sessions/{sessionId}/start` first.
 - If OpenWA returns `Session is already authenticated`, the account is already linked and no pairing code is needed.
-- If OpenWA returns 409 `Session is not waiting to be linked`, the engine is still connecting (or reconnecting after a drop). Wait for `status` to read `qr_ready` and request again.
+- If OpenWA returns 409 `Session is not waiting to be linked`, the engine is still connecting (or reconnecting after a drop). Wait for `status` to read `qr_ready` and request again. After a code was accepted the same 409 is answered until the session is `ready`; do not request another code then.
 - If the phone number is rejected, send digits only in international format, without `+`, spaces, or punctuation.
 - If you want to create a brand-new WhatsApp account programmatically, that is outside OpenWA's scope. OpenWA only links an existing WhatsApp account.

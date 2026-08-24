@@ -604,13 +604,20 @@ describe('BaileysAdapter lifecycle & status', () => {
   });
 
   /** Initialize and fire a QR update, resolving once the lifecycle has published it (rendering is async). */
-  async function initializeAtQrReady(): Promise<BaileysAdapter> {
+  async function initializeAtQrReady(onQRCode: jest.Mock = jest.fn()): Promise<BaileysAdapter> {
     let resolveQr!: () => void;
     const qrPublished = new Promise<void>(resolve => {
       resolveQr = resolve;
     });
     const adapter = newAdapter();
-    await adapter.initialize(noopCallbacks({ onQRCode: () => resolveQr() }));
+    await adapter.initialize(
+      noopCallbacks({
+        onQRCode: (url: string) => {
+          onQRCode(url);
+          resolveQr();
+        },
+      }),
+    );
     fakeSock.fire('connection.update', { qr: 'QR-STRING' });
     await qrPublished;
     expect(adapter.getStatus()).toBe(EngineStatus.QR_READY);
@@ -654,16 +661,47 @@ describe('BaileysAdapter lifecycle & status', () => {
   });
 
   it('moves to AUTHENTICATING and drops the QR once WhatsApp accepts the link, so a repeat pairing request rejects', async () => {
-    const adapter = await initializeAtQrReady();
+    const onQRCode = jest.fn();
+    const adapter = await initializeAtQrReady(onQRCode);
     fakeSock.fire('connection.update', { isNewLogin: true, qr: undefined });
     expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
     expect(adapter.getQRCode()).toBeNull();
     await expect(adapter.requestPairingCode('628999')).rejects.toBeInstanceOf(EngineNotReadyError);
     expect(fakeSock.requestPairingCode).not.toHaveBeenCalled();
-    // The restart that follows still lands on READY.
+
+    // Baileys keeps rotating the QR until the socket ends; a refresh must not reopen the guard.
+    fakeSock.fire('connection.update', { qr: 'QR-REFRESH' });
+    expect(qrcode.toDataURL).toHaveBeenCalledTimes(1);
+    expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
+    expect(onQRCode).toHaveBeenCalledTimes(1);
+
+    // WhatsApp then asks for a restart (515): INITIALIZING across the reconnect, READY on open.
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      fakeSock.fire('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 515 } } },
+      });
+      expect(adapter.getStatus()).toBe(EngineStatus.INITIALIZING);
+    } finally {
+      jest.useRealTimers();
+    }
     fakeSock.user = { id: '628999:12@s.whatsapp.net', name: 'Me' };
     fakeSock.fire('connection.update', { connection: 'open' });
     expect(adapter.getStatus()).toBe(EngineStatus.READY);
+  });
+
+  it('discards a QR whose render finished after WhatsApp accepted the link', async () => {
+    const onQRCode = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize(noopCallbacks({ onQRCode }));
+    fakeSock.fire('connection.update', { qr: 'QR-STRING' });
+    fakeSock.fire('connection.update', { isNewLogin: true, qr: undefined });
+    await (qrcode.toDataURL as unknown as jest.Mock).mock.results[0].value;
+    expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
+    expect(adapter.getQRCode()).toBeNull();
+    expect(onQRCode).not.toHaveBeenCalled();
+    await expect(adapter.requestPairingCode('628999')).rejects.toBeInstanceOf(EngineNotReadyError);
   });
 
   it('persists creds: subscribes saveCreds to creds.update', async () => {

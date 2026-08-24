@@ -278,7 +278,7 @@ curl -X POST "$BASE/api/sessions" -H "X-API-Key: $API_KEY" -H "Content-Type: app
 
 ### Issue: Session stuck at `authenticating`, never reaches `ready`
 
-> **Engine:** This issue applies to the `whatsapp-web.js` engine only. If you are using `ENGINE_TYPE=baileys`, skip this section.
+> **Engine:** This stall applies to the `whatsapp-web.js` engine only. Baileys also reports `authenticating`, but only for the seconds between WhatsApp accepting the link and the restart it requests; it cannot park there, so if you are using `ENGINE_TYPE=baileys`, skip this section.
 
 **Symptoms:** After scanning the QR the phone links the device, but the session stays at
 `authenticating` indefinitely and never becomes `ready`. `GET /sessions/:sessionId/qr` returns 400 while
