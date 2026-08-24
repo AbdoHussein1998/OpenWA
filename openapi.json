@@ -821,7 +821,7 @@
             "description": "Session not found"
           },
           "409": {
-            "description": "The session is not connected — an engine exists for it but is not `ready`: disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it — for those few seconds the answer is a `409` naming the reload; retry shortly."
+            "description": "The session is not waiting to be linked: the engine is still connecting, or reconnecting after a drop, so the request never reached WhatsApp. Wait for `status` to read `qr_ready` and retry. A session that reads `ready` is already linked and answers `400` instead."
           }
         },
         "summary": "Request an 8-char pairing code to link via phone number (alternative to QR)",
