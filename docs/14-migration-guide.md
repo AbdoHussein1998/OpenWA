@@ -690,6 +690,8 @@ docker compose down
 # 3. Move to the new version
 #    The repo's compose file BUILDS the API image from source:
 git pull && docker compose up -d --build
+#    Started with docker-compose.dev.yml (the README Quick Start)? Add `-f docker-compose.dev.yml`
+#    to every docker compose command here.
 #    Deployments pinned to a published image instead (ghcr.io/rmyndharis/openwa:<version>)
 #    bump the tag in their compose file, then: docker compose pull && docker compose up -d
 
@@ -702,8 +704,8 @@ for i in {1..30}; do
   sleep 2
 done
 
-# 5. Confirm the running version
-curl -s http://localhost:2785/api/health | jq '.version'
+# 5. Confirm the running version (`version` is only included for an authenticated request)
+curl -s -H "X-API-Key: $API_KEY" http://localhost:2785/api/health | jq '.version'
 
 # 6. Verify sessions came back
 curl -s -H "X-API-Key: $API_KEY" \
