@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `POST /sessions/{sessionId}/pairing-code`: the 409 description in the OpenAPI contract and API reference
+  now says to wait for `qr_ready`, not `ready`, which on this route means the session is already linked.
+- `GET /sessions/{sessionId}/qr` no longer declares a 409: the route reads the engine's cached QR and never
+  answers one. Its 400 already covers the not-ready case.
+
 ### Fixed
 
 - Baileys: requesting a pairing code before the session reaches `qr_ready` answers the documented 409 instead

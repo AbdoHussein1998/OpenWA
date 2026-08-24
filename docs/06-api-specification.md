@@ -356,7 +356,7 @@ Get the QR code (PNG data URL) for session authentication.
 
 `status` is the session's current lowercase status.
 
-**Errors:** `400` session not started / QR not ready yet / already authenticated · `401` · `403` · `404` not found · `409` conflict or engine not ready (retryable)
+**Errors:** `400` session not started / QR not ready yet / already authenticated · `401` · `403` · `404` not found
 
 #### GET /api/sessions/:sessionId/groups
 
