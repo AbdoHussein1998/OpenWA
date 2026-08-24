@@ -614,7 +614,8 @@ the old credentials remain usable depends on where the failure happened, and the
 report which.
 
 With `AUTO_START_SESSIONS=true`, auto-start selects sessions whose `phone` is non-null. Both a `200`
-and a `502` logout clear `phone`, so neither is auto-started on boot — an incomplete-logout (`502`)
+and a `502` logout clear `phone`, and a WhatsApp-initiated unlink reported by a running engine clears
+it the same way, so none of those are auto-started on boot — an incomplete-logout (`502`)
 session must be started explicitly and the logout retried by hand. A session that must stay down can
 simply be left as-is.
 
