@@ -47,6 +47,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The upgrade runbook and the migration guide state the `docker-compose.dev.yml` caveat before the first
   `docker compose` command instead of after it, and name the `openwa` service substitution it needs.
+- `GET /api/health` is documented consistently as withholding `version` from unauthenticated callers.
+
+### Dependencies
+
+- `@bull-board/{api,express,nestjs}` 8.6.1 to 9.3.2 (major), plus a minor/patch group (NestJS 11.2.1,
+  BullMQ 6.2.0, AWS SDK) and a dashboard group (Vite 8.2.2, i18next 26.4.0, lucide-react 1.33).
+
+### Upgrade notes (behavior changes)
+
+- The queue dashboard's obliterate action gained a **force** option in Bull Board 9. Forcing it deletes
+  active jobs as well as queued ones, so those deliveries never reach a final attempt and no
+  `webhook_delivery_failures` row is written for them. Bull Board 8 refused outright while jobs were
+  active. The route stays ADMIN-only behind `BullBoardAuthMiddleware`.
 
 ## [0.23.2] - 2026-08-23
 
