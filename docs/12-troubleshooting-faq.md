@@ -684,13 +684,24 @@ answers `503` and takes the session down with it, and this is just a slow comman
 **Solution:** raise the budget for that deployment.
 
 ```bash
-# 10 minutes, in .env or the environment
-PUPPETEER_PROTOCOL_TIMEOUT_MS=600000
+# 5 minutes, in .env or the environment. Unset means Puppeteer's own 180000.
+PUPPETEER_PROTOCOL_TIMEOUT_MS=300000
 ```
 
-> Do not set it to `0`. The gateway refuses to boot on a non-positive value: Puppeteer only arms
-> its timer for a truthy one, so `0` drops the bound altogether and a wedged renderer will hold the
-> command, and the request waiting on it, forever. A hung request is worse than a failed one.
+Raise it by as little as the account needs, because the budget is also how long a **wedged** browser
+holds a command before the gateway can give up on it. At 300000 that window is five minutes instead
+of three, and for its duration the stuck command holds the logout fence behind it: `start` and
+`delete` for that session answer `409 SESSION_NAME_TEARDOWN_PENDING`, and `forceKill` refuses with
+`400` because the engine was already evicted. There is no measurement in this repo saying how large
+an account has to be before 180000 is too small, so treat any value above it as an escape hatch you
+reached for after seeing the error above, not as a default worth pre-emptively setting.
+
+> Do not set it to `0`, and do not reach for a row of nines. The gateway refuses to boot on either.
+> Puppeteer only arms its timer for a truthy value, so `0` drops the bound altogether and a wedged
+> renderer will hold the command, and the request waiting on it, forever — a hung request is worse
+> than a failed one. Above `2147483647` Node's timer overflows, warns `TimeoutOverflowWarning`, and
+> fires after 1 ms instead, so every command in the launch handshake fails with this same error and
+> the browser never starts.
 
 ### Issue: Media Upload Fails
 

@@ -339,13 +339,12 @@ export class WwebjsLifecycle {
         ...(this.host.config.puppeteer?.executablePath
           ? { executablePath: this.host.config.puppeteer.executablePath }
           : {}),
-        // Per-CDP-command budget, spread only for a POSITIVE value so an unset or malformed config
-        // keeps Puppeteer's own 180 000 ms default rather than being handed a falsy one:
-        // `common/CallbackRegistry.js` arms the timer under `if (timeout)`, so 0 or NaN arms none
-        // and a wedged renderer holds the command — and the request behind it — indefinitely.
-        // A dead page must surface as a 503, never as a hang.
-        ...(typeof this.host.config.puppeteer?.protocolTimeoutMs === 'number' &&
-        this.host.config.puppeteer.protocolTimeoutMs > 0
+        // Per-CDP-command budget, spread only when the host configured one — configuration.ts
+        // leaves it undefined otherwise, and puppeteer-core nullish-coalesces a missing value to
+        // its own 180 000 ms (`cdp/Connection.js`). What must never reach it is a FALSY one:
+        // `common/CallbackRegistry.js` arms the timer under `if (timeout)`, so 0 arms none and a
+        // wedged renderer holds the command, and the request behind it, indefinitely.
+        ...(this.host.config.puppeteer?.protocolTimeoutMs !== undefined
           ? { protocolTimeout: this.host.config.puppeteer.protocolTimeoutMs }
           : {}),
       },

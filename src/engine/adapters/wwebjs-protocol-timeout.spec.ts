@@ -1,12 +1,15 @@
+import { Callback } from 'puppeteer-core/lib/cjs/puppeteer/common/CallbackRegistry.js';
 import { Client } from 'whatsapp-web.js';
+import configuration, { MAX_TIMER_MS } from '../../config/configuration';
+import { validateEnv } from '../../config/env.validation';
 import { WhatsAppWebJsAdapter } from './whatsapp-web-js.adapter';
 
 /**
  * The per-CDP-command budget handed to Puppeteer, and the one error it produces.
  *
- * Two invariants worth pinning: the option must never reach Puppeteer falsy (that arms no timer at
- * all, so a wedged renderer hangs the request — see wwebjs-lifecycle.ts), and a protocol timeout
- * must never be read as a dead page.
+ * Three invariants worth pinning: the value is range-checked before it leaves the config layer,
+ * the option reaches the Client when set and is absent when not, and a protocol timeout is never
+ * read as a dead page. The death signatures themselves are covered in whatsapp-web-js.adapter.spec.
  */
 describe('whatsapp-web.js protocol timeout', () => {
   const SESSION_ID = 'sess-protocol-timeout';
@@ -49,19 +52,50 @@ describe('whatsapp-web.js protocol timeout', () => {
     expect(await launchedPuppeteerOptions(300_000)).toMatchObject({ protocolTimeout: 300_000 });
   });
 
-  it('omits the option when unset, leaving Puppeteer its own 180 000 ms default', async () => {
+  it('omits the option when unset, leaving Puppeteer its own default', async () => {
     const options = await launchedPuppeteerOptions(undefined);
 
-    // Absent, not zero: passing 0 through would DISABLE the timer rather than fall back.
+    // Truly absent: `toHaveProperty` passes on a present-but-undefined key, so this is the check
+    // that the option was never spread rather than spread as undefined.
     expect(options).not.toHaveProperty('protocolTimeout');
   });
 
-  it.each([
-    ['zero', 0],
-    ['negative', -1],
-    ['NaN, e.g. from a malformed env value', Number.NaN],
-  ])('omits the option for a %s value rather than arming no timer', async (_label, value) => {
-    expect(await launchedPuppeteerOptions(value)).not.toHaveProperty('protocolTimeout');
+  describe('the bounds this knob exists to enforce', () => {
+    it('rejects a non-positive or over-range value at boot instead of handing it to Puppeteer', () => {
+      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: '0' })).toThrow(/positive integer/);
+      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: '-1' })).toThrow(/positive integer/);
+      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: 'abc' })).toThrow(/positive integer/);
+      // The row of nines an operator reaches for when the docs forbid 0.
+      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: String(MAX_TIMER_MS + 1) })).toThrow(/must not exceed/);
+      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: '999999999999' })).toThrow(/must not exceed/);
+      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: String(MAX_TIMER_MS) })).not.toThrow();
+      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: '300000' })).not.toThrow();
+    });
+
+    it('leaves the option unset for anything out of range, never falsy', () => {
+      const parsed = (raw?: string): number | undefined => {
+        const saved = process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS;
+        if (raw === undefined) delete process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS;
+        else process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS = raw;
+        try {
+          return (configuration() as { engine: { puppeteer: { protocolTimeoutMs?: number } } }).engine.puppeteer
+            .protocolTimeoutMs;
+        } finally {
+          if (saved === undefined) delete process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS;
+          else process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS = saved;
+        }
+      };
+
+      // A blank compose forward is "unset", not 0.
+      expect(parsed(undefined)).toBeUndefined();
+      expect(parsed('')).toBeUndefined();
+      expect(parsed('0')).toBeUndefined();
+      expect(parsed('-1')).toBeUndefined();
+      expect(parsed('abc')).toBeUndefined();
+      expect(parsed(String(MAX_TIMER_MS + 1))).toBeUndefined();
+      expect(parsed('300000')).toBe(300_000);
+      expect(parsed(String(MAX_TIMER_MS))).toBe(MAX_TIMER_MS);
+    });
   });
 
   describe('the transport classifier', () => {
@@ -77,28 +111,29 @@ describe('whatsapp-web.js protocol timeout', () => {
     };
 
     /**
-     * Verbatim from Puppeteer 24.38.0 `common/CallbackRegistry.js`, where the leading label is the
-     * CDP method name. Pinning the real string is the point: a paraphrase would keep passing while
-     * the message the library actually throws drifted out from under the guard.
+     * Provoked from the INSTALLED puppeteer-core rather than copied from it. The guard exists to
+     * survive a message the library may reshape on a version bump, so a hand-written literal would
+     * keep passing while the real string drifted out from under it — the one drift this test is
+     * here to catch. Driving the real `Callback` is also what shows the label is the bare CDP
+     * method name, with no `Protocol error (...)` prefix for the death pattern to match.
      */
-    const PUPPETEER_PROTOCOL_TIMEOUT =
-      "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.";
+    const puppeteerProtocolTimeoutMessage = async (): Promise<string> => {
+      const callback = new Callback(1, 'Runtime.callFunctionOn', 1);
+      try {
+        await callback.promise;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+      throw new Error('puppeteer-core did not reject on an expired protocolTimeout');
+    };
 
-    it('does not treat a protocol timeout as a dead page', () => {
-      // The renderer is slower than the budget, not gone — the next command may well succeed.
-      // Reporting death here would tear down a live session and answer 503 for a working page.
-      expect(classify(PUPPETEER_PROTOCOL_TIMEOUT)).toBe(false);
-    });
+    it('does not treat a protocol timeout as a dead page', async () => {
+      const message = await puppeteerProtocolTimeoutMessage();
 
-    it.each([
-      'Protocol error (Runtime.callFunctionOn): Session closed.',
-      'Protocol error (Page.navigate): Target closed',
-      'Attempted to use detached Frame',
-      'Connection closed',
-    ])('still reports a genuine transport death: %s', message => {
-      // The 503-on-dead-page contract, pinned from the other side: narrowing the classifier for
-      // timeouts must not cost a single real death signature.
-      expect(classify(message)).toBe(true);
+      // Guard the guard: if a bump ever drops the phrase this classifier keys on, fail here rather
+      // than silently start reporting slow reads as deaths.
+      expect(message).toMatch(/timed out\. Increase the 'protocolTimeout'/);
+      expect(classify(message)).toBe(false);
     });
 
     it('reports a death whose message also mentions a timeout', () => {
