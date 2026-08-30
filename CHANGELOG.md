@@ -9,27 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `PUPPETEER_PROTOCOL_TIMEOUT_MS` sets how long a single browser command may take on the
-  whatsapp-web.js engine. A read that walks the whole store, such as
-  `GET /sessions/{sessionId}/chats` on an account with thousands of chats, can run past Puppeteer's
-  budget and fail with `Runtime.callFunctionOn timed out` while the renderer is still working, and
-  until now there was no way to raise it short of patching the dependency. Left unset it stays at
-  Puppeteer's own budget (180 000 ms today), so an upgrade changes nothing for a deployment that
-  does not set it; raise
-  it only after seeing that error, since raising it is also how long a wedged browser holds a command
-  before the gateway can give up on it. The value must be a positive integer no greater than
-  2 147 483 647, rejected at boot on both ends: Puppeteer only arms its timer for a truthy value, so
-  `0` drops the bound instead of raising it and lets a wedged renderer hold the request forever,
-  while above 2 147 483 647 Node's timer overflows and fires after 1 ms, so the browser never
-  finishes launching.
+- `PUPPETEER_PROTOCOL_TIMEOUT_MS` raises the per-browser-command budget on the whatsapp-web.js
+  engine, for large accounts whose reads fail with `Runtime.callFunctionOn timed out`. Unset keeps
+  Puppeteer's own budget, so nothing changes for a deployment that does not set it. The gateway
+  refuses to boot on `0` or on a value above 2147483647; see docs/12 for when to reach for it.
 
 ### Changed
 
-- The whatsapp-web.js transport classifier now rules out a protocol timeout explicitly. That
-  message carries no transport-death signature on the current Puppeteer, so nothing was
-  misreporting it and behaviour is unchanged; the point is the spec, which pins the invariant in
-  both directions against the message the installed Puppeteer actually throws, so a future bump
-  cannot start reading a slow command as a dead page.
+- A whatsapp-web.js protocol timeout is no longer eligible to be classified as a dead page.
+  Behaviour is unchanged on the current Puppeteer; the guard keeps a future bump from reporting a
+  slow command as a transport death.
 
 ## [0.23.3] - 2026-08-24
 

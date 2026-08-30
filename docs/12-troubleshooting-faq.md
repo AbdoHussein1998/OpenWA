@@ -688,13 +688,13 @@ answers `503` and takes the session down with it, and this is just a slow comman
 PUPPETEER_PROTOCOL_TIMEOUT_MS=300000
 ```
 
-Raise it by as little as the account needs, because the budget is also how long a **wedged** browser
-holds a command before the gateway can give up on it. At 300000 that window is five minutes instead
-of three, and for its duration the stuck command holds the logout fence behind it: `start` and
-`delete` for that session answer `409 SESSION_NAME_TEARDOWN_PENDING`, and `forceKill` refuses with
-`400` because the engine was already evicted. There is no measurement in this repo saying how large
-an account has to be before 180000 is too small, so treat any value above it as an escape hatch you
-reached for after seeing the error above, not as a default worth pre-emptively setting.
+Raise it by as little as the account needs. The budget bounds a command that is slow but still
+running; it is not what protects you from a **wedged** browser. A page that stops answering is
+caught by the liveness watchdog, which probes every 60 s with a 15 s timeout and treats two
+consecutive failures as a disconnect, so a wedge is picked up in roughly 75 to 135 s whatever this
+value is. There is no measurement in this repo saying how large an account has to be before 180000
+is too small, so treat any value above it as an escape hatch you reached for after seeing the error
+above, not as a default worth pre-emptively setting.
 
 > Do not set it to `0`, and do not reach for a row of nines. The gateway refuses to boot on either.
 > Puppeteer only arms its timer for a truthy value, so `0` drops the bound altogether and a wedged
