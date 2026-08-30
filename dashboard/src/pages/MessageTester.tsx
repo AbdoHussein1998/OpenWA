@@ -65,6 +65,7 @@ const mediaAccept: Record<(typeof messageTypes)[number], string> = {
   poll: '*/*',
   forward: '*/*',
   bulk: '*/*',
+  template: '*/*',   
 };
 
 // Fallback MIME for when the browser leaves File.type empty (some extensions). The backend requires a
@@ -81,6 +82,7 @@ const fallbackMime: Record<(typeof messageTypes)[number], string> = {
   poll: 'application/octet-stream',
   forward: 'application/octet-stream',
   bulk: 'application/octet-stream',
+  template: 'application/octet-stream',   
 };
 
 // Client pre-check before base64-encoding an upload. Aligned with the default request-body limit: base64
