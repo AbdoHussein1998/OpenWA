@@ -4,10 +4,12 @@ import { Send, CheckCircle, XCircle, Loader2, Upload, X, Plus } from 'lucide-rea
 import {
   messageApi,
   contactApi,
+  templateApi,
   type SendMediaPayload,
   type MessageResponse,
   type BatchStatus,
   type BatchStatusResponse,
+  type MessageTemplate,
 } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useRole } from '../hooks/useRole';
@@ -15,6 +17,8 @@ import { useSessionsQuery, useSessionGroupsQuery } from '../hooks/queries';
 import { parseBulkRecipients, BULK_MAX_RECIPIENTS } from '../utils/bulkRecipients';
 import { PageHeader } from '../components/PageHeader';
 import './MessageTester.css';
+
+
 
 interface ApiResponse {
   success: boolean;
@@ -41,6 +45,8 @@ const messageTypes = [
   'poll',
   'forward',
   'bulk',
+  'template',
+
 ] as const;
 
 // The types that share the media upload/URL block (base64 XOR url + mimetype).
@@ -99,6 +105,54 @@ export function MessageTester() {
   const [messageType, setMessageType] = useState<(typeof messageTypes)[number]>('text');
   const [content, setContent] = useState('');
   const [mediaUrl, setMediaUrl] = useState('');
+  const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+
+
+
+
+  useEffect(() => {
+    if (!session) {
+      setTemplates([]);
+      setSelectedTemplate('');
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadTemplates = async () => {
+      setLoadingTemplates(true);
+
+      try {
+        const result = await templateApi.list(session);
+
+        if (!cancelled) {
+          setTemplates(result);
+        }
+      } catch {
+        if (!cancelled) {
+          setTemplates([]);
+          setSelectedTemplate('');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingTemplates(false);
+        }
+      }
+    };
+
+    loadTemplates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+
+
+
+
   // A locally-picked media file, read as raw base64 (the engine contract — NOT a data: URI). Mutually
   // exclusive with mediaUrl: picking a file clears the URL field; typing a URL drops the file.
   const [mediaFile, setMediaFile] = useState<{ base64: string; mimetype: string; filename: string } | null>(null);
@@ -262,7 +316,9 @@ export function MessageTester() {
       bulkRecipientList.length > 0 &&
       bulkRecipientList.length <= BULK_MAX_RECIPIENTS &&
       (delayMs === undefined || (!Number.isNaN(delayMs) && delayMs >= 1000 && delayMs <= 60000));
-  }
+  }else if (messageType === 'template') {
+  formValid = selectedTemplate.length > 0;
+}
 
   const isSendDisabled =
     !canWrite ||
@@ -395,6 +451,12 @@ export function MessageTester() {
           });
           break;
         }
+        case 'template':
+        result = await messageApi.sendTemplate(session, {
+          chatId,
+          templateId: selectedTemplate,
+        });
+        break;
         default:
           throw new Error(`Unsupported message type: ${messageType}`);
       }
@@ -560,6 +622,36 @@ export function MessageTester() {
               />
             </div>
           )}
+
+          {messageType === 'template' && (
+            <div className="form-group">
+              <label htmlFor="mt-template">
+                Template
+              </label>
+
+              <select
+                id="mt-template"
+                value={selectedTemplate}
+                onChange={e => setSelectedTemplate(e.target.value)}
+                disabled={loadingTemplates || templates.length === 0}
+              >
+                <option value="">
+                  {loadingTemplates
+                    ? 'Loading templates...'
+                    : templates.length === 0
+                      ? 'No templates available'
+                      : 'Select a template'}
+                </option>
+
+                {templates.map(template => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
 
           {isMediaMessageType && (
             <>
