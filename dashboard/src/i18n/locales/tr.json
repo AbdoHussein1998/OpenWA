@@ -614,7 +614,7 @@
       "poll": "Anket",
       "forward": "İlet",
       "bulk": "Toplu",
-          "templates": "Şablonlar"
+      "template": "Şablonlar"
 
     },
     "messageContent": "Mesaj İçeriği",
