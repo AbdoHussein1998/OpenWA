@@ -8,6 +8,7 @@ import {
 } from '../interfaces/whatsapp-engine.interface';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { type createLogger } from '../../common/services/logger.service';
+import { MAX_TIMER_MS } from '../../config/configuration';
 import { resolveWebVersionPin } from '../wa-web-version';
 import { resolveAuthTimeoutMs, resolveEngineInitTimeoutMs } from '../engine-init-timeout';
 import { killOrphanedChromiumProcesses, removeStaleSingletonFiles } from './chromium-profile-hygiene';
@@ -318,6 +319,19 @@ export class WwebjsLifecycle {
     proxyAuthentication: { username: string; password: string } | undefined,
     versionPin: Awaited<ReturnType<typeof resolveWebVersionPin>>,
   ): Promise<void> {
+    // Range-checked at the sink, not only in configuration.ts: a plugin config written through
+    // `PUT /api/plugins/whatsapp-web.js/config` is validated as an object and merged over the env
+    // blob at every boot, so it can carry a value the config layer never saw. Both bounds are
+    // load-bearing. `common/CallbackRegistry.js` arms the timer under `if (timeout)`, so 0 arms
+    // none and a wedged renderer holds the command, and the request behind it, indefinitely; above
+    // MAX_TIMER_MS Node's timer overflows and fires after 1 ms, so the browser never launches.
+    const configuredProtocolTimeout = this.host.config.puppeteer?.protocolTimeoutMs;
+    const protocolTimeout =
+      typeof configuredProtocolTimeout === 'number' &&
+      configuredProtocolTimeout > 0 &&
+      configuredProtocolTimeout <= MAX_TIMER_MS
+        ? configuredProtocolTimeout
+        : undefined;
     const client = new Client({
       authStrategy: new LocalAuth({
         clientId: this.host.config.sessionId,
@@ -339,14 +353,9 @@ export class WwebjsLifecycle {
         ...(this.host.config.puppeteer?.executablePath
           ? { executablePath: this.host.config.puppeteer.executablePath }
           : {}),
-        // Per-CDP-command budget, spread only when the host configured one — configuration.ts
-        // leaves it undefined otherwise, and puppeteer-core nullish-coalesces a missing value to
-        // its own 180 000 ms (`cdp/Connection.js`). What must never reach it is a FALSY one:
-        // `common/CallbackRegistry.js` arms the timer under `if (timeout)`, so 0 arms none and a
-        // wedged renderer holds the command, and the request behind it, indefinitely.
-        ...(this.host.config.puppeteer?.protocolTimeoutMs !== undefined
-          ? { protocolTimeout: this.host.config.puppeteer.protocolTimeoutMs }
-          : {}),
+        // Per-CDP-command budget, spread only when the host configured a usable one (see above).
+        // Absent, puppeteer-core nullish-coalesces to its own 180 000 ms (`cdp/Connection.js`).
+        ...(protocolTimeout !== undefined ? { protocolTimeout } : {}),
       },
       ...(authTimeoutMs !== undefined ? { authTimeoutMs } : {}),
       ...(proxyAuthentication ? { proxyAuthentication } : {}),

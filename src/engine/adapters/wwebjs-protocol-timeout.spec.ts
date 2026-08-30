@@ -60,6 +60,16 @@ describe('whatsapp-web.js protocol timeout', () => {
     expect(options).not.toHaveProperty('protocolTimeout');
   });
 
+  it('omits the option for a value configuration.ts would never produce', async () => {
+    // The config layer is not the only writer: a plugin config (PUT /api/plugins/{id}/config) is
+    // validated as an object and merged over the env blob at boot, so the sink enforces the bounds
+    // too. 0 arms no timer at all; over MAX_TIMER_MS overflows Node's and fires after 1 ms.
+    expect(await launchedPuppeteerOptions(0)).not.toHaveProperty('protocolTimeout');
+    expect(await launchedPuppeteerOptions(-1)).not.toHaveProperty('protocolTimeout');
+    expect(await launchedPuppeteerOptions(MAX_TIMER_MS + 1)).not.toHaveProperty('protocolTimeout');
+    expect(await launchedPuppeteerOptions(MAX_TIMER_MS)).toMatchObject({ protocolTimeout: MAX_TIMER_MS });
+  });
+
   describe('the bounds this knob exists to enforce', () => {
     it('rejects a non-positive or over-range value at boot instead of handing it to Puppeteer', () => {
       expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: '0' })).toThrow(/positive integer/);
@@ -134,6 +144,11 @@ describe('whatsapp-web.js protocol timeout', () => {
       // than silently start reporting slow reads as deaths.
       expect(message).toMatch(/timed out\. Increase the 'protocolTimeout'/);
       expect(classify(message)).toBe(false);
+
+      // The case that makes the carve-out load-bearing rather than decorative: puppeteer's own
+      // `_reject` formats a rejected command as `Protocol error (label): message`, which the death
+      // pattern matches. Without the carve-out this reads as a dead page.
+      expect(classify(`Protocol error (Runtime.callFunctionOn): ${message}`)).toBe(false);
     });
 
     it('reports a death whose message also mentions a timeout', () => {
