@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Behaviour is unchanged on the current Puppeteer; the guard keeps a future bump from reporting a
   slow command as a transport death.
 
+### Fixed
+
+- Inbound media whose download fails now keeps the `media` envelope with `omitted: true` and the declared
+  size, on both engines, instead of dropping the field and looking like a message that never had media.
+- Webhook filters and automation rules gated on `hasMedia` now match those messages.
+- Baileys logs a failed inbound media download at `warn` instead of `debug`, so it is visible by default.
+
 ## [0.23.3] - 2026-08-24
 
 ### Added
