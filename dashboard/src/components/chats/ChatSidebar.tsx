@@ -1,21 +1,58 @@
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, CircleDashed, Loader2, Megaphone, Plus, Search } from 'lucide-react';
+import {
+  AlertCircle,
+  CircleDashed,
+  Loader2,
+  Megaphone,
+  Plus,
+  Search,
+} from 'lucide-react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import type { Channel, Chat, ContactStatusGroup, Session } from '../../services/api';
+import type {
+  Channel,
+  Chat,
+  ContactStatusGroup,
+  Session,
+} from '../../services/api';
 import ChatAvatar from './ChatAvatar';
 
 export type ChatsTab = 'chats' | 'channels' | 'status';
 
 interface ChatSidebarProps {
   sessions: Session[];
+
   selectedSessionId: string;
+
+  /**
+   * Existing Chats page uses this to change the active session.
+   *
+   * In lockedSession mode, the callback is still accepted for backward
+   * compatibility but the session selector is not rendered.
+   */
   onSelectSession: (sessionId: string) => void;
+
+  /**
+   * Optional SPG mode.
+   *
+   * false / undefined:
+   *   Existing Chats behavior. User can switch sessions.
+   *
+   * true:
+   *   Session is locked to selectedSessionId and the session selector
+   *   is hidden.
+   */
+  lockedSession?: boolean;
+
   activeTab: ChatsTab;
   onSwitchTab: (tab: ChatsTab) => void;
+
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
+
   onComposeStatus: () => void;
+
   formatChatTime: (timestamp?: number) => string;
+
   chatsTab: {
     loading: boolean;
     chats: Chat[];
@@ -23,6 +60,7 @@ interface ChatSidebarProps {
     pictures?: Record<string, string | null>;
     onSelectChat: (chat: Chat) => void;
   };
+
   channelsTab: {
     engineLoading: boolean;
     supported: boolean;
@@ -31,6 +69,7 @@ interface ChatSidebarProps {
     activeChannelId?: string;
     onSelectChannel: (channel: Channel) => void;
   };
+
   statusTab: {
     loading: boolean;
     error: boolean;
@@ -40,12 +79,22 @@ interface ChatSidebarProps {
   };
 }
 
-// LEFT SIDEBAR: session selector, Chats/Channels/Status tab bar, search, and the per-tab lists.
-// The page owns all queries/state; this component renders them and reports interactions up.
+// LEFT SIDEBAR:
+// - session selector when unlocked
+// - Chats / Channels / Status tab bar
+// - search
+// - per-tab lists
+//
+// The page owns all queries/state; this component renders them and reports
+// interactions up.
+//
+// `lockedSession` is optional so the normal Chats page keeps its existing
+// behavior unchanged.
 function ChatSidebar({
   sessions,
   selectedSessionId,
   onSelectSession,
+  lockedSession = false,
   activeTab,
   onSwitchTab,
   searchQuery,
@@ -60,11 +109,10 @@ function ChatSidebar({
 
   const formatLastMessageSnippet = (chat: Chat) => chat.lastMessage || '';
 
-  // Shared row markup for the Chats and Status lists — a plain function (not memoized) since it
-  // closes over render-scoped props (chatsTab.activeChatId, chatsTab.pictures) that already
-  // change every render.
+  // Shared row markup for the Chats and Status lists.
   const renderChatRow = (chat: Chat) => {
     const isActive = chatsTab.activeChatId === chat.id;
+
     return (
       <div
         key={chat.id}
@@ -80,30 +128,54 @@ function ChatSidebar({
           }
         }}
       >
-        <ChatAvatar pictureUrl={chatsTab.pictures?.[chat.id]} kind={chat.kind} />
+        <ChatAvatar
+          pictureUrl={chatsTab.pictures?.[chat.id]}
+          kind={chat.kind}
+        />
 
         <div className="chat-item-info">
           <div className="chat-item-top">
-            <span className="chat-item-name" title={chat.name || chat.id}>
+            <span
+              className="chat-item-name"
+              title={chat.name || chat.id}
+            >
               {chat.name || chat.id.split('@')[0]}
             </span>
+
             {chat.kind !== 'individual' && chat.kind !== 'unknown' && (
-              <span className={`chat-kind-badge kind-${chat.kind}`}>{t(`chats.kind.${chat.kind}`)}</span>
+              <span className={`chat-kind-badge kind-${chat.kind}`}>
+                {t(`chats.kind.${chat.kind}`)}
+              </span>
             )}
-            {/* Ternary, not `&&`: a chat with no messages carries timestamp 0, and React
-                renders the number 0 as text — so `0 && <span/>` painted a literal "0"
-                where the time belongs, on every such row. */}
-            {chat.timestamp ? <span className="chat-item-time">{formatChatTime(chat.timestamp)}</span> : null}
+
+            {chat.timestamp ? (
+              <span className="chat-item-time">
+                {formatChatTime(chat.timestamp)}
+              </span>
+            ) : null}
           </div>
+
           <div className="chat-item-bottom">
-            <span className="chat-item-snippet" title={formatLastMessageSnippet(chat)}>
-              {formatLastMessageSnippet(chat) || <span className="no-message">{t('chats.noMessageYet')}</span>}
+            <span
+              className="chat-item-snippet"
+              title={formatLastMessageSnippet(chat)}
+            >
+              {formatLastMessageSnippet(chat) || (
+                <span className="no-message">
+                  {t('chats.noMessageYet')}
+                </span>
+              )}
             </span>
+
             {chat.unreadCount > 0 && (
               <span
                 className="chat-unread-badge"
-                title={t('chats.unreadBadge', { count: chat.unreadCount })}
-                aria-label={t('chats.unreadBadge', { count: chat.unreadCount })}
+                title={t('chats.unreadBadge', {
+                  count: chat.unreadCount,
+                })}
+                aria-label={t('chats.unreadBadge', {
+                  count: chat.unreadCount,
+                })}
               >
                 {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
               </span>
@@ -117,26 +189,41 @@ function ChatSidebar({
   return (
     <aside className="chats-sidebar">
       <div className="sidebar-header-box">
-        {/* Session selector */}
-        <div className="session-select-group">
-          <label className="form-label" htmlFor="csb-1">
-            {t('chats.sessionLabel')}
-          </label>
-          <select
-            id="csb-1"
-            value={selectedSessionId}
-            onChange={e => onSelectSession(e.target.value)}
-            className="session-selector"
-          >
-            {sessions.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.name} ({s.phone || t('chats.noPhone')})
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* ============================================================
+            SESSION SELECTOR
 
-        {/* Chats / Channels / Status tabs */}
+            Existing Chats page:
+              lockedSession === false
+                -> render the normal session selector.
+
+            SPG:
+              lockedSession === true
+                -> do not render selector.
+            ============================================================ */}
+        {!lockedSession && (
+          <div className="session-select-group">
+            <label className="form-label" htmlFor="csb-1">
+              {t('chats.sessionLabel')}
+            </label>
+
+            <select
+              id="csb-1"
+              value={selectedSessionId}
+              onChange={e => onSelectSession(e.target.value)}
+              className="session-selector"
+            >
+              {sessions.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.phone || t('chats.noPhone')})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* ============================================================
+            CHATS / CHANNELS / STATUS
+            ============================================================ */}
         <div className="chats-tabs" role="tablist">
           {(['chats', 'channels', 'status'] as const).map(tab => (
             <button
@@ -144,7 +231,9 @@ function ChatSidebar({
               type="button"
               role="tab"
               aria-selected={activeTab === tab}
-              className={`chats-tab ${activeTab === tab ? 'active' : ''}`}
+              className={`chats-tab ${
+                activeTab === tab ? 'active' : ''
+              }`}
               onClick={() => onSwitchTab(tab)}
             >
               {t(`chats.tab.${tab}`)}
@@ -152,9 +241,12 @@ function ChatSidebar({
           ))}
         </div>
 
-        {/* Search bar */}
+        {/* ============================================================
+            SEARCH
+            ============================================================ */}
         <div className="chat-search-input">
           <Search size={18} />
+
           <input
             type="text"
             placeholder={t('chats.searchPlaceholder')}
@@ -163,16 +255,24 @@ function ChatSidebar({
           />
         </div>
 
-        {/* Compose a new status — only meaningful on the Status tab. */}
+        {/* ============================================================
+            STATUS COMPOSE
+            ============================================================ */}
         {activeTab === 'status' && (
-          <button type="button" className="btn-primary status-compose-trigger" onClick={onComposeStatus}>
+          <button
+            type="button"
+            className="btn-primary status-compose-trigger"
+            onClick={onComposeStatus}
+          >
             <Plus size={16} />
             {t('chats.status.compose')}
           </button>
         )}
       </div>
 
-      {/* Chat list */}
+      {/* ================================================================
+          CHAT LIST
+          ================================================================ */}
       {activeTab === 'chats' && (
         <div className="chats-list">
           {chatsTab.loading ? (
@@ -190,9 +290,9 @@ function ChatSidebar({
         </div>
       )}
 
-      {/* Channels list — wwjs-only (newsletter/channel API isn't implemented on Baileys, which
-          throws 501 for both listing and reading). channelsQuery is gated off entirely on that
-          engine, so the branch order below never depends on a request having actually run. */}
+      {/* ================================================================
+          CHANNELS LIST
+          ================================================================ */}
       {activeTab === 'channels' && (
         <div className="chats-list">
           {channelsTab.engineLoading ? (
@@ -222,8 +322,16 @@ function ChatSidebar({
                 key={ch.id}
                 role="button"
                 tabIndex={0}
-                aria-current={channelsTab.activeChannelId === ch.id ? 'true' : undefined}
-                className={`chat-item-card ${channelsTab.activeChannelId === ch.id ? 'active' : ''}`}
+                aria-current={
+                  channelsTab.activeChannelId === ch.id
+                    ? 'true'
+                    : undefined
+                }
+                className={`chat-item-card ${
+                  channelsTab.activeChannelId === ch.id
+                    ? 'active'
+                    : ''
+                }`}
                 onClick={() => channelsTab.onSelectChannel(ch)}
                 onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -235,14 +343,20 @@ function ChatSidebar({
                 <div className="chat-avatar">
                   <Megaphone size={20} />
                 </div>
+
                 <div className="chat-item-info">
                   <div className="chat-item-top">
-                    <span className="chat-item-name">{ch.name}</span>
+                    <span className="chat-item-name">
+                      {ch.name}
+                    </span>
                   </div>
+
                   {ch.subscriberCount != null && (
                     <div className="chat-item-bottom">
                       <span className="chat-item-snippet">
-                        {t('chats.channels.subscribers', { count: ch.subscriberCount })}
+                        {t('chats.channels.subscribers', {
+                          count: ch.subscriberCount,
+                        })}
                       </span>
                     </div>
                   )}
@@ -253,8 +367,9 @@ function ChatSidebar({
         </div>
       )}
 
-      {/* Status list — per-contact status groups read from the 24h store. Not engine-gated:
-          both engines now have status content. */}
+      {/* ================================================================
+          STATUS LIST
+          ================================================================ */}
       {activeTab === 'status' && (
         <div className="chats-list">
           {statusTab.loading ? (
@@ -276,9 +391,19 @@ function ChatSidebar({
                 key={group.contact.id}
                 role="button"
                 tabIndex={0}
-                aria-current={statusTab.activeContactId === group.contact.id ? 'true' : undefined}
-                className={`chat-item-card ${statusTab.activeContactId === group.contact.id ? 'active' : ''}`}
-                onClick={() => statusTab.onSelectContact(group.contact.id)}
+                aria-current={
+                  statusTab.activeContactId === group.contact.id
+                    ? 'true'
+                    : undefined
+                }
+                className={`chat-item-card ${
+                  statusTab.activeContactId === group.contact.id
+                    ? 'active'
+                    : ''
+                }`}
+                onClick={() =>
+                  statusTab.onSelectContact(group.contact.id)
+                }
                 onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
@@ -289,18 +414,30 @@ function ChatSidebar({
                 <div className="chat-avatar">
                   <CircleDashed size={20} />
                 </div>
+
                 <div className="chat-item-info">
                   <div className="chat-item-top">
                     <span className="chat-item-name">
-                      {group.contact.name ?? group.contact.pushName ?? group.contact.id}
+                      {group.contact.name ??
+                        group.contact.pushName ??
+                        group.contact.id}
                     </span>
+
                     <span className="chat-item-time">
-                      {formatChatTime(Math.floor(new Date(group.latest).getTime() / 1000))}
+                      {formatChatTime(
+                        Math.floor(
+                          new Date(group.latest).getTime() /
+                            1000,
+                        ),
+                      )}
                     </span>
                   </div>
+
                   <div className="chat-item-bottom">
                     <span className="chat-item-snippet">
-                      {t('chats.status.itemCount', { count: group.items.length })}
+                      {t('chats.status.itemCount', {
+                        count: group.items.length,
+                      })}
                     </span>
                   </div>
                 </div>

@@ -23,6 +23,7 @@ const ApiKeys = lazy(() => import('./pages/ApiKeys').then(m => ({ default: m.Api
 const MessageTester = lazy(() => import('./pages/MessageTester').then(m => ({ default: m.MessageTester })));
 const Infrastructure = lazy(() => import('./pages/Infrastructure').then(m => ({ default: m.Infrastructure })));
 const Plugins = lazy(() => import('./pages/Plugins'));
+const SpgAgents = lazy(() => import('./pages/SpgAgents').then(m => ({ default: m.SpgAgents })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -120,6 +121,8 @@ function AppContent() {
               {role === 'admin' && <Route path="infrastructure" element={<Infrastructure />} />}
               {role === 'admin' && <Route path="plugins" element={<Plugins />} />}
               <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="spg-agents" element={<SpgAgents />} />
+
             </Route>
           </Routes>
         </Suspense>

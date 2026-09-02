@@ -1,0 +1,239 @@
+/* src/pages/SpgAgents.css */
+
+/* ============================================================
+   PAGE SHELL — scrolls now so chat + session card can stack
+   ============================================================ */
+
+.spg-agents-page {
+  padding: 2rem;
+  width: 100%;
+  height: calc(100vh - 4rem);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  gap: 1.5rem;
+  overflow-y: auto;   /* was `hidden` — this was clipping the chat box */
+  overflow-x: hidden;
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+
+.spg-agents-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.spg-agents-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary, #111827);
+}
+
+.spg-agents-header p {
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.9rem;
+}
+
+/* ============================================================
+   PHONE SEARCH + STATES
+   ============================================================ */
+
+.spg-search-section {
+  background: var(--bg-white, #ffffff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  flex-shrink: 0;
+}
+
+.spg-search-error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #fef2f2;
+  color: #dc2626;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.spg-loading-state,
+.spg-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem;
+  text-align: center;
+  color: var(--text-muted, #9ca3af);
+  background: var(--bg-white, #ffffff);
+  border: 1px dashed var(--border, #e5e7eb);
+  border-radius: 12px;
+}
+
+.spg-empty-state h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--text-primary, #111827);
+}
+
+.spg-empty-state p {
+  margin: 0;
+  max-width: 400px;
+}
+
+/* ============================================================
+   WORKSPACE GRID — chat on top (fixed usable height),
+   session card below (reachable by scrolling)
+   ============================================================ */
+
+.spg-workspace {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto;
+  gap: 1.5rem;
+  width: 100%;
+  flex: 1 0 auto;  /* grow to fill, never shrink below content */
+  min-height: 0;
+}
+
+.spg-chat-grid-item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* Chat always fills the viewport; the session card sits below the fold.
+     The floor guarantees it can NEVER collapse to 0 again. */
+  height: calc(100vh - 16rem);
+  min-height: 480px;
+}
+
+.spg-session-grid-item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.spg-session-grid-item .session-card {
+  width: 20%;
+}
+
+/* ============================================================
+   SESSION TOOLBAR (pill + rounded remove button)
+   ============================================================ */
+
+.spg-session-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  flex-shrink: 0;
+}
+
+.spg-session-toolbar-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  background-color: var(--bg-light, #f9fafb);
+  padding: 0.5rem 0.5rem 0.5rem 1rem;
+  border-radius: 9999px;
+  width: auto;
+  border: 1px solid var(--border, #e5e7eb);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.spg-session-toolbar-label {
+  font-weight: 600;
+  color: var(--text-secondary, #4b5563);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.spg-session-toolbar-phone {
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+  font-size: 0.9375rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.spg-remove-session-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  background-color: var(--bg-white, #ffffff);
+  color: var(--text-muted, #6b7280);
+  border: 1px solid var(--border, #e5e7eb);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.spg-remove-session-btn:hover {
+  background-color: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+  transform: scale(1.05);
+}
+
+.spg-remove-session-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ============================================================
+   OVERRIDE: fit shared .chats-layout into the chat grid item
+   (cancels Chats.css fixed height + margin-top)
+   ============================================================ */
+
+.spg-agents-page.chats-page .chats-layout {
+  height: 100%;
+  margin-top: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .spg-agents-page {
+    padding: 1rem;
+    height: auto;
+    min-height: calc(100vh - 2rem);
+    gap: 1rem;
+  }
+
+  .spg-agents-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .spg-search-section {
+    padding: 1rem;
+  }
+
+  .spg-workspace {
+    gap: 1rem;
+  }
+
+  .spg-chat-grid-item {
+    height: 60vh;
+    min-height: 420px;
+  }
+}

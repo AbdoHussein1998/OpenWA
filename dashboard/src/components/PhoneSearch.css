@@ -1,0 +1,137 @@
+/* src/components/PhoneSearch.css */
+
+.phone-search {
+  width: 100%;
+}
+
+.phone-search-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+
+  padding: 0.25rem;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.phone-search-wrapper:focus-within {
+  border-color: var(--primary);
+  background: var(--bg-white);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+}
+
+.phone-search-wrapper.has-error {
+  border-color: var(--error-text, #ef4444);
+}
+
+.phone-search-icon {
+  margin-left: 0.625rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.phone-search-wrapper input {
+  flex: 1;
+  min-width: 0;
+
+  padding: 0.625rem 0.5rem;
+
+  border: none;
+  outline: none;
+  background: transparent;
+
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.phone-search-wrapper input::placeholder {
+  color: var(--text-muted);
+}
+
+.phone-search-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+
+  min-height: 38px;
+  padding: 0.625rem 1rem;
+
+  border: none;
+  border-radius: var(--radius, 8px);
+
+  background: var(--primary);
+  color: white;
+
+  font-size: 0.875rem;
+  font-weight: 600;
+
+  cursor: pointer;
+  flex-shrink: 0;
+
+  transition:
+    background 0.2s ease,
+    transform 0.1s ease,
+    opacity 0.2s ease;
+}
+
+.phone-search-button:hover:not(:disabled) {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+.phone-search-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.phone-search-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.phone-search-error {
+  display: block;
+  margin-top: 0.375rem;
+
+  color: var(--error-text, #dc2626);
+  font-size: 0.75rem;
+}
+
+.phone-search-hint {
+  margin: 0.5rem 0 0;
+
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.phone-search-spinner {
+  width: 16px;
+  height: 16px;
+
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: white;
+  border-radius: 50%;
+
+  animation: phone-search-spin 0.7s linear infinite;
+}
+
+@keyframes phone-search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 600px) {
+  .phone-search-button {
+    padding-inline: 0.75rem;
+  }
+
+  .phone-search-button svg {
+    display: none;
+  }
+}
