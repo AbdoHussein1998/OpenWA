@@ -7,6 +7,7 @@ import { PluginContext, PluginType, IEnginePlugin } from '../../../core/plugins'
 import { IWhatsAppEngine } from '../../interfaces/whatsapp-engine.interface';
 import { WhatsAppWebJsAdapter } from '../../adapters/whatsapp-web-js.adapter';
 import { LidMappingStore } from '../../identity/lid-mapping-store.service';
+import { BraveProfileManager } from '../../brave/brave-profile.manager';
 
 export class WhatsAppWebJsPlugin implements IEnginePlugin {
   type = PluginType.ENGINE as const;
@@ -41,37 +42,90 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
   createEngine(config: Record<string, unknown>): IWhatsAppEngine {
     const sessionId = config.sessionId as string;
     const proxyUrl = config.proxyUrl as string | undefined;
-    const proxyType = config.proxyType as 'http' | 'https' | 'socks4' | 'socks5' | undefined;
+    const proxyType =
+      config.proxyType as 'http' | 'https' | 'socks4' | 'socks5' | undefined;
 
-    // Browser config is this engine's OWN namespace, read from the opaque per-engine blob the
-    // factory supplies via context.config (the `engine` sub-tree in configuration.ts). The
-    // per-call config carries only engine-neutral fields (sessionId, proxy).
+    // Browser config is this engine's OWN namespace, read from the opaque per-engine blob
+    // supplied through context.config / registeredConfig.
     const engineConfig = (this.context?.config ?? this.registeredConfig ?? {}) as {
       sessionDataPath?: string;
-      puppeteer?: { headless?: boolean; args?: string[]; executablePath?: string; protocolTimeoutMs?: number };
+
+      puppeteer?: {
+        headless?: boolean;
+        args?: string[];
+        executablePath?: string;
+        protocolTimeoutMs?: number;
+      };
+
+      brave?: {
+        executablePath?: string;
+        profileBasePath?: string;
+      };
     };
+
     const puppeteer = engineConfig.puppeteer ?? {};
-    const sessionDataPath = engineConfig.sessionDataPath ?? './data/sessions';
-    const headless = puppeteer.headless ?? true;
-    const puppeteerArgs = puppeteer.args ?? ['--no-sandbox', '--disable-setuid-sandbox'];
-    const executablePath = puppeteer.executablePath;
-    const protocolTimeoutMs = puppeteer.protocolTimeoutMs;
+
+    const sessionDataPath =
+      engineConfig.sessionDataPath ?? './data/sessions';
+
+    const headless =
+      puppeteer.headless ?? true;
+
+    const puppeteerArgs =
+      puppeteer.args ?? ['--no-sandbox', '--disable-setuid-sandbox'];
+
+    const executablePath =
+      puppeteer.executablePath;
+
+    const protocolTimeoutMs =
+      puppeteer.protocolTimeoutMs;
+
+    const brave = engineConfig.brave ?? {};
+
+    // Prefer the explicit Brave executable path.
+    // Fall back to the legacy Puppeteer executable path, then the default Linux Brave path.
+    const braveExecutablePath =
+      brave.executablePath ??
+      puppeteer.executablePath ??
+      '/usr/bin/brave';
+
+    // One persistent Brave profile root shared by sessions.
+    // Each session gets:
+    //   <baseProfilePath>/<sessionId>
+    const braveProfileBasePath =
+      brave.profileBasePath ??
+      '/data/brave-profiles';
+
+    // The profile manager is responsible for creating, resolving,
+    // cleaning and deleting session-specific Brave profiles.
+    const braveProfileManager =
+      new BraveProfileManager(braveProfileBasePath);
 
     return new WhatsAppWebJsAdapter({
       sessionId,
       sessionDataPath,
+
       puppeteer: {
         headless,
         args: puppeteerArgs,
         executablePath,
         protocolTimeoutMs,
       },
+
+      brave: {
+        executablePath: braveExecutablePath,
+        profileBasePath: braveProfileBasePath,
+      },
+
+      braveProfileManager,
+
       proxy: proxyUrl
         ? {
             url: proxyUrl,
             type: proxyType ?? 'http',
           }
         : undefined,
+
       lidMappingStore: this.lidMappingStore,
     });
   }
@@ -101,18 +155,28 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
     // The actual whatsapp-web.js library version (e.g. 1.34.7), surfaced so operators can see which
     // engine version is really running — distinct from this adapter plugin's manifest version (1.0.0).
     let version = 'unknown';
+
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       version = (require('whatsapp-web.js/package.json') as { version: string }).version;
     } catch {
       // Keep 'unknown' if the package metadata can't be resolved at runtime.
     }
-    return { name: 'whatsapp-web.js', version };
+
+    return {
+      name: 'whatsapp-web.js',
+      version,
+    };
   }
 
   healthCheck(): Promise<{ healthy: boolean; message?: string }> {
-    return Promise.resolve({ healthy: true, message: 'WhatsApp-web.js engine is available' });
+    return Promise.resolve({
+      healthy: true,
+      message: 'WhatsApp-web.js engine is available',
+    });
   }
 }
 
 export default WhatsAppWebJsPlugin;
+
+

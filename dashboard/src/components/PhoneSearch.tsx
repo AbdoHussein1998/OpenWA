@@ -1,4 +1,5 @@
-import { FormEvent, useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
+import type { FormEvent } from 'react';
 import { Search, Phone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

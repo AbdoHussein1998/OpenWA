@@ -1,6 +1,6 @@
 import * as qrcode from 'qrcode';
 import * as path from 'path';
-import { Client, LocalAuth, WAState } from 'whatsapp-web.js';
+import { Client, LocalAuth, NoAuth, WAState } from 'whatsapp-web.js';
 import {
   type AccountRestriction,
   type EngineEventCallbacks,
@@ -15,6 +15,10 @@ import { killOrphanedChromiumProcesses, removeStaleSingletonFiles } from './chro
 import { isSupportedProxyUrl, buildProxyLaunchConfig } from './wwebjs-proxy';
 import { BACKPORT_MISSING_MESSAGE, isBackportMissing } from './wwebjs-backport-check';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
+
+// ADD THESE IMPORTS at the top of the file
+import { BraveProfileManager } from '../brave/brave-profile.manager';
+
 
 /**
  * Detect Puppeteer's "Execution context was destroyed" error. During `Client.inject()` this is most
@@ -102,9 +106,7 @@ export interface WwebjsLifecycleHost {
   clearOnboardingWatcher(): void;
   /** Drop every cached live-call handle — the client they point at is going away. */
   clearLiveCalls(): void;
-  /** Stand-in promise for the LocalAuth profile removal (./wwebjs-stuck-auth), routed through the
-   *  adapter's own method so an instance-level replacement stays authoritative. */
-  clearLocalAuth(): Promise<void>;
+ 
   /** Register the domain client events (messages, groups, calls) on a freshly built client. */
   attachDomainEvents(client: Client): void;
 }
@@ -158,7 +160,9 @@ export class WwebjsLifecycle {
   private lastMainFrameNavigationAt = 0;
   private navigationEpisodeStartedAt = 0;
 
-  constructor(private readonly host: WwebjsLifecycleHost) {}
+  constructor(private readonly host: WwebjsLifecycleHost,
+              private readonly braveProfileManager: BraveProfileManager,  // <-- ADD THIS
+  ) {}
 
   async initialize(): Promise<void> {
     this.setStatus(EngineStatus.INITIALIZING);
@@ -287,8 +291,8 @@ export class WwebjsLifecycle {
         this.host.logger.warn(
           `"${reason}" during initialize. If this followed an OpenWA upgrade that changed the ` +
             `Chromium/Chrome binary (v0.8.12 amd64 switched Debian Chromium → Chrome for Testing), the ` +
-            `session's browser profile is likely stale — delete the profile dir ` +
-            `"${path.join(path.resolve(this.host.config.sessionDataPath), `session-${this.host.config.sessionId}`)}" ` +
+          `session's Brave browser profile is likely stale — delete the profile dir ` +
+          `"${this.braveProfileManager.getProfilePath(this.host.config.sessionId)}" ` +
             `and start again to re-scan. If no upgrade happened, Puppeteer also raises this on a page ` +
             `navigation or renderer crash (check for memory pressure or a WhatsApp Web reload). ` +
             `See docs/12-troubleshooting-faq.md.`,
@@ -313,6 +317,13 @@ export class WwebjsLifecycle {
    * without the pre-launch sweeps it would trip over attempt 1's stale Singleton files. A LIVE
    * attempt-1 browser never reaches attempt 2: resetForInitRetry() abandons the retry instead.
    */
+  /**
+ * One construction+launch attempt: everything from `new Client(...)` through the puppeteer death
+ * listeners. Extracted so the navigation retry (#1081) repeats the FULL sequence — a second
+ * attempt without setupEventHandlers() would have no qr/authenticated/ready handlers at all, and
+ * without the pre-launch sweeps it would trip over attempt 1's stale Singleton files. A LIVE
+ * attempt-1 browser never reaches attempt 2: resetForInitRetry() abandons the retry instead.
+ */
   private async runInitAttempt(
     puppeteerArgs: string[],
     authTimeoutMs: number | undefined,
@@ -332,11 +343,39 @@ export class WwebjsLifecycle {
       configuredProtocolTimeout <= MAX_TIMER_MS
         ? configuredProtocolTimeout
         : undefined;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BRAVE PROFILE SETUP — THE CORE ARCHITECTURAL CHANGE
+    // ═══════════════════════════════════════════════════════════════════════
+    // 
+    // BEFORE: Puppeteer launched its bundled Chromium with a TEMPORARY profile.
+    //   → Every restart = new browser identity = WhatsApp requires QR re-scan.
+    //
+    // AFTER: Puppeteer launches the REAL Brave binary with a PERSISTENT profile.
+    //   → Profile survives restarts = WhatsApp auth restored automatically.
+    //
+    // The sessionId becomes the profile identity: /data/brave-profiles/<sessionId>
+    // This enforces RULE 1: 1 OpenWA session = 1 Brave profile
+    // This enforces RULE 2: sessionId = profile identity
+
+    // Step 1: Resolve where this session's Brave profile lives on disk
+    const braveProfilePath = this.braveProfileManager.getProfilePath(this.host.config.sessionId);
+    
+    // Step 2: Ensure the directory exists (creates it if first time, no-op if exists)
+    // Like Python: os.makedirs(profile_path, exist_ok=True)
+    await this.braveProfileManager.ensureProfile(this.host.config.sessionId);
+    this.host.logger.log(`Using Brave profile: ${braveProfilePath}`);
+
+    // Step 3: Resolve which Brave binary to launch
+    // Priority: config.brave.executablePath > config.puppeteer.executablePath > system default
+    // This allows per-session override while having sensible defaults.
+    const braveExecutable = this.host.config.brave?.executablePath 
+      ?? this.host.config.puppeteer?.executablePath 
+      ?? '/usr/bin/brave';
+    // ═══════════════════════════════════════════════════════════════════════
+
     const client = new Client({
-      authStrategy: new LocalAuth({
-        clientId: this.host.config.sessionId,
-        dataPath: path.resolve(this.host.config.sessionDataPath),
-      }),
+      authStrategy: new NoAuth(),
       puppeteer: {
         headless: this.host.config.puppeteer?.headless ?? true,
         args: puppeteerArgs,
@@ -348,11 +387,23 @@ export class WwebjsLifecycle {
         handleSIGINT: false,
         handleSIGTERM: false,
         handleSIGHUP: false,
-        // Only override the executable when explicitly configured; otherwise let
-        // whatsapp-web.js fall back to Puppeteer's bundled Chromium.
-        ...(this.host.config.puppeteer?.executablePath
-          ? { executablePath: this.host.config.puppeteer.executablePath }
-          : {}),
+        userDataDir: braveProfilePath,  // ← Brave stores cookies, localStorage, IndexedDB here
+
+        // ═══════════════════════════════════════════════════════════════════
+        // THE TWO CRITICAL LINES — BROWSER IDENTITY MAPPING
+        // ═══════════════════════════════════════════════════════════════════
+        // executablePath: Tells Puppeteer "use THIS browser binary, not your bundled Chromium"
+        //   → Points to real Brave installed in Docker (e.g., /usr/bin/brave)
+        //   → Python equivalent: subprocess.Popen(['/usr/bin/brave', ...])
+        //
+        // userDataDir: Tells Brave "store ALL your data HERE" 
+        //   → Cookies, localStorage, IndexedDB, service workers, cache
+        //   → This is what makes the session PERSISTENT across restarts
+        //   → Python equivalent: chrome --user-data-dir=/path/to/profile
+        //
+        // Together: sessionId → profilePath → Brave binary → persistent identity
+        executablePath: braveExecutable,
+        // ═══════════════════════════════════════════════════════════════════
         // Per-CDP-command budget, spread only when the host configured a usable one (see above).
         // Absent, puppeteer-core nullish-coalesces to its own 180 000 ms (`cdp/Connection.js`).
         ...(protocolTimeout !== undefined ? { protocolTimeout } : {}),
@@ -369,22 +420,45 @@ export class WwebjsLifecycle {
       this.setStatus(EngineStatus.DISCONNECTED);
       return;
     }
-    // Kill any Chromium that survived a hard kill of a previous OpenWA process lifetime (its
-    // Puppeteer exit hook never ran, leaving an orphaned browser holding the profile). Safe here:
-    // this runs before this attempt's browser exists, so the only thing it can kill is an orphan —
-    // including attempt 1's browser when the bounded inter-attempt destroy did not finish it.
-    await killOrphanedChromiumProcesses(this.host.config.sessionId, this.host.logger);
-    // Clear stale Chromium Singleton* files left by a hard kill before launching — see
-    // removeStaleSingletonFiles. This runs after the orphan kill above and before this attempt's
-    // browser exists, so it cannot pull the files out from under a running Chromium.
-    await removeStaleSingletonFiles(this.host.config.sessionId, this.host.config.sessionDataPath, this.host.logger);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BRAVE ORPHAN CLEANUP — replaces old Chromium-specific cleanup
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // WHY: When OpenWA crashes hard (SIGKILL, power loss, OOM killer), Puppeteer's
+    // normal cleanup hook never runs. Brave keeps running, holding file locks on the
+    // profile directory. On next start, Brave refuses to open a locked profile.
+    //
+    // WHAT: Find Brave processes with our session marker arg (--openwa-session=<id>)
+    // and SIGKILL them. Then remove stale lock files (SingletonLock, SingletonSocket).
+    //
+    // WHEN: BEFORE client.initialize() — this runs before the new browser exists,
+    // so it can only kill ORPHANS (previous crashed sessions), never the live one.
+    //
+    // RULE 3: Browser process is disposable, but profile must survive.
+    //   → We kill the old process, but the profile directory stays intact.
+
+    // Kill any Brave processes from a previous crashed session holding this profile
+    await this.braveProfileManager.killOrphanedBraveProcesses(
+      this.host.config.sessionId,
+      this.host.logger,
+    );
+
+    // Remove stale lock files left by a crashed Brave instance
+    // These files prevent Brave from opening the profile: "Profile is in use"
+    await this.braveProfileManager.removeStaleSingletonFiles(
+      this.host.config.sessionId,
+      this.host.logger,
+    );
+    // ═══════════════════════════════════════════════════════════════════════
+
     await client.initialize();
     // whatsapp-web.js 1.34.x never observes the Chromium process/page it drives, so a crashed
     // browser leaves the client looking READY forever ("silent death"). Attach death listeners
     // to the puppeteer handles so a dead browser surfaces as a normal disconnect → reconnect.
     this.attachPuppeteerLifecycleListeners();
   }
-
+  
   /**
    * Reset between a failed first init attempt and its single retry (#1081). Deliberately NOT
    * beginClientTeardown(): that would latch tearingDown (the adapter is single-use after teardown)
@@ -395,8 +469,9 @@ export class WwebjsLifecycle {
    * must never run underneath a retry that is about to succeed.
    *
    * Returns false when attempt 1's browser could not be destroyed within the bound — the caller
-   * must then abandon the retry: launching a second Chromium into the same LocalAuth profile risks
-   * corrupting the only credential copy (an irreversible re-pair), and the marker-based orphan
+   * must then abandon the retry:launching a second Brave into the same userDataDir risks
+
+   * "Profile already in use" lock conflicts copy (an irreversible re-pair), and the marker-based orphan
    * sweep is explicitly best-effort, so it cannot be trusted as the escalation for a LIVE browser.
    */
   private async resetForInitRetry(): Promise<boolean> {
@@ -528,60 +603,30 @@ export class WwebjsLifecycle {
     this.host.attachDomainEvents(this.client);
 
     this.client.on('disconnected', reason => {
-      // A LOGOUT means whatsapp-web.js is ABOUT to delete this session's profile. The only site that
-      // emits this reason is the `framenavigated` listener, which emits and THEN awaits
-      // `authStrategy.logout()` → `LocalAuth.logout()` → `fs.rm(userDataDir)` — with the browser still
-      // open (only the explicit `Client.logout()` closes it first, and that path emits nothing). That
-      // rm happens whatever this listener does, so it MUST be surfaced to the lifecycle before the
-      // latch check below can drop out — otherwise a stop()/destroy() that latched first hides an
-      // in-flight rm, the name fence sees nothing pending, and a later start() under the same name can
-      // have its freshly written profile deleted by it (the #994 hazard, through a narrower window).
-      //
-      // Skipped when THIS adapter's logout() started it: that path already registered the real
-      // `client.logout()` promise, which covers the same rm and settles no earlier. Skipped again on
-      // every repeat, because the listener above carries no guard of its own — it resets its
-      // `lastLoggedOut` flag only after three awaits and never checks for the main frame, so one unlink
-      // can raise this event more than once (#1072). Sitting above the duplicate-event latch is what
-      // makes that reachable, so the guard has to be its own one-shot rather than that latch.
-      if (reason === 'LOGOUT' && !this.logoutInitiated && !this.credentialTeardownStarted) {
-        this.credentialTeardownStarted = true;
-        // Idempotent stand-in for the library's own rm, which we cannot get a handle on:
-        // `fs.rm(force: true)` races it safely and gives the lifecycle something to await.
-        this.host.getCallbacks().onCredentialTeardownStarted?.(this.host.clearLocalAuth());
-      }
-      // A deliberate teardown (logout/disconnect/destroy/forceDestroy via beginClientTeardown) also
-      // raises this event: client.logout() triggers the in-page Cmd 'logout' → framenavigated →
-      // DISCONNECTED 'LOGOUT' while we are still awaiting it. The unlink is already acknowledged by
-      // the API response and the session service writes DISCONNECTED itself, so report nothing here
-      // (mirrors the puppeteer-death gate). A WhatsApp-initiated unlink arrives with
-      // tearingDown=false and still flows through to the status/callback below.
-      //
-      // setStatus(DISCONNECTED) below latches disconnectReported synchronously on the first event, so a
-      // duplicate native 'disconnected' (whatsapp-web.js can fire it more than once for one drop) must
-      // no-op HERE — before log/status/callback — otherwise clearReadyReconcile(), setStatus, and
-      // onDisconnected re-run and the lifecycle schedules a second reconnect.
-      if (this.tearingDown || this.disconnectReported) return;
-      this.host.clearReadyReconcile();
-      // #982: LOGOUT is not a transient drop. The lifecycle's reconnect cannot restore the link; it
-      // can only come back with a fresh QR. Say that here rather than leaving the operator with an
-      // opaque engine token that reads like any other drop.
-      if (reason === 'LOGOUT') {
-        this.host.logger.warn(
-          'WhatsApp unlinked this device (LOGOUT). whatsapp-web.js is deleting the stored credentials ' +
-            'for this session, so reconnecting cannot restore the link — the session comes back with a ' +
-            'fresh QR and must be re-scanned. If this was not expected, check Linked devices on the phone.',
-        );
-      }
-      this.setStatus(EngineStatus.DISCONNECTED);
-      // Report the account judgement BEFORE the disconnect so a consumer reacting to the disconnect
-      // already knows why it happened. Only the state token is passed through — the adapter draws no
-      // conclusion about recoverability from it and leaves the reconnect decision exactly as it was.
-      const restriction = WA_STATE_RESTRICTIONS[reason];
-      if (restriction) {
-        this.host.getCallbacks().onAccountRestriction?.({ kind: restriction, code: reason });
-      }
-      this.host.getCallbacks().onDisconnected?.(reason);
-    });
+    // Skip if already tearing down or disconnect already reported
+    if (this.tearingDown || this.disconnectReported) return;
+
+    this.host.clearReadyReconcile();
+
+    if (reason === 'LOGOUT') {
+      // With NoAuth, there's no LocalAuth directory to delete.
+      // The Brave profile survives. If WhatsApp unlinked the device,
+      // the stale session in the profile will fail on next start
+      // and emit a fresh QR — the operator re-scans, done.
+      this.host.logger.warn(
+        'WhatsApp unlinked this device (LOGOUT). The Brave profile is preserved. ' +
+        'Next start will emit a fresh QR code for re-linking.',
+      );
+    }
+
+  this.setStatus(EngineStatus.DISCONNECTED);
+
+  const restriction = WA_STATE_RESTRICTIONS[reason];
+  if (restriction) {
+    this.host.getCallbacks().onAccountRestriction?.({ kind: restriction, code: reason });
+  }
+  this.host.getCallbacks().onDisconnected?.(reason);
+});
 
     this.client.on('auth_failure', (message?: string) => {
       this.host.clearReadyReconcile();
@@ -793,52 +838,34 @@ export class WwebjsLifecycle {
     this.clearNavigationReinjectWindow();
   }
 
-  async disconnect(): Promise<void> {
-    const client = this.beginClientTeardown();
-    if (!client) return;
+ async disconnect(): Promise<void> {
+  const client = this.beginClientTeardown();
+  if (!client) return;
 
-    try {
-      // Use destroy instead of logout to preserve session data
-      // This allows reconnecting without needing to scan QR again
-      await client.destroy();
-    } catch (error) {
-      this.host.logger.warn('Destroy client failed:', { error: String(error) });
-      // Already destroyed or not initialized - ignore
-    } finally {
-      this.finishClientTeardown(client);
-    }
+  try {
+    // With NoAuth + persistent profile, destroy() closes the browser
+    // but the profile (cookies, cache, localStorage) survives on disk.
+    // Next start: Brave reopens the same profile, WhatsApp reads the
+    // stored session, auto-restores — no QR scan needed.
+    await client.destroy();
+  } catch (error) {
+    this.host.logger.warn('Destroy client failed:', { error: String(error) });
+  } finally {
+    this.finishClientTeardown(client);
   }
+}
 
   async logout(): Promise<void> {
-    // Mark the credential removal as caller-owned before anything can emit 'disconnected'. The
-    // lifecycle tracks this call's removal from the outside — SessionService passes the session name
-    // to teardownEngineSafely, which registers the whole engine.logout() promise (a superset of the
-    // in-page unlink AND the profile rm that follows it), and that is the single owner for BOTH
-    // engines, since the Baileys adapter reports nothing here either. So this method must NOT
-    // register a second, narrower promise for the same removal, and the 'disconnected' LOGOUT handler
-    // must not add its stand-in on top. Set even with no live client: the throw path sends nothing,
-    // so no event can arrive, and a caller-initiated logout is still what happened.
     this.logoutInitiated = true;
     const client = this.beginClientTeardown();
-    // No live client means there is nothing to send the unlink through. Resolving here would report a
-    // confirmed unlink for a request that never reached WhatsApp — the caller writes an audit row on
-    // success, and the device would stay listed under the account holder's Linked Devices. The
-    // session-level "is it started?" check cannot catch this: an engine stays registered while its
-    // client is gone (a stuck-auth recovery nulls it, then waits out the reconnect backoff).
     if (!client) {
       throw new Error('No live WhatsApp Web client — the unlink was not sent');
     }
 
     try {
-      // client.logout() chains authStrategy.logout() (LocalAuth) → fs.rm of this session's profile
-      // dir. The lifecycle already tracks that removal through this method's own promise (see the
-      // note above logoutInitiated), so nothing is registered here.
       await client.logout();
     } catch (error) {
       this.host.logger.warn('Logout failed:', { error: String(error) });
-      // Fall back to destroy so the session still dies locally — but rethrow so the caller
-      // learns the unlink never reached WhatsApp: the device may still be listed under the
-      // account holder's Linked Devices, and reporting success would write a false audit row.
       try {
         await client.destroy();
       } catch (destroyError) {
@@ -847,6 +874,10 @@ export class WwebjsLifecycle {
       throw error;
     } finally {
       this.finishClientTeardown(client);
+      // Profile is INTENTIONALLY preserved. The Brave profile survives logout.
+      // Next start() with the same sessionId will reuse the same profile.
+      // If WhatsApp unlinked the device, the stale session in the profile will
+      // fail gracefully and emit a fresh QR code — no delete needed here.
     }
   }
 

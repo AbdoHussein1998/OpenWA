@@ -1,9 +1,11 @@
+// src/engine/engine.factory.ts
 import * as fs from 'fs';
 import * as path from 'path';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IWhatsAppEngine } from './interfaces/whatsapp-engine.interface';
 import { WhatsAppWebJsAdapter } from './adapters/whatsapp-web-js.adapter';
+import { BraveProfileManager } from './brave/brave-profile.manager';
 import { PluginLoaderService, PluginType, IEnginePlugin, PluginManifest } from '../core/plugins';
 import { WhatsAppWebJsPlugin } from './builtin/whatsapp-web-js';
 import { BaileysPlugin } from './builtin/baileys';
@@ -164,9 +166,17 @@ export class EngineFactory implements OnModuleInit {
       });
       return;
     }
+    const braveProfileBasePath =
+    this.configService.get<string>('engine.brave.profileBasePath') ??
+    '/data/brave-profiles';
+
     const dirs: Array<{ engine: string; dir: string }> = [
       { engine: 'whatsapp-web.js', dir: this.wwjsAuthDir(sessionName) },
       { engine: 'baileys', dir: this.baileysAuthDir(sessionName) },
+      {
+        engine: 'brave',
+        dir: new BraveProfileManager(braveProfileBasePath).getProfilePath(sessionName),
+      },
     ];
     for (const { engine, dir } of dirs) {
       try {
@@ -227,19 +237,52 @@ export class EngineFactory implements OnModuleInit {
     // Legacy direct creation (fallback)
     return new WhatsAppWebJsAdapter({
       sessionId: options.sessionId,
-      sessionDataPath: this.configService.get<string>('engine.sessionDataPath') ?? './data/sessions',
+
+      sessionDataPath:
+        this.configService.get<string>('engine.sessionDataPath') ??
+        './data/sessions',
+
       puppeteer: {
-        headless: this.configService.get<boolean>('engine.puppeteer.headless') ?? true,
-        args: this.configService.get<string[]>('engine.puppeteer.args') ?? ['--no-sandbox', '--disable-setuid-sandbox'],
-        executablePath: this.configService.get<string>('engine.puppeteer.executablePath'),
-        protocolTimeoutMs: this.configService.get<number>('engine.puppeteer.protocolTimeoutMs'),
+        headless:
+          this.configService.get<boolean>('engine.puppeteer.headless') ??
+          true,
+
+        args:
+          this.configService.get<string[]>('engine.puppeteer.args') ??
+          ['--no-sandbox', '--disable-setuid-sandbox'],
+
+        executablePath:
+          this.configService.get<string>('engine.puppeteer.executablePath'),
+
+        protocolTimeoutMs:
+          this.configService.get<number>(
+            'engine.puppeteer.protocolTimeoutMs',
+          ),
       },
+
+      brave: {
+        executablePath:
+          this.configService.get<string>('engine.brave.executablePath') ??
+          this.configService.get<string>('engine.puppeteer.executablePath') ??
+          '/usr/bin/brave',
+
+        profileBasePath:
+          this.configService.get<string>('engine.brave.profileBasePath') ??
+          '/data/brave-profiles',
+      },
+
+      braveProfileManager: new BraveProfileManager(
+        this.configService.get<string>('engine.brave.profileBasePath') ??
+          '/data/brave-profiles',
+      ),
+
       proxy: options.proxyUrl
         ? {
             url: options.proxyUrl,
             type: options.proxyType ?? 'http',
           }
         : undefined,
+
       lidMappingStore: this.lidMappingStore,
     });
   }

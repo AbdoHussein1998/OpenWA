@@ -1,3 +1,5 @@
+// src/config/configuration.ts
+
 import * as path from 'path';
 import { computeFeatureFlags } from './feature-flags';
 import { computeSendPacingConfig } from '../modules/message/send-pacing.config';
@@ -206,35 +208,37 @@ export default () => ({
   // WhatsApp engine configuration
   engine: {
     type: process.env.ENGINE_TYPE || 'whatsapp-web.js',
+
     puppeteer: {
       headless: process.env.PUPPETEER_HEADLESS !== 'false',
-      // Accept either delimiter: .env/compose use commas, the dashboard Infrastructure form
-      // persists space-separated. Splitting on both keeps each flag a discrete argv token —
-      // a single glued token like "--no-sandbox --disable-gpu" silently neuters --no-sandbox.
+
       args: withPinnedBrowserLocale(
         (process.env.PUPPETEER_ARGS || '--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu')
           .split(/[\s,]+/)
           .filter(Boolean),
       ),
-      // Optional path to a system Chromium/Chrome binary. When unset, whatsapp-web.js
-      // uses Puppeteer's bundled Chromium. Required on hosts where the bundled binary
-      // is missing or incompatible (Alpine, ARM, custom base images).
+
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      // How long one CDP command may take. An account with thousands of chats can push a single
-      // `client.getChats()` past Puppeteer's own budget; raising this is the escape hatch. Left
-      // UNDEFINED rather than defaulted to Puppeteer's number, so an unset or out-of-range value
-      // means "whatever puppeteer-core's `timeout ?? 180_000` says" instead of pinning today's
-      // figure here and silently outliving it. Out of range is not clamped either: see
-      // wwebjs-lifecycle.ts for why a falsy value is not "no limit", and MAX_TIMER_MS above for
-      // why a huge one is not either.
+
       protocolTimeoutMs: (() => {
         const n = parseInt(process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS || '', 10);
         return Number.isFinite(n) && n > 0 && n <= MAX_TIMER_MS ? n : undefined;
       })(),
     },
-    sessionDataPath: process.env.SESSION_DATA_PATH || './data/sessions',
-    // Baileys engine (used when ENGINE_TYPE=baileys). Multi-file auth state base dir; each session
-    // gets its own subdirectory. Read by the Baileys plugin from the opaque engine config blob.
+
+    brave: {
+      executablePath:
+        process.env.BRAVE_EXECUTABLE || '/usr/bin/brave',
+
+      profileBasePath:
+        process.env.BRAVE_PROFILE_PATH || './data/brave-profiles',
+    },
+
+    sessionDataPath:
+      process.env.SESSION_DATA_PATH || './data/sessions',
+
+    // Baileys engine (used when ENGINE_TYPE=baileys). Multi-file auth state base dir;
+    // each session gets its own subdirectory.
     baileys: {
       authDir: process.env.BAILEYS_AUTH_DIR || './data/baileys',
     },

@@ -27,9 +27,12 @@ import {
   type Channel,
   type Chat,
   type ChatKind,
-  type MessageMedia,
   type Session,
 } from '../services/api';
+
+import {
+  type MessageMedia,
+ } from '../utils/chatMessages';
 
 import { applyIncomingToChatList } from '../utils/chatList';
 

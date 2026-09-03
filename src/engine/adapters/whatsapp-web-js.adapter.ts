@@ -56,6 +56,7 @@ import { registerWwebjsGroupEvents } from './wwebjs-group-events';
 import { WwebjsOnboardingWatcher } from './wwebjs-onboarding';
 import { WwebjsLifecycle } from './wwebjs-lifecycle';
 import { WwebjsReadyReconcile } from './wwebjs-reconcile';
+import { BraveProfileManager } from '../brave/brave-profile.manager';
 import { WwebjsStuckAuth } from './wwebjs-stuck-auth';
 import { WwebjsCalls } from './wwebjs-calls';
 import {
@@ -80,6 +81,60 @@ export interface WhatsAppWebJsConfig {
     /** Per-CDP-command budget handed to Puppeteer. Must be positive — see wwebjs-lifecycle. */
     protocolTimeoutMs?: number;
   };
+  // ═══════════════════════════════════════════════════════════════════════
+  // BRAVE BROWSER CONFIGURATION — THE ARCHITECTURAL SHIFT
+  // ═══════════════════════════════════════════════════════════════════════
+  // 
+  // BEFORE: Puppeteer used its bundled Chromium with temporary profiles.
+  //   → No Brave-specific config existed.
+  //
+  // AFTER: Each session maps to a persistent Brave browser profile.
+  //   → brave.executablePath: Path to the Brave binary (e.g., /usr/bin/brave)
+  //   → brave.profileBasePath: Root directory for all session profiles
+  //     (e.g., /data/brave-profiles, mounted as Docker volume)
+  //
+  // These two fields enable the SESSION = BROWSER IDENTITY mapping:
+  //   sessionId → /data/brave-profiles/<sessionId> → real Brave process
+  //
+  // The `brave` object is optional for backward compatibility, but REQUIRED
+  // for the new persistent-profile behavior. If absent, the code falls back
+  // to puppeteer.executablePath (legacy behavior) or system default.
+  // ═══════════════════════════════════════════════════════════════════════
+  brave?: {
+    /** 
+     * Absolute path to the Brave browser executable.
+     * 
+     * Python reference: Like specifying the Chrome binary path in Selenium:
+     *   driver = webdriver.Chrome(executable_path='/usr/bin/brave')
+     * 
+     * Typical values:
+     *   - Docker: '/usr/bin/brave' (installed via apt in Dockerfile)
+     *   - macOS: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'
+     *   - Linux: '/usr/bin/brave' or '/usr/bin/brave-browser'
+     *   - Windows: 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe'
+     * 
+     * If omitted, falls back to config.puppeteer.executablePath, then '/usr/bin/brave'.
+     */
+    executablePath?: string;
+    
+    /** 
+     * Base directory where all session-specific Brave profiles are stored.
+     * 
+     * Python reference: Like a base data directory that gets subfoldered per session:
+     *   base_path = '/data/brave-profiles'
+     *   session_profile = os.path.join(base_path, session_id)
+     * 
+     * Each session gets its OWN subdirectory: <basePath>/<sessionId>
+     * This directory MUST be a persistent Docker volume to survive restarts.
+     * 
+     * If omitted, falls back to environment variable or a sensible default
+     * resolved by the BraveProfileManager constructor caller.
+     */
+    profileBasePath?: string;
+  };
+  braveProfileManager: BraveProfileManager;
+  // ═══════════════════════════════════════════════════════════════════════
+  
   // Phase 3: Proxy per session
   proxy?: {
     url: string;
@@ -89,6 +144,7 @@ export interface WhatsAppWebJsConfig {
   // learns while resolving sends, letting the message read-path bridge `@c.us`/`@lid` rows (#583 R3).
   lidMappingStore?: LidMappingStore;
 }
+
 
 // WhatsApp Web version resolution (the #488 auto-resolve) lives in a dependency-free module so infra
 // status can import it without loading whatsapp-web.js (engine lazy-loading). The lifecycle delegate
@@ -263,19 +319,21 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       isDisconnectReported: () => this.disconnectReported,
       getCallbacks: () => this.callbacks,
     });
-    this.lifecycle = new WwebjsLifecycle({
-      logger: this.logger,
-      config: this.config,
-      getCallbacks: () => this.callbacks,
-      emitState: status => this.emit('stateChanged', status),
-      scheduleReadyReconcile: () => this.reconcile.scheduleReadyReconcile(),
-      clearReadyReconcile: () => this.reconcile.clearReadyReconcile(),
-      startOnboardingWatcher: () => this.onboardingWatcher.startOnboardingWatcher(),
-      clearOnboardingWatcher: () => this.onboardingWatcher.clearOnboardingWatcher(),
-      clearLiveCalls: () => this.calls.clearLiveCalls(),
-      clearLocalAuth: () => this.clearLocalAuth(),
-      attachDomainEvents: client => this.attachDomainEvents(client),
-    });
+    this.lifecycle = new WwebjsLifecycle(
+  {
+    logger: this.logger,
+    config: this.config,
+    getCallbacks: () => this.callbacks,
+    emitState: status => this.emit('stateChanged', status),
+    scheduleReadyReconcile: () => this.reconcile.scheduleReadyReconcile(),
+    clearReadyReconcile: () => this.reconcile.clearReadyReconcile(),
+    startOnboardingWatcher: () => this.onboardingWatcher.startOnboardingWatcher(),
+    clearOnboardingWatcher: () => this.onboardingWatcher.clearOnboardingWatcher(),
+    clearLiveCalls: () => this.calls.clearLiveCalls(),
+    attachDomainEvents: client => this.attachDomainEvents(client),
+  },
+  this.config.braveProfileManager,
+);
   }
 
   /**
@@ -456,10 +514,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.stuckAuth.recoverFromStuckAuth();
   }
 
-  private clearLocalAuth(): Promise<void> {
-    return this.stuckAuth.clearLocalAuth();
-  }
-
+ 
   private reportActionRequired(reason: string): void {
     this.onboardingWatcher.reportActionRequired(reason);
   }
