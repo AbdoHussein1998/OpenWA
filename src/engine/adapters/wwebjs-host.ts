@@ -24,4 +24,10 @@ export interface WwebjsEngineHost {
   getCallbacks(): EngineEventCallbacks;
   /** Own account wid, or undefined while no client exists (late events during teardown). */
   getSelfWid(): string | undefined;
+  
+  isProtocolTimeoutError(error: unknown): boolean;
+
+  probeBrowserHealth(): Promise<boolean>;
+
+  handleProtocolTimeout(operation: string): Promise<void>;
 }

@@ -55,16 +55,12 @@ export class BraveProfileManager {
    * Note: In production you'd probably want this to be async using fs.access() with await,
    * but here we use a synchronous check for simplicity in guards.
    */
-  profileExists(sessionId: string): boolean {
+
+  async profileExists(sessionId: string): Promise<boolean> {
     try {
-      // fs.access with no second argument checks if the path is accessible (exists + permissions)
-      // We use the synchronous version (fs.accessSync would be the true sync equivalent)
-      // but here we fire-and-forget the promise — this is a quick existence check.
-      fs.access(this.getProfilePath(sessionId));
+      await fs.access(this.getProfilePath(sessionId));
       return true;
     } catch {
-      // TypeScript's `catch` without a parameter — equivalent to Python's `except:`
-      // The catch block catches ANY error (ENOENT, permission denied, etc.)
       return false;
     }
   }

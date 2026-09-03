@@ -157,8 +157,16 @@ export class WwebjsLifecycle {
   // Navigation re-inject window (#1081): stamped by our framenavigated listener, closed by the
   // library's re-emitted 'ready' and by teardown. Timestamps, never timers — several suites pin
   // exact jest timer counts, and a timer would also outlive the single-use adapter.
+  /**
+ * Consecutive per-command protocol timeouts observed while the session is READY.
+ * A single timeout is treated as a transient browser/renderer fault and does not
+ * immediately destroy the session. Repeated timeouts after failed health probes
+ * trigger the existing forceDestroy() recovery path.
+ */
+  private consecutiveProtocolTimeouts = 0; 
   private lastMainFrameNavigationAt = 0;
   private navigationEpisodeStartedAt = 0;
+
 
   constructor(private readonly host: WwebjsLifecycleHost,
               private readonly braveProfileManager: BraveProfileManager,  // <-- ADD THIS
@@ -727,6 +735,63 @@ export class WwebjsLifecycle {
     return WwebjsLifecycle.PAGE_TRANSPORT_ERROR_PATTERN.test(message);
   }
 
+  public isProtocolTimeoutError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return WwebjsLifecycle.PROTOCOL_TIMEOUT_PATTERN.test(message);
+  }
+  
+
+  async probeBrowserHealth(): Promise<boolean> {
+  if (!this.client || this.tearingDown || this.status !== EngineStatus.READY) {
+    return false;
+  }
+
+  const { pupPage } = this.client as unknown as {
+    pupPage?: {
+      isClosed?: () => boolean;
+      evaluate: <T>(pageFunction: () => T) => Promise<T>;
+    };
+  };
+
+  if (!pupPage) {
+    return false;
+  }
+
+  if (typeof pupPage.isClosed === 'function' && pupPage.isClosed()) {
+    return false;
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    await Promise.race([
+      pupPage.evaluate(() => true),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('browser health probe timed out')),
+          10_000,
+        );
+        timeout.unref?.();
+      }),
+    ]);
+
+    return true;
+  } catch (error) {
+    this.host.logger.warn('Browser health probe failed', {
+      sessionId: this.host.config.sessionId,
+      error: error instanceof Error ? error.message : String(error),
+      action: 'browser_health_probe_failed',
+    });
+
+    return false;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+
   /**
    * Report a failed client/page operation as a session death when the error matches
    * PAGE_TRANSPORT_ERROR_PATTERN. A wedged page can fire NO events while still reporting CONNECTED
@@ -1017,4 +1082,134 @@ export class WwebjsLifecycle {
     }
     return this.client.requestPairingCode(phoneNumber);
   }
+
+  
+  async handleProtocolTimeout(operation: string): Promise<void> {
+    const MAX_PROTOCOL_TIMEOUT_RECOVERY_ATTEMPTS = 2;
+
+    this.host.logger.warn('Puppeteer protocol timeout detected', {
+      sessionId: this.host.config.sessionId,
+      operation,
+      status: this.status,
+      consecutiveProtocolTimeouts: this.consecutiveProtocolTimeouts,
+      action: 'protocol_timeout_detected',
+    });
+
+    if (
+      this.tearingDown ||
+      this.status === EngineStatus.DISCONNECTED ||
+      this.status === EngineStatus.FAILED ||
+      !this.client
+    ) {
+      return;
+    }
+
+    /*
+    * First question:
+    * Is the Chromium/CDP/page transport still responsive?
+    */
+    const browserHealthy = await this.probeBrowserHealth();
+
+    if (browserHealthy) {
+      this.consecutiveProtocolTimeouts = 0;
+
+      this.host.logger.warn(
+        'Browser is responsive after protocol timeout; keeping session alive',
+        {
+          sessionId: this.host.config.sessionId,
+          operation,
+          action: 'protocol_timeout_browser_healthy',
+        },
+      );
+
+      return;
+    }
+
+    /*
+    * The direct page probe failed.
+    *
+    * Before destroying the browser, give the existing whatsapp-web.js
+    * liveness probe a chance to confirm that the WhatsApp runtime itself
+    * is still alive/recovering.
+    */
+    const waRuntimeHealthy = await this.probeLiveness();
+
+    if (waRuntimeHealthy) {
+      this.consecutiveProtocolTimeouts = 0;
+
+      this.host.logger.warn(
+        'WhatsApp runtime is still responsive after protocol timeout; keeping session alive',
+        {
+          sessionId: this.host.config.sessionId,
+          operation,
+          action: 'protocol_timeout_wa_runtime_healthy',
+        },
+      );
+
+      return;
+    }
+
+    /*
+    * Both probes failed.
+    *
+    * Do NOT kill the browser on the first occurrence. Count consecutive
+    * failures and only escalate after repeated evidence of a wedged session.
+    */
+    this.consecutiveProtocolTimeouts += 1;
+
+    this.host.logger.error(
+      'Protocol timeout followed by failed browser and WhatsApp liveness probes',
+      {
+        sessionId: this.host.config.sessionId,
+        operation,
+        consecutiveProtocolTimeouts: this.consecutiveProtocolTimeouts,
+        recoveryThreshold: MAX_PROTOCOL_TIMEOUT_RECOVERY_ATTEMPTS,
+        action: 'protocol_timeout_health_failed',
+      },
+    );
+
+    if (
+      this.consecutiveProtocolTimeouts <
+      MAX_PROTOCOL_TIMEOUT_RECOVERY_ATTEMPTS
+    ) {
+      this.host.logger.warn(
+        'Keeping the session alive after the first failed protocol-timeout recovery check',
+        {
+          sessionId: this.host.config.sessionId,
+          operation,
+          consecutiveProtocolTimeouts: this.consecutiveProtocolTimeouts,
+          action: 'protocol_timeout_recovery_deferred',
+        },
+      );
+
+      return;
+    }
+
+    this.host.logger.error(
+      'Repeated protocol timeouts with failed health checks; forcing browser recovery',
+      {
+        sessionId: this.host.config.sessionId,
+        operation,
+        consecutiveProtocolTimeouts: this.consecutiveProtocolTimeouts,
+        action: 'protocol_timeout_force_destroy',
+      },
+    );
+
+    this.consecutiveProtocolTimeouts = 0;
+
+    await this.forceDestroy();
+  }
+
+
+
+
+
+
+
+
 }
+
+
+
+
+  

@@ -24,51 +24,109 @@ export class WwebjsChats {
   }
 
   async getChats(): Promise<ChatSummary[]> {
-    this.host.ensureReady();
-    let chats: Awaited<ReturnType<Client['getChats']>>;
-    try {
-      chats = await this.client().getChats();
-    } catch (error) {
-      // Same split every sibling read makes (see getChatsByLabel): a dead page is a 503 and an
-      // early death signal, not an opaque 500 under a status that still says READY (#1081).
-      if (this.host.isPageTransportError(error)) {
-        this.host.reportIfPageTransportError(error, 'getChats');
-        throw new EngineTransportError('Transport died while listing chats');
+  this.host.ensureReady();
+
+  let chats: Awaited<ReturnType<Client['getChats']>>;
+
+  try {
+    chats = await this.client().getChats();
+  } catch (error) {
+    /*
+     * A Puppeteer protocol timeout is different from a dead page.
+     *
+     * Do not immediately destroy Brave here. Let the lifecycle decide
+     * whether the browser/page is still healthy and whether recovery
+     * is necessary.
+     */
+    if (this.host.isProtocolTimeoutError(error)) {
+      this.host.logger.warn(
+        'getChats timed out at the Puppeteer protocol layer',
+        {
+          action: 'get_chats_protocol_timeout',
+        },
+      );
+
+      await this.host.handleProtocolTimeout('getChats');
+
+      /*
+       * handleProtocolTimeout() may have kept the existing client alive,
+       * or it may have forced recovery. Only retry if the session is still
+       * usable.
+       */
+      this.host.ensureReady();
+
+      try {
+        chats = await this.client().getChats();
+      } catch (retryError) {
+        /*
+         * If the retry reveals an actual dead transport, preserve the
+         * existing transport-error behavior.
+         */
+        if (this.host.isPageTransportError(retryError)) {
+          this.host.reportIfPageTransportError(
+            retryError,
+            'getChats.retry',
+          );
+
+          throw new EngineTransportError(
+            'Transport died while listing chats',
+          );
+        }
+
+        throw retryError;
       }
+    } else if (this.host.isPageTransportError(error)) {
+      /*
+       * Existing behavior: a genuine page/browser transport failure
+       * is an early death signal, not an opaque 500.
+       */
+      this.host.reportIfPageTransportError(error, 'getChats');
+
+      throw new EngineTransportError(
+        'Transport died while listing chats',
+      );
+    } else {
       throw error;
     }
-    const summaries: ChatSummary[] = [];
-    let skipped = 0;
-
-    // Map the raw whatsapp-web.js chat objects to the library-agnostic ChatSummary
-    // shape so that no library types leak past the engine boundary. Some WA system
-    // or channel-like entries can lack the normal serialized id; skip those instead
-    // of failing the whole dashboard chats request.
-    for (const chat of chats) {
-      const id = chat.id?._serialized;
-      if (!id) {
-        skipped++;
-        continue;
-      }
-
-      summaries.push({
-        id,
-        name: chat.name || id,
-        isGroup: Boolean(chat.isGroup),
-        kind: chatKind(id),
-        unreadCount: chat.unreadCount || 0,
-        timestamp: chat.timestamp || 0,
-        // A location message's body is the base64 map thumbnail; don't surface it as the chat preview.
-        lastMessage: chat.lastMessage?.type === MessageTypes.LOCATION ? '📍' : chat.lastMessage?.body || undefined,
-      });
-    }
-
-    if (skipped > 0) {
-      this.host.logger.warn(`Skipped ${skipped} chat(s) without a serialized id`);
-    }
-
-    return summaries;
   }
+
+  const summaries: ChatSummary[] = [];
+  let skipped = 0;
+
+  // Map the raw whatsapp-web.js chat objects to the library-agnostic
+  // ChatSummary shape so that no library types leak past the engine boundary.
+  // Some WA system or channel-like entries can lack the normal serialized id;
+  // skip those instead of failing the whole dashboard chats request.
+  for (const chat of chats) {
+    const id = chat.id?._serialized;
+
+    if (!id) {
+      skipped++;
+      continue;
+    }
+
+    summaries.push({
+      id,
+      name: chat.name || id,
+      isGroup: Boolean(chat.isGroup),
+      kind: chatKind(id),
+      unreadCount: chat.unreadCount || 0,
+      timestamp: chat.timestamp || 0,
+      lastMessage:
+        chat.lastMessage?.type === MessageTypes.LOCATION
+          ? '📍'
+          : chat.lastMessage?.body || undefined,
+    });
+  }
+
+  if (skipped > 0) {
+    this.host.logger.warn(
+      `Skipped ${skipped} chat(s) without a serialized id`,
+    );
+  }
+
+  return summaries;
+}
 
   async sendSeen(chatId: string): Promise<boolean> {
     this.host.ensureReady();
