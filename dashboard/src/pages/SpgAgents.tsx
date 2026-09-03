@@ -75,9 +75,9 @@ import MediaLightbox, {
 } from '../components/chats/MediaLightbox';
 
 import KindIcon from '../components/chats/KindIcon';
+import { createTrailingCoalescer } from '../utils/trailingCoalescer';
 
 import './Chats.css';      // <-- ADD: reuse the main chat UI styles
-import './SpgAgents.css';
 import './SpgAgents.css';
 
 /* ================================================================
@@ -85,7 +85,7 @@ import './SpgAgents.css';
    ================================================================ */
 
 const SPG_PHONE_STORAGE_KEY = 'spgAgents.phoneNumber';
-
+const MARK_READ_DEBOUNCE_MS = 750;
 const MESSAGE_QUERY_PREFIX = 'messages';
 
 const SPG_WS_EVENTS = [
@@ -939,29 +939,49 @@ export function SpgAgents() {
 
     setActiveChat(null);
   }, []);
+    /* ================================================================
+    MARK CHAT READ
+    ================================================================ */
 
-  /* ================================================================
-     MARK CHAT READ
-     ================================================================ */
+  const markReadCoalescer = useMemo(
+    () =>
+      createTrailingCoalescer<string>(chatId => {
+        const sessionId = selectedSessionIdRef.current;
 
-  const markChatRead = useCallback(
-    (chatId: string) => {
-      const sessionId = selectedSessionIdRef.current;
+        if (!sessionId) {
+          return;
+        }
 
-      if (!sessionId) {
-        return;
-      }
-
-      void sessionApi.markChatRead(sessionId, chatId).catch(err => {
-        toast.warning(
-          t('chats.errors.markRead'),
-          err instanceof Error ? err.message : undefined,
-        );
-      });
-    },
+        void sessionApi.markChatRead(sessionId, chatId).catch(err => {
+          toast.warning(
+            t('chats.errors.markRead'),
+            err instanceof Error ? err.message : undefined,
+          );
+        });
+      }, MARK_READ_DEBOUNCE_MS),
     [t, toast],
   );
 
+  const markChatRead = useCallback(
+    (chatId: string) => {
+      markReadCoalescer.call(chatId);
+    },
+    [markReadCoalescer],
+  );
+
+  /*
+  * Flush a pending trailing mark-read request when this component
+  * unmounts or when the coalescer instance changes.
+  */
+  useEffect(
+    () => () => markReadCoalescer.flush(),
+    [markReadCoalescer],
+  );
+
+  /*
+  * Mark the currently opened chat as read and clear its sidebar
+  * unread badge.
+  */
   useEffect(() => {
     if (!activeChatId) {
       return;
@@ -981,7 +1001,10 @@ export function SpgAgents() {
     );
   }, [activeChatId, markChatRead, setChatsWithRef]);
 
-  /* ================================================================
+
+
+
+    /* ================================================================
      LIGHTBOX ITEMS
      ================================================================ */
 
