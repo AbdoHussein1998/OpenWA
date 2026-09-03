@@ -39,7 +39,7 @@ import { useChannelMessages } from '../hooks/useChannelMessages';
 import { useContactStatuses } from '../hooks/useContactStatuses';
 import { useChatScrollPosition } from '../hooks/useChatScrollPosition';
 import { useCurrentEngineQuery } from '../hooks/queries';
-import { createTrailingCoalescer } from '../utils/trailingCoalescer';
+import { useMarkChatRead } from '../hooks/useMarkChatRead';
 import MessageBody from '../components/chats/MessageBody';
 import MediaLightbox, { type LightboxItem } from '../components/chats/MediaLightbox';
 import KindIcon from '../components/chats/KindIcon';
@@ -50,8 +50,6 @@ import StatusMedia from '../components/chats/StatusMedia';
 import StatusComposeModal from '../components/chats/StatusComposeModal';
 import './Chats.css';
 
-// Quiet window for coalescing mark-as-read RPCs (see markReadCoalescer below).
-const MARK_READ_DEBOUNCE_MS = 750;
 
 // mergeDeliveryStatus (forward-only delivery-tick merge) is shared with mergeOrAppend in utils/chatMessages
 // so the WS append path and the ack path apply the exact same rule.
@@ -108,8 +106,7 @@ const statusFontStyle = (font?: number): { fontFamily?: string; fontWeight?: num
 export function Chats() {
   const { t } = useTranslation();
   useDocumentTitle(t('nav.chats'));
-  const { error: showErrorToast, warning: showWarningToast } = useToast();
-
+  const { error: showErrorToast } = useToast(); 
   // Sessions list & active session
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
@@ -177,9 +174,14 @@ export function Chats() {
   const { appendMessage, updateMessage } = useChatMessagesActions();
   const queryClient = useQueryClient();
 
-  // Lightbox state for media viewer
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const { markChatRead } = useMarkChatRead(
+    selectedSessionId || undefined,
+    {
+      errorTitle: t('chats.errors.markRead'),
+    },
+  );
 
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [replyingTo, setReplyingTo] = useState<ChatMessageView | null>(null);
   // Draft text lives here (not in ChatComposer) so it survives closing/switching the room.
   const [messageInput, setMessageInput] = useState<string>('');
@@ -303,32 +305,8 @@ export function Chats() {
     }
   }, [selectedSessionId, loadChats]);
 
-  // Coalesce mark-as-read RPCs per chat: every incoming message in the visible chat raises a
-  // read event, and a per-event POST sprays the gateway into 429s. One trailing call per chat
-  // after a quiet window carries the same effect.
-  const markReadCoalescer = useMemo(
-    () =>
-      createTrailingCoalescer<string>(chatId => {
-        void sessionApi.markChatRead(selectedSessionId, chatId).catch(err => {
-          showWarningToast(t('chats.errors.markRead'), err instanceof Error ? err.message : undefined);
-        });
-      }, MARK_READ_DEBOUNCE_MS),
-    [selectedSessionId, t, showWarningToast],
-  );
 
-  // Flush pending trailing calls on unmount / session switch: the mark-as-read POST is
-  // fire-and-forget (a failure only raises a warning toast), so firing on the way out is safe —
-  // and dropping the pending call would leave the last messages of a quickly-exited chat unread.
-  // The flush closure still references the PREVIOUS session on a session switch, which is exactly
-  // where those queued reads belong.
-  useEffect(() => () => markReadCoalescer.flush(), [markReadCoalescer]);
 
-  const markChatRead = useCallback(
-    (chatId: string) => {
-      markReadCoalescer.call(chatId);
-    },
-    [markReadCoalescer],
-  );
 
   // 3. WebSocket integration for real-time messages
   const handleIncomingMessage = useCallback(
@@ -651,11 +629,18 @@ export function Chats() {
   // useChatScrollPosition (both keyed off activeChat?.id). Deliberately keying off `activeChat?.id`
   // (not the whole object) so a sidebar reshuffle that mutates the activeChat instance doesn't re-fire
   // the mark-as-read RPC for the same chat.
-  useEffect(() => {
+    useEffect(() => {
     if (!activeChat) return;
+
     markChatRead(activeChat.id);
-    setChats(prev => prev.map(c => (c.id === activeChat.id ? { ...c, unreadCount: 0 } : c)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    setChats(prev =>
+      prev.map(c =>
+        c.id === activeChat.id
+          ? { ...c, unreadCount: 0 }
+          : c,
+      ),
+    );
   }, [activeChat?.id, markChatRead]);
 
   // --- Global search: jump to a hit's chat (and best-effort scroll to the message) ---
