@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { sessionApi } from '../services/api';
-import { useToast } from './useToast';
+import { useToast } from '../hooks/useToast';
 import { createRequestQueue } from '../utils/requestQueue';
 import { createTrailingCoalescer } from '../utils/trailingCoalescer';
 import {
