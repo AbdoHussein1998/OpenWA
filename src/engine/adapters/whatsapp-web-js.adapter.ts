@@ -273,6 +273,15 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       config: this.config,
       getCallbacks: () => this.callbacks,
       getSelfWid: () => this.client?.info?.wid?._serialized,
+
+      isProtocolTimeoutError: (error: unknown) =>
+        this.lifecycle.isProtocolTimeoutError(error),
+
+      probeBrowserHealth: () =>
+        this.lifecycle.probeBrowserHealth(),
+
+      handleProtocolTimeout: (operation: string) =>
+        this.lifecycle.handleProtocolTimeout(operation),
     };
     this.groups = new WwebjsGroups(this.host);
     this.messaging = new WwebjsMessaging(this.host);

@@ -1158,15 +1158,13 @@ export class WwebjsLifecycle {
     this.consecutiveProtocolTimeouts += 1;
 
     this.host.logger.error(
-      'Protocol timeout followed by failed browser and WhatsApp liveness probes',
-      {
-        sessionId: this.host.config.sessionId,
-        operation,
-        consecutiveProtocolTimeouts: this.consecutiveProtocolTimeouts,
-        recoveryThreshold: MAX_PROTOCOL_TIMEOUT_RECOVERY_ATTEMPTS,
-        action: 'protocol_timeout_health_failed',
-      },
-    );
+  `Protocol timeout followed by failed browser and WhatsApp liveness probes ` +
+    `(sessionId=${this.host.config.sessionId}, operation=${operation}, ` +
+    `consecutiveProtocolTimeouts=${this.consecutiveProtocolTimeouts}, ` +
+    `recoveryThreshold=${MAX_PROTOCOL_TIMEOUT_RECOVERY_ATTEMPTS}, ` +
+    `action=protocol_timeout_health_failed)`,
+);
+  
 
     if (
       this.consecutiveProtocolTimeouts <
@@ -1186,14 +1184,11 @@ export class WwebjsLifecycle {
     }
 
     this.host.logger.error(
-      'Repeated protocol timeouts with failed health checks; forcing browser recovery',
-      {
-        sessionId: this.host.config.sessionId,
-        operation,
-        consecutiveProtocolTimeouts: this.consecutiveProtocolTimeouts,
-        action: 'protocol_timeout_force_destroy',
-      },
-    );
+  `Repeated protocol timeouts with failed health checks; forcing browser recovery ` +
+    `(sessionId=${this.host.config.sessionId}, operation=${operation}, ` +
+    `consecutiveProtocolTimeouts=${this.consecutiveProtocolTimeouts}, ` +
+    `action=protocol_timeout_force_destroy)`,
+);
 
     this.consecutiveProtocolTimeouts = 0;
 
