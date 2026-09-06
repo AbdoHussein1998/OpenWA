@@ -47,6 +47,10 @@ import { IntegrationModule } from './modules/integration/integration.module';
 import { SearchModule } from './modules/search/search.module';
 import { SqlitePermissionsBoot } from './database/sqlite-file-permissions';
 
+import { TeamLeaderModule } from './modules/teamleader/teamleader.module';
+
+
+
 // Only import QueueModule if explicitly enabled to avoid Redis connection errors
 const queueModules: Array<Type | DynamicModule> = [];
 if (process.env.QUEUE_ENABLED === 'true') {
@@ -117,6 +121,8 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
 
 @Module({
   imports: [
+
+    
     // Configuration
     ConfigModule.forRoot({
       isGlobal: true,
@@ -141,6 +147,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
           entities: [
             __dirname + '/modules/auth/**/*.entity{.ts,.js}',
             __dirname + '/modules/audit/**/*.entity{.ts,.js}',
+            __dirname + '/modules/teamleader/**/*.entity{.ts,.js}',
           ],
           // Dedicated migrations dir for the main connection only (must NOT run the
           // data-connection migrations, which target session/webhook/message tables).
@@ -290,6 +297,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
     EventsModule, // WebSocket real-time events
     ...queueModules,
     AuthModule,
+    TeamLeaderModule,
     EngineModule,
     SessionModule,
     MessageModule,

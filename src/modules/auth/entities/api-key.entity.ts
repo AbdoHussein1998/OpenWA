@@ -1,9 +1,23 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+  JoinColumn,
+  ManyToOne,
+} from 'typeorm';
+
+import { Agent } from '../../teamleader/entities/agent.entity';
+import { TeamLeader } from '../../teamleader/entities/team-leader.entity';
 
 export enum ApiKeyRole {
   ADMIN = 'admin',
   OPERATOR = 'operator',
   VIEWER = 'viewer',
+  TEAM_LEADER = 'team_leader',
+  AGENT = 'agent',
 }
 
 @Entity('api_keys')
@@ -29,6 +43,54 @@ export class ApiKey {
     default: ApiKeyRole.OPERATOR,
   })
   role!: ApiKeyRole;
+
+  /**
+   * Principal binding for TEAM_LEADER API keys.
+   *
+   * Must be non-null only when role === TEAM_LEADER.
+   * The main-database migration adds the FK to team_leaders.id.
+   */
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  teamLeaderId!: string | null;
+
+  @ManyToOne(
+  () => TeamLeader,
+  {
+    nullable: true,
+    onDelete: 'CASCADE',
+  },
+  )
+  @JoinColumn({
+    name: 'teamLeaderId',
+  })
+  teamLeader!: TeamLeader | null;
+
+
+  /**
+   * Principal binding for AGENT API keys.
+   *
+   * Must be non-null only when role === AGENT.
+   * The main-database migration adds the FK to agents.id.
+   */
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  agentId!: string | null;
+
+
+  @ManyToOne(
+  () => Agent,
+  {
+    nullable: true,
+    onDelete: 'CASCADE',
+  },
+  )
+  @JoinColumn({
+    name: 'agentId',
+  })
+  agent!: Agent | null;
+
+
 
   @Column({ type: 'simple-array', nullable: true })
   allowedIps!: string[] | null;

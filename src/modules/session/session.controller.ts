@@ -12,6 +12,9 @@ import {
   HttpStatus,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
+import { SessionTenantAccessService } from '../access-control/session-tenant-access.service';
+
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { SessionService } from './session.service';
 import {
@@ -52,8 +55,9 @@ import { ENGINE_NOT_READY_409, PAIRING_NOT_READY_409 } from '../../common/openap
 @SessionScoped()
 export class SessionController {
   constructor(
-    private readonly sessionService: SessionService,
-    private readonly auditService: AuditService,
+  private readonly sessionService: SessionService,
+  private readonly auditService: AuditService,
+  private readonly sessionTenantAccessService: SessionTenantAccessService,
   ) {}
 
   private transformSession(session: Session): SessionResponseDto {
@@ -64,9 +68,6 @@ export class SessionController {
 
   @Post()
   @RequireRole(ApiKeyRole.OPERATOR)
-  // Creating a session has no existing session id for the class-level @SessionScoped fence to check,
-  // and the new session is outside the caller's allowlist by construction — so a key restricted to
-  // specific sessions cannot create one. Different metadata key from @SessionScoped; they coexist.
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Create a new WhatsApp session' })
   @ApiResponse({
@@ -74,16 +75,52 @@ export class SessionController {
     description: 'Session created',
     type: SessionResponseDto,
   })
-  @ApiResponse({ status: 409, description: 'Session name already exists' })
-  async create(@Body() dto: CreateSessionDto): Promise<SessionResponseDto> {
-    const session = await this.sessionService.create(dto);
-    await this.auditService.logInfo(AuditAction.SESSION_CREATED, {
-      sessionId: session.id,
-      sessionName: session.name,
-    });
+  @ApiResponse({
+    status: 409,
+    description: 'Session name already exists',
+  })
+  async create(
+    @CurrentApiKey() apiKey: ApiKey,
+    @Body() dto: CreateSessionDto,
+  ): Promise<SessionResponseDto> {
+    let ownerTeamLeaderId: string | null = null;
+
+    if (apiKey.role === ApiKeyRole.TEAM_LEADER) {
+      if (!apiKey.teamLeaderId) {
+        /*
+        * Fail closed for a malformed management credential.
+        *
+        * Session creation has no existing :sessionId, so the normal
+        * SessionTenantAccessService.assertSessionAccess() fence cannot
+        * validate the Team Leader principal binding here.
+        */
+        throw new ForbiddenException(
+          'Team Leader API key is missing its principal binding',
+        );
+      }
+
+      ownerTeamLeaderId = apiKey.teamLeaderId;
+    }
+
+    const session = await this.sessionService.create(
+      dto,
+      {
+        ownerTeamLeaderId,
+      },
+    );
+
+    await this.auditService.logInfo(
+      AuditAction.SESSION_CREATED,
+      {
+        sessionId: session.id,
+        sessionName: session.name,
+      },
+    );
+
     return this.transformSession(session);
   }
 
+  
   @Get()
   @ApiOperation({ summary: 'List all sessions' })
   @ApiResponse({
@@ -91,21 +128,52 @@ export class SessionController {
     description: 'List of sessions',
     type: [SessionResponseDto],
   })
-  @ApiQuery({ name: 'limit', required: false, description: 'Max sessions to return (1-1000, default 1000)' })
-  @ApiQuery({ name: 'offset', required: false, description: 'Number of sessions to skip (for paging)' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description:
+      'Max sessions to return (1-1000, default 1000)',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    description:
+      'Number of sessions to skip (for paging)',
+  })
   async findAll(
-    @CurrentApiKey() apiKey?: ApiKey,
+    @CurrentApiKey() apiKey: ApiKey,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ): Promise<SessionResponseDto[]> {
-    // Scope to the key's allowedSessions so a session-restricted key cannot enumerate every
-    // session. A null/empty allowlist (e.g. ADMIN) still lists all.
-    const sessions = await this.sessionService.findAll(apiKey?.allowedSessions, {
-      limit: limit ? parseInt(limit, 10) : undefined,
-      offset: offset ? parseInt(offset, 10) : undefined,
-    });
-    return sessions.map(s => this.transformSession(s));
+    const scope =
+      await this.sessionTenantAccessService.getEffectiveSessionScope(
+        apiKey,
+      );
+
+    const sessions =
+      await this.sessionService.findAll(
+        scope,
+        {
+          limit: limit
+            ? parseInt(limit, 10)
+            : undefined,
+
+          offset: offset
+            ? parseInt(offset, 10)
+            : undefined,
+        },
+      );
+
+    return sessions.map(session =>
+      this.transformSession(session),
+    );
   }
+
+
+
+
+
+
 
   @Get(':sessionId')
   @ApiOperation({ summary: 'Get session by ID' })
@@ -746,25 +814,43 @@ export class SessionController {
     return { success: true };
   }
 
+  
+  
+
+
+
+
   @Get('stats/overview')
   @ApiOperation({
-    summary: 'Get session statistics for multi-session monitoring',
+    summary:
+      'Get session statistics for multi-session monitoring',
   })
   @ApiResponse({
     status: 200,
-    description: 'Session statistics including counts and memory usage',
+    description:
+      'Session statistics including counts and memory usage',
     type: SessionsOverviewResponseDto,
   })
-  async getStats(@CurrentApiKey() apiKey?: ApiKey): Promise<{
+  async getStats(
+    @CurrentApiKey() apiKey: ApiKey,
+  ): Promise<{
     total: number;
     active: number;
     ready: number;
     disconnected: number;
     byStatus: Record<string, number>;
-    memoryUsage: { heapUsed: number; heapTotal: number; rss: number };
+    memoryUsage: {
+      heapUsed: number;
+      heapTotal: number;
+      rss: number;
+    };
   }> {
-    // Scope aggregate stats to the key's allowedSessions so a session-restricted key cannot enumerate
-    // global session counts/status (the route carries no :sessionId for the guard to scope against).
-    return this.sessionService.getStats(apiKey?.allowedSessions);
+    const scope =
+      await this.sessionTenantAccessService.getEffectiveSessionScope(
+        apiKey,
+      );
+
+    return this.sessionService.getStats(scope);
   }
 }
+

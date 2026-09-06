@@ -1,4 +1,11 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
 import { DateTransformer } from '../../../common/transformers/date.transformer';
 import { jsonColumnType, dateColumnType } from '../../../common/utils/column-types';
 import type { AccountRestriction } from '../../../engine/interfaces/whatsapp-engine.interface';
@@ -22,6 +29,22 @@ export class Session {
   @Column({ type: 'varchar', length: 100, unique: true })
   name!: string;
 
+  /**
+   * Tenant owner of this WhatsApp session.
+   *
+   * NULL means this is a legacy/non-Team-Leader-owned session.
+   *
+   * This is intentionally NOT a TypeORM relation because TeamLeader lives
+   * in the separate `main` database while Session lives in `data`.
+   */
+  @Index()
+  @Column({
+    type: 'varchar',
+    length: 36,
+    nullable: true,
+  })
+  ownerTeamLeaderId!: string | null;
+
   @Column({
     type: 'varchar',
     length: 50,
@@ -29,8 +52,26 @@ export class Session {
   })
   status!: SessionStatus;
 
+
+
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone!: string | null;
+
+  /**
+   * Optional intended/display phone number supplied when the session
+   * is created.
+   *
+   * This is metadata only and MUST NOT be used for authorization.
+   */
+  @Column({
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
+  targetPhone!: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  pushName!: string | null;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   pushName!: string | null;

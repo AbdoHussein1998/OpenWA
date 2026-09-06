@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -8,7 +9,13 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, UpdateQueryBuilder, DeleteQueryBuilder, type QueryDeepPartialEntity } from 'typeorm';
+import {
+  DeleteQueryBuilder,
+  EntityManager,
+  QueryDeepPartialEntity,
+  Repository,
+  UpdateQueryBuilder,
+} from 'typeorm';
 import { randomBytes } from 'crypto';
 import { ipMatches } from '../../common/utils/ip';
 import { hashApiKey } from './api-key-hash';
@@ -18,7 +25,7 @@ import { createLogger } from '../../common/services/logger.service';
 import { readBootstrapKey, removeBootstrapKey, writeBootstrapKey } from './bootstrap-key-file';
 import { ApiKeyUsageTracker } from './api-key-usage-tracker.service';
 import { EventsGateway, type ApiKeyEvictionReason } from '../events/events.gateway';
-
+import { ApiCapability } from './capabilities/api-capability';
 /**
  * Resolves the API key to seed on first boot (when no keys exist yet).
  * Precedence: an explicit `API_MASTER_KEY` always wins; otherwise a
@@ -48,6 +55,130 @@ export function bannerKeyLine(displayKey: string, isNewKey: boolean): string {
   if (displayKey.startsWith('(')) return displayKey;
   return `${displayKey.slice(0, 8)}… (full key in data/.api-key or the dashboard)`;
 }
+
+
+
+const ROLE_PERMISSIONS: Readonly<
+  Record<ApiKeyRole, ReadonlySet<ApiKeyRole>>
+> = {
+  [ApiKeyRole.ADMIN]: new Set([
+    ApiKeyRole.ADMIN,
+    ApiKeyRole.OPERATOR,
+    ApiKeyRole.VIEWER,
+  ]),
+
+  [ApiKeyRole.OPERATOR]: new Set([
+    ApiKeyRole.OPERATOR,
+    ApiKeyRole.VIEWER,
+  ]),
+
+  [ApiKeyRole.VIEWER]: new Set([
+    ApiKeyRole.VIEWER,
+  ]),
+
+  /*
+   * Team Leaders retain compatibility with legacy routes that still
+   * require OPERATOR while we progressively move sensitive routes to
+   * explicit capabilities.
+   *
+   * Tenant/session ownership is enforced separately.
+   */
+  [ApiKeyRole.TEAM_LEADER]: new Set([
+    ApiKeyRole.OPERATOR,
+    ApiKeyRole.VIEWER,
+  ]),
+
+  /*
+   * Agents deliberately do NOT inherit OPERATOR.
+   *
+   * The message/chat write routes they require will use explicit
+   * capabilities instead.
+   */
+  [ApiKeyRole.AGENT]: new Set([
+    ApiKeyRole.VIEWER,
+  ]),
+};
+
+const ROLE_CAPABILITIES: Readonly<
+  Record<ApiKeyRole, ReadonlySet<ApiCapability>>
+> = {
+  [ApiKeyRole.ADMIN]: new Set([
+    ApiCapability.SESSION_READ,
+    ApiCapability.SESSION_CREATE,
+    ApiCapability.SESSION_MANAGE,
+    ApiCapability.SESSION_CONFIGURE,
+
+    ApiCapability.CHAT_READ,
+    ApiCapability.CHAT_OPERATE,
+
+    ApiCapability.MESSAGE_SEND,
+    ApiCapability.MESSAGE_OPERATE,
+    ApiCapability.MESSAGE_BULK,
+
+    ApiCapability.WEBHOOK_MANAGE,
+    ApiCapability.TEMPLATE_MANAGE,
+    ApiCapability.SEARCH_MESSAGES,
+
+    ApiCapability.TEAM_MANAGE,
+
+    ApiCapability.API_KEY_MANAGE,
+    ApiCapability.AUDIT_READ,
+    ApiCapability.INFRA_MANAGE,
+    ApiCapability.PLUGIN_MANAGE,
+  ]),
+
+  [ApiKeyRole.OPERATOR]: new Set([
+    ApiCapability.SESSION_READ,
+    ApiCapability.SESSION_CREATE,
+    ApiCapability.SESSION_MANAGE,
+    ApiCapability.SESSION_CONFIGURE,
+
+    ApiCapability.CHAT_READ,
+    ApiCapability.CHAT_OPERATE,
+
+    ApiCapability.MESSAGE_SEND,
+    ApiCapability.MESSAGE_OPERATE,
+    ApiCapability.MESSAGE_BULK,
+
+    ApiCapability.WEBHOOK_MANAGE,
+    ApiCapability.TEMPLATE_MANAGE,
+    ApiCapability.SEARCH_MESSAGES,
+  ]),
+
+  [ApiKeyRole.VIEWER]: new Set([
+    ApiCapability.SESSION_READ,
+    ApiCapability.CHAT_READ,
+  ]),
+
+  [ApiKeyRole.TEAM_LEADER]: new Set([
+    ApiCapability.SESSION_READ,
+    ApiCapability.SESSION_CREATE,
+    ApiCapability.SESSION_MANAGE,
+    ApiCapability.SESSION_CONFIGURE,
+
+    ApiCapability.CHAT_READ,
+    ApiCapability.CHAT_OPERATE,
+
+    ApiCapability.MESSAGE_SEND,
+    ApiCapability.MESSAGE_OPERATE,
+
+    ApiCapability.WEBHOOK_MANAGE,
+    ApiCapability.TEMPLATE_MANAGE,
+    ApiCapability.SEARCH_MESSAGES,
+
+    ApiCapability.TEAM_MANAGE,
+  ]),
+
+  [ApiKeyRole.AGENT]: new Set([
+    ApiCapability.SESSION_READ,
+
+    ApiCapability.CHAT_READ,
+    ApiCapability.CHAT_OPERATE,
+
+    ApiCapability.MESSAGE_SEND,
+    ApiCapability.MESSAGE_OPERATE,
+  ]),
+};
 
 @Injectable()
 export class AuthService implements OnModuleInit, OnModuleDestroy {
@@ -173,7 +304,21 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
 
   async createApiKey(dto: CreateApiKeyDto): Promise<{ apiKey: ApiKey; rawKey: string }> {
     // Generate secure random key: owa_k1_<32 bytes hex>
-    const rawKey = `owa_k1_${randomBytes(32).toString('hex')}`;
+    const requestedRole =
+      dto.role ?? ApiKeyRole.OPERATOR;
+
+    if (
+      requestedRole === ApiKeyRole.TEAM_LEADER ||
+      requestedRole === ApiKeyRole.AGENT
+    ) {
+      throw new BadRequestException(
+        'Team Leader and Agent API keys must be created through principal management',
+      );
+    }
+
+    const rawKey =
+      `owa_k1_${randomBytes(32).toString('hex')}`;
+
     const keyHash = this.hashKey(rawKey);
     const keyPrefix = rawKey.substring(0, 12);
 
@@ -181,10 +326,12 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       name: dto.name,
       keyHash,
       keyPrefix,
-      role: dto.role || ApiKeyRole.OPERATOR,
+      role: requestedRole,
       allowedIps: dto.allowedIps || null,
       allowedSessions: dto.allowedSessions || null,
-      expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+      expiresAt: dto.expiresAt
+        ? new Date(dto.expiresAt)
+        : null,
     });
 
     const saved = await this.apiKeyRepository.save(apiKey);
@@ -196,6 +343,71 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
 
     return { apiKey: saved, rawKey };
   }
+
+    /**
+   * Internal credential provisioning for management principals.
+   *
+   * TeamLeaderService uses this method while already inside a transaction
+   * on the `main` database so principal + credential creation is atomic.
+   *
+   * Do not expose this through the generic /auth/api-keys API.
+   */
+  async createApiKeyInTransaction(
+    manager: EntityManager,
+    input: {
+      name: string;
+      role: ApiKeyRole.TEAM_LEADER | ApiKeyRole.AGENT;
+
+      teamLeaderId?: string | null;
+      agentId?: string | null;
+
+      allowedIps?: string[] | null;
+      allowedSessions?: string[] | null;
+      expiresAt?: Date | null;
+    },
+  ): Promise<{
+    apiKey: ApiKey;
+    rawKey: string;
+  }> {
+    this.assertManagementPrincipalBinding(input);
+
+    const rawKey =
+      `owa_k1_${randomBytes(32).toString('hex')}`;
+
+    const repository =
+      manager.getRepository(ApiKey);
+
+    const apiKey = repository.create({
+      name: input.name,
+      keyHash: this.hashKey(rawKey),
+      keyPrefix: rawKey.substring(0, 12),
+      role: input.role,
+
+      teamLeaderId:
+        input.teamLeaderId ?? null,
+
+      agentId:
+        input.agentId ?? null,
+
+      allowedIps:
+        input.allowedIps ?? null,
+
+      allowedSessions:
+        input.allowedSessions ?? null,
+
+      expiresAt:
+        input.expiresAt ?? null,
+    });
+
+    const saved =
+      await repository.save(apiKey);
+
+    return {
+      apiKey: saved,
+      rawKey,
+    };
+  }
+
 
   async findAll(): Promise<ApiKey[]> {
     return this.apiKeyRepository.find({
@@ -213,6 +425,31 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
 
   async update(id: string, dto: UpdateApiKeyDto): Promise<ApiKey> {
     const apiKey = await this.findOne(id);
+    /*
+    * Management-role bindings are lifecycle-managed by TeamLeaderService.
+    * The generic API-key endpoint must not create, remove or convert those
+    * principal bindings by changing roles.
+    */
+    if (
+      dto.role === ApiKeyRole.TEAM_LEADER ||
+      dto.role === ApiKeyRole.AGENT
+    ) {
+      throw new BadRequestException(
+        'Team Leader and Agent roles cannot be assigned through generic API-key management',
+      );
+    }
+
+    if (
+      dto.role !== undefined &&
+      (
+        apiKey.role === ApiKeyRole.TEAM_LEADER ||
+        apiKey.role === ApiKeyRole.AGENT
+      )
+    ) {
+      throw new BadRequestException(
+        'Management identity API-key roles cannot be changed through generic API-key management',
+      );
+    }
 
     // Scoping the last unscoped admin (non-empty allowedSessions) strips key-management just as
     // surely as demoting or expiring it: @RequireUnscopedKey would then 403 every lifecycle route.
@@ -423,6 +660,33 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+
+  private assertManagementPrincipalBinding(
+    input: {
+      role: ApiKeyRole.TEAM_LEADER | ApiKeyRole.AGENT;
+      teamLeaderId?: string | null;
+      agentId?: string | null;
+    },
+  ): void {
+    if (input.role === ApiKeyRole.TEAM_LEADER) {
+      if (!input.teamLeaderId || input.agentId) {
+        throw new BadRequestException(
+          'TEAM_LEADER API key requires teamLeaderId and must not contain agentId',
+        );
+      }
+
+      return;
+    }
+
+    if (!input.agentId || input.teamLeaderId) {
+      throw new BadRequestException(
+        'AGENT API key requires agentId and must not contain teamLeaderId',
+      );
+    }
+  }
+
+
+
   async validateApiKey(rawKey: string, clientIp?: string, sessionId?: string): Promise<ApiKey> {
     // Trim before hashing so every surface agrees on what the credential is. HTTP already strips
     // surrounding whitespace from header values, so a pasted key with a stray space/newline
@@ -483,13 +747,43 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     return allowedIps.some(entry => ipMatches(clientIp, entry));
   }
 
-  hasPermission(apiKey: ApiKey, requiredRole: ApiKeyRole): boolean {
-    const roleHierarchy: Record<ApiKeyRole, number> = {
-      [ApiKeyRole.VIEWER]: 1,
-      [ApiKeyRole.OPERATOR]: 2,
-      [ApiKeyRole.ADMIN]: 3,
-    };
+      /**
+     * Compatibility authorization for existing @RequireRole routes.
+     *
+     * Do not infer privilege from enum ordering.
+     */
+    hasPermission(
+      apiKey: ApiKey,
+      requiredRole: ApiKeyRole,
+    ): boolean {
+      return (
+        ROLE_PERMISSIONS[apiKey.role]?.has(
+          requiredRole,
+        ) ?? false
+      );
+    }
 
-    return roleHierarchy[apiKey.role] >= roleHierarchy[requiredRole];
+    /**
+     * Fine-grained capability authorization.
+     *
+     * This answers WHAT the principal may do.
+     * Tenant/session authorization answers WHERE they may do it.
+     */
+    hasCapability(
+      apiKey: ApiKey,
+      capability: ApiCapability,
+    ): boolean {
+      return (
+        ROLE_CAPABILITIES[apiKey.role]?.has(
+          capability,
+        ) ?? false
+      );
+    }
+
   }
-}
+
+
+
+
+
+

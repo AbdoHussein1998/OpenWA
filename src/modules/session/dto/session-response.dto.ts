@@ -1,10 +1,21 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+
+
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
+
 import type { Session } from '../entities/session.entity';
 import { SessionStatus } from '../entities/session.entity';
 
 export class AccountRestrictionDto {
   @ApiProperty({
-    enum: ['reachout_timelock', 'tos_block', 'proxy_block'],
+    enum: [
+      'reachout_timelock',
+      'tos_block',
+      'proxy_block',
+    ],
     description:
       'What WhatsApp is restricting. `reachout_timelock` leaves the session connected and existing ' +
       'chats working, blocking only the start of new conversations. `tos_block` and `proxy_block` ' +
@@ -12,7 +23,10 @@ export class AccountRestrictionDto {
       'seeing either alongside a `ready` status is not possible.',
     example: 'reachout_timelock',
   })
-  kind!: 'reachout_timelock' | 'tos_block' | 'proxy_block';
+  kind!:
+    | 'reachout_timelock'
+    | 'tos_block'
+    | 'proxy_block';
 
   @ApiProperty({
     description:
@@ -35,31 +49,79 @@ export class AccountRestrictionDto {
 }
 
 export class SessionResponseDto {
-  @ApiProperty({ example: '0a941dac-a965-45e7-b318-74ae8be134f0' })
+  @ApiProperty({
+    example:
+      '0a941dac-a965-45e7-b318-74ae8be134f0',
+  })
   id!: string;
 
-  @ApiProperty({ example: 'my-bot' })
+  @ApiProperty({
+    example: 'my-bot',
+  })
   name!: string;
 
-  @ApiProperty({ enum: SessionStatus, example: SessionStatus.READY })
+  @ApiProperty({
+    enum: SessionStatus,
+    example: SessionStatus.READY,
+  })
   status!: SessionStatus;
 
-  @ApiPropertyOptional({ type: String, example: '628123456789', nullable: true })
+  /**
+   * Intended/display phone entered when the session was created.
+   *
+   * This is not authorization state and may differ from the actual
+   * connected WhatsApp account.
+   */
+  @ApiPropertyOptional({
+    type: String,
+    example: '+201234567890',
+    description:
+      'Optional intended phone number supplied when the session was created. This is display metadata only and may differ from the connected account.',
+    nullable: true,
+  })
+  targetPhone?: string | null;
+
+  /**
+   * Actual connected WhatsApp account phone number.
+   */
+  @ApiPropertyOptional({
+    type: String,
+    example: '628123456789',
+    nullable: true,
+  })
   phone?: string | null;
 
-  @ApiPropertyOptional({ type: String, example: 'John Doe', nullable: true })
+  @ApiPropertyOptional({
+    type: String,
+    example: 'John Doe',
+    nullable: true,
+  })
   pushName?: string | null;
 
-  @ApiPropertyOptional({ type: String, format: 'date-time', example: '2025-02-02T10:00:00Z', nullable: true })
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    example: '2025-02-02T10:00:00Z',
+    nullable: true,
+  })
   connectedAt?: Date | null;
 
-  @ApiPropertyOptional({ type: String, format: 'date-time', example: '2025-02-02T10:30:00Z', nullable: true })
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    example: '2025-02-02T10:30:00Z',
+    nullable: true,
+  })
   lastActive?: Date | null;
 
-  @ApiProperty({ example: '2025-02-02T09:00:00Z' })
+  @ApiProperty({
+    example: '2025-02-02T09:00:00Z',
+  })
   createdAt!: Date;
 
-  @ApiProperty({ example: '2025-02-02T10:00:00Z' })
+  @ApiProperty({
+    example: '2025-02-02T10:00:00Z',
+  })
   updatedAt!: Date;
 
   @ApiPropertyOptional({
@@ -67,7 +129,8 @@ export class SessionResponseDto {
     description:
       'Human-readable reason carried while the status is FAILED (a terminal engine failure) or ' +
       'ACTION_REQUIRED (the engine is running but something needs a human). Cleared on any other status.',
-    example: 'Failed to launch the browser process: spawn /usr/bin/chromium ENOENT',
+    example:
+      'Failed to launch the browser process: spawn /usr/bin/chromium ENOENT',
     nullable: true,
   })
   lastError?: string | null;
@@ -99,32 +162,63 @@ export class SessionResponseDto {
    * engine config fields (`config`, `proxyUrl`, `proxyType`) that must not
    * appear in any API response.
    *
-   * `engineLoaded` is not on the entity — it is live process state owned by the session service, so
-   * every caller must pass it in rather than letting it default. A required parameter is deliberate:
-   * a default of `false` would silently tell clients "no engine" for whole surfaces (the MCP tools,
-   * any future caller) and the dashboard would then offer Start to a running session.
+   * `ownerTeamLeaderId` is also intentionally omitted because it is
+   * internal authorization state and is not part of the public session
+   * response contract.
+   *
+   * `engineLoaded` is not on the entity — it is live process state owned
+   * by the session service, so every caller must pass it in rather than
+   * letting it default.
    */
-  static fromEntity(session: Session, engineLoaded: boolean): SessionResponseDto {
+  static fromEntity(
+    session: Session,
+    engineLoaded: boolean,
+  ): SessionResponseDto {
     return {
       id: session.id,
       name: session.name,
       status: session.status,
+
+      targetPhone:
+        session.targetPhone ?? null,
+
       phone: session.phone,
       pushName: session.pushName,
-      connectedAt: session.connectedAt,
-      lastActive: session.lastActiveAt,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      lastError: session.lastError ?? null,
+
+      connectedAt:
+        session.connectedAt,
+
+      lastActive:
+        session.lastActiveAt,
+
+      createdAt:
+        session.createdAt,
+
+      updatedAt:
+        session.updatedAt,
+
+      lastError:
+        session.lastError ?? null,
+
       restriction: session.restriction
         ? {
-            kind: session.restriction.kind,
-            code: session.restriction.code,
-            // Held as epoch ms internally (what the engine gives us); served as a date-time like
-            // every other timestamp in this response.
-            expiresAt: session.restriction.expiresAt ? new Date(session.restriction.expiresAt) : null,
+            kind:
+              session.restriction.kind,
+
+            code:
+              session.restriction.code,
+
+            // Held as epoch ms internally (what the engine gives us);
+            // served as a date-time like every other timestamp.
+            expiresAt:
+              session.restriction.expiresAt
+                ? new Date(
+                    session.restriction.expiresAt,
+                  )
+                : null,
           }
         : null,
+
       engineLoaded,
     };
   }
@@ -137,6 +231,11 @@ export class QRCodeResponseDto {
   })
   qrCode!: string;
 
-  @ApiProperty({ enum: SessionStatus, example: SessionStatus.QR_READY })
+  @ApiProperty({
+    enum: SessionStatus,
+    example: SessionStatus.QR_READY,
+  })
   status!: SessionStatus;
 }
+
+

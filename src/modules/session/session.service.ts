@@ -11,7 +11,18 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, In, Not, IsNull, DataSource, FindManyOptions } from 'typeorm';
+import {
+  Repository,
+  In,
+  Not,
+  IsNull,
+  DataSource,
+  SelectQueryBuilder,
+} from 'typeorm';
+import {
+  SessionScope,
+  SessionScopeType,
+} from '../access-control/session-scope';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { setTimeout } from 'node:timers/promises';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
@@ -71,6 +82,19 @@ function isTransientLaunchFailure(error: unknown): boolean {
 
 /** Pause between sequential auto-start launches so a burst of Chromium boots does not spike the host. */
 export const AUTOSTART_THROTTLE_MS = 2_000;
+
+
+
+
+export interface CreateSessionOptions {
+  /**
+   * Tenant owner supplied from authenticated server context.
+   *
+   * null means a legacy/non-Team-Leader-owned session.
+   */
+  ownerTeamLeaderId?: string | null;
+}
+
 
 /**
  * The session-record API: CRUD over the sessions table, aggregate stats, and the thin engine query
@@ -258,64 +282,224 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     await this.ownership?.releaseAll();
   }
 
-  async create(dto: CreateSessionDto): Promise<Session> {
-    // Check if session with same name exists
-    const existing = await this.sessionRepository.findOne({
-      where: { name: dto.name },
-    });
+  async create(
+    dto: CreateSessionDto,
+    options: CreateSessionOptions = {},
+  ): Promise<Session> {
+    // Check if session with same name exists.
+    const existing =
+      await this.sessionRepository.findOne({
+        where: {
+          name: dto.name,
+        },
+      });
 
     if (existing) {
-      throw new ConflictException(`Session with name '${dto.name}' already exists`);
+      throw new ConflictException(
+        `Session with name '${dto.name}' already exists`,
+      );
     }
 
-    const session = this.sessionRepository.create({
-      name: dto.name,
-      config: dto.config || {},
-      proxyUrl: dto.proxyUrl || null,
-      proxyType: dto.proxyType || null,
-      status: SessionStatus.CREATED,
-    });
+    const session =
+      this.sessionRepository.create({
+        name: dto.name,
 
-    // The findOne pre-check above is a fast path for the common case, but it's a check-then-insert
-    // TOCTOU: two concurrent same-name creates both pass it, then one hits the name UNIQUE constraint.
-    // Translate that violation to a 409 (matching the pre-check) instead of leaking a raw 500.
-    let saved: Session;
-    try {
-      saved = await this.dataSource.transaction(async manager => {
-        return await manager.save(session);
+        /*
+        * Tenant ownership comes only from authenticated
+        * server context, never from CreateSessionDto.
+        */
+        ownerTeamLeaderId:
+          options.ownerTeamLeaderId ?? null,
+
+        /*
+        * Optional display/intention metadata.
+        * Never use targetPhone for authorization.
+        */
+        targetPhone:
+          dto.targetPhone ?? null,
+
+        config:
+          dto.config || {},
+
+        proxyUrl:
+          dto.proxyUrl || null,
+
+        proxyType:
+          dto.proxyType || null,
+
+        status:
+          SessionStatus.CREATED,
       });
+
+    /*
+    * The findOne pre-check above is only the common fast path.
+    * Concurrent requests may still hit the unique constraint,
+    * so preserve the existing 409 translation.
+    */
+    let saved: Session;
+
+    try {
+      saved =
+        await this.dataSource.transaction(
+          async manager => {
+            return manager.save(session);
+          },
+        );
     } catch (err) {
       if (isUniqueViolation(err)) {
-        throw new ConflictException(`Session with name '${dto.name}' already exists`);
+        throw new ConflictException(
+          `Session with name '${dto.name}' already exists`,
+        );
       }
+
       throw err;
     }
-    this.logger.log(`Session created: ${saved.name}`, {
-      sessionId: saved.id,
-      action: 'create',
-    });
 
-    // Execute hook after session created (outside transaction since hooks do external I/O)
-    await this.hookManager.execute('session:created', saved, {
-      sessionId: saved.id,
-      source: 'SessionService',
-    });
+    this.logger.log(
+      `Session created: ${saved.name}`,
+      {
+        sessionId: saved.id,
+        action: 'create',
+      },
+    );
+
+    // Hooks run outside the DB transaction because they perform I/O.
+    await this.hookManager.execute(
+      'session:created',
+      saved,
+      {
+        sessionId: saved.id,
+        source: 'SessionService',
+      },
+    );
 
     return saved;
+  }  
+
+  async findAll(
+    scope: SessionScope,
+    opts: ListOptions = {},
+  ): Promise<Session[]> {
+    const {
+      limit,
+      offset,
+    } = resolveListWindow(
+      opts.limit,
+      opts.offset,
+    );
+
+    const query =
+      this.sessionRepository
+        .createQueryBuilder('session')
+        .orderBy(
+          'session.createdAt',
+          'DESC',
+        )
+        .take(limit)
+        .skip(offset);
+
+    this.applySessionScope(
+      query,
+      scope,
+    );
+
+    const sessions =
+      await query.getMany();
+
+    return sessions.map(session =>
+      this.attachRuntimeState(session),
+    );
   }
 
-  async findAll(allowedSessions?: string[] | null, opts: ListOptions = {}): Promise<Session[]> {
-    // A session-restricted key only lists its own sessions; an unrestricted key (null/empty
-    // allowlist) lists all — mirroring the ApiKeyGuard allowedSessions model so a scoped key
-    // cannot enumerate every session through this aggregate route.
-    const { limit, offset } = resolveListWindow(opts.limit, opts.offset);
-    const options: FindManyOptions<Session> = { order: { createdAt: 'DESC' }, take: limit, skip: offset };
-    if (allowedSessions && allowedSessions.length > 0) {
-      options.where = { id: In(allowedSessions) };
+
+  /**
+   * Apply an effective tenant session scope to a SQL query.
+   *
+   * IMPORTANT:
+   *
+   * OWNER_AND_IDS means:
+   *
+   *   ownerTeamLeaderId = :owner
+   *   AND
+   *   id IN (...)
+   *
+   * Never convert it to TypeORM:
+   *
+   *   where: [
+   *     { ownerTeamLeaderId: ... },
+   *     { id: In(...) },
+   *   ]
+   *
+   * because an array of where objects is OR.
+   */
+  private applySessionScope(
+    query: SelectQueryBuilder<Session>,
+    scope: SessionScope,
+  ): void {
+    switch (scope.type) {
+      case SessionScopeType.ALL:
+        return;
+
+      case SessionScopeType.NONE:
+        /*
+        * Always false, without relying on an empty IN().
+        */
+        query.andWhere('1 = 0');
+        return;
+
+      case SessionScopeType.IDS:
+        query.andWhere(
+          'session.id IN (:...scopeSessionIds)',
+          {
+            scopeSessionIds: [
+              ...scope.sessionIds,
+            ],
+          },
+        );
+        return;
+
+      case SessionScopeType.OWNER:
+        query.andWhere(
+          'session.ownerTeamLeaderId = :scopeOwnerTeamLeaderId',
+          {
+            scopeOwnerTeamLeaderId:
+              scope.ownerTeamLeaderId,
+          },
+        );
+        return;
+
+      case SessionScopeType.OWNER_AND_IDS:
+        query
+          .andWhere(
+            'session.ownerTeamLeaderId = :scopeOwnerTeamLeaderId',
+            {
+              scopeOwnerTeamLeaderId:
+                scope.ownerTeamLeaderId,
+            },
+          )
+          .andWhere(
+            'session.id IN (:...scopeSessionIds)',
+            {
+              scopeSessionIds: [
+                ...scope.sessionIds,
+              ],
+            },
+          );
+        return;
+
+      default: {
+        const exhaustiveCheck: never =
+          scope;
+
+        throw new Error(
+          `Unsupported session scope: ${JSON.stringify(
+            exhaustiveCheck,
+          )}`,
+        );
+      }
     }
-    const sessions = await this.sessionRepository.find(options);
-    return sessions.map(session => this.attachRuntimeState(session));
   }
+
 
   async findOne(id: string): Promise<Session> {
     const session = await this.sessionRepository.findOne({ where: { id } });
@@ -742,56 +926,191 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   /**
-   * Get overall session statistics for multi-session monitoring
-   */
-  async getStats(allowedSessions?: string[] | null): Promise<{
+ * Get overall session statistics for multi-session monitoring.
+ *
+ * Aggregate endpoints must use the same effective session scope
+ * as GET /sessions because they do not contain a :sessionId that
+ * ApiKeyGuard can authorize individually.
+ */
+  async getStats(
+    scope: SessionScope,
+  ): Promise<{
     total: number;
     active: number;
     ready: number;
     disconnected: number;
     byStatus: Record<string, number>;
-    memoryUsage: { heapUsed: number; heapTotal: number; rss: number };
+    memoryUsage: {
+      heapUsed: number;
+      heapTotal: number;
+      rss: number;
+    };
   }> {
-    // Scope to the caller's allowedSessions so a session-restricted key cannot enumerate the count /
-    // status distribution of sessions it has no rights to (matches the scoped GET /sessions route).
-    const scope = allowedSessions && allowedSessions.length > 0 ? allowedSessions : null;
-    // Aggregate status counts in the database instead of loading every row. findAll() is bounded by
-    // DEFAULT_LIST_LIMIT for the HTTP routes, so reusing it here would silently undercount `total` and
-    // `byStatus` on deployments with more sessions than that cap. A grouped COUNT is correct at any
-    // scale and cheaper (no entity hydration).
-    const qb = this.sessionRepository
-      .createQueryBuilder('session')
-      .select('session.status', 'status')
-      .addSelect('COUNT(session.id)', 'count');
-    if (scope) {
-      qb.where('session.id IN (:...scope)', { scope });
-    }
-    const rows = await qb.groupBy('session.status').getRawMany<{ status: string; count: string }>();
+    /*
+    * Aggregate in SQL instead of going through findAll(), because
+    * findAll() is paginated and therefore cannot safely calculate
+    * global counts.
+    */
+    const query =
+      this.sessionRepository
+        .createQueryBuilder('session')
+        .select(
+          'session.status',
+          'status',
+        )
+        .addSelect(
+          'COUNT(session.id)',
+          'count',
+        );
 
-    const byStatus: Record<string, number> = {};
+    this.applySessionScope(
+      query,
+      scope,
+    );
+
+    const rows =
+      await query
+        .groupBy('session.status')
+        .getRawMany<{
+          status: string;
+          count: string;
+        }>();
+
+    const byStatus:
+      Record<string, number> = {};
+
     let total = 0;
+
     for (const row of rows) {
-      const count = Number(row.count) || 0;
-      byStatus[row.status] = count;
+      const count =
+        Number(row.count) || 0;
+
+      byStatus[row.status] =
+        count;
+
       total += count;
     }
 
-    const memory = process.memoryUsage();
+    const active =
+      await this.countActiveSessionsInScope(
+        scope,
+      );
+
+    const memory =
+      process.memoryUsage();
 
     return {
       total,
-      // engines is keyed by session id; a scoped key sees only its own running engines, not the global count.
-      active: scope ? [...this.engines.keys()].filter(id => scope.includes(id)).length : this.engines.size,
-      ready: byStatus[SessionStatus.READY] || 0,
-      disconnected: byStatus[SessionStatus.DISCONNECTED] || 0,
+
+      active,
+
+      ready:
+        byStatus[
+          SessionStatus.READY
+        ] || 0,
+
+      disconnected:
+        byStatus[
+          SessionStatus.DISCONNECTED
+        ] || 0,
+
       byStatus,
+
       memoryUsage: {
-        heapUsed: Math.round(memory.heapUsed / 1024 / 1024),
-        heapTotal: Math.round(memory.heapTotal / 1024 / 1024),
-        rss: Math.round(memory.rss / 1024 / 1024),
+        heapUsed:
+          Math.round(
+            memory.heapUsed /
+              1024 /
+              1024,
+          ),
+
+        heapTotal:
+          Math.round(
+            memory.heapTotal /
+              1024 /
+              1024,
+          ),
+
+        rss:
+          Math.round(
+            memory.rss /
+              1024 /
+              1024,
+          ),
       },
     };
   }
+    
+
+  /**
+ * Count live engines that also fall inside the effective database
+ * tenant scope.
+ *
+ * For OWNER scopes we cannot determine access from the engine ID
+ * alone, so the live IDs are intersected with the scoped Session
+ * query in the database.
+ */
+  private async countActiveSessionsInScope(
+    scope: SessionScope,
+  ): Promise<number> {
+    const activeIds = [
+      ...this.engines.keys(),
+    ];
+
+    if (
+      scope.type ===
+      SessionScopeType.ALL
+    ) {
+      return activeIds.length;
+    }
+
+    if (
+      scope.type ===
+        SessionScopeType.NONE ||
+      activeIds.length === 0
+    ) {
+      return 0;
+    }
+
+    const query =
+      this.sessionRepository
+        .createQueryBuilder('session')
+        .select(
+          'session.id',
+          'id',
+        )
+        .where(
+          'session.id IN (:...activeSessionIds)',
+          {
+            activeSessionIds:
+              activeIds,
+          },
+        );
+
+    /*
+    * This adds the tenant restrictions using AND.
+    *
+    * For example OWNER_AND_IDS becomes:
+    *
+    * active ID
+    * AND owner
+    * AND allowed session ID
+    */
+    this.applySessionScope(
+      query,
+      scope,
+    );
+
+    const rows =
+      await query.getRawMany<{
+        id: string;
+      }>();
+
+    return rows.length;
+  }
+
+
+
 
   /**
    * Check if session is currently active (engine running)

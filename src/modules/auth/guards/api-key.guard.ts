@@ -9,15 +9,20 @@ import { resolveClientIp } from '../../../common/utils/ip';
 import { setRequestActor } from '../../../common/services/request-context';
 import { AuditService } from '../../audit/audit.service';
 import { AuditAction } from '../../audit/entities/audit-log.entity';
+import { ApiCapability } from '../capabilities/api-capability';
+import { REQUIRED_CAPABILITY_KEY } from '../decorators/capability.decorator';
+import { SessionTenantAccessService } from '../../access-control/session-tenant-access.service';
+
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
   constructor(
-    private readonly authService: AuthService,
-    private readonly reflector: Reflector,
-    private readonly configService: ConfigService,
-    private readonly auditService: AuditService,
-  ) {}
+  private readonly authService: AuthService,
+  private readonly sessionTenantAccessService: SessionTenantAccessService,
+  private readonly reflector: Reflector,
+  private readonly configService: ConfigService,
+  private readonly auditService: AuditService,
+) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     // Check if route is marked as public
@@ -49,66 +54,167 @@ export class ApiKeyGuard implements CanActivate {
     }
   }
 
-  private async authorize(request: Request, context: ExecutionContext): Promise<boolean> {
+  private async authorize(
+    request: Request,
+    context: ExecutionContext,
+  ): Promise<boolean> {
     const apiKeyHeader = this.extractApiKey(request);
 
     if (!apiKeyHeader) {
-      throw new UnauthorizedException('API key is required');
+      throw new UnauthorizedException(
+        'API key is required',
+      );
     }
 
-    const requiredRole = this.reflector.getAllAndOverride<ApiKeyRole>(REQUIRED_ROLE_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const requiredRole =
+      this.reflector.getAllAndOverride<ApiKeyRole>(
+        REQUIRED_ROLE_KEY,
+        [
+          context.getHandler(),
+          context.getClass(),
+        ],
+      );
 
-    // Resolve the session id used for the key's allowedSessions scope. `:sessionId` is always a
-    // session; the bare `:id` param is only a session on controllers marked @SessionScoped (i.e.
-    // SessionController) — on other routes `:id` is an unrelated resource id (API key, plugin, …)
-    // and must NOT be fed to the allowedSessions check, which would spuriously deny a scoped key.
-    const sessionScoped = this.reflector.getAllAndOverride<boolean>(SESSION_SCOPED_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    const sessionId = (request.params['sessionId'] || (sessionScoped ? request.params['id'] : undefined)) as
-      string | undefined;
-    const clientIp = this.getClientIp(request);
+    const requiredCapability =
+      this.reflector.getAllAndOverride<ApiCapability>(
+        REQUIRED_CAPABILITY_KEY,
+        [
+          context.getHandler(),
+          context.getClass(),
+        ],
+      );
 
-    // Validate API key
-    const apiKey = await this.authService.validateApiKey(apiKeyHeader, clientIp, sessionId);
+    /*
+    * Resolve the route session id.
+    *
+    * :sessionId is always a session identifier.
+    *
+    * A bare :id is treated as a session identifier only when the
+    * controller/route is explicitly marked @SessionScoped().
+    */
+    const sessionScoped =
+      this.reflector.getAllAndOverride<boolean>(
+        SESSION_SCOPED_KEY,
+        [
+          context.getHandler(),
+          context.getClass(),
+        ],
+      );
 
-    // Stamp the resolved actor into the per-request async context so downstream audit log writes —
-    // which fire from services deep in the call stack without DI access to the key — can attribute
-    // the action to this key + IP. Without this every audit row's apiKey/ipAddress column is blank
-    // because call sites pass only { sessionId } etc.
-    //
-    // Stamped HERE, the moment the key is known, rather than after the authorization checks below:
-    // both of those throw, and the catch that audits the denial cannot see `apiKey` (it is a const
-    // inside this method). Stamping afterwards meant every 403 the guard raised was recorded against
-    // an IP alone — behind NAT or a proxy without TRUSTED_PROXIES that IP is common to every tenant,
-    // so the operator could see that a key had been denied but not which one to revoke.
-    setRequestActor({ apiKeyId: apiKey.id, apiKeyName: apiKey.name, ipAddress: clientIp });
+    const sessionId = (
+      request.params['sessionId'] ||
+      (
+        sessionScoped
+          ? request.params['id']
+          : undefined
+      )
+    ) as string | undefined;
 
-    if (requiredRole && !this.authService.hasPermission(apiKey, requiredRole)) {
-      throw new ForbiddenException(`Insufficient permissions. Required: ${requiredRole}`);
+    const clientIp =
+      this.getClientIp(request);
+
+    /*
+    * Credential validation only.
+    *
+    * Session authorization is deliberately NOT performed inside
+    * validateApiKey(). SessionTenantAccessService is the authority
+    * for session scope.
+    */
+    const apiKey =
+      await this.authService.validateApiKey(
+        apiKeyHeader,
+        clientIp,
+      );
+
+    /*
+    * Stamp the authenticated actor before authorization checks so
+    * rejected requests remain attributable in audit logging.
+    */
+    setRequestActor({
+      apiKeyId: apiKey.id,
+      apiKeyName: apiKey.name,
+      ipAddress: clientIp,
+    });
+
+    /*
+    * Legacy @RequireRole compatibility.
+    */
+    if (
+      requiredRole &&
+      !this.authService.hasPermission(
+        apiKey,
+        requiredRole,
+      )
+    ) {
+      throw new ForbiddenException(
+        `Insufficient permissions. Required: ${requiredRole}`,
+      );
     }
 
-    // Routes marked @RequireUnscopedKey carry no session dimension, so the allowedSessions check
-    // above can never bite on them. A session-scoped key reaching such a surface (e.g. API-key
-    // lifecycle management) could mint or widen credentials beyond its own confinement — reject it
-    // outright, whatever its role. The denial is audited by the caller's catch block.
-    const requireUnscoped = this.reflector.getAllAndOverride<boolean>(UNSCOPED_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (requireUnscoped && (apiKey.allowedSessions?.length ?? 0) > 0) {
-      throw new ForbiddenException('Session-scoped API keys are not permitted on this route');
+    /*
+    * Fine-grained capability authorization.
+    */
+    if (
+      requiredCapability &&
+      !this.authService.hasCapability(
+        apiKey,
+        requiredCapability,
+      )
+    ) {
+      throw new ForbiddenException(
+        `Insufficient permissions. Required capability: ${requiredCapability}`,
+      );
     }
 
-    // Attach API key to request for use in controllers
-    (request as Request & { apiKey: typeof apiKey }).apiKey = apiKey;
-    // Expose the trusted-proxy-aware client IP so controllers (e.g. the audit trail on key lifecycle
-    // ops) reuse the already-resolved value instead of re-deriving it.
-    (request as Request & { clientIp?: string }).clientIp = clientIp;
+    /*
+    * Administrative routes that explicitly require an unscoped key
+    * remain unavailable to keys carrying an allowedSessions ceiling.
+    */
+    const requireUnscoped =
+      this.reflector.getAllAndOverride<boolean>(
+        UNSCOPED_KEY,
+        [
+          context.getHandler(),
+          context.getClass(),
+        ],
+      );
+
+    if (
+      requireUnscoped &&
+      (apiKey.allowedSessions?.length ?? 0) > 0
+    ) {
+      throw new ForbiddenException(
+        'Session-scoped API keys are not permitted on this route',
+      );
+    }
+
+    /*
+    * Central tenant/session authorization.
+    *
+    * This is the only REST location that decides whether the
+    * authenticated principal may access a concrete session.
+    */
+    if (sessionId) {
+      await this.sessionTenantAccessService.assertSessionAccess(
+        apiKey,
+        sessionId,
+      );
+    }
+
+    /*
+    * Expose authenticated context to downstream controllers.
+    */
+    (
+      request as Request & {
+        apiKey: typeof apiKey;
+      }
+    ).apiKey = apiKey;
+
+    (
+      request as Request & {
+        clientIp?: string;
+      }
+    ).clientIp = clientIp;
 
     return true;
   }
