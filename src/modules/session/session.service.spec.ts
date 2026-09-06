@@ -13,6 +13,10 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
+import {
+  SessionScopes,
+} from '../access-control/session-scope';
+
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { ConfigService } from '@nestjs/config';
 import { SessionService, AUTOSTART_THROTTLE_MS } from './session.service';
@@ -58,24 +62,59 @@ import { AuditService } from '../audit/audit.service';
 const auditCall = (mock: jest.Mock, index = 0): [string, { sessionId?: string; metadata?: Record<string, unknown> }] =>
   mock.mock.calls[index] as [string, { sessionId?: string; metadata?: Record<string, unknown> }];
 
-function createMockSession(overrides: Partial<Session> = {}): Session {
+function createMockSession(
+  overrides: Partial<Session> = {},
+): Session {
   return {
     id: 'sess-uuid-1',
+
     name: 'test-session',
-    status: SessionStatus.CREATED,
+
+    /**
+     * Tenant ownership.
+     *
+     * null represents a legacy/non-Team-Leader-owned session.
+     */
+    ownerTeamLeaderId: null,
+
+    status:
+      SessionStatus.CREATED,
+
+    /**
+     * Optional intended/display phone supplied at creation time.
+     *
+     * This is metadata only and never authorization state.
+     */
+    targetPhone: null,
+
     phone: null,
+
     pushName: null,
+
     config: {},
+
     proxyUrl: null,
+
     proxyType: null,
+
     connectedAt: null,
+
     lastActiveAt: null,
+
     nodeId: null,
+
     claimedAt: null,
+
     leaseExpiresAt: null,
+
     nodeUrl: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+
+    createdAt:
+      new Date(),
+
+    updatedAt:
+      new Date(),
+
     ...overrides,
   };
 }
@@ -102,12 +141,25 @@ describe('SessionService', () => {
     delete process.env.STATUS_SEED_ON_READY;
     repository = {
       count: jest.fn(),
+
       find: jest.fn(),
+
       findOne: jest.fn(),
+
       create: jest.fn(),
+
       save: jest.fn(),
+
       remove: jest.fn(),
+
       update: jest.fn(),
+
+      /**
+       * findAll() and getStats() now use query builders so tenant
+       * restrictions can be composed safely with AND semantics.
+       */
+      createQueryBuilder:
+        jest.fn(),
     };
 
     messageRepository = {
@@ -727,54 +779,381 @@ describe('SessionService', () => {
 
   // ── findAll / findOne ─────────────────────────────────────────────
 
-  describe('findAll', () => {
-    it('should return all sessions ordered by createdAt DESC', async () => {
-      const sessions = [createMockSession(), createMockSession({ id: 'sess-2' })];
-      (repository.find as jest.Mock).mockResolvedValue(sessions);
+  describe('findAll — SessionScope',
+  () => {
+    const makeListQueryBuilder = (
+      sessions: Session[] = [],
+    ) => {
+      const query = {
+        orderBy:
+          jest.fn(),
 
-      const result = await service.findAll();
+        take:
+          jest.fn(),
 
-      expect(result).toHaveLength(2);
-      expect(repository.find).toHaveBeenCalledWith({ order: { createdAt: 'DESC' }, take: 1000, skip: 0 });
-    });
+        skip:
+          jest.fn(),
 
-    it('scopes results to a session-restricted key', async () => {
-      (repository.find as jest.Mock).mockResolvedValue([]);
+        andWhere:
+          jest.fn(),
 
-      await service.findAll(['sess-1', 'sess-2']);
+        getMany:
+          jest
+            .fn()
+            .mockResolvedValue(
+              sessions,
+            ),
+      };
 
-      expect(repository.find).toHaveBeenCalledWith({
-        where: { id: In(['sess-1', 'sess-2']) },
-        order: { createdAt: 'DESC' },
-        take: 1000,
-        skip: 0,
-      });
-    });
+      query.orderBy
+        .mockReturnValue(
+          query,
+        );
 
-    it('returns all sessions for an unrestricted key (null/empty allowlist)', async () => {
-      (repository.find as jest.Mock).mockResolvedValue([]);
+      query.take
+        .mockReturnValue(
+          query,
+        );
 
-      await service.findAll(null);
-      await service.findAll([]);
+      query.skip
+        .mockReturnValue(
+          query,
+        );
 
-      expect(repository.find).toHaveBeenCalledTimes(2);
-      expect(repository.find).toHaveBeenNthCalledWith(1, { order: { createdAt: 'DESC' }, take: 1000, skip: 0 });
-      expect(repository.find).toHaveBeenNthCalledWith(2, { order: { createdAt: 'DESC' }, take: 1000, skip: 0 });
-    });
+      query.andWhere
+        .mockReturnValue(
+          query,
+        );
 
-    it('applies bounded pagination to the database query', async () => {
-      (repository.find as jest.Mock).mockResolvedValue([]);
+      return query;
+    };
 
-      await service.findAll(['sess-1'], { limit: 5000, offset: -5 });
+    it(
+      'ALL returns all sessions without adding a tenant WHERE clause',
+      async () => {
+        const sessions = [
+          createMockSession({
+            id:
+              'session-1',
+          }),
 
-      expect(repository.find).toHaveBeenCalledWith({
-        where: { id: In(['sess-1']) },
-        order: { createdAt: 'DESC' },
-        take: 1000,
-        skip: 0,
-      });
-    });
-  });
+          createMockSession({
+            id:
+              'session-2',
+          }),
+        ];
+
+        const query =
+          makeListQueryBuilder(
+            sessions,
+          );
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        const result =
+          await service.findAll(
+            SessionScopes.all(),
+          );
+
+        expect(
+          repository.createQueryBuilder,
+        ).toHaveBeenCalledWith(
+          'session',
+        );
+
+        expect(
+          query.orderBy,
+        ).toHaveBeenCalledWith(
+          'session.createdAt',
+          'DESC',
+        );
+
+        expect(
+          query.take,
+        ).toHaveBeenCalledWith(
+          1000,
+        );
+
+        expect(
+          query.skip,
+        ).toHaveBeenCalledWith(
+          0,
+        );
+
+        /**
+         * ALL means no tenant restriction.
+         */
+        expect(
+          query.andWhere,
+        ).not.toHaveBeenCalled();
+
+        expect(
+          query.getMany,
+        ).toHaveBeenCalledTimes(
+          1,
+        );
+
+        expect(
+          result,
+        ).toHaveLength(
+          2,
+        );
+      },
+    );
+
+    it(
+      'IDS restricts the query to the explicit session IDs',
+      async () => {
+        const query =
+          makeListQueryBuilder();
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        await service.findAll(
+          SessionScopes.ids([
+            'session-a',
+            'session-b',
+          ]),
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledTimes(
+          1,
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledWith(
+          'session.id IN (:...scopeSessionIds)',
+          {
+            scopeSessionIds: [
+              'session-a',
+              'session-b',
+            ],
+          },
+        );
+      },
+    );
+
+    it(
+      'OWNER restricts the query to sessions owned by the Team Leader',
+      async () => {
+        const query =
+          makeListQueryBuilder();
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        await service.findAll(
+          SessionScopes.owner(
+            'team-leader-a',
+          ),
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledTimes(
+          1,
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledWith(
+          'session.ownerTeamLeaderId = :scopeOwnerTeamLeaderId',
+          {
+            scopeOwnerTeamLeaderId:
+              'team-leader-a',
+          },
+        );
+      },
+    );
+
+    it(
+      'OWNER_AND_IDS applies ownership AND explicit session IDs to the same query',
+      async () => {
+        const query =
+          makeListQueryBuilder();
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        await service.findAll(
+          SessionScopes.ownerAndIds(
+            'team-leader-a',
+            [
+              'session-a',
+              'session-b',
+            ],
+          ),
+        );
+
+        /**
+         * This is the critical tenant-isolation invariant.
+         *
+         * Both restrictions must be applied to the SAME query using
+         * chained andWhere() calls.
+         */
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledTimes(
+          2,
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenNthCalledWith(
+          1,
+          'session.ownerTeamLeaderId = :scopeOwnerTeamLeaderId',
+          {
+            scopeOwnerTeamLeaderId:
+              'team-leader-a',
+          },
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenNthCalledWith(
+          2,
+          'session.id IN (:...scopeSessionIds)',
+          {
+            scopeSessionIds: [
+              'session-a',
+              'session-b',
+            ],
+          },
+        );
+
+        /**
+         * Effective SQL semantics:
+         *
+         * ownerTeamLeaderId = 'team-leader-a'
+         *
+         * AND
+         *
+         * id IN ('session-a', 'session-b')
+         *
+         * Never OR.
+         */
+        const predicates =
+          query.andWhere.mock.calls.map(
+            call => call[0],
+          );
+
+        expect(
+          predicates,
+        ).toEqual([
+          'session.ownerTeamLeaderId = :scopeOwnerTeamLeaderId',
+          'session.id IN (:...scopeSessionIds)',
+        ]);
+      },
+    );
+
+    it(
+      'NONE produces an always-false query instead of an empty IN expression',
+      async () => {
+        const query =
+          makeListQueryBuilder();
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        const result =
+          await service.findAll(
+            SessionScopes.none(),
+          );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledTimes(
+          1,
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledWith(
+          '1 = 0',
+        );
+
+        expect(
+          result,
+        ).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      'applies bounded pagination after the SessionScope',
+      async () => {
+        const query =
+          makeListQueryBuilder();
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        await service.findAll(
+          SessionScopes.ids([
+            'session-a',
+          ]),
+          {
+            limit: 5000,
+            offset: -5,
+          },
+        );
+
+        /**
+         * Existing pagination behavior is preserved:
+         *
+         * max limit -> 1000
+         * negative offset -> 0
+         */
+        expect(
+          query.take,
+        ).toHaveBeenCalledWith(
+          1000,
+        );
+
+        expect(
+          query.skip,
+        ).toHaveBeenCalledWith(
+          0,
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledWith(
+          'session.id IN (:...scopeSessionIds)',
+          {
+            scopeSessionIds: [
+              'session-a',
+            ],
+          },
+        );
+      },
+    );
+  },
+  );
 
   describe('findOne', () => {
     it('should return session by id', async () => {
@@ -4978,62 +5357,611 @@ describe('SessionService', () => {
 
   // ── getStats ──────────────────────────────────────────────────────
 
-  describe('getStats', () => {
-    const makeStatsQb = (rows: Array<{ status: string; count: string }>) => ({
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      groupBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue(rows),
-    });
+  describe('getStats — SessionScope',() => {
+    const makeStatsQueryBuilder = (
+      rows: Array<{
+        status: string;
+        count: string;
+      }> = [],
+    ) => {
+      const query = {
+        select:
+          jest.fn(),
 
-    it('should return correct session statistics', async () => {
-      (repository.createQueryBuilder as jest.Mock) = jest.fn().mockReturnValue(
-        makeStatsQb([
-          { status: SessionStatus.READY, count: '2' },
-          { status: SessionStatus.DISCONNECTED, count: '1' },
-        ]),
+        addSelect:
+          jest.fn(),
+
+        andWhere:
+          jest.fn(),
+
+        groupBy:
+          jest.fn(),
+
+        getRawMany:
+          jest
+            .fn()
+            .mockResolvedValue(
+              rows,
+            ),
+      };
+
+      query.select
+        .mockReturnValue(
+          query,
+        );
+
+      query.addSelect
+        .mockReturnValue(
+          query,
+        );
+
+      query.andWhere
+        .mockReturnValue(
+          query,
+        );
+
+      query.groupBy
+        .mockReturnValue(
+          query,
+        );
+
+      return query;
+    };
+
+    const makeActiveQueryBuilder = (
+      rows: Array<{
+        id: string;
+      }> = [],
+    ) => {
+      const query = {
+        select:
+          jest.fn(),
+
+        where:
+          jest.fn(),
+
+        andWhere:
+          jest.fn(),
+
+        getRawMany:
+          jest
+            .fn()
+            .mockResolvedValue(
+              rows,
+            ),
+      };
+
+      query.select
+        .mockReturnValue(
+          query,
+        );
+
+      query.where
+        .mockReturnValue(
+          query,
+        );
+
+      query.andWhere
+        .mockReturnValue(
+          query,
+        );
+
+      return query;
+    };
+
+    it(
+      'ALL aggregates every session without adding a tenant predicate',
+      async () => {
+        const query =
+          makeStatsQueryBuilder([
+            {
+              status:
+                SessionStatus.READY,
+
+              count: '2',
+            },
+
+            {
+              status:
+                SessionStatus.DISCONNECTED,
+
+              count: '1',
+            },
+          ]);
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        const stats =
+          await service.getStats(
+            SessionScopes.all(),
+          );
+
+        expect(
+          query.andWhere,
+        ).not.toHaveBeenCalled();
+
+        expect(
+          stats.total,
+        ).toBe(
+          3,
+        );
+
+        expect(
+          stats.ready,
+        ).toBe(
+          2,
+        );
+
+        expect(
+          stats.disconnected,
+        ).toBe(
+          1,
+        );
+
+        expect(
+          stats.byStatus[
+            SessionStatus.READY
+          ],
+        ).toBe(
+          2,
+        );
+
+        expect(
+          stats.memoryUsage,
+        ).toBeDefined();
+      },
+    );
+
+    it(
+      'still aggregates more than the list pagination cap',
+      async () => {
+        const query =
+          makeStatsQueryBuilder([
+            {
+              status:
+                SessionStatus.READY,
+
+              count:
+                '1500',
+            },
+          ]);
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        const findSpy =
+          repository.find as jest.Mock;
+
+        findSpy.mockClear();
+
+        const stats =
+          await service.getStats(
+            SessionScopes.all(),
+          );
+
+        expect(
+          stats.total,
+        ).toBe(
+          1500,
+        );
+
+        expect(
+          stats.ready,
+        ).toBe(
+          1500,
+        );
+
+        /**
+         * Stats must not go through paginated findAll().
+         */
+        expect(
+          findSpy,
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      'IDS scopes aggregate rows to explicit session IDs',
+      async () => {
+        const query =
+          makeStatsQueryBuilder([
+            {
+              status:
+                SessionStatus.READY,
+
+              count: '1',
+            },
+          ]);
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        const stats =
+          await service.getStats(
+            SessionScopes.ids([
+              'session-a',
+              'session-b',
+            ]),
+          );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledWith(
+          'session.id IN (:...scopeSessionIds)',
+          {
+            scopeSessionIds: [
+              'session-a',
+              'session-b',
+            ],
+          },
+        );
+
+        expect(
+          stats.total,
+        ).toBe(
+          1,
+        );
+      },
+    );
+
+    it(
+      'OWNER scopes aggregate rows to the Team Leader owner',
+      async () => {
+        const query =
+          makeStatsQueryBuilder([
+            {
+              status:
+                SessionStatus.READY,
+
+              count: '2',
+            },
+          ]);
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        await service.getStats(
+          SessionScopes.owner(
+            'team-leader-a',
+          ),
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledTimes(
+          1,
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledWith(
+          'session.ownerTeamLeaderId = :scopeOwnerTeamLeaderId',
+          {
+            scopeOwnerTeamLeaderId:
+              'team-leader-a',
+          },
+        );
+      },
+    );
+
+    it(
+      'OWNER_AND_IDS applies owner AND ids to aggregate statistics',
+      async () => {
+        const query =
+          makeStatsQueryBuilder([
+            {
+              status:
+                SessionStatus.READY,
+
+              count: '1',
+            },
+          ]);
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        await service.getStats(
+          SessionScopes.ownerAndIds(
+            'team-leader-a',
+            [
+              'session-a',
+              'session-b',
+            ],
+          ),
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledTimes(
+          2,
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenNthCalledWith(
+          1,
+          'session.ownerTeamLeaderId = :scopeOwnerTeamLeaderId',
+          {
+            scopeOwnerTeamLeaderId:
+              'team-leader-a',
+          },
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenNthCalledWith(
+          2,
+          'session.id IN (:...scopeSessionIds)',
+          {
+            scopeSessionIds: [
+              'session-a',
+              'session-b',
+            ],
+          },
+        );
+      },
+    );
+
+    it(
+      'NONE returns zero scoped statistics and applies an always-false predicate',
+      async () => {
+        const query =
+          makeStatsQueryBuilder([]);
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        ).mockReturnValue(
+          query,
+        );
+
+        const stats =
+          await service.getStats(
+            SessionScopes.none(),
+          );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledTimes(
+          1,
+        );
+
+        expect(
+          query.andWhere,
+        ).toHaveBeenCalledWith(
+          '1 = 0',
+        );
+
+        expect(
+          stats.total,
+        ).toBe(
+          0,
+        );
+
+        expect(
+          stats.active,
+        ).toBe(
+          0,
+        );
+
+        expect(
+          stats.ready,
+        ).toBe(
+          0,
+        );
+
+        expect(
+          stats.disconnected,
+        ).toBe(
+          0,
+        );
+
+        expect(
+          stats.byStatus,
+        ).toEqual(
+          {},
+        );
+      },
+    );
+
+    it(
+      'OWNER_AND_IDS active count intersects live engine IDs AND owner AND allowed session IDs',
+      async () => {
+        /**
+         * Pretend three engines are live globally.
+         *
+         * Only session-a will be returned by the scoped DB query.
+         */
+        const engines =
+          (
+            service as unknown as {
+              engines: {
+                set(
+                  id: string,
+                  engine: unknown,
+                ): void;
+
+                clear(): void;
+              };
+            }
+          ).engines;
+
+        engines.set(
+          'session-a',
+          {},
+        );
+
+        engines.set(
+          'session-b',
+          {},
+        );
+
+        engines.set(
+          'foreign-session',
+          {},
+        );
+
+        const aggregateQuery =
+          makeStatsQueryBuilder([
+            {
+              status:
+                SessionStatus.READY,
+
+              count: '1',
+            },
+          ]);
+
+        /**
+         * This represents the database result after:
+         *
+         * live IDs
+         * AND Team Leader ownership
+         * AND explicit session ceiling
+         */
+        const activeQuery =
+          makeActiveQueryBuilder([
+            {
+              id:
+                'session-a',
+            },
+          ]);
+
+        (
+          repository.createQueryBuilder as jest.Mock
+        )
+          .mockReturnValueOnce(
+            aggregateQuery,
+          )
+          .mockReturnValueOnce(
+            activeQuery,
+          );
+
+        try {
+          const stats =
+            await service.getStats(
+              SessionScopes.ownerAndIds(
+                'team-leader-a',
+                [
+                  'session-a',
+                  'session-b',
+                ],
+              ),
+            );
+
+          /**
+           * Aggregate query:
+           *
+           * owner AND allowed IDs.
+           */
+          expect(
+            aggregateQuery.andWhere,
+          ).toHaveBeenNthCalledWith(
+            1,
+            'session.ownerTeamLeaderId = :scopeOwnerTeamLeaderId',
+            {
+              scopeOwnerTeamLeaderId:
+                'team-leader-a',
+            },
+          );
+
+          expect(
+            aggregateQuery.andWhere,
+          ).toHaveBeenNthCalledWith(
+            2,
+            'session.id IN (:...scopeSessionIds)',
+            {
+              scopeSessionIds: [
+                'session-a',
+                'session-b',
+              ],
+            },
+          );
+
+          /**
+           * Active-session query first limits candidates to actually
+           * live engines.
+           */
+          expect(
+            activeQuery.where,
+          ).toHaveBeenCalledWith(
+            'session.id IN (:...activeSessionIds)',
+            {
+              activeSessionIds:
+                expect.arrayContaining([
+                  'session-a',
+                  'session-b',
+                  'foreign-session',
+                ]),
+            },
+          );
+
+          /**
+           * Then tenant restrictions are intersected using AND.
+           */
+          expect(
+            activeQuery.andWhere,
+          ).toHaveBeenCalledTimes(
+            2,
+          );
+
+          expect(
+            activeQuery.andWhere,
+          ).toHaveBeenNthCalledWith(
+            1,
+            'session.ownerTeamLeaderId = :scopeOwnerTeamLeaderId',
+            {
+              scopeOwnerTeamLeaderId:
+                'team-leader-a',
+            },
+          );
+
+          expect(
+            activeQuery.andWhere,
+          ).toHaveBeenNthCalledWith(
+            2,
+            'session.id IN (:...scopeSessionIds)',
+            {
+              scopeSessionIds: [
+                'session-a',
+                'session-b',
+              ],
+            },
+          );
+
+          /**
+           * There are three globally live engines, but only one survives:
+           *
+           * LIVE
+           *   AND owner = team-leader-a
+           *   AND id IN (session-a, session-b)
+           */
+          expect(
+            stats.active,
+          ).toBe(
+            1,
+          );
+        } finally {
+          engines.clear();
+        }
+      },
       );
-
-      const stats = await service.getStats();
-
-      expect(stats.total).toBe(3);
-      expect(stats.ready).toBe(2);
-      expect(stats.disconnected).toBe(1);
-      expect(stats.byStatus[SessionStatus.READY]).toBe(2);
-      expect(stats.memoryUsage).toBeDefined();
-    });
-
-    it('counts every session via a grouped COUNT, not the bounded findAll (no undercount past the cap)', async () => {
-      const findSpy = repository.find as jest.Mock;
-      findSpy.mockClear();
-      (repository.createQueryBuilder as jest.Mock) = jest
-        .fn()
-        .mockReturnValue(makeStatsQb([{ status: SessionStatus.READY, count: '1500' }]));
-
-      const stats = await service.getStats();
-
-      // 1500 > DEFAULT_LIST_LIMIT (1000): the old findAll-based path would have capped total at 1000.
-      expect(stats.total).toBe(1500);
-      expect(stats.ready).toBe(1500);
-      expect(findSpy).not.toHaveBeenCalled();
-    });
-
-    it('scopes the stats to a restricted key (active counts only in-scope engines)', async () => {
-      const qb = makeStatsQb([{ status: SessionStatus.READY, count: '1' }]);
-      (repository.createQueryBuilder as jest.Mock) = jest.fn().mockReturnValue(qb);
-      const engines = (service as unknown as { engines: Map<string, unknown> }).engines;
-      engines.set('sess-A', {});
-      engines.set('sess-B', {}); // global engine the scoped key must NOT see counted
-
-      const stats = await service.getStats(['sess-A']);
-
-      expect(qb.where).toHaveBeenCalledWith('session.id IN (:...scope)', { scope: ['sess-A'] });
-      expect(stats.total).toBe(1);
-      expect(stats.active).toBe(1); // not 2 (global engines.size)
-      engines.clear();
-    });
-  });
+    },
+  );
 
   // ── getChats ──────────────────────────────────────────────────────
 

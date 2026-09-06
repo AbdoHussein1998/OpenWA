@@ -22,7 +22,7 @@ export class ApiKeyGuard implements CanActivate {
   private readonly reflector: Reflector,
   private readonly configService: ConfigService,
   private readonly auditService: AuditService,
-) {}
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     // Check if route is marked as public

@@ -1,3 +1,5 @@
+
+
 import {
   Entity,
   Column,
@@ -6,8 +8,12 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
+
 import { DateTransformer } from '../../../common/transformers/date.transformer';
-import { jsonColumnType, dateColumnType } from '../../../common/utils/column-types';
+import {
+  jsonColumnType,
+  dateColumnType,
+} from '../../../common/utils/column-types';
 import type { AccountRestriction } from '../../../engine/interfaces/whatsapp-engine.interface';
 
 export enum SessionStatus {
@@ -26,7 +32,11 @@ export class Session {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'varchar', length: 100, unique: true })
+  @Column({
+    type: 'varchar',
+    length: 100,
+    unique: true,
+  })
   name!: string;
 
   /**
@@ -52,9 +62,11 @@ export class Session {
   })
   status!: SessionStatus;
 
-
-
-  @Column({ type: 'varchar', length: 20, nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
   phone!: string | null;
 
   /**
@@ -70,26 +82,51 @@ export class Session {
   })
   targetPhone!: string | null;
 
-  @Column({ type: 'varchar', length: 100, nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   pushName!: string | null;
 
-  @Column({ type: 'varchar', length: 100, nullable: true })
-  pushName!: string | null;
-
-  @Column({ type: jsonColumnType(), default: '{}' })
+  @Column({
+    type: jsonColumnType(),
+    default: '{}',
+  })
   config!: Record<string, unknown>;
 
   // Phase 3: Proxy per session
-  @Column({ type: 'varchar', length: 255, nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   proxyUrl!: string | null;
 
-  @Column({ type: 'varchar', length: 10, nullable: true })
-  proxyType!: 'http' | 'https' | 'socks4' | 'socks5' | null;
+  @Column({
+    type: 'varchar',
+    length: 10,
+    nullable: true,
+  })
+  proxyType!:
+    | 'http'
+    | 'https'
+    | 'socks4'
+    | 'socks5'
+    | null;
 
-  @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
+  @Column({
+    type: dateColumnType(),
+    nullable: true,
+    transformer: DateTransformer,
+  })
   connectedAt!: Date | null;
 
-  @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
+  @Column({
+    type: dateColumnType(),
+    nullable: true,
+    transformer: DateTransformer,
+  })
   lastActiveAt!: Date | null;
 
   /**
@@ -99,10 +136,18 @@ export class Session {
    * process tell "my own leftovers, which really are dead" from "another process's live session",
    * which it previously could not and so reset both.
    */
-  @Column({ type: 'varchar', length: 190, nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 190,
+    nullable: true,
+  })
   nodeId!: string | null;
 
-  @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
+  @Column({
+    type: dateColumnType(),
+    nullable: true,
+    transformer: DateTransformer,
+  })
   claimedAt!: Date | null;
 
   /**
@@ -110,7 +155,11 @@ export class Session {
    * engine lives with the owner). Written at claim time from NODE_URL; null when the operator has
    * not configured routing — a peer then answers 409 instead of forwarding.
    */
-  @Column({ type: 'varchar', length: 2048, nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 2048,
+    nullable: true,
+  })
   nodeUrl!: string | null;
 
   /**
@@ -118,7 +167,11 @@ export class Session {
    * pointing at an owner that is gone, so the claim expires rather than requiring a clean shutdown
    * to recover; a running owner keeps extending it.
    */
-  @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
+  @Column({
+    type: dateColumnType(),
+    nullable: true,
+    transformer: DateTransformer,
+  })
   leaseExpiresAt!: Date | null;
 
   @CreateDateColumn()
@@ -142,3 +195,5 @@ export class Session {
    */
   restriction?: AccountRestriction | null;
 }
+
+

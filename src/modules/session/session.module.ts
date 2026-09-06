@@ -1,3 +1,5 @@
+
+
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -6,6 +8,7 @@ import { AccessControlModule } from '../access-control/access-control.module';
 
 import { Session } from './entities/session.entity';
 import { Message } from '../message/entities/message.entity';
+import { Agent } from '../teamleader/entities/agent.entity';
 
 import { SessionService } from './session.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
@@ -36,12 +39,37 @@ import {
    * dependency remains one-directional.
    */
   imports: [
+    /*
+     * Session runtime/data entities live in the `data` database.
+     */
     TypeOrmModule.forFeature(
       [
         Session,
         Message,
       ],
       'data',
+    ),
+
+    /*
+     * Agent principals live in the separate `main` database.
+     *
+     * SessionService needs Repository<Agent> only for Phase G
+     * cross-database cleanup:
+     *
+     *   Session deleted
+     *       ↓
+     *   UPDATE Agent
+     *   SET assignedSessionId = NULL
+     *   WHERE assignedSessionId = deletedSessionId
+     *
+     * There is intentionally no Agent -> Session foreign key because
+     * the two entities live in different databases.
+     */
+    TypeOrmModule.forFeature(
+      [
+        Agent,
+      ],
+      'main',
     ),
 
     /*
@@ -66,8 +94,11 @@ import {
      * dimension. Inert unless NODE_URL is configured.
      */
     {
-      provide: APP_INTERCEPTOR,
-      useClass: SessionProxyInterceptor,
+      provide:
+        APP_INTERCEPTOR,
+
+      useClass:
+        SessionProxyInterceptor,
     },
 
     SessionService,
@@ -85,8 +116,11 @@ import {
      * instance so lifecycle hooks still execute only once.
      */
     {
-      provide: PLUGIN_SESSION_PORT,
-      useExisting: SessionService,
+      provide:
+        PLUGIN_SESSION_PORT,
+
+      useExisting:
+        SessionService,
     },
   ],
 
