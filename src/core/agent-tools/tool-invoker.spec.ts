@@ -1,188 +1,666 @@
-import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+
+
+
+
+import {
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+
 import { z } from 'zod';
-import { invokeTool } from './tool-invoker';
-import type { ToolDescriptor } from './tool-descriptor';
+
 import type { AuthService } from '../../modules/auth/auth.service';
-import { ApiKeyRole } from '../../modules/auth/entities/api-key.entity';
 
-const readTool: ToolDescriptor = {
-  name: 'T',
-  description: 'd',
-  tier: 'read',
-  inputSchema: z.object({ n: z.number() }),
-  handler: input => Promise.resolve({ got: (input as { n: number }).n }),
-};
+import {
+  ApiKeyRole,
+  type ApiKey,
+} from '../../modules/auth/entities/api-key.entity';
 
-function auth(over: Partial<Record<string, unknown>> = {}): Pick<AuthService, 'validateApiKey' | 'hasPermission'> {
-  return {
-    validateApiKey: jest.fn().mockResolvedValue({ id: 'k1', allowedSessions: null, ...over }),
-    hasPermission: jest.fn().mockReturnValue(true),
-  };
-}
+import { ApiCapability } from '../../modules/auth/capabilities/api-capability';
 
-describe('invokeTool', () => {
-  it('rejects a missing key', async () => {
-    await expect(invokeTool(readTool, { n: 1 }, undefined, auth() as unknown as AuthService)).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
+import type { SessionTenantAccessService } from '../../modules/access-control/session-tenant-access.service';
+
+import {
+  SessionScopeType,
+  type SessionScope,
+} from '../../modules/access-control/session-scope';
+
+import {
+  defineTool,
+} from './tool-descriptor';
+
+import {
+  invokeTool,
+} from './tool-invoker';
+
+
+describe('invokeTool — Phase J MCP tenancy', () => {
+  let authService: AuthService;
+
+  let sessionTenantAccessService:
+    SessionTenantAccessService;
+
+  let validateApiKey:
+    jest.Mock;
+
+  let hasCapability:
+    jest.Mock;
+
+  let hasPermission:
+    jest.Mock;
+
+  let assertSessionAccess:
+    jest.Mock;
+
+  let getEffectiveSessionScope:
+    jest.Mock;
+
+  const teamLeaderA = {
+    id: 'key-team-leader-a',
+    name: 'Team Leader A',
+    role: ApiKeyRole.TEAM_LEADER,
+    teamLeaderId: 'team-leader-a',
+
+    /*
+     * Deliberately present so these tests prove MCP does not authorize
+     * directly from this property.
+     */
+    allowedSessions: [
+      'legacy-ceiling-session',
+    ],
+  } as ApiKey;
+
+  const agentA = {
+    id: 'key-agent-a',
+    name: 'Agent A',
+    role: ApiKeyRole.AGENT,
+    teamLeaderId: 'team-leader-a',
+    agentId: 'agent-a',
+
+    allowedSessions: [
+      'session-a',
+    ],
+  } as ApiKey;
+
+  beforeEach(() => {
+    validateApiKey =
+      jest.fn();
+
+    hasCapability =
+      jest.fn();
+
+    hasPermission =
+      jest.fn();
+
+    assertSessionAccess =
+      jest.fn();
+
+    getEffectiveSessionScope =
+      jest.fn();
+
+    authService = {
+      validateApiKey,
+      hasCapability,
+      hasPermission,
+    } as unknown as AuthService;
+
+    sessionTenantAccessService = {
+      assertSessionAccess,
+      getEffectiveSessionScope,
+    } as unknown as SessionTenantAccessService;
   });
 
-  it('validates input AFTER auth and runs the handler', async () => {
-    const a = auth();
-    const out = await invokeTool(readTool, { n: 5 }, 'rawkey', a as unknown as AuthService);
-    expect(a.validateApiKey).toHaveBeenCalledWith('rawkey', undefined, undefined);
-    expect(out).toEqual({ got: 5 });
-  });
-
-  it('maps a zod failure to BadRequestException', async () => {
-    await expect(invokeTool(readTool, { n: 'x' }, 'rawkey', auth() as unknown as AuthService)).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-  });
-
-  it('passes sessionId from input to validateApiKey when sessionScoped', async () => {
-    const a = auth();
-    const scoped: ToolDescriptor = {
-      ...readTool,
-      sessionScoped: true,
-      inputSchema: z.object({ sessionId: z.string() }),
-      handler: () => Promise.resolve('ok'),
-    };
-    await invokeTool(scoped, { sessionId: 's1' }, 'rawkey', a as unknown as AuthService);
-    expect(a.validateApiKey).toHaveBeenCalledWith('rawkey', undefined, 's1');
-  });
-
-  it('fails closed for a sessionScoped tool when no sessionId is supplied (no auth with an unscoped id)', async () => {
-    const a = auth();
-    // A sessionScoped tool whose input omits sessionId (e.g. an optional/loose schema): the per-key
-    // allowedSessions check would be skipped if undefined reached validateApiKey, so fence it here.
-    const scoped: ToolDescriptor = {
-      ...readTool,
-      sessionScoped: true,
-      inputSchema: z.object({ sessionId: z.string().optional() }),
-      handler: () => Promise.resolve('ok'),
-    };
-    await expect(invokeTool(scoped, {}, 'rawkey', a as unknown as AuthService)).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-    expect(a.validateApiKey).not.toHaveBeenCalled();
-  });
-
-  it('rejects when validateApiKey throws for an out-of-scope session', async () => {
-    const a = auth();
-    (a.validateApiKey as jest.Mock).mockRejectedValueOnce(
-      new UnauthorizedException('API key not authorized for this session'),
-    );
-    const scoped: ToolDescriptor = {
-      ...readTool,
-      sessionScoped: true,
-      inputSchema: z.object({ sessionId: z.string() }),
-      handler: () => Promise.resolve('ok'),
-    };
-    await expect(
-      invokeTool(scoped, { sessionId: 'other-session' }, 'rawkey', a as unknown as AuthService),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
-  });
-
-  it('enforces requiredRole via hasPermission', async () => {
-    const a = auth();
-    (a.hasPermission as jest.Mock).mockReturnValue(false);
-    const writeTool: ToolDescriptor = { ...readTool, tier: 'write', requiredRole: ApiKeyRole.OPERATOR };
-    await expect(invokeTool(writeTool, { n: 1 }, 'rawkey', a as unknown as AuthService)).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-  });
-
-  // FIX 3(b): onAuthenticated callback
-  it('calls onAuthenticated with apiKey.id after successful validateApiKey', async () => {
-    const a = auth({ id: 'key-abc' });
-    const onAuthenticated = jest.fn();
-    await invokeTool(readTool, { n: 1 }, 'rawkey', a as unknown as AuthService, onAuthenticated);
-    expect(onAuthenticated).toHaveBeenCalledTimes(1);
-    expect(onAuthenticated).toHaveBeenCalledWith('key-abc');
-  });
-
-  it('does NOT call onAuthenticated when validateApiKey throws', async () => {
-    const a = auth();
-    (a.validateApiKey as jest.Mock).mockRejectedValueOnce(new UnauthorizedException('bad key'));
-    const onAuthenticated = jest.fn();
-    await expect(
-      invokeTool(readTool, { n: 1 }, 'rawkey', a as unknown as AuthService, onAuthenticated),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(onAuthenticated).not.toHaveBeenCalled();
-  });
-
-  it('works without onAuthenticated (backward compatible)', async () => {
-    const a = auth();
-    // No 5th argument — must not throw
-    await expect(invokeTool(readTool, { n: 1 }, 'rawkey', a as unknown as AuthService)).resolves.toBeDefined();
-  });
-
-  // onAuthFailure: MCP auth-failure audit hook (mirrors the REST ApiKeyGuard). Fires at the auth boundary
-  // only — never on success, never on input-validation/handler errors (parity with the guard).
-  describe('onAuthFailure callback (MCP auth-failure audit boundary)', () => {
-    it('is invoked with the error on a missing key (Unauthorized)', async () => {
-      const onAuthFailure = jest.fn();
-      await expect(
-        invokeTool(readTool, { n: 1 }, undefined, auth() as unknown as AuthService, undefined, onAuthFailure),
-      ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(onAuthFailure).toHaveBeenCalledTimes(1);
-      expect((onAuthFailure.mock.calls[0] as unknown[])[0]).toBeInstanceOf(UnauthorizedException);
-    });
-
-    it('is invoked on a wrong-role rejection (Forbidden)', async () => {
-      const a = auth();
-      (a.hasPermission as jest.Mock).mockReturnValue(false);
-      const onAuthFailure = jest.fn();
-      const writeTool: ToolDescriptor = { ...readTool, tier: 'write', requiredRole: ApiKeyRole.OPERATOR };
-      await expect(
-        invokeTool(writeTool, { n: 1 }, 'rawkey', a as unknown as AuthService, undefined, onAuthFailure),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(onAuthFailure).toHaveBeenCalledTimes(1);
-    });
-
-    it('is invoked when validateApiKey rejects (IP/revoked/expired/session-not-allowed)', async () => {
-      const a = auth();
-      (a.validateApiKey as jest.Mock).mockRejectedValueOnce(new UnauthorizedException('IP address not allowed'));
-      const onAuthFailure = jest.fn();
-      await expect(
-        invokeTool(readTool, { n: 1 }, 'rawkey', a as unknown as AuthService, undefined, onAuthFailure),
-      ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(onAuthFailure).toHaveBeenCalledTimes(1);
-    });
-
-    it('is NOT invoked on a successful auth (happy path)', async () => {
-      const onAuthFailure = jest.fn();
-      await invokeTool(readTool, { n: 1 }, 'rawkey', auth() as unknown as AuthService, undefined, onAuthFailure);
-      expect(onAuthFailure).not.toHaveBeenCalled();
-    });
-
-    it('is NOT invoked on a post-auth zod validation error (BadRequest)', async () => {
-      const onAuthFailure = jest.fn();
-      await expect(
-        invokeTool(readTool, { n: 'bad' }, 'rawkey', auth() as unknown as AuthService, undefined, onAuthFailure),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(onAuthFailure).not.toHaveBeenCalled();
-    });
-
-    it('is NOT invoked when a tool handler throws after successful auth', async () => {
-      const onAuthFailure = jest.fn();
-      const throwingHandler: ToolDescriptor = {
-        ...readTool,
-        handler: () => Promise.reject(new ForbiddenException('handler-level forbid')),
-      };
-      await expect(
-        invokeTool(throwingHandler, { n: 1 }, 'rawkey', auth() as unknown as AuthService, undefined, onAuthFailure),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      // A handler-thrown 403 is NOT an auth failure — must not be audited as api_key_auth_failed.
-      expect(onAuthFailure).not.toHaveBeenCalled();
-    });
-
-    it('works without onAuthFailure (backward compatible)', async () => {
-      // No 6th argument — a missing key still rejects without calling an undefined hook.
-      await expect(invokeTool(readTool, { n: 1 }, undefined, auth() as unknown as AuthService)).rejects.toBeInstanceOf(
-        UnauthorizedException,
+  function createSessionReadTool() {
+    const handler =
+      jest.fn(
+        async (
+          input: {
+            sessionId: string;
+          },
+        ) => ({
+          sessionId:
+            input.sessionId,
+        }),
       );
-    });
-  });
+
+    const tool =
+      defineTool({
+        name:
+          'TestSessionRead',
+
+        description:
+          'Test session-scoped read tool',
+
+        tier:
+          'read',
+
+        requiredCapability:
+          ApiCapability.SESSION_READ,
+
+        sessionScoped:
+          true,
+
+        inputSchema:
+          z.object({
+            sessionId:
+              z
+                .string()
+                .min(1),
+          }),
+
+        handler: async input =>
+          handler(
+            input,
+          ),
+      });
+
+    return {
+      tool,
+      handler,
+    };
+  }
+
+  it.each([
+    [
+      'TEAM_LEADER',
+      teamLeaderA,
+    ],
+    [
+      'AGENT',
+      agentA,
+    ],
+  ])(
+    '%s may invoke a session-scoped tool when SessionTenantAccessService allows the session',
+    async (
+      _principal,
+      apiKey,
+    ) => {
+      validateApiKey
+        .mockResolvedValue(
+          apiKey,
+        );
+
+      hasCapability
+        .mockReturnValue(
+          true,
+        );
+
+      assertSessionAccess
+        .mockResolvedValue(
+          undefined,
+        );
+
+      const {
+        tool,
+        handler,
+      } =
+        createSessionReadTool();
+
+      const result =
+        await invokeTool(
+          tool,
+          {
+            sessionId:
+              'session-a',
+          },
+          'raw-api-key',
+          authService,
+          sessionTenantAccessService,
+        );
+
+      expect(
+        validateApiKey,
+      ).toHaveBeenCalledWith(
+        'raw-api-key',
+        undefined,
+      );
+
+      expect(
+        hasCapability,
+      ).toHaveBeenCalledWith(
+        apiKey,
+        ApiCapability.SESSION_READ,
+      );
+
+      expect(
+        assertSessionAccess,
+      ).toHaveBeenCalledTimes(
+        1,
+      );
+
+      expect(
+        assertSessionAccess,
+      ).toHaveBeenCalledWith(
+        apiKey,
+        'session-a',
+      );
+
+      expect(
+        handler,
+      ).toHaveBeenCalledTimes(
+        1,
+      );
+
+      expect(
+        result,
+      ).toEqual({
+        sessionId:
+          'session-a',
+      });
+    },
+  );
+
+  it.each([
+    [
+      'TEAM_LEADER',
+      teamLeaderA,
+    ],
+    [
+      'AGENT',
+      agentA,
+    ],
+  ])(
+    '%s receives a 404-equivalent denial for a foreign session and the handler never runs',
+    async (
+      _principal,
+      apiKey,
+    ) => {
+      validateApiKey
+        .mockResolvedValue(
+          apiKey,
+        );
+
+      hasCapability
+        .mockReturnValue(
+          true,
+        );
+
+      assertSessionAccess
+        .mockRejectedValue(
+          new NotFoundException(
+            'Session not found',
+          ),
+        );
+
+      const {
+        tool,
+        handler,
+      } =
+        createSessionReadTool();
+
+      await expect(
+        invokeTool(
+          tool,
+          {
+            sessionId:
+              'session-b',
+          },
+          'raw-api-key',
+          authService,
+          sessionTenantAccessService,
+        ),
+      ).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+
+      expect(
+        assertSessionAccess,
+      ).toHaveBeenCalledWith(
+        apiKey,
+        'session-b',
+      );
+
+      /*
+       * Most important part of the foreign-tenant test:
+       *
+       * the service handler must never run after tenant denial.
+       */
+      expect(
+        handler,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
+    'denies an AGENT before tenant lookup when the tool requires a capability the Agent does not have',
+    async () => {
+      validateApiKey
+        .mockResolvedValue(
+          agentA,
+        );
+
+      hasCapability
+        .mockReturnValue(
+          false,
+        );
+
+      const handler =
+        jest.fn(
+          async () => ({
+            ok: true,
+          }),
+        );
+
+      const tool =
+        defineTool({
+          name:
+            'SessionStartLikeTool',
+
+          description:
+            'Represents a session-management operation',
+
+          tier:
+            'write',
+
+          requiredCapability:
+            ApiCapability.SESSION_MANAGE,
+
+          sessionScoped:
+            true,
+
+          inputSchema:
+            z.object({
+              sessionId:
+                z
+                  .string()
+                  .min(1),
+            }),
+
+          handler: async input =>
+            handler(
+              input,
+            ),
+        });
+
+      await expect(
+        invokeTool(
+          tool,
+          {
+            sessionId:
+              'session-a',
+          },
+          'raw-agent-key',
+          authService,
+          sessionTenantAccessService,
+        ),
+      ).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+
+      expect(
+        hasCapability,
+      ).toHaveBeenCalledWith(
+        agentA,
+        ApiCapability.SESSION_MANAGE,
+      );
+
+      /*
+       * WHAT authorization fails before WHERE authorization.
+       */
+      expect(
+        assertSessionAccess,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        getEffectiveSessionScope,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        handler,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each<{
+    label: string;
+    apiKey: ApiKey;
+    scope: SessionScope;
+  }>([
+    {
+      label:
+        'TEAM_LEADER',
+
+      apiKey:
+        teamLeaderA,
+
+      scope: {
+        type:
+          SessionScopeType.OWNER,
+
+        ownerTeamLeaderId:
+          'team-leader-a',
+      },
+    },
+
+    {
+      label:
+        'AGENT',
+
+      apiKey:
+        agentA,
+
+      scope: {
+        type:
+          SessionScopeType.OWNER_AND_IDS,
+
+        ownerTeamLeaderId:
+          'team-leader-a',
+
+        sessionIds: [
+          'session-a',
+        ],
+      },
+    },
+  ])(
+    '$label aggregate tool receives the effective SessionScope from SessionTenantAccessService',
+    async ({
+      apiKey,
+      scope,
+    }) => {
+      validateApiKey
+        .mockResolvedValue(
+          apiKey,
+        );
+
+      hasCapability
+        .mockReturnValue(
+          true,
+        );
+
+      getEffectiveSessionScope
+        .mockResolvedValue(
+          scope,
+        );
+
+      const handler =
+        jest.fn(
+          async (
+            _input: Record<
+              string,
+              never
+            >,
+            _authenticatedKey:
+              ApiKey,
+            context: {
+              sessionScope?:
+                SessionScope;
+            },
+          ) =>
+            context.sessionScope,
+        );
+
+      const tool =
+        defineTool({
+          name:
+            'AggregateSessions',
+
+          description:
+            'Test aggregate session tool',
+
+          tier:
+            'read',
+
+          requiredCapability:
+            ApiCapability.SESSION_READ,
+
+          aggregateSessionScoped:
+            true,
+
+          inputSchema:
+            z.object({}),
+
+          handler,
+        });
+
+      const result =
+        await invokeTool(
+          tool,
+          {},
+          'raw-api-key',
+          authService,
+          sessionTenantAccessService,
+        );
+
+      expect(
+        getEffectiveSessionScope,
+      ).toHaveBeenCalledTimes(
+        1,
+      );
+
+      expect(
+        getEffectiveSessionScope,
+      ).toHaveBeenCalledWith(
+        apiKey,
+      );
+
+      /*
+       * Aggregate tools do NOT perform one-session authorization.
+       */
+      expect(
+        assertSessionAccess,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        handler,
+      ).toHaveBeenCalledTimes(
+        1,
+      );
+
+      expect(
+        handler.mock.calls[0][2],
+      ).toEqual({
+        sessionScope:
+          scope,
+      });
+
+      expect(
+        result,
+      ).toEqual(
+        scope,
+      );
+    },
+  );
+
+  it(
+    'uses effective aggregate scope instead of raw apiKey.allowedSessions',
+    async () => {
+      const agentWithMisleadingLegacyCeiling =
+        {
+          ...agentA,
+
+          allowedSessions: [
+            'foreign-session',
+          ],
+        } as ApiKey;
+
+      const effectiveScope:
+        SessionScope = {
+          type:
+            SessionScopeType.OWNER_AND_IDS,
+
+          ownerTeamLeaderId:
+            'team-leader-a',
+
+          sessionIds: [
+            'session-a',
+          ],
+        };
+
+      validateApiKey
+        .mockResolvedValue(
+          agentWithMisleadingLegacyCeiling,
+        );
+
+      hasCapability
+        .mockReturnValue(
+          true,
+        );
+
+      getEffectiveSessionScope
+        .mockResolvedValue(
+          effectiveScope,
+        );
+
+      const handler =
+        jest.fn(
+          async (
+            _input,
+            _apiKey,
+            context,
+          ) =>
+            context.sessionScope,
+        );
+
+      const tool =
+        defineTool({
+          name:
+            'AggregateScopeCeilingTest',
+
+          description:
+            'Aggregate tenant-scope test',
+
+          tier:
+            'read',
+
+          requiredCapability:
+            ApiCapability.SESSION_READ,
+
+          aggregateSessionScoped:
+            true,
+
+          inputSchema:
+            z.object({}),
+
+          handler,
+        });
+
+      const result =
+        await invokeTool(
+          tool,
+          {},
+          'raw-api-key',
+          authService,
+          sessionTenantAccessService,
+        );
+
+      expect(
+        result,
+      ).toEqual(
+        effectiveScope,
+      );
+
+      expect(
+        result,
+      ).not.toEqual({
+        type:
+          SessionScopeType.IDS,
+
+        sessionIds: [
+          'foreign-session',
+        ],
+      });
+    },
+  );
 });
+
+

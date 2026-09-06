@@ -1,3 +1,5 @@
+
+
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -12,6 +14,8 @@ import { Server, Socket } from 'socket.io';
 import { Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from '../auth/auth.service';
+import { SessionTenantAccessService } from '../access-control/session-tenant-access.service';
+import { SessionScopeType } from '../access-control/session-scope';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { resolveCorsPolicy } from '../../config/bootstrap-security';
@@ -57,23 +61,6 @@ import type {
 } from './dto/ws-messages.dto';
 import { SUBSCRIBABLE_EVENTS, buildRoomName } from './dto/ws-messages.dto';
 import type { DeliveryStatus } from '../../engine/interfaces/whatsapp-engine.interface';
-
-/**
- * Whether an API key may subscribe to a session's WebSocket event rooms.
- * An unrestricted key (no `allowedSessions`) may subscribe to anything, including
- * the `*` wildcard. A key scoped to specific sessions may NOT subscribe to `*`
- * (which would receive every session's events) nor to a session outside its
- * allowlist — preventing cross-tenant event leakage (#221).
- */
-export function isSessionSubscriptionAllowed(allowedSessions: string[] | null | undefined, sessionId: string): boolean {
-  if (!allowedSessions || allowedSessions.length === 0) {
-    return true;
-  }
-  if (sessionId === '*') {
-    return false;
-  }
-  return allowedSessions.includes(sessionId);
-}
 
 /** Why an API key's live WebSocket sockets are being torn down — drives the client-facing message. */
 export type ApiKeyEvictionReason = 'revoked' | 'deleted' | 'authorization_changed' | 'expired';
@@ -132,6 +119,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private readonly authService: AuthService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
+    private readonly sessionTenantAccessService: SessionTenantAccessService,
   ) {
     this.rateLimits = readWsRateLimitConfig();
     this.frameLimiter = new TokenBucketLimiter(this.rateLimits.framePerSecond, this.rateLimits.frameBurst);
@@ -367,7 +355,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     // here too, not just at connect.
     const rawApiKey = (client.data as { rawApiKey?: string }).rawApiKey;
     const clientIp = this.resolveClientIp(client);
-    let subscriberKey: { allowedSessions?: string[] | null } | null;
+    let subscriberKey: ApiKey | null;
     try {
       subscriberKey = rawApiKey ? await this.authService.validateApiKey(rawApiKey, clientIp) : null;
     } catch {
@@ -379,9 +367,34 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       return this.createError('UNAUTHORIZED', 'API key is no longer valid', requestId);
     }
 
-    // Enforce per-key session scope against the FRESH key: a key restricted to specific
-    // sessions must not subscribe to '*' or a session outside its allowlist (#221).
-    if (!isSessionSubscriptionAllowed(subscriberKey.allowedSessions, sessionId)) {
+    // Keep the socket's cached credential snapshot fresh after successful re-validation. The DB
+    // remains authoritative; assignment/authorization changes still evict existing sockets via
+    // evictApiKey(..., 'authorization_changed').
+    (client.data as { apiKey: ApiKey }).apiKey = subscriberKey;
+
+    // Phase I — WebSocket tenancy.
+    //
+    // Do not duplicate Team Leader / Agent / allowedSessions comparison logic in this gateway.
+    // SessionTenantAccessService is the single tenant-policy authority, matching the REST surface.
+    //
+    // `sessionId = "*"` is a true cross-session wildcard and is therefore allowed ONLY for an
+    // effective ALL scope. TEAM_LEADER, AGENT, and legacy scoped keys all resolve to narrower scopes.
+    try {
+      if (sessionId === '*') {
+        const scope = await this.sessionTenantAccessService.getEffectiveSessionScope(subscriberKey);
+        if (scope.type !== SessionScopeType.ALL) {
+          return this.createError(
+            'FORBIDDEN_SESSION',
+            'API key is not authorized for global session subscriptions',
+            requestId,
+          );
+        }
+      } else {
+        await this.sessionTenantAccessService.assertSessionAccess(subscriberKey, sessionId);
+      }
+    } catch {
+      // Deliberately collapse missing/foreign/unassigned sessions to the same WS response so the
+      // subscription surface does not reveal whether another tenant's session exists.
       return this.createError('FORBIDDEN_SESSION', 'API key is not authorized for this session', requestId);
     }
 
@@ -697,3 +710,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     this.emitToRooms(sessionId, 'status.received', data);
   }
 }
+
+
+

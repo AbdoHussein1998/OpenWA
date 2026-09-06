@@ -1,6 +1,9 @@
 
 
 
+
+
+
 import {
   BadRequestException,
   ConflictException,
@@ -445,6 +448,76 @@ export class AuthService
   }
 
   /**
+   * Whether a role belongs to a management principal.
+   */
+  private isManagementRole(
+    role: ApiKeyRole,
+  ): boolean {
+    return (
+      role ===
+        ApiKeyRole.TEAM_LEADER ||
+      role ===
+        ApiKeyRole.AGENT
+    );
+  }
+
+  /**
+   * A management credential is identified fail-closed.
+   *
+   * Normally the role and principal binding agree:
+   *
+   * TEAM_LEADER:
+   *   role = TEAM_LEADER
+   *   teamLeaderId != null
+   *   agentId == null
+   *
+   * AGENT:
+   *   role = AGENT
+   *   agentId != null
+   *   teamLeaderId == null
+   *
+   * Checking principal bindings as well as role prevents generic key
+   * management from changing the role of a malformed stored row that still
+   * points at a management principal.
+   */
+  private isManagementCredential(
+    apiKey: Pick<
+      ApiKey,
+      'role' | 'teamLeaderId' | 'agentId'
+    >,
+  ): boolean {
+    return (
+      this.isManagementRole(
+        apiKey.role,
+      ) ||
+      Boolean(
+        apiKey.teamLeaderId,
+      ) ||
+      Boolean(
+        apiKey.agentId,
+      )
+    );
+  }
+
+  /**
+   * Generic /auth/api-keys management may only create or assign legacy
+   * ADMIN / OPERATOR / VIEWER roles.
+   */
+  private assertGenericApiKeyRole(
+    role: ApiKeyRole,
+  ): void {
+    if (
+      this.isManagementRole(
+        role,
+      )
+    ) {
+      throw new BadRequestException(
+        'Team Leader and Agent API keys must be managed through principal management',
+      );
+    }
+  }
+
+  /**
    * Generic API-key creation.
    *
    * TEAM_LEADER and AGENT credentials are intentionally excluded.
@@ -460,16 +533,14 @@ export class AuthService
     const requestedRole =
       dto.role ?? ApiKeyRole.OPERATOR;
 
-    if (
-      requestedRole ===
-        ApiKeyRole.TEAM_LEADER ||
-      requestedRole ===
-        ApiKeyRole.AGENT
-    ) {
-      throw new BadRequestException(
-        'Team Leader and Agent API keys must be created through principal management',
-      );
-    }
+    /**
+     * DTO validation rejects management roles, but the service is the
+     * authoritative security boundary and must also fail closed for direct
+     * callers.
+     */
+    this.assertGenericApiKeyRole(
+      requestedRole,
+    );
 
     const rawKey =
       `owa_k1_${randomBytes(
@@ -653,39 +724,30 @@ export class AuthService
       await this.findOne(id);
 
     /**
-     * Management-role bindings are lifecycle-managed by
-     * TeamLeaderService.
+     * Generic API-key management may never assign a management role.
      *
-     * Generic key management must not create TEAM_LEADER or AGENT
-     * identities by mutating role.
-     */
-    if (
-      dto.role ===
-        ApiKeyRole.TEAM_LEADER ||
-      dto.role ===
-        ApiKeyRole.AGENT
-    ) {
-      throw new BadRequestException(
-        'Team Leader and Agent roles cannot be assigned through generic API-key management',
-      );
-    }
-
-    /**
-     * Existing management identities also cannot be converted into
+     * DTO validation already rejects this, but the service remains the
+     * authoritative security boundary.
+     *
+     * Existing principal-bound credentials also cannot be converted into
      * legacy identities through generic key management.
      */
     if (
-      dto.role !== undefined &&
-      (
-        apiKey.role ===
-          ApiKeyRole.TEAM_LEADER ||
-        apiKey.role ===
-          ApiKeyRole.AGENT
-      )
+      dto.role !== undefined
     ) {
-      throw new BadRequestException(
-        'Management identity API-key roles cannot be changed through generic API-key management',
+      this.assertGenericApiKeyRole(
+        dto.role,
       );
+
+      if (
+        this.isManagementCredential(
+          apiKey,
+        )
+      ) {
+        throw new BadRequestException(
+          'Management identity API-key roles cannot be changed through generic API-key management',
+        );
+      }
     }
 
     /**
@@ -1159,9 +1221,7 @@ export class AuthService
    */
   private assertManagementPrincipalBinding(
     input: {
-      role:
-        | ApiKeyRole.TEAM_LEADER
-        | ApiKeyRole.AGENT;
+      role: ApiKeyRole;
 
       teamLeaderId?:
         | string
@@ -1172,6 +1232,22 @@ export class AuthService
         | null;
     },
   ): void {
+    /**
+     * Compile-time narrowing on createApiKeyInTransaction() is useful, but
+     * this method is also a runtime security boundary. Reject unexpected
+     * enum values explicitly rather than treating every non-TEAM_LEADER
+     * value as AGENT.
+     */
+    if (
+      !this.isManagementRole(
+        input.role,
+      )
+    ) {
+      throw new BadRequestException(
+        'Management principal API-key provisioning requires TEAM_LEADER or AGENT role',
+      );
+    }
+
     if (
       input.role ===
       ApiKeyRole.TEAM_LEADER
@@ -1188,6 +1264,9 @@ export class AuthService
       return;
     }
 
+    /**
+     * The only remaining valid management role is AGENT.
+     */
     if (
       !input.agentId ||
       input.teamLeaderId
@@ -1385,5 +1464,9 @@ export class AuthService
     );
   }
 }
+
+
+
+
 
 

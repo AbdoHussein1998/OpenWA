@@ -1,22 +1,33 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+
 import { SearchController } from './search.controller';
 import { SearchService } from './search.service';
 import { SearchProviderRegistry } from './search-provider.registry';
 import { BuiltInFtsProvider } from './providers/builtin-fts.provider';
+
 import { PLUGIN_SEARCH_REGISTRY_PORT } from '../../core/plugins/plugin-host-ports';
 
+import { AccessControlModule } from '../access-control/access-control.module';
+
 /**
- * Wires the global search feature: the route (SearchController), the service layer (SearchService),
- * the provider registry, and the built-in DB-native FTS provider. The `SEARCH_BOOTSTRAP` factory runs
- * at DI time via `bootstrapSearchProviders` to register `builtin-fts` and make it the active provider.
+ * Wires the global search feature:
  *
- * `SEARCH_PROVIDER=none` is honored by leaving the registry empty: the module (and route) stay loaded
- * but `SearchService.search()` throws NotImplementedException → /search returns 501. This is distinct
- * from `SEARCH_ENABLED=false`, which omits the module entirely (route 404).
+ * - SearchController
+ * - SearchService
+ * - SearchProviderRegistry
+ * - BuiltInFtsProvider
  *
- * The module is imported by AppModule only when `SEARCH_ENABLED !== 'false'`. Plugin providers
- * (Spec 2) will register themselves the same way and `auto` will select a healthy plugin over builtin.
+ * SEARCH_PROVIDER=none keeps the route mounted but registers no provider,
+ * causing SearchService.search() to return the existing 501 behavior.
+ *
+ * SEARCH_ENABLED=false is handled by AppModule and omits this module
+ * entirely, leaving /search unavailable.
+ *
+ * Phase H:
+ * AccessControlModule is imported so SearchController can obtain
+ * SessionTenantAccessService and calculate the authenticated caller's
+ * effective SessionScope before executing an aggregate/global search.
  */
 export function bootstrapSearchProviders(
   registry: SearchProviderRegistry,
@@ -24,35 +35,73 @@ export function bootstrapSearchProviders(
   cfg: ConfigService,
 ): SearchProviderRegistry {
   const provider = cfg.get<string>('search.provider', 'auto');
-  // `none` keeps the route mounted but registers no provider, so registry.active() is null and
-  // SearchService.search() throws NotImplementedException → /search returns 501 (not live results).
-  if (provider === 'none') return registry;
+
+  /*
+   * `none` keeps the route mounted but registers no provider.
+   *
+   * registry.active() remains null and SearchService.search()
+   * preserves the existing 501 behavior.
+   */
+  if (provider === 'none') {
+    return registry;
+  }
+
   registry.register(builtin);
-  // register() auto-promotes the first provider to active; the explicit setActive is belt-and-braces
-  // for `builtin-fts` (a no-op for `auto`, which register() already activated).
+
+  /*
+   * register() auto-promotes the first provider.
+   *
+   * Explicitly selecting builtin-fts remains useful when the configured
+   * provider requests it directly.
+   */
   if (provider === 'builtin-fts') {
     registry.setActive('builtin-fts');
   }
+
   return registry;
 }
 
 @Module({
-  imports: [ConfigModule],
+  imports: [
+    ConfigModule,
+
+    /*
+     * Phase H tenant authorization.
+     *
+     * Provides SessionTenantAccessService to SearchController.
+     */
+    AccessControlModule,
+  ],
+
   controllers: [SearchController],
+
   providers: [
     SearchProviderRegistry,
     SearchService,
     BuiltInFtsProvider,
+
     {
       provide: 'SEARCH_BOOTSTRAP',
-      inject: [SearchProviderRegistry, BuiltInFtsProvider, ConfigService],
+      inject: [
+        SearchProviderRegistry,
+        BuiltInFtsProvider,
+        ConfigService,
+      ],
       useFactory: bootstrapSearchProviders,
     },
-    // Binds the core-owned plugin capability port to this module's registry; resolved lazily by the
-    // plugin runtime (PluginHostServices), which no-ops when this whole module is omitted
-    // (SEARCH_ENABLED=false).
-    // An alias, not a factory, so lifecycle hooks are not dispatched twice on the same instance.
-    { provide: PLUGIN_SEARCH_REGISTRY_PORT, useExisting: SearchProviderRegistry },
+
+    /*
+     * Bind the core-owned plugin search capability port to this
+     * module's registry.
+     *
+     * useExisting is intentional so Nest does not construct or dispatch
+     * lifecycle hooks against another SearchProviderRegistry instance.
+     */
+    {
+      provide: PLUGIN_SEARCH_REGISTRY_PORT,
+      useExisting: SearchProviderRegistry,
+    },
   ],
 })
 export class SearchModule {}
+

@@ -1,5 +1,6 @@
 import * as qrcode from 'qrcode';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 import { Client, LocalAuth, NoAuth, WAState } from 'whatsapp-web.js';
 import {
   type AccountRestriction,
@@ -375,11 +376,12 @@ export class WwebjsLifecycle {
     this.host.logger.log(`Using Brave profile: ${braveProfilePath}`);
 
     // Step 3: Resolve which Brave binary to launch
-    // Priority: config.brave.executablePath > config.puppeteer.executablePath > system default
-    // This allows per-session override while having sensible defaults.
-    const braveExecutable = this.host.config.brave?.executablePath 
-      ?? this.host.config.puppeteer?.executablePath 
-      ?? '/usr/bin/brave';
+    // Priority:
+    //   1. config.brave.executablePath
+    //   2. config.puppeteer.executablePath
+    //   3. Automatically detect Brave on Windows
+    //   4. Existing Linux default
+    const braveExecutable = await this.resolveBraveExecutable();
     // ═══════════════════════════════════════════════════════════════════════
 
     const client = new Client({
@@ -515,6 +517,77 @@ export class WwebjsLifecycle {
     } finally {
       if (timeout) clearTimeout(timeout);
     }
+  }
+
+  /**
+   * Resolve the Brave browser executable.
+   *
+   * Explicit configuration always wins. On Windows, when no explicit path is
+   * configured, search the common Brave installation locations used by
+   * system-wide and per-user installations. On non-Windows platforms, preserve
+   * the existing Linux fallback.
+   */
+  private async resolveBraveExecutable(): Promise<string> {
+    const configuredBrave = this.host.config.brave?.executablePath;
+    if (configuredBrave) {
+      return configuredBrave;
+    }
+
+    const configuredPuppeteer = this.host.config.puppeteer?.executablePath;
+    if (configuredPuppeteer) {
+      return configuredPuppeteer;
+    }
+
+    if (process.platform === 'win32') {
+      const candidates = [
+        process.env.PROGRAMFILES
+          ? path.join(
+              process.env.PROGRAMFILES,
+              'BraveSoftware',
+              'Brave-Browser',
+              'Application',
+              'brave.exe',
+            )
+          : undefined,
+
+        process.env['PROGRAMFILES(X86)']
+          ? path.join(
+              process.env['PROGRAMFILES(X86)'],
+              'BraveSoftware',
+              'Brave-Browser',
+              'Application',
+              'brave.exe',
+            )
+          : undefined,
+
+        process.env.LOCALAPPDATA
+          ? path.join(
+              process.env.LOCALAPPDATA,
+              'BraveSoftware',
+              'Brave-Browser',
+              'Application',
+              'brave.exe',
+            )
+          : undefined,
+      ].filter((candidate): candidate is string => Boolean(candidate));
+
+      for (const candidate of candidates) {
+        try {
+          await fs.access(candidate);
+          this.host.logger.log(`Detected Brave browser at: ${candidate}`);
+          return candidate;
+        } catch {
+          // Candidate does not exist; continue searching.
+        }
+      }
+
+      throw new Error(
+        'Brave browser executable was not found on Windows. ' +
+        'Set brave.executablePath explicitly.',
+      );
+    }
+
+    return '/usr/bin/brave';
   }
 
   setupEventHandlers(): void {

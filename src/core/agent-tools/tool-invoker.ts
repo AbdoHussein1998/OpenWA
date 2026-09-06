@@ -1,77 +1,306 @@
-import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+
+
+
+
+
+import {
+  BadRequestException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
+
 import { ZodError } from 'zod';
+
 import type { AuthService } from '../../modules/auth/auth.service';
-import type { AnyToolDescriptor } from './tool-descriptor';
+import type { SessionTenantAccessService } from '../../modules/access-control/session-tenant-access.service';
+import type { SessionScope } from '../../modules/access-control/session-scope';
+
+import type {
+  AnyToolDescriptor,
+  ToolInvocationContext,
+} from './tool-descriptor';
 
 /**
- * Run one tool call with REST-equivalent guarantees, reusing core's own auth:
- * auth (role + allowedSessions + IP fail-closed) → validate input → handler.
- * Mirrors the REST guard-then-pipe order (auth before validation).
- * `clientIp` is undefined over MCP — a key with allowedIps therefore fails closed
- * inside validateApiKey (documented limitation).
+ * Run one tool call with REST-equivalent authorization guarantees.
  *
- * @param onAuthenticated Optional callback invoked with `apiKey.id` immediately
- * after `validateApiKey` succeeds and BEFORE role/input checks. Use this to
- * key rate-limiters off the authenticated identity rather than the raw header
- * string, preventing pre-auth bucket allocation by anonymous callers.
- * @param onAuthFailure Optional callback invoked with the error when the AUTH
- * phase rejects (missing/invalid/revoked/expired key, wrong role, IP/session not
- * allowed). Mirrors the REST ApiKeyGuard's auth-failure hook (which records the
- * audit trail). Fires BEFORE input validation and the tool handler, so a 401/403
- * thrown from a handler body is NOT surfaced here. Re-thrown after the callback.
+ * Phase J pipeline:
+ *
+ *   credential validation
+ *          ↓
+ *   capability check
+ *          ↓
+ *   tenant authorization
+ *          ↓
+ *   Zod validation
+ *          ↓
+ *   handler
+ *
+ * Important:
+ *
+ * AuthService answers:
+ *
+ *   "WHAT may this identity do?"
+ *
+ * SessionTenantAccessService answers:
+ *
+ *   "WHERE may this identity do it?"
+ *
+ * MCP must not duplicate TEAM_LEADER / AGENT / allowedSessions authorization
+ * logic itself.
+ *
+ * `clientIp` remains undefined over MCP. A key carrying `allowedIps` therefore
+ * fails closed inside validateApiKey.
+ *
+ * @param onAuthenticated
+ * Optional callback invoked with apiKey.id immediately after credential
+ * validation succeeds and before capability/tenant/input checks.
+ *
+ * Used by MCP rate limiting so authenticated identities are keyed by API-key ID
+ * instead of allocating buckets from attacker-controlled raw credentials.
+ *
+ * @param onAuthFailure
+ * Optional callback invoked when authentication or authorization fails.
+ *
+ * This includes:
+ *
+ * - invalid/missing/revoked/expired credential
+ * - missing capability
+ * - legacy role fallback failure
+ * - tenant/session denial
+ *
+ * Input validation and handler failures are not auth failures.
  */
 export async function invokeTool(
   tool: AnyToolDescriptor,
   rawInput: unknown,
   rawKey: string | undefined,
   authService: AuthService,
+  sessionTenantAccessService: SessionTenantAccessService,
   onAuthenticated?: (apiKeyId: string) => void,
   onAuthFailure?: (error: unknown) => void,
 ): Promise<unknown> {
-  // AUTH PHASE — every rejection here is an authentication/authorization failure (the MCP analog of the
-  // REST ApiKeyGuard's authorize()). Wrapped so onAuthFailure can record the audit trail at the boundary.
-  let apiKey: Awaited<ReturnType<typeof authService.validateApiKey>>;
+  /*
+   * Descriptor configuration errors are application bugs, not caller auth
+   * failures.
+   */
+  if (
+    tool.sessionScoped &&
+    tool.aggregateSessionScoped
+  ) {
+    throw new Error(
+      `Tool '${tool.name}' cannot be both sessionScoped and aggregateSessionScoped`,
+    );
+  }
+
+  let apiKey: Awaited<
+    ReturnType<typeof authService.validateApiKey>
+  >;
+
+  let effectiveSessionScope: SessionScope | undefined;
+
+  /*
+   * AUTHORIZATION PHASE
+   *
+   * Mirrors the REST security architecture without assuming REST guards
+   * execute for MCP.
+   */
   try {
     if (!rawKey) {
-      throw new UnauthorizedException('Missing API key');
-    }
-    // Pre-extract sessionId for the scope check BEFORE full validation (REST reads
-    // req.params.sessionId in the guard, before the pipe).
-    const probe = (rawInput ?? {}) as Record<string, unknown>;
-    const sessionId = tool.sessionScoped && typeof probe.sessionId === 'string' ? probe.sessionId : undefined;
-
-    // Fail closed: a sessionScoped tool MUST carry a non-empty sessionId before auth. Otherwise an
-    // undefined scope would skip the per-key allowedSessions check inside validateApiKey, letting a
-    // session-restricted key drive the tool against any session. This enforces the fence at the runtime
-    // boundary regardless of an individual tool's input schema.
-    if (tool.sessionScoped && !sessionId) {
-      throw new BadRequestException('sessionId is required for this tool');
+      throw new UnauthorizedException(
+        'Missing API key',
+      );
     }
 
-    apiKey = await authService.validateApiKey(rawKey, undefined, sessionId);
-    onAuthenticated?.(apiKey.id);
+    /*
+     * Phase J:
+     *
+     * Credential validation does NOT receive sessionId anymore.
+     *
+     * Credential/IP/expiry validation belongs to AuthService.
+     * Tenant authorization belongs exclusively to
+     * SessionTenantAccessService.
+     */
+    apiKey = await authService.validateApiKey(
+      rawKey,
+      undefined,
+    );
 
-    if (tool.requiredRole && !authService.hasPermission(apiKey, tool.requiredRole)) {
-      throw new ForbiddenException('API key lacks the required role');
+    onAuthenticated?.(
+      apiKey.id,
+    );
+
+    /*
+     * Capability is authoritative for migrated Phase J tools.
+     *
+     * requiredRole remains only as a migration fallback so existing tools
+     * continue compiling while their descriptors are converted.
+     *
+     * IMPORTANT:
+     *
+     * If requiredCapability exists, requiredRole is deliberately ignored.
+     * Otherwise an AGENT possessing MESSAGE_SEND could still be rejected by
+     * an old OPERATOR role requirement, defeating capability-based RBAC.
+     */
+    if (tool.requiredCapability) {
+      if (
+        !authService.hasCapability(
+          apiKey,
+          tool.requiredCapability,
+        )
+      ) {
+        throw new ForbiddenException(
+          'API key lacks the required capability',
+        );
+      }
+    } else if (
+      tool.requiredRole &&
+      !authService.hasPermission(
+        apiKey,
+        tool.requiredRole,
+      )
+    ) {
+      throw new ForbiddenException(
+        'API key lacks the required role',
+      );
+    }
+
+    /*
+     * Single-session tenant authorization.
+     *
+     * Like REST route guards, we need sessionId before full DTO/Zod
+     * validation so authorization happens before the tool handler.
+     *
+     * We only probe the value here. The complete object is still validated by
+     * the tool's own Zod schema afterwards.
+     */
+    if (tool.sessionScoped) {
+      const probe =
+        (
+          rawInput ?? {}
+        ) as Record<string, unknown>;
+
+      const rawSessionId =
+        probe.sessionId;
+
+      const sessionId =
+        typeof rawSessionId === 'string' &&
+        rawSessionId.trim().length > 0
+          ? rawSessionId
+          : undefined;
+
+      /*
+       * Fail closed.
+       *
+       * A session-scoped tool without sessionId cannot simply skip tenant
+       * authorization.
+       */
+      if (!sessionId) {
+        throw new BadRequestException(
+          'sessionId is required for this tool',
+        );
+      }
+
+      /*
+       * Central tenant policy.
+       *
+       * Handles:
+       *
+       * ADMIN / legacy       -> allowedSessions semantics
+       * TEAM_LEADER          -> ownership
+       * AGENT                -> assigned session AND matching owner
+       *
+       * Foreign/nonexistent/unassigned access keeps the normal tenancy error
+       * semantics from SessionTenantAccessService.
+       */
+      await sessionTenantAccessService
+        .assertSessionAccess(
+          apiKey,
+          sessionId,
+        );
+    }
+
+    /*
+     * Aggregate/global MCP authorization.
+     *
+     * Do NOT pass apiKey.allowedSessions to aggregate handlers. That cannot
+     * represent OWNER / OWNER_AND_IDS / NONE.
+     *
+     * Resolve the same effective SessionScope used by REST aggregate routes.
+     */
+    if (
+      tool.aggregateSessionScoped
+    ) {
+      effectiveSessionScope =
+        await sessionTenantAccessService
+          .getEffectiveSessionScope(
+            apiKey,
+          );
     }
   } catch (error) {
-    // auditMcpAuthFailure (the only current caller hook) filters to 401/403, so the BadRequestException
-    // for a missing sessionId above is NOT audited (parity with the REST guard, which skips 400s).
-    onAuthFailure?.(error);
+    /*
+     * The MCP adapter may use this hook for auth/security audit events.
+     *
+     * Phase K can distinguish ordinary credential/capability failures from
+     * tenant-denial 404s and record TENANT_ACCESS_DENIED.
+     */
+    onAuthFailure?.(
+      error,
+    );
+
     throw error;
   }
 
-  // VALIDATION + HANDLER PHASE — not part of auth; their errors are not auth failures.
+  /*
+   * VALIDATION PHASE
+   *
+   * Authorization has already completed. Zod now determines the complete
+   * service input contract.
+   */
   let input: unknown;
+
   try {
-    input = tool.inputSchema.parse(rawInput);
-  } catch (e) {
-    if (e instanceof ZodError) {
-      throw new BadRequestException(e.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`));
+    input =
+      tool.inputSchema.parse(
+        rawInput,
+      );
+  } catch (error) {
+    if (
+      error instanceof ZodError
+    ) {
+      throw new BadRequestException(
+        error.issues.map(
+          issue =>
+            `${issue.path.join('.') || '(root)'}: ${issue.message}`,
+        ),
+      );
     }
-    throw e;
+
+    throw error;
   }
-  // The single cast the erasure needs, placed next to the parse that justifies it: `input` is
-  // whatever this tool's own `inputSchema` just accepted, which is exactly what its handler declares.
-  return tool.handler(input as never, apiKey);
+
+  /*
+   * SERVER-RESOLVED CONTEXT
+   *
+   * Aggregate handlers receive effective SessionScope here. It never comes
+   * from MCP client input.
+   */
+  const context: ToolInvocationContext = {
+    sessionScope:
+      effectiveSessionScope,
+  };
+
+  /*
+   * The single cast required by AnyToolDescriptor's erased input type.
+   *
+   * `input` has just passed this exact descriptor's inputSchema, so it is the
+   * type its handler declared.
+   */
+  return tool.handler(
+    input as never,
+    apiKey,
+    context,
+  );
 }
+
+
+
