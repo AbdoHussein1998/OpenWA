@@ -675,7 +675,13 @@ export class SessionEngineLifecycle {
 
   /** Engine callback body, lifted out of initializeEngine so the wiring table stays readable. */
   private handleEngineReady(id: string, engine: IWhatsAppEngine, phone: string, pushName: string): void {
-    if (!this.isLiveEngine(id, engine)) return;
+    if (!this.isLiveEngine(id, engine)) {
+      this.logger.debug('Dropped READY callback from a stale engine generation', {
+        sessionId: id,
+        action: 'stale_ready_callback_dropped',
+      });
+      return;
+    }
     this.logger.log(`Session ready: ${phone}`, {
       sessionId: id,
       phone,

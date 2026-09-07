@@ -2,60 +2,34 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { type createLogger } from '../../common/services/logger.service';
 
-/**
- * Promisified version of child_process.exec.
- * 
- * Python reference: This is like wrapping subprocess.run() to return a Promise (async/await)
- * instead of using callbacks. Node's util.promisify converts callback-based APIs to Promise-based.
- */
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+const PROCESS_LIST_MAX_BUFFER = 10 * 1024 * 1024;
+const PROCESS_KILL_SETTLE_MS = 500;
 
 /**
  * Manages persistent Brave browser profiles per OpenWA session.
- * 
- * Python reference: Think of this as a utility class that manages Chrome user-data directories.
- * In Python you'd have a class with methods like get_profile_path(), ensure_profile(), delete_profile().
- * The difference is TypeScript uses `private readonly` for instance variables and `async/await`
- * with explicit Promise<void> return types instead of Python's implicit async.
+ *
+ * Each OpenWA session owns one persistent Brave user-data directory.
+ * Browser processes are disposable, but the profile is not.
  */
 export class BraveProfileManager {
-  /**
-   * Constructor dependency injection.
-   * 
-   * Python reference: Similar to __init__(self, base_profile_path: str) where base_profile_path
-   * is a required argument. The `private readonly` shorthand in TypeScript both declares the
-   * parameter AND creates an instance variable — equivalent to assigning self.baseProfilePath
-   * inside __init__. The `readonly` means it can only be set in the constructor (like a final
-   * attribute in Python's dataclasses or @dataclass(frozen=True)).
-   */
   constructor(private readonly baseProfilePath: string) {}
 
   /**
-   * Returns the full filesystem path for a session's Brave profile.
-   * 
-   * Python reference: Similar to os.path.join(self.base_path, session_id). TypeScript's
-   * path.join() works identically to Python's os.path.join() — it handles path separators
-   * correctly for the current OS. No `async` here because it's pure computation, no I/O.
+   * Return the persistent Brave profile directory for one OpenWA session.
    */
   getProfilePath(sessionId: string): string {
     return path.join(this.baseProfilePath, sessionId);
   }
 
   /**
-   * Checks whether a profile directory already exists on disk.
-   * 
-   * Python reference: Similar to os.path.exists(profile_path), but using fs.access() which is
-   * the Node.js equivalent. Returns a boolean synchronously (no async/await) because we use
-   * a try/catch pattern: if fs.access() throws, the profile doesn't exist.
-   * 
-   * Note: In production you'd probably want this to be async using fs.access() with await,
-   * but here we use a synchronous check for simplicity in guards.
+   * True when the session's Brave profile directory exists.
    */
-
   async profileExists(sessionId: string): Promise<boolean> {
     try {
       await fs.access(this.getProfilePath(sessionId));
@@ -66,183 +40,620 @@ export class BraveProfileManager {
   }
 
   /**
-   * Creates the profile directory if it doesn't already exist.
-   * 
-   * Python reference: Equivalent to os.makedirs(path, exist_ok=True). The `{ recursive: true }`
-   * option is the Node.js equivalent of exist_ok=True — it creates parent directories as needed
-   * and does NOT throw if the directory already exists. Returns Promise<void> because fs.mkdir
-   * is async in Node.js (non-blocking I/O).
+   * Create the persistent profile directory when it does not already exist.
    */
   async ensureProfile(sessionId: string): Promise<void> {
-    const profilePath = this.getProfilePath(sessionId);
-    await fs.mkdir(profilePath, { recursive: true });
+    await fs.mkdir(this.getProfilePath(sessionId), {
+      recursive: true,
+    });
   }
 
   /**
-   * Completely removes a session's Brave profile directory.
-   * Called during session deletion (the purge flow).
-   * 
-   * Python reference: Equivalent to shutil.rmtree(path, ignore_errors=True). The `recursive: true`
-   * option deletes directories and their contents. `force: true` is like ignore_errors=True —
-   * it suppresses errors when the path doesn't exist (idempotent delete). Returns Promise<void>
-   * because fs.rm is async.
-   * 
-   * This enforces RULE 4: Session deletion = browser shutdown + profile deletion + session deletion.
-   * This enforces RULE 7: A recreated session starts with a clean profile.
+   * Permanently remove a Brave profile.
+   *
+   * Used only by the session-delete purge flow.
    */
   async deleteProfile(sessionId: string): Promise<void> {
     const profilePath = this.getProfilePath(sessionId);
+
     try {
-      await fs.rm(profilePath, { recursive: true, force: true });
+      await fs.rm(profilePath, {
+        recursive: true,
+        force: true,
+      });
     } catch (error) {
-      // Type narrowing: we check if this is a Node.js ENOENT error (file not found)
-      // Python equivalent: except OSError as e: if e.errno != errno.ENOENT: raise
       const nodeError = error as NodeJS.ErrnoException;
+
       if (nodeError.code !== 'ENOENT') {
-        // Re-throw anything OTHER than "file not found" — permission errors, etc.
         throw error;
       }
-      // If ENOENT: the profile was already gone, which is fine (idempotent)
     }
   }
 
   /**
-   * Kills orphaned Brave processes that hold a session's profile lock.
-   * 
-   * Python reference: This is like running subprocess.check_output(['ps', 'aux']) and parsing
-   * the output to find PIDs matching a pattern, then calling os.kill(pid, signal.SIGKILL).
-   * 
-   * WHY THIS MATTERS: When OpenWA crashes hard (SIGKILL, power loss, OOM killer), Puppeteer's
-   * normal cleanup hook never runs. Brave keeps running, holding file locks on the profile.
-   * On next start, Brave refuses to open a locked profile ("Profile already in use").
-   * 
-   * HOW IT WORKS: We use `ps aux | grep` to find processes with our session marker argument
-   * (--openwa-session=<sessionId>), then SIGKILL them. This is best-effort: if no orphans exist,
-   * the grep returns empty and we no-op.
-   * 
-   * RULE 3: Browser process is disposable, but profile must survive.
+   * Kill Brave processes left behind by a previous crashed OpenWA process.
+   *
+   * The lifecycle adds:
+   *
+   *   --openwa-session=<sessionName>
+   *
+   * to the Brave command line.
+   *
+   * Windows:
+   *   Win32_Process.CommandLine through PowerShell/CIM.
+   *
+   * POSIX:
+   *   `ps -eo pid=,args=` parsed in Node.
+   *
+   * IMPORTANT:
+   *
+   * A process-enumeration failure is NOT treated as "no orphan".
+   * If we cannot prove the old Brave process is gone, startup fails instead
+   * of deleting Singleton lock files underneath a possibly live browser.
    */
   async killOrphanedBraveProcesses(
     sessionId: string,
     logger: ReturnType<typeof createLogger>,
   ): Promise<void> {
+    let pids: number[];
+
     try {
-      // Build a shell command that finds PIDs of Brave processes with our session marker.
-      // The marker is passed as a command-line arg to Brave, so it appears in ps output.
-      // 
-      // Python reference: Similar to:
-      //   result = subprocess.run("ps aux | grep 'marker' | grep -v grep | awk '{print $2}'",
-      //                          shell=True, capture_output=True, text=True)
-      //   pids = result.stdout.strip().split('\n')
-      const marker = this.getSessionMarker(sessionId);
-      const { stdout } = await execAsync(
-        `ps aux | grep '${marker}' | grep -v grep | awk '{print $2}'`
-      );
-
-      // Parse the output into individual PIDs (non-empty lines only)
-      // Python reference: Similar to [pid for pid in stdout.strip().split('\n') if pid.strip()]
-      const pids = stdout.trim().split('\n').filter(Boolean);
-
-      // No orphans found — clean start, nothing to do
-      if (pids.length === 0) {
-        return;
-      }
-
-      // Log the discovery before killing
-      // Python reference: logger.warning(f"Found {len(pids)} orphaned Brave processes...")
-      logger.warn(
-        `Found ${pids.length} orphaned Brave process(es) for session ${sessionId}, killing...`,
-        { sessionId, action: 'kill_orphaned_brave', pids }
-      );
-
-      // SIGKILL each orphan. SIGKILL (signal 9) cannot be caught or ignored — immediate termination.
-      // Python reference: for pid in pids: os.kill(int(pid), signal.SIGKILL)
-      for (const pid of pids) {
-        try {
-          // process.kill() is Node's built-in, NOT the same as os.kill() in Python
-          // It sends signals to processes by PID. Number(pid) casts string to int.
-          process.kill(Number(pid), 'SIGKILL');
-        } catch (error) {
-          // The process might have died between our `ps` and `kill` — race condition.
-          // We log and continue; other PIDs might still need killing.
-          logger.warn(`Failed to kill orphan PID ${pid}`, { error: String(error) });
-        }
-      }
-
-      // Give the OS time to release file locks before we try to open the profile.
-      // Python reference: time.sleep(0.5) — but here we use an async sleep to avoid blocking.
-      await this.sleep(500);
+      pids = await this.findSessionBravePids(sessionId);
     } catch (error) {
-      // The execAsync might fail if `ps` isn't available or grep finds nothing.
-      // We log at debug level since this is expected behavior when no orphans exist.
-      logger.debug('No orphaned Brave processes found', { sessionId });
+      logger.warn(
+        'Unable to enumerate Brave processes; refusing unsafe profile-lock cleanup',
+        {
+          sessionId,
+          platform: process.platform,
+          action: 'brave_orphan_enumeration_failed',
+          error:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        },
+      );
+
+      throw error;
+    }
+
+    if (pids.length === 0) {
+      return;
+    }
+
+    logger.warn(
+      `Found ${pids.length} orphaned Brave process(es) for session ${sessionId}; terminating them`,
+      {
+        sessionId,
+        action: 'kill_orphaned_brave',
+        pids,
+      },
+    );
+
+    for (const pid of pids) {
+      this.killPid(
+        pid,
+        sessionId,
+        logger,
+      );
+    }
+
+    await this.sleep(
+      PROCESS_KILL_SETTLE_MS,
+    );
+
+    /*
+     * Verify that the processes really disappeared.
+     *
+     * A kill can race process exit, fail due to permissions, or leave
+     * another matching Brave child process behind.
+     */
+    let survivors =
+      await this.findSessionBravePids(
+        sessionId,
+      );
+
+    if (survivors.length > 0) {
+      logger.warn(
+        'Brave process(es) still present after the first termination pass; retrying once',
+        {
+          sessionId,
+          action: 'kill_orphaned_brave_retry',
+          pids: survivors,
+        },
+      );
+
+      for (const pid of survivors) {
+        this.killPid(
+          pid,
+          sessionId,
+          logger,
+        );
+      }
+
+      await this.sleep(
+        PROCESS_KILL_SETTLE_MS,
+      );
+
+      survivors =
+        await this.findSessionBravePids(
+          sessionId,
+        );
+    }
+
+    if (survivors.length > 0) {
+      const error =
+        new Error(
+          `Unable to terminate Brave process(es) holding session '${sessionId}' profile: ` +
+            survivors.join(', '),
+        );
+
+      logger.warn(
+        'Brave profile is still owned by a live process; refusing to continue startup',
+        {
+          sessionId,
+          action: 'brave_orphan_kill_failed',
+          pids: survivors,
+        },
+      );
+
+      throw error;
     }
   }
 
   /**
-   * Removes stale lock files left by a crashed Brave instance.
-   * 
-   * Python reference: Brave (like Chrome) creates lock files to prevent multiple instances from
-   * using the same profile simultaneously. If Brave crashes, these files are left behind and
-   * block the next launch. This is like removing SingletonLock, SingletonSocket from a Chrome
-   * profile directory.
-   * 
-   * The three files:
-   * - SingletonLock: Prevents multiple Brave instances from opening the profile
-   * - SingletonSocket: IPC socket for the running instance
-   * - SingletonCookie: Authentication cookie for the singleton protocol
-   * 
-   * WHEN: Called BEFORE launching Brave, so the new instance can acquire fresh locks.
-   * Safe because we already killed orphans above — no live Brave should be holding these.
+   * Remove stale Brave/Chromium singleton files.
+   *
+   * Before deleting anything, independently verify that no process carrying
+   * this session's marker is still alive.
+   *
+   * This verification is intentionally repeated here even though the normal
+   * lifecycle calls killOrphanedBraveProcesses() immediately before this.
    */
   async removeStaleSingletonFiles(
     sessionId: string,
     logger: ReturnType<typeof createLogger>,
   ): Promise<void> {
-    const profilePath = this.getProfilePath(sessionId);
-    const singletonFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
+    let livePids: number[];
 
-    // Iterate over each lock file and try to delete it
-    // Python reference: for filename in ['SingletonLock', ...]: os.remove(os.path.join(path, filename))
+    try {
+      livePids =
+        await this.findSessionBravePids(
+          sessionId,
+        );
+    } catch (error) {
+      logger.warn(
+        'Unable to verify Brave profile ownership; refusing to remove Singleton files',
+        {
+          sessionId,
+          platform: process.platform,
+          action: 'brave_singleton_verification_failed',
+          error:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        },
+      );
+
+      throw error;
+    }
+
+    if (livePids.length > 0) {
+      const error =
+        new Error(
+          `Refusing to remove Brave Singleton files while session '${sessionId}' ` +
+            `is still owned by PID(s): ${livePids.join(', ')}`,
+        );
+
+      logger.warn(
+        'Refusing to remove Brave Singleton files while a matching process is alive',
+        {
+          sessionId,
+          action: 'brave_singleton_live_owner',
+          pids: livePids,
+        },
+      );
+
+      throw error;
+    }
+
+    const profilePath =
+      this.getProfilePath(
+        sessionId,
+      );
+
+    const singletonFiles = [
+      'SingletonLock',
+      'SingletonSocket',
+      'SingletonCookie',
+    ];
+
     for (const file of singletonFiles) {
-      const filePath = path.join(profilePath, file);
+      const filePath =
+        path.join(
+          profilePath,
+          file,
+        );
+
       try {
-        // fs.unlink deletes a file (equivalent to os.remove in Python)
-        await fs.unlink(filePath);
-        logger.log(`Removed stale ${file} from Brave profile`, { sessionId });
+        await fs.unlink(
+          filePath,
+        );
+
+        logger.log(
+          `Removed stale ${file} from Brave profile`,
+          {
+            sessionId,
+            action: 'brave_singleton_removed',
+            file,
+          },
+        );
       } catch (error) {
-        // Type narrowing to check the error code
-        const nodeError = error as NodeJS.ErrnoException;
-        
-        // ENOENT = file didn't exist, which is the normal case (no crash left locks behind)
-        // We only log warnings for OTHER errors (permission denied, etc.)
-        if (nodeError.code !== 'ENOENT') {
-          logger.warn(`Failed to remove stale ${file}`, { sessionId, error: nodeError.message });
+        const nodeError =
+          error as NodeJS.ErrnoException;
+
+        if (
+          nodeError.code !==
+          'ENOENT'
+        ) {
+          logger.warn(
+            `Failed to remove stale ${file}`,
+            {
+              sessionId,
+              action:
+                'brave_singleton_remove_failed',
+              file,
+              error:
+                nodeError.message,
+            },
+          );
         }
-        // If ENOENT: silently continue — the file was already gone, which is what we wanted
       }
     }
   }
 
   /**
-   * Returns the command-line marker argument used to identify this session's processes.
-   * 
-   * Python reference: This is like a constant or helper method that returns a formatted string.
-   * Brave receives this as --openwa-session=sales-agent-01, and `ps aux` shows it in the
-   * command line, allowing us to grep for it later.
+   * The marker placed on Brave's command line for this session.
    */
-  private getSessionMarker(sessionId: string): string {
+  private getSessionMarker(
+    sessionId: string,
+  ): string {
     return `--openwa-session=${sessionId}`;
   }
 
   /**
-   * Async sleep utility.
-   * 
-   * Python reference: Equivalent to asyncio.sleep(seconds) — but Node.js doesn't have a built-in
-   * async sleep, so we create one using setTimeout wrapped in a Promise. The Promise resolves
-   * after `ms` milliseconds. This is a common pattern in JavaScript for non-blocking delays.
+   * Enumerate PIDs carrying the exact OpenWA session marker.
    */
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  private async findSessionBravePids(
+    sessionId: string,
+  ): Promise<number[]> {
+    const marker =
+      this.getSessionMarker(
+        sessionId,
+      );
+
+    if (
+      process.platform ===
+      'win32'
+    ) {
+      return this.findWindowsSessionPids(
+        marker,
+      );
+    }
+
+    return this.findPosixSessionPids(
+      marker,
+    );
+  }
+
+  /**
+   * Windows implementation using Win32_Process.CommandLine.
+   */
+  private async findWindowsSessionPids(
+    marker: string,
+  ): Promise<number[]> {
+    /*
+     * The marker is passed through the environment rather than interpolated
+     * into the PowerShell command.
+     *
+     * The regex requires whitespace boundaries so:
+     *
+     *   --openwa-session=foo
+     *
+     * does NOT accidentally match:
+     *
+     *   --openwa-session=foobar
+     */
+    const powershellScript =
+      '$marker = $env:OPENWA_SESSION_MARKER; ' +
+      "$pattern = '(?:^|\\s)' + [regex]::Escape($marker) + '(?=$|\\s)'; " +
+      'Get-CimInstance Win32_Process | ' +
+      'Where-Object { $_.CommandLine -and $_.CommandLine -match $pattern } | ' +
+      'ForEach-Object { $_.ProcessId }';
+
+    const env = {
+      ...process.env,
+      OPENWA_SESSION_MARKER:
+        marker,
+    };
+
+    let lastError:
+      unknown;
+
+    /*
+     * Windows PowerShell is normally present on Windows.
+     * PowerShell 7 is a fallback when only pwsh is installed.
+     */
+    for (
+      const executable
+      of [
+        'powershell.exe',
+        'pwsh.exe',
+      ]
+    ) {
+      try {
+        const {
+          stdout,
+        } =
+          await execFileAsync(
+            executable,
+            [
+              '-NoLogo',
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              powershellScript,
+            ],
+            {
+              windowsHide:
+                true,
+
+              env,
+
+              maxBuffer:
+                PROCESS_LIST_MAX_BUFFER,
+            },
+          );
+
+        return this.parsePidLines(
+          String(
+            stdout,
+          ),
+        );
+      } catch (error) {
+        lastError =
+          error;
+
+        const nodeError =
+          error as NodeJS.ErrnoException;
+
+        /*
+         * Missing executable:
+         * try the next PowerShell implementation.
+         *
+         * Any other error means process ownership could not be verified.
+         */
+        if (
+          nodeError.code ===
+          'ENOENT'
+        ) {
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    throw lastError instanceof
+      Error
+      ? lastError
+      : new Error(
+          'Neither powershell.exe nor pwsh.exe is available to enumerate Brave processes',
+        );
+  }
+
+  /**
+   * POSIX implementation.
+   *
+   * No grep/awk shell pipeline and no session-id interpolation.
+   */
+  private async findPosixSessionPids(
+    marker: string,
+  ): Promise<number[]> {
+    const {
+      stdout,
+    } =
+      await execFileAsync(
+        'ps',
+        [
+          '-eo',
+          'pid=,args=',
+        ],
+        {
+          maxBuffer:
+            PROCESS_LIST_MAX_BUFFER,
+        },
+      );
+
+    const pids =
+      new Set<number>();
+
+    for (
+      const line
+      of String(
+        stdout,
+      ).split(
+        /\r?\n/,
+      )
+    ) {
+      const match =
+        line.match(
+          /^\s*(\d+)\s+(.*)$/,
+        );
+
+      if (!match) {
+        continue;
+      }
+
+      const pid =
+        Number(
+          match[1],
+        );
+
+      const commandLine =
+        match[2];
+
+      if (
+        Number.isInteger(
+          pid,
+        ) &&
+        pid > 0 &&
+        pid !==
+          process.pid &&
+        this.commandLineHasMarker(
+          commandLine,
+          marker,
+        )
+      ) {
+        pids.add(
+          pid,
+        );
+      }
+    }
+
+    return [
+      ...pids,
+    ];
+  }
+
+  /**
+   * Match the marker as a complete argument rather than a prefix.
+   */
+  private commandLineHasMarker(
+    commandLine: string,
+    marker: string,
+  ): boolean {
+    const escaped =
+      marker.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        '\\$&',
+      );
+
+    return new RegExp(
+      `(?:^|\\s)${escaped}(?=$|\\s)`,
+    ).test(
+      commandLine,
+    );
+  }
+
+  /**
+   * Parse one PID per line.
+   */
+  private parsePidLines(
+    stdout: string,
+  ): number[] {
+    const pids =
+      new Set<number>();
+
+    for (
+      const raw
+      of stdout.split(
+        /\r?\n/,
+      )
+    ) {
+      const value =
+        raw.trim();
+
+      if (
+        !/^\d+$/.test(
+          value,
+        )
+      ) {
+        continue;
+      }
+
+      const pid =
+        Number(
+          value,
+        );
+
+      if (
+        Number.isInteger(
+          pid,
+        ) &&
+        pid > 0 &&
+        pid !==
+          process.pid
+      ) {
+        pids.add(
+          pid,
+        );
+      }
+    }
+
+    return [
+      ...pids,
+    ];
+  }
+
+  /**
+   * Best-effort process signal.
+   *
+   * Final success is decided by the verification pass afterwards.
+   */
+  private killPid(
+    pid: number,
+    sessionId: string,
+    logger: ReturnType<typeof createLogger>,
+  ): void {
+    try {
+      process.kill(
+        pid,
+        'SIGKILL',
+      );
+    } catch (error) {
+      const nodeError =
+        error as NodeJS.ErrnoException;
+
+      /*
+       * ESRCH:
+       * the process died between enumeration and kill.
+       * That is already the desired result.
+       */
+      if (
+        nodeError.code ===
+        'ESRCH'
+      ) {
+        return;
+      }
+
+      logger.warn(
+        `Failed to terminate orphan Brave PID ${pid}`,
+        {
+          sessionId,
+          pid,
+          action:
+            'kill_orphaned_brave_pid_failed',
+
+          error:
+            nodeError.message ??
+            String(
+              error,
+            ),
+        },
+      );
+    }
+  }
+
+  private sleep(
+    ms: number,
+  ): Promise<void> {
+    return new Promise(
+      resolve =>
+        setTimeout(
+          resolve,
+          ms,
+        ),
+    );
   }
 }
+

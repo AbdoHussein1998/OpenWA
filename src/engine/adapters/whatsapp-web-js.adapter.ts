@@ -1,3 +1,6 @@
+
+
+
 import { EventEmitter } from 'events';
 import { MessageMedia, type Call, type Client, type Message } from 'whatsapp-web.js';
 import {
@@ -334,6 +337,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     config: this.config,
     getCallbacks: () => this.callbacks,
     emitState: status => this.emit('stateChanged', status),
+    scheduleAuthReconcile: () => this.reconcile.scheduleAuthReconcile(),
+    clearAuthReconcile: () => this.reconcile.clearAuthReconcile(),
     scheduleReadyReconcile: () => this.reconcile.scheduleReadyReconcile(),
     clearReadyReconcile: () => this.reconcile.clearReadyReconcile(),
     startOnboardingWatcher: () => this.onboardingWatcher.startOnboardingWatcher(),
@@ -1036,3 +1041,5 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     }
   }
 }
+
+

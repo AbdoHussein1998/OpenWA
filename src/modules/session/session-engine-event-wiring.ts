@@ -163,7 +163,10 @@ export class SessionEngineEventWiring {
 
         persistStatus(SessionStatus.QR_READY);
       },
-      onReady: (phone, pushName): void => host.handleEngineReady(id, engine, phone, pushName),
+      onReady: (phone, pushName): void => {
+        if (!host.isLiveEngine(id, engine)) return;
+        host.handleEngineReady(id, engine, phone, pushName);
+      },
       onMessage: (message): void => host.messages.handleInboundMessage(id, engine, message),
       onHistoryMessages: (messages): void => {
         if (!host.isLiveEngine(id, engine)) return;

@@ -77,6 +77,7 @@ import { resolveFeatureFlags } from '../../config/feature-flags';
 
 import {
   IWhatsAppEngine,
+  EngineStatus,
   ChatSummary,
   ChatState,
 } from '../../engine/interfaces/whatsapp-engine.interface';
@@ -1533,12 +1534,30 @@ export class SessionService
       engine.getQRCode();
 
     if (!qrCode) {
+      const engineStatus =
+        engine.getStatus();
+
+      // The browser/engine state changes before the asynchronous DB status write necessarily
+      // settles. Once a scanned QR has been consumed, prefer that live state so this endpoint does
+      // not keep telling the dashboard to wait for/scan a QR while the same engine is already
+      // authenticating or ready.
       if (
+        engineStatus ===
+          EngineStatus.READY ||
         session.status ===
-        SessionStatus.READY
+          SessionStatus.READY
       ) {
         throw new BadRequestException(
           'Session is already authenticated, no QR code needed',
+        );
+      }
+
+      if (
+        engineStatus ===
+        EngineStatus.AUTHENTICATING
+      ) {
+        throw new BadRequestException(
+          'Session is authenticating. The QR code has already been consumed; please wait for the session to become ready.',
         );
       }
 

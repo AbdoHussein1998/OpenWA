@@ -1,6 +1,11 @@
 
 
 
+
+
+
+
+
 import * as qrcode from 'qrcode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -102,6 +107,9 @@ export interface WwebjsLifecycleHost {
   getCallbacks(): EngineEventCallbacks;
   /** Re-emit a status transition on the adapter's EventEmitter (`stateChanged`). */
   emitState(status: EngineStatus): void;
+  /** Arm / disarm the pre-authentication QR_READY reconciliation (./wwebjs-reconcile). */
+  scheduleAuthReconcile(): void;
+  clearAuthReconcile(): void;
   /** Arm / disarm the post-authentication readiness reconciliation (./wwebjs-reconcile). */
   scheduleReadyReconcile(): void;
   clearReadyReconcile(): void;
@@ -286,6 +294,8 @@ export class WwebjsLifecycle {
         await this.runInitAttempt(puppeteerArgs, authTimeoutMs, proxyAuthentication, versionPin);
       }
     } catch (error) {
+      this.host.clearAuthReconcile();
+      this.host.clearReadyReconcile();
       this.setStatus(EngineStatus.FAILED);
       const reason = error instanceof Error ? error.message : String(error);
       // What the dashboard renders as `lastError` is exactly this string and nothing else — the log
@@ -490,6 +500,7 @@ export class WwebjsLifecycle {
   private async resetForInitRetry(): Promise<boolean> {
     const failed = this.client;
     this.client = null;
+    this.host.clearAuthReconcile();
     this.host.clearReadyReconcile();
     this.qrCode = null;
     this.setStatus(EngineStatus.INITIALIZING);
@@ -728,7 +739,13 @@ export class WwebjsLifecycle {
       // finished adapter to QR_READY and publish a QR that links a phantom device. Mirrors the
       // 'authenticated' guard below; the normal first QR is unaffected (initialize() moves the status to
       // INITIALIZING before any client exists, so the latch is still clear).
-      if (this.tearingDown || this.disconnectReported || this.status === EngineStatus.FAILED || !this.client) {
+      const statusAtQrStart = this.getStatus();
+      if (
+        this.tearingDown ||
+        this.disconnectReported ||
+        !this.client ||
+        (statusAtQrStart !== EngineStatus.INITIALIZING && statusAtQrStart !== EngineStatus.QR_READY)
+      ) {
         return;
       }
       // Capture the source client so the post-await fence can prove THIS client is still the live one.
@@ -744,17 +761,35 @@ export class WwebjsLifecycle {
         // a dead/finished adapter must be dropped, not resurrected. The status is read through getStatus()
         // (not `this.status`) so the pre-await guard's narrowing does not elide this comparison:
         // setStatus(FAILED) can run on another tick during the await.
+        const currentStatus = this.getStatus();
         if (
           this.client !== sourceClient ||
           this.tearingDown ||
           this.disconnectReported ||
-          this.getStatus() === EngineStatus.FAILED
+          (currentStatus !== EngineStatus.INITIALIZING && currentStatus !== EngineStatus.QR_READY)
         ) {
+          /*
+           * Authentication/readiness may have advanced while qrcode.toDataURL() was awaiting.
+           * Never let a stale QR encode drive the state machine backwards:
+           *
+           *   AUTHENTICATING  -> QR_READY
+           *   READY           -> QR_READY
+           *   ACTION_REQUIRED -> QR_READY
+           *   FAILED          -> QR_READY
+           *
+           * INITIALIZING -> QR_READY and QR_READY -> QR_READY are the only legitimate QR
+           * transitions (the latter is normal QR rotation).
+           */
           return;
         }
+
         this.qrCode = encodedQr;
         this.setStatus(EngineStatus.QR_READY);
         this.host.getCallbacks().onQRCode?.(this.qrCode);
+        // Do not rely exclusively on whatsapp-web.js's `authenticated` edge. With a persistent
+        // Brave profile the page can already be synced before that edge listener is attached; the
+        // QR watcher is the runtime backstop that replays the missed handoff when necessary.
+        this.host.scheduleAuthReconcile();
       } catch (error) {
         this.host.logger.error('Error generating QR code', String(error));
       }
@@ -771,16 +806,31 @@ export class WwebjsLifecycle {
         this.disconnectReported ||
         this.status === EngineStatus.AUTHENTICATING ||
         this.status === EngineStatus.READY ||
+        this.status === EngineStatus.ACTION_REQUIRED ||
         this.status === EngineStatus.FAILED
       ) {
         return;
       }
+      this.host.clearAuthReconcile();
       this.setStatus(EngineStatus.AUTHENTICATING);
       this.qrCode = null;
       this.host.scheduleReadyReconcile();
     });
 
     this.client.on('ready', () => {
+      // A late ready from a retired client must not touch a null/replaced client or resurrect a
+      // terminal lifecycle state.
+      if (
+        !this.client ||
+        this.tearingDown ||
+        this.disconnectReported ||
+        this.status === EngineStatus.DISCONNECTED ||
+        this.status === EngineStatus.FAILED ||
+        this.status === EngineStatus.ACTION_REQUIRED
+      ) {
+        return;
+      }
+
       // The library re-emits 'ready' at the end of EVERY completed (re)inject pipeline — for a
       // post-navigation re-inject this is the completion edge, and the only one it offers. Close the
       // navigation window HERE, before the guards below: markReadyFromClientInfo early-returns while
@@ -813,6 +863,7 @@ export class WwebjsLifecycle {
     // Skip if already tearing down or disconnect already reported
     if (this.tearingDown || this.disconnectReported) return;
 
+    this.host.clearAuthReconcile();
     this.host.clearReadyReconcile();
 
     if (reason === 'LOGOUT') {
@@ -836,6 +887,7 @@ export class WwebjsLifecycle {
 });
 
     this.client.on('auth_failure', (message?: string) => {
+      this.host.clearAuthReconcile();
       this.host.clearReadyReconcile();
       this.setStatus(EngineStatus.FAILED);
       // Authentication failure is terminal: the stored credentials are invalid and
@@ -903,6 +955,7 @@ export class WwebjsLifecycle {
     if (this.tearingDown || this.status === EngineStatus.DISCONNECTED || this.status === EngineStatus.FAILED) {
       return;
     }
+    this.host.clearAuthReconcile();
     this.host.clearReadyReconcile();
     this.setStatus(EngineStatus.DISCONNECTED);
     this.host.getCallbacks().onDisconnected?.(reason);
@@ -1031,24 +1084,62 @@ export class WwebjsLifecycle {
       [EngineStatus.READY, EngineStatus.DISCONNECTED, EngineStatus.FAILED, EngineStatus.ACTION_REQUIRED].includes(
         this.status,
       )
-    )
+    ) {
       return;
-    this.host.clearReadyReconcile();
+    }
+
+    const wasAuthenticating = this.status === EngineStatus.AUTHENTICATING;
+
     try {
       const info = this.client?.info;
-      this.phoneNumber = info?.wid?.user || null;
-      this.pushName = info?.pushname || null;
+      const phone = info?.wid?.user || null;
+      const pushName = info?.pushname || null;
+
+      // READY is the persisted identity boundary. Never publish READY with an empty phone: doing so
+      // makes the DB say the engine is usable while the account identity is unknown, and it also
+      // defeats restart logic that relies on a completed link. If a library `ready` emit races
+      // ClientInfo population, stay/re-enter AUTHENTICATING and let the existing reconciler retry.
+      if (!phone) {
+        this.host.logger.warn(
+          'WhatsApp Web signalled readiness before the own-account identity was available; keeping the session authenticating',
+          {
+            sessionId: this.host.config.sessionId,
+            action: 'ready_identity_not_available',
+          },
+        );
+
+        this.host.clearAuthReconcile();
+        if (!wasAuthenticating) {
+          this.setStatus(EngineStatus.AUTHENTICATING);
+          this.host.scheduleReadyReconcile();
+        }
+        return;
+      }
+
+      this.phoneNumber = phone;
+      this.pushName = pushName;
+
+      this.host.clearAuthReconcile();
+      this.host.clearReadyReconcile();
       this.setStatus(EngineStatus.READY);
-      this.host.getCallbacks().onReady?.(this.phoneNumber || '', this.pushName || '');
+      this.host.getCallbacks().onReady?.(phone, pushName || '');
+
+      // A freshly-linked account may show a "What's new" onboarding modal that, left
+      // unacknowledged, gets the companion unlinked later. Arm the watcher only after the session
+      // has a real identity and READY has actually been published.
+      this.host.startOnboardingWatcher();
     } catch (error) {
       this.host.logger.error('Error getting client info', String(error));
-      this.setStatus(EngineStatus.READY);
-      this.host.getCallbacks().onReady?.('', '');
+
+      // An exception reading ClientInfo is not proof of readiness. Preserve/re-enter the
+      // AUTHENTICATING state and allow the normal reconciliation window to retry instead of
+      // persisting READY with an empty identity.
+      this.host.clearAuthReconcile();
+      if (!wasAuthenticating) {
+        this.setStatus(EngineStatus.AUTHENTICATING);
+        this.host.scheduleReadyReconcile();
+      }
     }
-    // A freshly-linked account may show a "What's new" onboarding modal that, left unacknowledged,
-    // gets the companion unlinked (~5m later → disconnected: LOGOUT, #982). Dismiss it best-effort
-    // and fall back to ACTION_REQUIRED. Started after READY so a non-ready session never arms it.
-    this.host.startOnboardingWatcher();
   }
 
   /** The single status-transition funnel: latches disconnectReported, fires the callback, re-emits
@@ -1081,10 +1172,11 @@ export class WwebjsLifecycle {
     // Before the clientless early-return: a teardown must always close the navigation window, or a
     // stale stamp could grace the next generation's probe (single-use contract notwithstanding).
     this.clearNavigationReinjectWindow();
+    this.host.clearAuthReconcile();
+    this.host.clearReadyReconcile();
     const client = this.client;
     if (!client) return null;
 
-    this.host.clearReadyReconcile();
     this.host.clearOnboardingWatcher();
     if (this.status !== EngineStatus.DISCONNECTED) {
       this.setStatus(EngineStatus.DISCONNECTED);
@@ -1097,6 +1189,7 @@ export class WwebjsLifecycle {
     if (this.client === client) {
       this.client = null;
     }
+    this.host.clearAuthReconcile();
     this.host.clearReadyReconcile();
     this.host.clearOnboardingWatcher();
     this.clearNavigationReinjectWindow();
@@ -1407,5 +1500,9 @@ export class WwebjsLifecycle {
 
 
   
+
+
+
+
 
 

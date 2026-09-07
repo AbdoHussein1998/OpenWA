@@ -1,187 +1,384 @@
+
+
+
 /**
  * Post-install hook (npm `postinstall`).
  *
- * Eight conditional steps, each skipped when its target is absent so the hook is a no-op where the
- * piece is missing (the Docker builder stage copies package*.json long before any source):
+ * Nine conditional steps, each skipped when its own script/target is absent so the hook remains a
+ * no-op for pieces that are not part of a particular installation:
  *
- *   1. `npm ci` inside dashboard/ when dashboard/ exists — the dashboard carries its own lockfile and
- *      the root install would otherwise leave it without dependencies. We run `npm ci` directly in
- *      dashboard/ with any `npm_config_allow_scripts` environment variable stripped so that npm 11
- *      does not reject `allow-scripts=true` from user `.npmrc` with EALLOWSCRIPTS. A failure here
- *      MUST abort the install: the old inline hook swallowed spawnSync's exit status, so a red
- *      dashboard install still reported `npm install` success and the breakage surfaced only at
- *      build/run time.
- *   2. `node scripts/patch-wwebjs-201832.js --best-effort` when the patcher exists. The patcher
- *      itself decides fatality: under --best-effort it warns and exits 0 for a pristine-but-
- *      unpatched tree (no `patch` binary, Baileys-only user), but exits 1 for a HALF-patched
- *      tree — which must never be waved through. So a non-zero status here is propagated as-is.
- *   3. `node scripts/patch-wwebjs-newsletter-preview.js --best-effort` when present. The production
- *      Docker stage runs it again without best-effort, making dependency drift a build failure.
- *   4. `node scripts/patch-wwebjs-status.js --best-effort` when present — the status posting
- *      repairs, gated the same way as step 3.
- *   5. `node scripts/patch-wwebjs-ready-sync.js --best-effort` when present — the readiness
- *      marker + hasSynced level-check, gated the same way.
- *   6. `node scripts/patch-wwebjs-participant-arity.js --best-effort` when present — makes the group
- *      participant writes report which requested ids resolved to members, gated the same way.
- *   7. `node scripts/patch-wwebjs-block.js --best-effort` when present, restoring block and
- *      unblock after WhatsApp Web removed the contact resolver they used.
- *   8. `node scripts/patch-baileys-appstate.js --best-effort` when present, the app-state resync
- *      bound, gated the same way.
- *   9. `node scripts/patch-baileys-newsletter-create.js --best-effort` when present, the
- *      newsletter-create parse fix. Steps 7-8 are the Baileys patches, so a Baileys-only install
- *      runs those and skips 2-6.
+ *   1. `npm ci` inside dashboard/ when dashboard/ exists. Failure is fatal.
+ *   2. `node scripts/patch-wwebjs-201832.js --best-effort` when present.
+ *   3. `node scripts/patch-wwebjs-newsletter-preview.js --best-effort` when present.
+ *   4. `node scripts/patch-wwebjs-status.js --best-effort` when present.
+ *   5. `node scripts/patch-wwebjs-ready-sync.js --best-effort` when present.
+ *      For this critical readiness repair, --best-effort permits ONLY an absent whatsapp-web.js
+ *      target; an installed unsupported or half-patched Client.js exits non-zero and this hook
+ *      propagates that failure.
+ *   6. `node scripts/patch-wwebjs-participant-arity.js --best-effort` when present.
+ *   7. `node scripts/patch-wwebjs-block.js --best-effort` when present.
+ *   8. `node scripts/patch-baileys-appstate.js --best-effort` when present.
+ *   9. `node scripts/patch-baileys-newsletter-create.js --best-effort` when present.
  *
- * Structured like scripts/patch-wwebjs-201832.js: pure planning + injectable spawn, so the spec
- * (scripts/postinstall.spec.js, node:test) exercises every branch without a real npm run.
+ * Every spawned step is checked. A non-zero exit, spawn error, or terminating signal stops the
+ * sequence and makes the root install fail instead of silently shipping an incomplete dependency
+ * repair.
+ *
+ * Structured as pure planning + injectable spawn so scripts/postinstall.spec.js can exercise every
+ * branch without running a real npm install.
  */
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
+const fs =
+  require('fs');
 
-const ROOT = path.join(__dirname, '..');
+const path =
+  require('path');
+
+const {
+  spawnSync,
+} =
+  require('child_process');
+
+const ROOT =
+  path.join(
+    __dirname,
+    '..',
+  );
 
 /**
  * Sanitize an environment object for child invocations.
  *
  * npm 11 rejects `--allow-scripts` in project-scoped installs (`npm ci`, `npm install`) when it
  * originates from the environment (`npm_config_allow_scripts`) rather than `.npmrc` or
- * `package.json`. When a root install is invoked with `allow-scripts=true` in `.npmrc`, npm
- * exports that setting to the lifecycle environment as `npm_config_allow_scripts`. Stripping it
- * prevents nested npm executions (`npm run dashboard:ci` -> `cd dashboard && npm ci`) from
- * failing with EALLOWSCRIPTS while preserving the user's `.npmrc` configuration.
+ * `package.json`.
+ *
+ * Strip that inherited environment variable for nested npm executions while preserving the rest of
+ * the caller's environment.
  */
-function sanitizeEnv(env = process.env) {
-  const clean = { ...env };
-  for (const key of Object.keys(clean)) {
-    if (/^npm_config_allow[_-]scripts$/i.test(key)) {
-      delete clean[key];
+function sanitizeEnv(
+  env = process.env,
+) {
+  const clean = {
+    ...env,
+  };
+
+  for (
+    const key
+    of Object.keys(
+      clean,
+    )
+  ) {
+    if (
+      /^npm_config_allow[_-]scripts$/i.test(
+        key,
+      )
+    ) {
+      delete clean[
+        key
+      ];
     }
   }
+
   return clean;
 }
 
-/** The steps to run for a given repo root, in order. */
-function planSteps(root, env = process.env) {
-  const cleanEnv = sanitizeEnv(env);
-  const steps = [];
-  if (fs.existsSync(path.join(root, 'dashboard'))) {
+/**
+ * Build one conditional patch-script execution.
+ *
+ * Returns null when the patcher does not exist in this checkout.
+ */
+function patchStep(
+  root,
+  cleanEnv,
+  filename,
+  label,
+) {
+  const patcher =
+    path.join(
+      root,
+      'scripts',
+      filename,
+    );
+
+  if (
+    !fs.existsSync(
+      patcher,
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    name:
+      `${label} (scripts/${filename} --best-effort)`,
+
+    command:
+      process.execPath,
+
+    args: [
+      patcher,
+      '--best-effort',
+    ],
+
+    options: {
+      stdio:
+        'inherit',
+
+      cwd:
+        root,
+
+      env:
+        cleanEnv,
+    },
+  };
+}
+
+/**
+ * The steps to run for a given repo root, in order.
+ */
+function planSteps(
+  root,
+  env = process.env,
+) {
+  const cleanEnv =
+    sanitizeEnv(
+      env,
+    );
+
+  const steps =
+    [];
+
+  /*
+   * The dashboard has its own package-lock.json.
+   *
+   * If the directory exists, its dependency install is mandatory: a failed nested npm ci must abort
+   * the root install rather than surfacing later as a dashboard build/runtime failure.
+   */
+  if (
+    fs.existsSync(
+      path.join(
+        root,
+        'dashboard',
+      ),
+    )
+  ) {
     steps.push({
-      name: 'dashboard dependencies (npm ci)',
-      command: 'npm ci',
-      options: { stdio: 'inherit', shell: true, cwd: path.join(root, 'dashboard'), env: cleanEnv },
+      name:
+        'dashboard dependencies (npm ci)',
+
+      command:
+        'npm ci',
+
+      options: {
+        stdio:
+          'inherit',
+
+        shell:
+          true,
+
+        cwd:
+          path.join(
+            root,
+            'dashboard',
+          ),
+
+        env:
+          cleanEnv,
+      },
     });
   }
-  const patcher = path.join(root, 'scripts', 'patch-wwebjs-201832.js');
-  if (fs.existsSync(patcher)) {
-    steps.push({
-      name: 'whatsapp-web.js backport (scripts/patch-wwebjs-201832.js --best-effort)',
-      command: process.execPath,
-      args: [patcher, '--best-effort'],
-      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
-    });
+
+  const patchers = [
+    [
+      'patch-wwebjs-201832.js',
+      'whatsapp-web.js backport',
+    ],
+    [
+      'patch-wwebjs-newsletter-preview.js',
+      'whatsapp-web.js newsletter preview backport',
+    ],
+    [
+      'patch-wwebjs-status.js',
+      'whatsapp-web.js status send repair',
+    ],
+    [
+      'patch-wwebjs-ready-sync.js',
+      'whatsapp-web.js ready-sync repair',
+    ],
+    [
+      'patch-wwebjs-participant-arity.js',
+      'whatsapp-web.js participant batch truth',
+    ],
+    [
+      'patch-wwebjs-block.js',
+      'whatsapp-web.js block/unblock LID repair',
+    ],
+    [
+      'patch-baileys-appstate.js',
+      'Baileys app-state resync bound',
+    ],
+    [
+      'patch-baileys-newsletter-create.js',
+      'Baileys newsletter-create parse fix',
+    ],
+  ];
+
+  for (
+    const [
+      filename,
+      label,
+    ]
+    of patchers
+  ) {
+    const step =
+      patchStep(
+        root,
+        cleanEnv,
+        filename,
+        label,
+      );
+
+    if (
+      step
+    ) {
+      steps.push(
+        step,
+      );
+    }
   }
-  const previewPatcher = path.join(root, 'scripts', 'patch-wwebjs-newsletter-preview.js');
-  if (fs.existsSync(previewPatcher)) {
-    steps.push({
-      name: 'whatsapp-web.js newsletter preview backport (scripts/patch-wwebjs-newsletter-preview.js --best-effort)',
-      command: process.execPath,
-      args: [previewPatcher, '--best-effort'],
-      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
-    });
-  }
-  const statusPatcher = path.join(root, 'scripts', 'patch-wwebjs-status.js');
-  if (fs.existsSync(statusPatcher)) {
-    steps.push({
-      name: 'whatsapp-web.js status send repair (scripts/patch-wwebjs-status.js --best-effort)',
-      command: process.execPath,
-      args: [statusPatcher, '--best-effort'],
-      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
-    });
-  }
-  const readySyncPatcher = path.join(root, 'scripts', 'patch-wwebjs-ready-sync.js');
-  if (fs.existsSync(readySyncPatcher)) {
-    steps.push({
-      name: 'whatsapp-web.js ready-sync repair (scripts/patch-wwebjs-ready-sync.js --best-effort)',
-      command: process.execPath,
-      args: [readySyncPatcher, '--best-effort'],
-      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
-    });
-  }
-  const participantArityPatcher = path.join(root, 'scripts', 'patch-wwebjs-participant-arity.js');
-  if (fs.existsSync(participantArityPatcher)) {
-    steps.push({
-      name: 'whatsapp-web.js participant batch truth (scripts/patch-wwebjs-participant-arity.js --best-effort)',
-      command: process.execPath,
-      args: [participantArityPatcher, '--best-effort'],
-      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
-    });
-  }
-  const blockPatcher = path.join(root, 'scripts', 'patch-wwebjs-block.js');
-  if (fs.existsSync(blockPatcher)) {
-    steps.push({
-      name: 'whatsapp-web.js block/unblock LID repair (scripts/patch-wwebjs-block.js --best-effort)',
-      command: process.execPath,
-      args: [blockPatcher, '--best-effort'],
-      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
-    });
-  }
-  const baileysAppStatePatcher = path.join(root, 'scripts', 'patch-baileys-appstate.js');
-  if (fs.existsSync(baileysAppStatePatcher)) {
-    steps.push({
-      name: 'Baileys app-state resync bound (scripts/patch-baileys-appstate.js --best-effort)',
-      command: process.execPath,
-      args: [baileysAppStatePatcher, '--best-effort'],
-      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
-    });
-  }
-  const baileysNewsletterPatcher = path.join(root, 'scripts', 'patch-baileys-newsletter-create.js');
-  if (fs.existsSync(baileysNewsletterPatcher)) {
-    steps.push({
-      name: 'Baileys newsletter-create parse fix (scripts/patch-baileys-newsletter-create.js --best-effort)',
-      command: process.execPath,
-      args: [baileysNewsletterPatcher, '--best-effort'],
-      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
-    });
-  }
+
   return steps;
 }
 
-/** Human-readable failure cause from a spawnSync result. */
-function failureReason(res) {
-  if (res.error) return `failed to start — ${res.error.message}`;
-  if (typeof res.status === 'number' && res.status !== 0) return `exit code ${res.status}`;
-  if (res.signal) return `killed by ${res.signal}`;
+/**
+ * Human-readable failure cause from a spawnSync result.
+ */
+function failureReason(
+  res,
+) {
+  if (
+    res &&
+    res.error
+  ) {
+    return `failed to start — ${res.error.message}`;
+  }
+
+  if (
+    res &&
+    typeof res.status ===
+      'number' &&
+    res.status !==
+      0
+  ) {
+    return `exit code ${res.status}`;
+  }
+
+  if (
+    res &&
+    res.signal
+  ) {
+    return `killed by ${res.signal}`;
+  }
+
   return null;
 }
 
 /**
- * Run the planned steps, stopping at the first failure. Returns the process exit code (0 = all
- * steps ran clean or were absent). `spawn` is injectable for tests.
+ * Run the planned steps, stopping at the first failure.
+ *
+ * Returns:
+ *   0 = every planned step succeeded, or there were no applicable steps
+ *   1 = a child command failed, could not start, threw, or was killed
  */
-function run(root = ROOT, spawn = spawnSync, env = process.env) {
-  const steps = planSteps(root, env);
-  if (!steps.length) {
-    console.log('postinstall: no dashboard/ or patch script present — nothing to do.');
+function run(
+  root = ROOT,
+  spawn = spawnSync,
+  env = process.env,
+) {
+  const steps =
+    planSteps(
+      root,
+      env,
+    );
+
+  if (
+    !steps.length
+  ) {
+    console.log(
+      'postinstall: no dashboard/ or patch script present — nothing to do.',
+    );
+
     return 0;
   }
-  for (const step of steps) {
-    const res = spawn(step.command, step.args, step.options);
-    const reason = failureReason(res ?? {});
-    if (reason) {
+
+  for (
+    const step
+    of steps
+  ) {
+    let res;
+
+    /*
+     * spawnSync normally reports startup errors through result.error rather than throwing, but the
+     * injected test seam may throw and a future wrapper could as well. Treat both forms identically.
+     */
+    try {
+      res =
+        spawn(
+          step.command,
+          step.args,
+          step.options,
+        );
+    } catch (
+      error
+    ) {
       console.error(
-        `postinstall: ${step.name} failed (${reason}). The install is INCOMPLETE — ` +
-          'fix the error above and re-run `npm install`.',
+        `postinstall: ${step.name} failed ` +
+          `(spawn threw — ${
+            error instanceof Error
+              ? error.message
+              : String(error)
+          }). ` +
+          'The install is INCOMPLETE — fix the error above and re-run `npm install`.',
       );
+
+      return 1;
+    }
+
+    const reason =
+      failureReason(
+        res ?? {},
+      );
+
+    if (
+      reason
+    ) {
+      console.error(
+        `postinstall: ${step.name} failed (${reason}). ` +
+          'The install is INCOMPLETE — fix the error above and re-run `npm install`.',
+      );
+
       return 1;
     }
   }
+
   return 0;
 }
 
-if (require.main === module) {
-  process.exit(run());
+if (
+  require.main ===
+  module
+) {
+  process.exitCode =
+    run();
 }
 
-module.exports = { sanitizeEnv, planSteps, failureReason, run, ROOT };
+module.exports = {
+  sanitizeEnv,
+  patchStep,
+  planSteps,
+  failureReason,
+  run,
+  ROOT,
+};
+
