@@ -1,16 +1,15 @@
-import * as path from 'path';
-import * as fs from 'fs';
 import { type Client } from 'whatsapp-web.js';
 import { type EngineEventCallbacks, EngineStatus } from '../interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
 
 /**
- * Stuck-auth detection and recovery extracted from WhatsAppWebJsAdapter: what to do when a session
- * authenticated but never reached runtime readiness, and the LocalAuth-profile removal both that
- * recovery and a WhatsApp-initiated unlink go through. The adapter keeps the methods as thin
- * forwarders and injects the host surface via closures, so the delegate never touches lifecycle
- * state directly.
+ * Stuck-auth detection and recovery for the NoAuth + persistent-Brave architecture.
+ *
+ * The WhatsApp credentials are no longer owned by LocalAuth under sessionDataPath. They live inside
+ * the per-session Brave user-data directory managed by BraveProfileManager. Recovery therefore has
+ * to retire the current browser generation completely before removing that profile; deleting files
+ * underneath a live Chromium/Brave process risks a partial profile and an endless re-pair loop.
  */
 export interface WwebjsStuckAuthHost {
   readonly logger: ReturnType<typeof createLogger>;
@@ -22,31 +21,30 @@ export interface WwebjsStuckAuthHost {
   getCallbacks(): EngineEventCallbacks;
 }
 
+const CLIENT_DESTROY_TIMEOUT_MS = 5_000;
+
 export class WwebjsStuckAuth {
-  // Guards the stuck-auth self-heal so it runs at most once per engine: a re-paired session that still
-  // can't reach readiness fails terminally instead of looping QR -> timeout -> clear forever.
+  /**
+   * Standalone-adapter fallback for the session-owned recovery budget. In normal session lifecycle
+   * use, claimStuckAuthRecovery is authoritative and survives automatic reconnect generations.
+   */
   private recoveryAttempted = false;
 
   constructor(private readonly host: WwebjsStuckAuthHost) {}
 
   /**
-   * Recover a session that authenticated but never reached runtime readiness (stale/incompatible auth
-   * or a wedged page). Clear the broken LocalAuth and disconnect so the session lifecycle re-pairs (a
-   * fresh QR) instead of hanging at "authenticating". Runs at most ONCE per reconnect episode: the
-   * one-shot budget lives on the session (via the synchronous `claimStuckAuthRecovery` callback), so
-   * an automatic reconnect that builds a fresh adapter cannot reset it and wipe LocalAuth every
-   * generation. A re-paired session that still can't reach readiness fails terminally rather than looping.
+   * Recover a session that authenticated but never reached a usable runtime.
    *
-   * When the callback is ABSENT (standalone adapter use/test, no session lifecycle) the adapter falls
-   * back to its own instance-local boolean so standalone behavior stays one-shot.
+   * One destructive recovery is allowed for the whole reconnect episode. The current client is
+   * detached first so late whatsapp-web.js events cannot resurrect it; then the Brave process is
+   * stopped and independently verified gone; only then is the dedicated Brave profile deleted.
+   * A failed/unsafe profile reset is terminal and does NOT emit onDisconnected, because reconnecting
+   * onto a profile that may still be owned by a live process would make the situation worse.
    */
   async recoverFromStuckAuth(): Promise<void> {
-    // The one-shot budget is decided SYNCHRONOUSLY before any destructive I/O. The session-owned
-    // callback is authoritative when present; the instance-local boolean is the standalone fallback.
-    // Fail-closed: a callback that throws (or already-spent budget) makes this terminal WITHOUT
-    // touching the auth dir, so a wedged claim path can never wipe the only copy of the credentials.
     const claim = this.host.getCallbacks().claimStuckAuthRecovery;
     let granted: boolean;
+
     if (claim) {
       try {
         granted = claim();
@@ -57,54 +55,135 @@ export class WwebjsStuckAuth {
       granted = !this.recoveryAttempted;
       this.recoveryAttempted = true;
     }
+
     if (!granted) {
       this.host.setStatus(EngineStatus.FAILED);
       this.host
         .getCallbacks()
         .onError?.(
-          'WhatsApp Web could not reach readiness after re-pairing. Pin WWEBJS_WEB_VERSION to a known-good build and try again.',
+          'WhatsApp Web could not reach readiness after the one allowed re-pair recovery. ' +
+            'Pin WWEBJS_WEB_VERSION to a known-good build and try again.',
         );
       return;
     }
 
     const client = this.host.getClient();
+
+    // Retire this generation before any await. A late qr/authenticated/ready/disconnected from this
+    // Client must not mutate lifecycle state while its browser/profile is being removed.
     this.host.setClient(null);
-    // Clear auth + disconnect FIRST (the recovery path), then tear the wedged client down in the
-    // background so a hung Chromium destroy can't block (or skip) the recovery.
-    await this.clearLocalAuth();
+    client?.removeAllListeners?.();
+
+    try {
+      await this.stopClientForProfileReset(client);
+      await this.clearBraveProfile();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.host.logger.error(
+        `Stuck-auth recovery could not safely reset the Brave profile: ${reason}`,
+        undefined,
+        {
+          sessionId: this.host.config.sessionId,
+          action: 'stuck_auth_profile_reset_failed',
+        },
+      );
+      this.host.setStatus(EngineStatus.FAILED);
+      this.host
+        .getCallbacks()
+        .onError?.(
+          'WhatsApp Web authentication is stuck, but OpenWA could not safely reset the Brave profile. ' +
+            'The session was stopped to avoid corrupting its browser data. Check the server logs and restart it manually.',
+        );
+      return;
+    }
+
     this.host.setStatus(EngineStatus.DISCONNECTED);
-    // onDisconnected drives the lifecycle's reconnect, which re-creates the engine with no saved auth
-    // → a fresh QR. (A no-op once the engine is superseded/torn down.)
-    this.host.getCallbacks().onDisconnected?.('Saved session could not be restored; cleared for re-pairing');
-    if (typeof client?.destroy === 'function') void client.destroy().catch(() => undefined);
+    this.host
+      .getCallbacks()
+      .onDisconnected?.('Saved Brave session could not be restored; profile cleared for re-pairing');
   }
 
-  /** Remove this session's LocalAuth directory so the next start re-pairs from a clean slate. */
-  async clearLocalAuth(): Promise<void> {
-    const dir = path.join(path.resolve(this.host.config.sessionDataPath), `session-${this.host.config.sessionId}`);
-    await fs.promises
-      // maxRetries mirrors LocalAuth's own default: on a WhatsApp-initiated unlink the library never
-      // closes the browser, so Chromium is still rotating IndexedDB files while this walks the tree and
-      // a bare rm reports ENOTEMPTY (#1072). Node's default is 0 retries, which is why the failure
-      // surfaced here and never on the library's removal of the same directory.
-      .rm(dir, { recursive: true, force: true, maxRetries: 4 })
-      .then(() => {
-        // #981: this is the only copy of the session's WhatsApp credentials, and removing it is not
-        // recoverable — every later start finds an empty profile and can do nothing but show a QR. Say
-        // so at the moment it happens: otherwise the sole trace is a session that silently stops
-        // reconnecting, indistinguishable from a WhatsApp-side logout or an untouched profile.
-        this.host.logger.warn(
-          `Deleted this session's stored WhatsApp credentials at ${dir}. That was the only copy, so the ` +
-            'next start cannot restore the link and comes back with a fresh QR to scan.',
-          { sessionId: this.host.config.sessionId, dir, action: 'auth_cleared' },
-        );
-      })
-      .catch((error: unknown) => {
-        this.host.logger.warn(`Could not clear stale auth at ${dir}`, {
+  /**
+   * Stop the live whatsapp-web.js/Brave generation with a bounded graceful destroy. Regardless of
+   * whether destroy succeeds, BraveProfileManager then verifies that no process carrying this
+   * session's --openwa-session marker remains. That verification is the safety gate before deletion.
+   */
+  private async stopClientForProfileReset(client: Client | null): Promise<void> {
+    if (client && typeof client.destroy === 'function') {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          client.destroy(),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error(`client.destroy() timed out after ${CLIENT_DESTROY_TIMEOUT_MS}ms`)),
+              CLIENT_DESTROY_TIMEOUT_MS,
+            );
+            timeout.unref?.();
+          }),
+        ]);
+      } catch (error) {
+        this.host.logger.warn('Graceful client destroy did not complete during stuck-auth recovery', {
           sessionId: this.host.config.sessionId,
-          dir,
-          error: String(error),
+          action: 'stuck_auth_destroy_incomplete',
+          error: error instanceof Error ? error.message : String(error),
         });
-      });
+
+        // Best-effort direct kill of this client's browser process. The manager verification below is
+        // still authoritative and will fail closed if any marked Brave process survives.
+        try {
+          const proc = (
+            client as unknown as {
+              pupBrowser?: { process?: () => { kill?: (signal: string) => void } | null };
+            }
+          ).pupBrowser?.process?.();
+          proc?.kill?.('SIGKILL');
+        } catch (killError) {
+          this.host.logger.warn('Direct Brave kill failed during stuck-auth recovery', {
+            sessionId: this.host.config.sessionId,
+            action: 'stuck_auth_direct_kill_failed',
+            error: killError instanceof Error ? killError.message : String(killError),
+          });
+        }
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    }
+
+    // This is not merely cleanup: it independently proves the profile has no live Brave owner.
+    await this.host.config.braveProfileManager.killOrphanedBraveProcesses(
+      this.host.config.sessionId,
+      this.host.logger,
+    );
+  }
+
+  /**
+   * Delete the complete per-session Brave user-data directory. Do not selectively remove only
+   * Cookies/IndexedDB/Local Storage: WhatsApp/Chromium state spans multiple stores and a partial wipe
+   * can leave a half-linked profile that reproduces the same failure on the next generation.
+   */
+  async clearBraveProfile(): Promise<void> {
+    const manager = this.host.config.braveProfileManager;
+    const profilePath = manager.getProfilePath(this.host.config.sessionId);
+
+    await manager.deleteProfile(this.host.config.sessionId);
+
+    this.host.logger.warn(
+      `Deleted this session's persistent Brave profile at ${profilePath}. That profile contained the ` +
+        'stored WhatsApp Web link, so the next start will require a fresh QR scan.',
+      {
+        sessionId: this.host.config.sessionId,
+        dir: profilePath,
+        action: 'brave_auth_cleared',
+      },
+    );
+  }
+
+  /**
+   * Backward-compatible method name for older adapter/tests that still forward clearLocalAuth().
+   * In the Brave/NoAuth architecture it intentionally clears the Brave profile instead.
+   */
+  async clearLocalAuth(): Promise<void> {
+    await this.clearBraveProfile();
   }
 }

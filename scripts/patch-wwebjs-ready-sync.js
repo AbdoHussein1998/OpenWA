@@ -1,29 +1,26 @@
-
-
 /**
  * Make whatsapp-web.js readiness observable and race-free on warm session restores.
  *
- * whatsapp-web.js 1.34.7 runs its entire post-auth pipeline — LoadUtils, ClientInfo,
- * attachEventListeners (the page->Node message bridge), and the `ready` emit — inside a callback
- * fired by the page-side `change:hasSynced` EDGE. Two real failure modes follow:
+ * whatsapp-web.js 1.34.7 runs its post-auth pipeline from the page-side `change:hasSynced`
+ * handoff. Two failure modes matter to OpenWA:
  *
- * 1. On a warm/persistent profile the page can reach hasSynced=true BEFORE the listener attaches;
- *    the edge never comes again and the whole pipeline silently never runs.
- * 2. attachEventListeners can throw partway; `ready` never fires, while sends may still work, so the
- *    session can look connected even though inbound events are unavailable.
+ * 1. A warm/persistent profile can already have `Socket.hasSynced === true` before the listener is
+ *    attached. The edge is then missed and the post-auth pipeline never starts.
+ * 2. `attachEventListeners()` can fail or hang after the page is already CONNECTED. Sends may still
+ *    work, but inbound events are unavailable, so OpenWA must not publish READY.
  *
- * Three transforms are applied as ONE all-or-nothing group:
- *  - initialize `eventsAttached = false` on the client;
- *  - set `eventsAttached = true` only AFTER attachEventListeners() resolves;
- *  - after subscribing to `change:hasSynced`, immediately replay the handler when hasSynced is
- *    already true, closing the missed-edge race.
+ * Three transforms are applied as one all-or-nothing group:
+ *  - initialise `eventsAttached = false` on the Client;
+ *  - set `eventsAttached = false` immediately before each bridge attach attempt and `true` only
+ *    after `attachEventListeners()` resolves;
+ *  - after subscribing to `change:hasSynced`, immediately replay the same handler when
+ *    `Socket.hasSynced` is already true.
  *
  * Safety contract:
- *  - a completely absent whatsapp-web.js target may be skipped under `--best-effort` (for installs
- *    that do not carry this engine);
- *  - an installed but unsupported / partially patched Client.js is ALWAYS fatal, including under
- *    `--best-effort`. Shipping a half-applied readiness repair is worse than failing installation.
- *  - the target file is written only after every expected source shape has been validated.
+ *  - under `--best-effort`, a completely absent whatsapp-web.js package may be skipped;
+ *  - if whatsapp-web.js exists but Client.js is missing, unsupported, or partially patched, the
+ *    patch is fatal even under `--best-effort`;
+ *  - Client.js is written only after all expected source shapes have been validated in memory.
  */
 'use strict';
 
@@ -37,12 +34,10 @@ const DEFAULT_WWJS = path.join(
   'whatsapp-web.js',
 );
 
-const CLIENT_PATH = path.join(
-  'src',
-  'Client.js',
-);
+const CLIENT_PATH = path.join('src', 'Client.js');
 
 const PATCH_ERROR_CODES = Object.freeze({
+  PACKAGE_MISSING: 'READY_SYNC_PACKAGE_MISSING',
   TARGET_MISSING: 'READY_SYNC_TARGET_MISSING',
   UNSUPPORTED_SHAPE: 'READY_SYNC_UNSUPPORTED_SHAPE',
 });
@@ -52,14 +47,16 @@ const FLAG_INIT_FIND = `        this.currentIndexHtml = null;
 
 const FLAG_INIT_REPLACE = `        this.currentIndexHtml = null;
         this.lastLoggedOut = false;
-        // Set true only after attachEventListeners() resolves; the message bridge is not
-        // trustworthy before that, even when the page itself reports CONNECTED.
+        // False means the current page->Node event bridge has not been proven attached yet.
         this.eventsAttached = false;`;
 
 const ATTACH_MARK_FIND = `                    await this.attachEventListeners();
                 }`;
 
-const ATTACH_MARK_REPLACE = `                    await this.attachEventListeners();
+const ATTACH_MARK_REPLACE = `                    // A re-inject after page navigation must invalidate the previous bridge state
+                    // before attempting to attach the listeners for the new document.
+                    this.eventsAttached = false;
+                    await this.attachEventListeners();
                     this.eventsAttached = true;
                 }`;
 
@@ -75,165 +72,80 @@ const HAS_SYNCED_REPLACE = `            window
                     window.onAppStateHasSyncedEvent();
                 });
             // A warm profile can restore to hasSynced=true before this listener exists; the edge
-            // then never fires again. Fire once on the already-reached level as well.
+            // then never fires again. Fire once from the already-reached level as well.
             if (window.require('WAWebSocketModel').Socket.hasSynced) {
                 window.onAppStateHasSyncedEvent();
             }`;
 
 const EDITS = [
-  {
-    find: FLAG_INIT_FIND,
-    replace: FLAG_INIT_REPLACE,
-  },
-  {
-    find: ATTACH_MARK_FIND,
-    replace: ATTACH_MARK_REPLACE,
-  },
-  {
-    find: HAS_SYNCED_FIND,
-    replace: HAS_SYNCED_REPLACE,
-  },
+  { find: FLAG_INIT_FIND, replace: FLAG_INIT_REPLACE },
+  { find: ATTACH_MARK_FIND, replace: ATTACH_MARK_REPLACE },
+  { find: HAS_SYNCED_FIND, replace: HAS_SYNCED_REPLACE },
 ];
 
-function occurrences(
-  source,
-  needle,
-) {
-  return source
-    .split(needle)
-    .length - 1;
+function occurrences(source, needle) {
+  return source.split(needle).length - 1;
 }
 
-function createPatchError(
-  code,
-  message,
-) {
+function createPatchError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
 }
 
-function errorMessage(
-  error,
-) {
-  return error instanceof Error
-    ? error.message
-    : String(error);
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
- * Count each pristine source fragment after removing the corresponding replacement fragment first.
+ * Count pristine source fragments after first removing their corresponding replacement fragments.
  *
- * Every replacement intentionally contains its original `find`, so counting raw source alone would
- * report both "patched" and "unpatched" at the same time.
+ * Every replacement intentionally contains its original `find`, so counting the raw source would
+ * otherwise report both "patched" and "unpatched" at the same time.
  */
-function inspectPatchState(
-  source,
-) {
-  const replaces =
-    EDITS.map(
-      edit =>
-        occurrences(
-          source,
-          edit.replace,
-        ),
-    );
+function inspectPatchState(source) {
+  const replaces = EDITS.map(edit => occurrences(source, edit.replace));
+  const finds = EDITS.map(edit => occurrences(source.split(edit.replace).join(''), edit.find));
 
-  const finds =
-    EDITS.map(
-      edit =>
-        occurrences(
-          source
-            .split(edit.replace)
-            .join(''),
-          edit.find,
-        ),
-    );
-
-  return {
-    finds,
-    replaces,
-  };
+  return { finds, replaces };
 }
 
-function isFullyPatched(
-  state,
-) {
-  return (
-    state.finds.every(
-      count =>
-        count === 0,
-    ) &&
-    state.replaces.every(
-      count =>
-        count === 1,
-    )
-  );
+function isFullyPatched(state) {
+  return state.finds.every(count => count === 0) && state.replaces.every(count => count === 1);
 }
 
-function isFullyUnpatched(
-  state,
-) {
-  return (
-    state.finds.every(
-      count =>
-        count === 1,
-    ) &&
-    state.replaces.every(
-      count =>
-        count === 0,
-    )
-  );
+function isFullyUnpatched(state) {
+  return state.finds.every(count => count === 1) && state.replaces.every(count => count === 0);
 }
 
-function applyReadySyncPatch(
-  wwjsDir = DEFAULT_WWJS,
-) {
-  const clientFile =
-    path.join(
-      wwjsDir,
-      CLIENT_PATH,
-    );
-
-  if (
-    !fs.existsSync(
-      clientFile,
-    )
-  ) {
+function applyReadySyncPatch(wwjsDir = DEFAULT_WWJS) {
+  if (!fs.existsSync(wwjsDir)) {
     throw createPatchError(
-      PATCH_ERROR_CODES.TARGET_MISSING,
-      `whatsapp-web.js Client.js not found at ${clientFile}`,
+      PATCH_ERROR_CODES.PACKAGE_MISSING,
+      `whatsapp-web.js package not found at ${wwjsDir}`,
     );
   }
 
-  const original =
-    fs.readFileSync(
-      clientFile,
-      'utf8',
-    );
+  const clientFile = path.join(wwjsDir, CLIENT_PATH);
 
-  const state =
-    inspectPatchState(
-      original,
+  if (!fs.existsSync(clientFile)) {
+    throw createPatchError(
+      PATCH_ERROR_CODES.TARGET_MISSING,
+      `whatsapp-web.js is installed but Client.js was not found at ${clientFile}`,
     );
+  }
 
-  if (
-    isFullyPatched(
-      state,
-    )
-  ) {
+  const original = fs.readFileSync(clientFile, 'utf8');
+  const state = inspectPatchState(original);
+
+  if (isFullyPatched(state)) {
     return {
       skipped: true,
-      reason:
-        'installed whatsapp-web.js already carries the ready-sync repair',
+      reason: 'installed whatsapp-web.js already carries the ready-sync repair',
     };
   }
 
-  if (
-    !isFullyUnpatched(
-      state,
-    )
-  ) {
+  if (!isFullyUnpatched(state)) {
     throw createPatchError(
       PATCH_ERROR_CODES.UNSUPPORTED_SHAPE,
       `unsupported Client.js shape ` +
@@ -242,41 +154,15 @@ function applyReadySyncPatch(
     );
   }
 
-  /*
-   * Transform entirely in memory first.
-   *
-   * Nothing is written until the source shape is known to match every expected edit exactly.
-   */
-  let patched =
-    original;
-
-  for (
-    const edit
-    of EDITS
-  ) {
-    patched =
-      patched.replace(
-        edit.find,
-        edit.replace,
-      );
+  // Transform entirely in memory. Do not touch disk until all three source shapes were validated.
+  let patched = original;
+  for (const edit of EDITS) {
+    patched = patched.replace(edit.find, edit.replace);
   }
 
-  /*
-   * Defensive verification of the result before touching disk.
-   *
-   * This should already be guaranteed by isFullyUnpatched(), but retaining this check ensures a
-   * future edit to this patcher cannot accidentally write a partially transformed Client.js.
-   */
-  const finalState =
-    inspectPatchState(
-      patched,
-    );
-
-  if (
-    !isFullyPatched(
-      finalState,
-    )
-  ) {
+  // Defensive post-transform verification before the single write.
+  const finalState = inspectPatchState(patched);
+  if (!isFullyPatched(finalState)) {
     throw createPatchError(
       PATCH_ERROR_CODES.UNSUPPORTED_SHAPE,
       `ready-sync transform did not produce the expected final shape ` +
@@ -284,100 +170,49 @@ function applyReadySyncPatch(
     );
   }
 
-  fs.writeFileSync(
-    clientFile,
-    patched,
-    'utf8',
-  );
+  fs.writeFileSync(clientFile, patched, 'utf8');
 
   return {
     skipped: false,
-    note:
-      'readiness marker and hasSynced level-check applied',
+    note: 'readiness marker, bridge lifecycle marker, and hasSynced level-check applied',
   };
 }
 
 /**
  * CLI entry point.
  *
- * `--best-effort` means only:
- *
- *   "it is okay if whatsapp-web.js is not installed here"
- *
- * It does NOT mean:
- *
- *   "ignore an unsupported or half-patched Client.js"
- *
- * An installed-but-unsafe tree therefore always returns exit code 1.
+ * `--best-effort` means only that it is acceptable for whatsapp-web.js itself not to be installed.
+ * It never permits an installed-but-unsafe dependency tree.
  */
-function run(
-  argv = process.argv,
-) {
-  const bestEffort =
-    argv.includes(
-      '--best-effort',
-    );
+function run(argv = process.argv) {
+  const bestEffort = argv.includes('--best-effort');
 
   try {
-    const result =
-      applyReadySyncPatch();
+    const result = applyReadySyncPatch();
 
     console.log(
       `patch-wwebjs-ready-sync: ${
-        result.skipped
-          ? `skipped — ${result.reason}`
-          : result.note
+        result.skipped ? `skipped — ${result.reason}` : result.note
       }`,
     );
 
     return 0;
-  } catch (
-    error
-  ) {
-    const message =
-      errorMessage(
-        error,
-      );
+  } catch (error) {
+    const message = errorMessage(error);
+    const code = error && typeof error === 'object' ? error.code : undefined;
 
-    const code =
-      error &&
-      typeof error === 'object'
-        ? error.code
-        : undefined;
-
-    /*
-     * Best-effort is allowed ONLY when whatsapp-web.js itself is absent.
-     *
-     * If Client.js exists but its contents do not match the known pristine or fully-patched form,
-     * installation must fail. Otherwise OpenWA could silently run without the readiness guarantees
-     * this patch exists to provide.
-     */
-    if (
-      bestEffort &&
-      code ===
-        PATCH_ERROR_CODES.TARGET_MISSING
-    ) {
-      console.warn(
-        `patch-wwebjs-ready-sync: skipped — ${message}`,
-      );
-
+    if (bestEffort && code === PATCH_ERROR_CODES.PACKAGE_MISSING) {
+      console.warn(`patch-wwebjs-ready-sync: skipped — ${message}`);
       return 0;
     }
 
-    console.error(
-      `patch-wwebjs-ready-sync: ${message}`,
-    );
-
+    console.error(`patch-wwebjs-ready-sync: ${message}`);
     return 1;
   }
 }
 
-if (
-  require.main ===
-  module
-) {
-  process.exitCode =
-    run();
+if (require.main === module) {
+  process.exitCode = run();
 }
 
 module.exports = {
@@ -392,4 +227,5 @@ module.exports = {
   HAS_SYNCED_FIND,
   HAS_SYNCED_REPLACE,
 };
+
 

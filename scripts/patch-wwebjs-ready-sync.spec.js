@@ -5,9 +5,11 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('node:child_process');
 
 const {
   applyReadySyncPatch,
+  PATCH_ERROR_CODES,
   FLAG_INIT_FIND,
   FLAG_INIT_REPLACE,
   ATTACH_MARK_FIND,
@@ -17,10 +19,9 @@ const {
 } = require('./patch-wwebjs-ready-sync');
 
 /**
- * Same contract as the sibling patcher specs: the patcher rewrites a file this repository does not
- * own, so it must fire only on the exact shape it was written for, refuse loudly on anything else,
- * and never leave a half-patched tree — the three edits reference one another (the adapter reads
- * the flag the constructor initialises and the attach path sets).
+ * Same contract as the sibling patcher specs: this patcher rewrites dependency-owned code, so it
+ * must apply only to the exact source shape it knows, be idempotent, reject partial/unknown trees,
+ * and never write a half-patched Client.js.
  */
 
 function fakeWwjs(clientSource) {
@@ -59,63 +60,149 @@ test('is idempotent — a second run is a no-op, not a double patch', () => {
 });
 
 test('refuses an upstream shape it does not recognise and leaves the file untouched', () => {
-  const { dir, clientFile } = fakeWwjs(withSnippets(FLAG_INIT_FIND, '        somethingElse();', HAS_SYNCED_FIND));
+  const { dir, clientFile } = fakeWwjs(
+    withSnippets(FLAG_INIT_FIND, '        somethingElse();', HAS_SYNCED_FIND),
+  );
   const before = fs.readFileSync(clientFile, 'utf8');
 
-  assert.throws(() => applyReadySyncPatch(dir), /unsupported Client\.js shape/);
+  assert.throws(
+    () => applyReadySyncPatch(dir),
+    error =>
+      error instanceof Error &&
+      error.code === PATCH_ERROR_CODES.UNSUPPORTED_SHAPE &&
+      /unsupported Client\.js shape/.test(error.message),
+  );
   assert.equal(fs.readFileSync(clientFile, 'utf8'), before);
 });
 
-test('refuses a tree containing both the unpatched and the patched form', () => {
-  const { dir, clientFile } = fakeWwjs(withSnippets(`${FLAG_INIT_FIND}\n${FLAG_INIT_REPLACE}`, ATTACH_MARK_FIND, HAS_SYNCED_FIND));
+test('refuses a partially patched tree and leaves the file untouched', () => {
+  const { dir, clientFile } = fakeWwjs(
+    withSnippets(FLAG_INIT_REPLACE, ATTACH_MARK_FIND, HAS_SYNCED_FIND),
+  );
   const before = fs.readFileSync(clientFile, 'utf8');
 
-  assert.throws(() => applyReadySyncPatch(dir), /unsupported Client\.js shape/);
+  assert.throws(
+    () => applyReadySyncPatch(dir),
+    error => error instanceof Error && error.code === PATCH_ERROR_CODES.UNSUPPORTED_SHAPE,
+  );
   assert.equal(fs.readFileSync(clientFile, 'utf8'), before);
 });
 
-test('reports a missing whatsapp-web.js rather than pretending to patch it', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wwjs-ready-empty-'));
+test('refuses a tree containing both the unpatched and patched form', () => {
+  const { dir, clientFile } = fakeWwjs(
+    withSnippets(`${FLAG_INIT_FIND}\n${FLAG_INIT_REPLACE}`, ATTACH_MARK_FIND, HAS_SYNCED_FIND),
+  );
+  const before = fs.readFileSync(clientFile, 'utf8');
 
-  assert.throws(() => applyReadySyncPatch(dir), /Client\.js not found/);
+  assert.throws(
+    () => applyReadySyncPatch(dir),
+    error => error instanceof Error && error.code === PATCH_ERROR_CODES.UNSUPPORTED_SHAPE,
+  );
+  assert.equal(fs.readFileSync(clientFile, 'utf8'), before);
 });
 
-test('CLI: unrecognised tree exits 1 bare and 0 under --best-effort', () => {
-  const { spawnSync } = require('node:child_process');
+test('reports a completely absent whatsapp-web.js package distinctly', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wwjs-ready-package-missing-'));
+  const absentPackage = path.join(root, 'whatsapp-web.js');
+
+  assert.throws(
+    () => applyReadySyncPatch(absentPackage),
+    error =>
+      error instanceof Error &&
+      error.code === PATCH_ERROR_CODES.PACKAGE_MISSING &&
+      /package not found/.test(error.message),
+  );
+});
+
+test('an installed package missing src/Client.js is fatal, not treated as package absence', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wwjs-ready-target-missing-'));
+
+  assert.throws(
+    () => applyReadySyncPatch(dir),
+    error =>
+      error instanceof Error &&
+      error.code === PATCH_ERROR_CODES.TARGET_MISSING &&
+      /is installed but Client\.js was not found/.test(error.message),
+  );
+});
+
+function installCliFixture(clientSource) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wwjs-ready-cli-'));
   fs.mkdirSync(path.join(root, 'scripts'));
   const script = path.join(root, 'scripts', 'patch-wwebjs-ready-sync.js');
   fs.copyFileSync(path.join(__dirname, 'patch-wwebjs-ready-sync.js'), script);
-  const clientDir = path.join(root, 'node_modules', 'whatsapp-web.js', 'src');
-  fs.mkdirSync(clientDir, { recursive: true });
-  fs.writeFileSync(path.join(clientDir, 'Client.js'), 'class Client {}\n');
+
+  if (clientSource !== undefined) {
+    const clientDir = path.join(root, 'node_modules', 'whatsapp-web.js', 'src');
+    fs.mkdirSync(clientDir, { recursive: true });
+    fs.writeFileSync(path.join(clientDir, 'Client.js'), clientSource);
+  }
+
+  return { root, script };
+}
+
+test('CLI: unsupported installed Client.js exits 1 both bare and under --best-effort', () => {
+  const { script } = installCliFixture('class Client {}\n');
 
   const bare = spawnSync(process.execPath, [script], { encoding: 'utf8' });
-  assert.equal(bare.status, 1, 'the production image build must fail on a tree the patcher cannot repair');
+  assert.equal(bare.status, 1, 'production install must fail on an unsupported installed tree');
   assert.match(bare.stderr, /unsupported Client\.js shape/);
 
   const bestEffort = spawnSync(process.execPath, [script, '--best-effort'], { encoding: 'utf8' });
-  assert.equal(bestEffort.status, 0, 'postinstall must not fail an install the patcher cannot help');
+  assert.equal(
+    bestEffort.status,
+    1,
+    '--best-effort must not hide an unsupported installed whatsapp-web.js tree',
+  );
+  assert.match(bestEffort.stderr, /unsupported Client\.js shape/);
+});
+
+test('CLI: installed package missing Client.js exits 1 even under --best-effort', () => {
+  const { root, script } = installCliFixture(undefined);
+  fs.mkdirSync(path.join(root, 'node_modules', 'whatsapp-web.js'), { recursive: true });
+
+  const bestEffort = spawnSync(process.execPath, [script, '--best-effort'], { encoding: 'utf8' });
+
+  assert.equal(bestEffort.status, 1);
+  assert.match(bestEffort.stderr, /is installed but Client\.js was not found/);
+});
+
+test('CLI: a completely absent whatsapp-web.js package is fatal bare but skippable under --best-effort', () => {
+  const { script } = installCliFixture(undefined);
+
+  const bare = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  assert.equal(bare.status, 1);
+  assert.match(bare.stderr, /package not found/);
+
+  const bestEffort = spawnSync(process.execPath, [script, '--best-effort'], { encoding: 'utf8' });
+  assert.equal(bestEffort.status, 0);
   assert.match(bestEffort.stderr, /skipped/);
+  assert.match(bestEffort.stderr, /package not found/);
 });
 
 /**
- * Shape assertions on the replacements themselves: the properties other code depends on. The
- * adapter's reconcile probe reads `eventsAttached === false` as "bridge not ready", so the flag
- * must start false and flip true only after the attach resolves; the level-check must call the
- * SAME handler the edge calls, guarded on the already-true level.
+ * Shape assertions on the replacement strings themselves. Runtime reconciliation relies on these
+ * properties, so keep them explicit and cheap to diagnose when whatsapp-web.js changes upstream.
  */
-test('replacements carry the contract the adapter relies on', () => {
+test('replacements carry the bridge/readiness contract the adapter relies on', () => {
   assert.ok(FLAG_INIT_REPLACE.includes('this.eventsAttached = false;'), 'flag starts false');
+
+  const resetIndex = ATTACH_MARK_REPLACE.indexOf('this.eventsAttached = false;');
+  const attachIndex = ATTACH_MARK_REPLACE.indexOf('await this.attachEventListeners();');
+  const readyIndex = ATTACH_MARK_REPLACE.indexOf('this.eventsAttached = true;');
+
+  assert.ok(resetIndex >= 0, 'bridge flag resets before each attach attempt');
+  assert.ok(resetIndex < attachIndex, 'bridge flag resets before attach begins');
+  assert.ok(attachIndex < readyIndex, 'bridge flag flips true only after attach resolves');
+
   assert.ok(
-    ATTACH_MARK_REPLACE.indexOf('await this.attachEventListeners();') <
-      ATTACH_MARK_REPLACE.indexOf('this.eventsAttached = true;'),
-    'flag flips true only after the attach resolves',
+    HAS_SYNCED_REPLACE.includes("if (window.require('WAWebSocketModel').Socket.hasSynced)"),
+    'hasSynced level guard is present',
   );
-  assert.ok(HAS_SYNCED_REPLACE.includes("if (window.require('WAWebSocketModel').Socket.hasSynced)"), 'level guard');
   assert.equal(
     HAS_SYNCED_REPLACE.split('window.onAppStateHasSyncedEvent()').length - 1,
     2,
-    'level-check fires the same handler the edge fires',
+    'the level-check invokes the same handler as the edge listener',
   );
 });
+

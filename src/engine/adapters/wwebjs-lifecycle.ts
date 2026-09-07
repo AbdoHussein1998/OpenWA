@@ -9,7 +9,7 @@
 import * as qrcode from 'qrcode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { Client, LocalAuth, NoAuth, WAState } from 'whatsapp-web.js';
+import { Client, NoAuth, WAState } from 'whatsapp-web.js';
 import {
   type AccountRestriction,
   type EngineEventCallbacks,
@@ -20,12 +20,10 @@ import { type createLogger } from '../../common/services/logger.service';
 import { MAX_TIMER_MS } from '../../config/configuration';
 import { resolveWebVersionPin } from '../wa-web-version';
 import { resolveAuthTimeoutMs, resolveEngineInitTimeoutMs } from '../engine-init-timeout';
-import { killOrphanedChromiumProcesses, removeStaleSingletonFiles } from './chromium-profile-hygiene';
 import { isSupportedProxyUrl, buildProxyLaunchConfig } from './wwebjs-proxy';
 import { BACKPORT_MISSING_MESSAGE, isBackportMissing } from './wwebjs-backport-check';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
 
-// ADD THESE IMPORTS at the top of the file
 import { BraveProfileManager } from '../brave/brave-profile.manager';
 
 
@@ -231,7 +229,7 @@ export class WwebjsLifecycle {
       }
 
       // Marker arg: Chromium silently ignores unknown flags, so this exists purely as a label that
-      // lets killOrphanedChromiumProcesses() identify this session's browser processes in `ps`
+      // lets BraveProfileManager identify this session's browser processes in `ps`
       // output later (after a hard kill of the OpenWA process orphaned them).
       puppeteerArgs.push(`--openwa-session=${this.host.config.sessionId}`);
 
@@ -307,7 +305,7 @@ export class WwebjsLifecycle {
         // During initialize() its dominant cause is a browser profile left stale by an upgrade that
         // changed the Chromium/Chrome binary (e.g. v0.8.12 amd64: Debian Chromium → Chrome for Testing,
         // #663) — but it can also follow a page navigation or a renderer crash, so advise, don't assert.
-        // The profile dir is the same one clearLocalAuth() removes on a clean re-pair. Safe to compute
+        // The profile dir is the same persistent Brave user-data directory stuck-auth recovery removes. Safe to compute
         // here: sessionDataPath is a required config field already resolved in the try block above, so
         // this can't throw and mask the original error we are about to rethrow.
         this.host.logger.warn(
@@ -730,8 +728,13 @@ export class WwebjsLifecycle {
   setupEventHandlers(): void {
     if (!this.client) return;
 
+    // Every handler registered by this call belongs to exactly one whatsapp-web.js Client generation.
+    // Re-check that identity before mutating lifecycle state so a retired init-attempt/browser cannot
+    // race a replacement client with late qr/authenticated/ready/disconnected events.
+    const sourceClient = this.client;
+
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
-    this.client.on('qr', async (qr: string) => {
+    sourceClient.on('qr', async (qr: string) => {
       // A 'qr' buffered by a wedged page can flush during the awaited client.destroy(), after
       // recoverFromStuckAuth() nulls this.client, or from a client that whatsapp-web.js re-injected
       // after a LOGOUT (#982) — in the last case the browser is still alive and will keep serving QRs
@@ -741,6 +744,7 @@ export class WwebjsLifecycle {
       // INITIALIZING before any client exists, so the latch is still clear).
       const statusAtQrStart = this.getStatus();
       if (
+        this.client !== sourceClient ||
         this.tearingDown ||
         this.disconnectReported ||
         !this.client ||
@@ -752,7 +756,7 @@ export class WwebjsLifecycle {
       // qrcode.toDataURL() is an awaited macrotask: a 'disconnected' (or a teardown nulling this.client)
       // that lands during the encode leaves the pre-await guard stale. Encode to a LOCAL so the stored
       // qrCode is only touched once the fence re-proves the source client and the finished flags.
-      const sourceClient = this.client;
+      const qrSourceClient = sourceClient;
       try {
         const encodedQr = await qrcode.toDataURL(qr);
         // Post-await fence: the encode resolved, but the source client may have disconnected or been
@@ -763,7 +767,7 @@ export class WwebjsLifecycle {
         // setStatus(FAILED) can run on another tick during the await.
         const currentStatus = this.getStatus();
         if (
-          this.client !== sourceClient ||
+          this.client !== qrSourceClient ||
           this.tearingDown ||
           this.disconnectReported ||
           (currentStatus !== EngineStatus.INITIALIZING && currentStatus !== EngineStatus.QR_READY)
@@ -795,13 +799,14 @@ export class WwebjsLifecycle {
       }
     });
 
-    this.client.on('authenticated', () => {
+    sourceClient.on('authenticated', () => {
       // Only the first authentication starts the reconcile window. Ignore a re-fired 'authenticated'
       // while already AUTHENTICATING (so it can't restart the 90s deadline), once READY/FAILED, or any
       // time after the adapter is finished — teardown, or a reported disconnect the lifecycle has not
       // replaced the engine for yet (#982). The initial status is DISCONNECTED too, so "finished" is
       // carried by the flags, never by the status alone.
       if (
+        this.client !== sourceClient ||
         this.tearingDown ||
         this.disconnectReported ||
         this.status === EngineStatus.AUTHENTICATING ||
@@ -817,10 +822,11 @@ export class WwebjsLifecycle {
       this.host.scheduleReadyReconcile();
     });
 
-    this.client.on('ready', () => {
+    sourceClient.on('ready', () => {
       // A late ready from a retired client must not touch a null/replaced client or resurrect a
       // terminal lifecycle state.
       if (
+        this.client !== sourceClient ||
         !this.client ||
         this.tearingDown ||
         this.disconnectReported ||
@@ -857,42 +863,59 @@ export class WwebjsLifecycle {
 
     // Message/group/call domain events: registered through the adapter's attachDomainEvents seam,
     // which wires ./wwebjs-message-events, ./wwebjs-group-events and the call-cache delegate.
-    this.host.attachDomainEvents(this.client);
+    this.host.attachDomainEvents(sourceClient);
 
-    this.client.on('disconnected', reason => {
-    // Skip if already tearing down or disconnect already reported
-    if (this.tearingDown || this.disconnectReported) return;
+    sourceClient.on('disconnected', reason => {
+      // whatsapp-web.js treats this event as terminal for this Client generation. Do not try to
+      // preserve a pre-auth generation here: upstream may already be destroying its browser. The
+      // generation fence prevents a later authenticated/ready from resurrecting that dead client.
+      if (this.client !== sourceClient || this.tearingDown || this.disconnectReported) return;
 
-    this.host.clearAuthReconcile();
-    this.host.clearReadyReconcile();
+      const reasonCode = String(reason);
+      const statusAtDisconnect = this.status;
+      const eventsAttached = (sourceClient as Client & { eventsAttached?: boolean }).eventsAttached;
+      const hasIdentity = Boolean(sourceClient.info?.wid?.user);
 
-    if (reason === 'LOGOUT') {
-      // With NoAuth, there's no LocalAuth directory to delete.
-      // The Brave profile survives. If WhatsApp unlinked the device,
-      // the stale session in the profile will fail on next start
-      // and emit a fresh QR — the operator re-scans, done.
-      this.host.logger.warn(
-        'WhatsApp unlinked this device (LOGOUT). The Brave profile is preserved. ' +
-        'Next start will emit a fresh QR code for re-linking.',
-      );
-    }
+      this.host.logger.warn('WhatsApp Web client disconnected', {
+        sessionId: this.host.config.sessionId,
+        reason: reasonCode,
+        status: statusAtDisconnect,
+        hasIdentity,
+        eventsAttached,
+        action: 'wwebjs_disconnected',
+      });
 
-  this.setStatus(EngineStatus.DISCONNECTED);
+      this.host.clearAuthReconcile();
+      this.host.clearReadyReconcile();
 
-  const restriction = WA_STATE_RESTRICTIONS[reason];
-  if (restriction) {
-    this.host.getCallbacks().onAccountRestriction?.({ kind: restriction, code: reason });
-  }
-  this.host.getCallbacks().onDisconnected?.(reason);
-});
+      if (reasonCode === 'LOGOUT') {
+        // With NoAuth the browser profile is the persistence layer. whatsapp-web.js/WA has already
+        // performed the unlink; we preserve the browser profile itself (preferences/cache) and let
+        // the next generation discover that it needs a fresh pairing.
+        this.host.logger.warn(
+          'WhatsApp unlinked this device (LOGOUT). The Brave profile container is preserved; ' +
+            'the next start should return to pairing if the stored WA link is no longer valid.',
+          { sessionId: this.host.config.sessionId, action: 'wwebjs_logout_disconnect' },
+        );
+      }
 
-    this.client.on('auth_failure', (message?: string) => {
+      this.setStatus(EngineStatus.DISCONNECTED);
+
+      const restriction = WA_STATE_RESTRICTIONS[reasonCode];
+      if (restriction) {
+        this.host.getCallbacks().onAccountRestriction?.({ kind: restriction, code: reasonCode });
+      }
+      this.host.getCallbacks().onDisconnected?.(reasonCode);
+    });
+
+    sourceClient.on('auth_failure', (message?: string) => {
+      if (this.client !== sourceClient || this.tearingDown || this.disconnectReported) return;
       this.host.clearAuthReconcile();
       this.host.clearReadyReconcile();
       this.setStatus(EngineStatus.FAILED);
-      // Authentication failure is terminal: the stored credentials are invalid and
-      // reconnecting will not help — the operator must re-scan the QR code. Route it
-      // through onError (FAILED, no reconnect) rather than onDisconnected (reconnect).
+      // Authentication failure is terminal for this generation. Do not automatically erase the
+      // persistent Brave profile here: destructive cleanup is reserved for the one-shot stuck-auth
+      // recovery path, which is session-budgeted and process-safe. Route this through onError.
       this.host.getCallbacks().onError?.(message ? `Authentication failed: ${message}` : 'Authentication failed');
     });
   }
