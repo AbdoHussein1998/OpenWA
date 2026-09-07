@@ -1,7 +1,10 @@
 
 
 
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import {
+  Injectable,
+  NotImplementedException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -12,8 +15,15 @@ import {
   SEARCH_OFFSET_MAX,
 } from './search.constants';
 
-import type { SearchQuery, SearchResults } from './search.types';
-import type { SessionScope } from '../access-control/session-scope';
+import type {
+  SearchQuery,
+  SearchResults,
+} from './search.types';
+
+import {
+  SessionScopeType,
+  type SessionScope,
+} from '../access-control/session-scope';
 
 import { Session } from '../session/entities/session.entity';
 
@@ -30,7 +40,8 @@ export class SearchService {
     query: SearchQuery,
     sessionScope: SessionScope,
   ): Promise<SearchResults> {
-    const provider = this.registry.active();
+    const provider =
+      this.registry.active();
 
     if (!provider) {
       throw new NotImplementedException(
@@ -41,8 +52,9 @@ export class SearchService {
     /*
      * Phase H — aggregate/global route tenancy.
      *
-     * Resolve the authenticated principal's effective SessionScope into
-     * concrete session IDs BEFORE crossing the provider boundary.
+     * Resolve the authenticated principal's effective SessionScope
+     * into concrete session IDs BEFORE crossing the provider
+     * boundary.
      *
      * undefined:
      *   unrestricted / ALL
@@ -51,28 +63,38 @@ export class SearchService {
      *   explicitly no accessible sessions / NONE
      */
     const effectiveSessionIds =
-      await this.resolveSessionScope(sessionScope);
+      await this.resolveSessionScope(
+        sessionScope,
+      );
 
     /*
-     * `query.sessionId` comes from the HTTP query and is therefore only
-     * allowed to NARROW the authenticated scope.
+     * query.sessionId comes from the transport layer.
+     *
+     * It is allowed only to NARROW the already-authenticated
+     * effective tenant scope.
      *
      * It must never replace or widen SessionScope.
      */
-    const providerSessionIds = this.intersectRequestedSession(
-      effectiveSessionIds,
-      query.sessionId,
-    );
+    const providerSessionIds =
+      this.intersectRequestedSession(
+        effectiveSessionIds,
+        query.sessionId,
+      );
 
     /*
      * Fail closed.
      *
-     * Do not send an empty scope to a provider. Some providers may treat
-     * an empty sessionIds array the same as "no filter", which could turn
-     * NONE into global access.
+     * Do not send an empty sessionIds array to the provider.
      *
-     * Returning locally also prevents plugin search providers from seeing
-     * a query belonging to a tenant with no accessible sessions.
+     * A provider could potentially interpret:
+     *
+     * []
+     *
+     * as:
+     *
+     * "no filter"
+     *
+     * which would accidentally turn NONE into global access.
      */
     if (
       providerSessionIds !== undefined &&
@@ -87,20 +109,21 @@ export class SearchService {
     }
 
     /*
-     * Auth scoping is authoritative.
+     * Authorization scoping is authoritative.
      *
-     * Spread the caller query first, then overwrite sessionIds so transport
-     * input can never control the provider's tenant boundary.
-     *
-     * Pagination is still capped host-side for every provider.
+     * Spread the caller query first and overwrite sessionIds
+     * afterwards so caller-controlled transport data can never
+     * broaden the provider's tenant boundary.
      */
     const scoped: SearchQuery = {
       ...query,
 
-      sessionIds: providerSessionIds,
+      sessionIds:
+        providerSessionIds,
 
       limit: Math.min(
-        query.limit ?? SEARCH_DEFAULT_LIMIT,
+        query.limit ??
+          SEARCH_DEFAULT_LIMIT,
         SEARCH_LIMIT_MAX,
       ),
 
@@ -110,146 +133,216 @@ export class SearchService {
       ),
     };
 
-    return provider.search(scoped);
+    return provider.search(
+      scoped,
+    );
   }
 
+  /**
+   * Convert tenant-aware SessionScope into the concrete session IDs
+   * that may be passed to a search provider.
+   *
+   * Return semantics:
+   *
+   * undefined:
+   *   ALL / unrestricted
+   *
+   * []:
+   *   NONE / no accessible sessions
+   *
+   * string[]:
+   *   concrete effective tenant scope
+   */
   private async resolveSessionScope(
     scope: SessionScope,
   ): Promise<string[] | undefined> {
     const sessionRepository =
-      this.dataSource.getRepository(Session);
+      this.dataSource.getRepository(
+        Session,
+      );
 
-    switch (scope.kind) {
+    switch (scope.type) {
       /*
-       * Global legacy/admin scope.
+       * ADMIN / unrestricted legacy scope.
        *
-       * undefined intentionally means "do not add a sessionIds filter".
+       * undefined intentionally means that no sessionIds
+       * filter should be applied at the provider boundary.
        */
-      case 'ALL':
+      case SessionScopeType.ALL:
         return undefined;
 
       /*
-       * Legacy allowedSessions scope.
+       * Legacy allowedSessions ceiling.
        */
-      case 'IDS':
-        return [...scope.ids];
+      case SessionScopeType.IDS:
+        return [
+          ...scope.sessionIds,
+        ];
 
       /*
-       * Team Leader scope:
+       * Team Leader ownership scope.
        *
-       * only sessions owned by this Team Leader.
+       * Only sessions owned by this Team Leader are visible.
        */
-      case 'OWNER': {
-        const sessions = await sessionRepository.find({
-          select: {
-            id: true,
-          },
-          where: {
-            ownerTeamLeaderId: scope.ownerTeamLeaderId,
-          },
-        });
+      case SessionScopeType.OWNER: {
+        const sessions =
+          await sessionRepository.find({
+            select: {
+              id: true,
+            },
 
-        return sessions.map((session) => session.id);
-      }
-
-      /*
-       * OWNER_AND_IDS is an intersection, NEVER a union.
-       *
-       * Required rule:
-       *
-       * ownerTeamLeaderId = owner
-       * AND
-       * id IN (...)
-       *
-       * Used for:
-       * - Team Leader + allowedSessions ceiling
-       * - Agent assigned-session scope
-       */
-      case 'OWNER_AND_IDS': {
-        if (scope.ids.length === 0) {
-          return [];
-        }
-
-        const rows = await sessionRepository
-          .createQueryBuilder('session')
-          .select('session.id', 'id')
-          .where(
-            'session.ownerTeamLeaderId = :ownerTeamLeaderId',
-            {
+            where: {
               ownerTeamLeaderId:
                 scope.ownerTeamLeaderId,
             },
-          )
-          .andWhere(
-            'session.id IN (:...sessionIds)',
-            {
-              sessionIds: scope.ids,
-            },
-          )
-          .getRawMany<{ id: string }>();
+          });
 
-        return rows.map((row) => row.id);
+        return sessions.map(
+          sessionEntity =>
+            sessionEntity.id,
+        );
       }
 
       /*
-       * Explicit fail-closed scope.
+       * OWNER_AND_IDS is an INTERSECTION.
+       *
+       * NEVER change this into a union.
+       *
+       * Required authorization rule:
+       *
+       * ownerTeamLeaderId = :ownerTeamLeaderId
+       *
+       * AND
+       *
+       * session.id IN (:...sessionIds)
+       *
+       * This supports:
+       *
+       * - Team Leader ownership + allowedSessions ceiling
+       * - Agent ownership + assigned-session ceiling
        */
-      case 'NONE':
+      case SessionScopeType
+        .OWNER_AND_IDS: {
+        if (
+          scope.sessionIds.length === 0
+        ) {
+          return [];
+        }
+
+        const rows =
+          await sessionRepository
+            .createQueryBuilder(
+              'session',
+            )
+            .select(
+              'session.id',
+              'id',
+            )
+            .where(
+              'session.ownerTeamLeaderId = :ownerTeamLeaderId',
+              {
+                ownerTeamLeaderId:
+                  scope
+                    .ownerTeamLeaderId,
+              },
+            )
+            .andWhere(
+              'session.id IN (:...sessionIds)',
+              {
+                sessionIds:
+                  scope.sessionIds,
+              },
+            )
+            .getRawMany<{
+              id: string;
+            }>();
+
+        return rows.map(
+          row => row.id,
+        );
+      }
+
+      /*
+       * Explicit no-access scope.
+       */
+      case SessionScopeType.NONE:
         return [];
 
       default: {
         /*
          * Compile-time exhaustiveness protection.
          *
-         * Adding a new SessionScope variant later must force this service
-         * to decide how that variant maps to search authorization rather
-         * than accidentally treating it as ALL.
+         * If another SessionScope variant is introduced,
+         * TypeScript should force this service to explicitly
+         * define how that variant behaves.
          */
-        const exhaustiveCheck: never = scope;
+        const exhaustiveCheck:
+          never = scope;
+
         return exhaustiveCheck;
       }
     }
   }
 
+  /**
+   * An optional requested sessionId can only NARROW the
+   * authenticated tenant scope.
+   *
+   * It can never expand it.
+   */
   private intersectRequestedSession(
-    effectiveSessionIds: string[] | undefined,
+    effectiveSessionIds:
+      | string[]
+      | undefined,
     requestedSessionId?: string,
   ): string[] | undefined {
     /*
-     * No ?sessionId= supplied:
+     * No explicit requested session.
      *
-     * preserve the caller's complete effective scope.
+     * Preserve the full authenticated scope.
      */
     if (!requestedSessionId) {
       return effectiveSessionIds;
     }
 
     /*
-     * ALL + ?sessionId=x
+     * ALL + requested session.
      *
-     * The caller is globally authorized but voluntarily narrows the search
+     * An unrestricted principal voluntarily narrows the operation
      * to one session.
      */
-    if (effectiveSessionIds === undefined) {
-      return [requestedSessionId];
+    if (
+      effectiveSessionIds ===
+      undefined
+    ) {
+      return [
+        requestedSessionId,
+      ];
     }
 
     /*
-     * Scoped principal + ?sessionId=x
+     * Restricted principal + requested session.
      *
-     * x survives ONLY when it is already inside the authenticated scope.
+     * The requested ID survives only when it is already contained
+     * within the authenticated effective scope.
      *
      * Foreign session:
-     *   -> []
-     *   -> fail closed before provider.search()
+     *
+     * -> []
+     * -> fail closed before provider.search()
      */
-    return effectiveSessionIds.includes(requestedSessionId)
-      ? [requestedSessionId]
+    return effectiveSessionIds.includes(
+      requestedSessionId,
+    )
+      ? [
+          requestedSessionId,
+        ]
       : [];
   }
 
   async health() {
-    const provider = this.registry.active();
+    const provider =
+      this.registry.active();
 
     if (!provider) {
       return {

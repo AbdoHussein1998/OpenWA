@@ -1,3 +1,6 @@
+
+
+
 import * as qrcode from 'qrcode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -520,74 +523,197 @@ export class WwebjsLifecycle {
   }
 
   /**
-   * Resolve the Brave browser executable.
+   * Resolve the Brave executable for the current operating system.
    *
-   * Explicit configuration always wins. On Windows, when no explicit path is
-   * configured, search the common Brave installation locations used by
-   * system-wide and per-user installations. On non-Windows platforms, preserve
-   * the existing Linux fallback.
+   * Resolution order:
+   *
+   * 1. config.brave.executablePath, but only when the path really exists.
+   * 2. config.puppeteer.executablePath, but only when the path really exists.
+   * 3. Well-known Brave installation paths for the current OS.
+   * 4. Brave binaries discoverable through PATH.
+   *
+   * This existence check is important because configuration.ts historically
+   * defaulted brave.executablePath to `/usr/bin/brave`. Without validating that
+   * path first, a Windows host receives the Linux default and Puppeteer fails
+   * before Windows auto-detection can run.
    */
   private async resolveBraveExecutable(): Promise<string> {
-    const configuredBrave = this.host.config.brave?.executablePath;
-    if (configuredBrave) {
-      return configuredBrave;
-    }
+    const seen = new Set<string>();
+    const candidates: string[] = [];
 
-    const configuredPuppeteer = this.host.config.puppeteer?.executablePath;
-    if (configuredPuppeteer) {
-      return configuredPuppeteer;
-    }
-
-    if (process.platform === 'win32') {
-      const candidates = [
-        process.env.PROGRAMFILES
-          ? path.join(
-              process.env.PROGRAMFILES,
-              'BraveSoftware',
-              'Brave-Browser',
-              'Application',
-              'brave.exe',
-            )
-          : undefined,
-
-        process.env['PROGRAMFILES(X86)']
-          ? path.join(
-              process.env['PROGRAMFILES(X86)'],
-              'BraveSoftware',
-              'Brave-Browser',
-              'Application',
-              'brave.exe',
-            )
-          : undefined,
-
-        process.env.LOCALAPPDATA
-          ? path.join(
-              process.env.LOCALAPPDATA,
-              'BraveSoftware',
-              'Brave-Browser',
-              'Application',
-              'brave.exe',
-            )
-          : undefined,
-      ].filter((candidate): candidate is string => Boolean(candidate));
-
-      for (const candidate of candidates) {
-        try {
-          await fs.access(candidate);
-          this.host.logger.log(`Detected Brave browser at: ${candidate}`);
-          return candidate;
-        } catch {
-          // Candidate does not exist; continue searching.
-        }
+    const addCandidate = (candidate?: string | null): void => {
+      if (!candidate) {
+        return;
       }
 
-      throw new Error(
-        'Brave browser executable was not found on Windows. ' +
-        'Set brave.executablePath explicitly.',
-      );
+      const trimmed = candidate.trim();
+      if (!trimmed || seen.has(trimmed)) {
+        return;
+      }
+
+      seen.add(trimmed);
+      candidates.push(trimmed);
+    };
+
+    /*
+     * Explicit configuration has first priority, but it is not trusted blindly.
+     * A stale/default Linux path on Windows must not prevent OS auto-detection.
+     */
+    addCandidate(this.host.config.brave?.executablePath);
+    addCandidate(this.host.config.puppeteer?.executablePath);
+
+    const pathDirectories = (process.env.PATH ?? '')
+      .split(path.delimiter)
+      .map(directory => directory.trim())
+      .filter(Boolean);
+
+    switch (process.platform) {
+      case 'win32': {
+        const installRoots = [
+          process.env.PROGRAMFILES,
+          process.env['PROGRAMFILES(X86)'],
+          process.env.LOCALAPPDATA,
+          process.env.USERPROFILE
+            ? path.join(process.env.USERPROFILE, 'AppData', 'Local')
+            : undefined,
+        ].filter((root): root is string => Boolean(root));
+
+        for (const root of installRoots) {
+          addCandidate(
+            path.join(
+              root,
+              'BraveSoftware',
+              'Brave-Browser',
+              'Application',
+              'brave.exe',
+            ),
+          );
+
+          addCandidate(
+            path.join(
+              root,
+              'BraveSoftware',
+              'Brave-Browser-Beta',
+              'Application',
+              'brave.exe',
+            ),
+          );
+
+          addCandidate(
+            path.join(
+              root,
+              'BraveSoftware',
+              'Brave-Browser-Nightly',
+              'Application',
+              'brave.exe',
+            ),
+          );
+        }
+
+        for (const directory of pathDirectories) {
+          addCandidate(path.join(directory, 'brave.exe'));
+          addCandidate(path.join(directory, 'brave-browser.exe'));
+        }
+
+        break;
+      }
+
+      case 'darwin': {
+        addCandidate(
+          '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+        );
+
+        addCandidate(
+          '/Applications/Brave Browser Beta.app/Contents/MacOS/Brave Browser Beta',
+        );
+
+        addCandidate(
+          '/Applications/Brave Browser Nightly.app/Contents/MacOS/Brave Browser Nightly',
+        );
+
+        if (process.env.HOME) {
+          addCandidate(
+            path.join(
+              process.env.HOME,
+              'Applications',
+              'Brave Browser.app',
+              'Contents',
+              'MacOS',
+              'Brave Browser',
+            ),
+          );
+        }
+
+        for (const directory of pathDirectories) {
+          addCandidate(path.join(directory, 'brave'));
+          addCandidate(path.join(directory, 'brave-browser'));
+        }
+
+        break;
+      }
+
+      case 'linux': {
+        addCandidate('/usr/bin/brave-browser');
+        addCandidate('/usr/bin/brave');
+        addCandidate('/usr/bin/brave-browser-stable');
+        addCandidate('/usr/local/bin/brave-browser');
+        addCandidate('/usr/local/bin/brave');
+        addCandidate('/snap/bin/brave');
+
+        for (const directory of pathDirectories) {
+          addCandidate(path.join(directory, 'brave-browser'));
+          addCandidate(path.join(directory, 'brave'));
+          addCandidate(path.join(directory, 'brave-browser-stable'));
+        }
+
+        break;
+      }
+
+      default: {
+        /*
+         * Unknown Unix-like platforms still get a PATH-based attempt.
+         */
+        for (const directory of pathDirectories) {
+          addCandidate(path.join(directory, 'brave-browser'));
+          addCandidate(path.join(directory, 'brave'));
+        }
+
+        break;
+      }
     }
 
-    return '/usr/bin/brave';
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+
+        this.host.logger.log(
+          `Using Brave browser executable: ${candidate}`,
+          {
+            platform: process.platform,
+            executablePath: candidate,
+            action: 'brave_executable_resolved',
+          },
+        );
+
+        return candidate;
+      } catch {
+        /*
+         * Candidate is absent/inaccessible on this host.
+         * Continue to the next configured/OS/PATH location.
+         */
+      }
+    }
+
+    const configuredBrave = this.host.config.brave?.executablePath;
+    const configuredPuppeteer = this.host.config.puppeteer?.executablePath;
+
+    throw new Error(
+      `Brave browser executable was not found for platform '${process.platform}'. ` +
+        `Checked ${candidates.length} candidate path(s). ` +
+        `Configured Brave path: ${configuredBrave || '(none)'}. ` +
+        `Configured Puppeteer path: ${configuredPuppeteer || '(none)'}. ` +
+        `Install Brave or set BRAVE_EXECUTABLE / brave.executablePath to the correct executable.`,
+    );
   }
 
   setupEventHandlers(): void {
@@ -1281,3 +1407,5 @@ export class WwebjsLifecycle {
 
 
   
+
+

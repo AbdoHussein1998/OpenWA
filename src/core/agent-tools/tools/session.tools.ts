@@ -1,6 +1,7 @@
 
 
 
+
 import { z } from 'zod';
 
 import { ApiCapability } from '../../../modules/auth/capabilities/api-capability';
@@ -87,6 +88,9 @@ export function sessionTools(
             sessions.map(sessionEntity =>
               SessionResponseDto.fromEntity(
                 sessionEntity,
+                session.isActive(
+                  sessionEntity.id,
+                ),
               ),
             ),
           );
@@ -125,6 +129,9 @@ export function sessionTools(
           .then(sessionEntity =>
             SessionResponseDto.fromEntity(
               sessionEntity,
+              session.isActive(
+                sessionEntity.id,
+              ),
             ),
           ),
     }),
@@ -329,4 +336,5 @@ export function sessionTools(
     }),
   ];
 }
+
 
