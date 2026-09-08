@@ -1,3 +1,6 @@
+
+
+
 import {
   Controller,
   Get,
@@ -11,8 +14,8 @@ import {
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
-import { ForbiddenException } from '@nestjs/common';
 import { SessionTenantAccessService } from '../access-control/session-tenant-access.service';
 
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
@@ -44,7 +47,13 @@ import { Session } from './entities/session.entity';
 import { ChatSummary } from '../../engine/interfaces/whatsapp-engine.interface';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
-import { RequireRole, CurrentApiKey, SessionScoped, RequireUnscopedKey } from '../auth/decorators/auth.decorators';
+import {
+  CurrentApiKey,
+  SessionScoped,
+  RequireUnscopedKey,
+} from '../auth/decorators/auth.decorators';
+import { RequireCapability } from '../auth/decorators/capability.decorator';
+import { ApiCapability } from '../auth/capabilities/api-capability';
 import { ApiKey, ApiKeyRole } from '../auth/entities/api-key.entity';
 import { ENGINE_NOT_READY_409, PAIRING_NOT_READY_409 } from '../../common/openapi/engine-status-responses';
 
@@ -67,7 +76,7 @@ export class SessionController {
   }
 
   @Post()
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.SESSION_CREATE)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Create a new WhatsApp session' })
   @ApiResponse({
@@ -122,6 +131,7 @@ export class SessionController {
 
   
   @Get()
+  @RequireCapability(ApiCapability.SESSION_READ)
   @ApiOperation({ summary: 'List all sessions' })
   @ApiResponse({
     status: 200,
@@ -176,6 +186,7 @@ export class SessionController {
 
 
   @Get(':sessionId')
+  @RequireCapability(ApiCapability.SESSION_READ)
   @ApiOperation({ summary: 'Get session by ID' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({
@@ -190,6 +201,7 @@ export class SessionController {
   }
 
   @Get(':sessionId/config')
+  @RequireCapability(ApiCapability.SESSION_READ)
   @ApiOperation({ summary: 'Get the tunable configuration for a session' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({
@@ -203,7 +215,7 @@ export class SessionController {
   }
 
   @Patch(':sessionId/config')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.SESSION_CONFIGURE)
   @ApiOperation({
     summary: 'Update the tunable configuration for a session',
     description:
@@ -235,7 +247,7 @@ export class SessionController {
   }
 
   @Delete(':sessionId')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.SESSION_MANAGE)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a session' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -259,7 +271,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/start')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.SESSION_START)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Start a session and initialize WhatsApp connection',
@@ -292,7 +304,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/stop')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.SESSION_SHUTDOWN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Stop a session and disconnect WhatsApp' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -328,7 +340,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/logout')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.SESSION_SHUTDOWN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Log out of WhatsApp (unlinks this device) and stop the session',
@@ -394,7 +406,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/force-kill')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.SESSION_SHUTDOWN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Force-kill a stuck session (SIGKILL its wedged engine, then tear it down)' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -415,7 +427,7 @@ export class SessionController {
   }
 
   @Get(':sessionId/qr')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.SESSION_MANAGE)
   @ApiOperation({ summary: 'Get QR code for session authentication' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({
@@ -437,7 +449,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/pairing-code')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.SESSION_MANAGE)
   @ApiOperation({ summary: 'Request an 8-char pairing code to link via phone number (alternative to QR)' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({ status: 201, description: 'Pairing code generated', type: PairingCodeResponseDto })
@@ -454,6 +466,7 @@ export class SessionController {
   // Shares a Path Item with GroupController's POST on the same route — one parameter name for the
   // one positional segment, or the contract splits it into two entries.
   @Get(':sessionId/groups')
+  @RequireCapability(ApiCapability.CHAT_READ)
   @ApiOperation({ summary: 'Get all groups for a session' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({
@@ -485,6 +498,7 @@ export class SessionController {
   }
 
   @Get(':sessionId/chats')
+  @RequireCapability(ApiCapability.CHAT_READ)
   @ApiOperation({ summary: 'Get active chats for a session' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({ status: 200, description: 'List of active chats (most recent first)', type: [ChatSummaryDto] })
@@ -511,7 +525,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/chats/read')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark a chat as read/seen' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -542,7 +556,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/presence/subscribe')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Subscribe to a chat's presence",
@@ -575,7 +589,7 @@ export class SessionController {
   }
 
   @Put(':sessionId/presence')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @ApiOperation({
     summary: "Set the account's own global presence (appear online or offline)",
     description:
@@ -600,7 +614,7 @@ export class SessionController {
   }
 
   @Get(':sessionId/presence/:chatId')
-  @RequireRole(ApiKeyRole.VIEWER)
+  @RequireCapability(ApiCapability.CHAT_READ)
   @ApiOperation({
     summary: "Read a chat's last reported presence",
     description:
@@ -624,7 +638,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/chats/unread')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark a chat as unread' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -647,7 +661,7 @@ export class SessionController {
   }
 
   @Delete(':sessionId/chats/:chatId/messages')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete every message in a chat, keeping the chat itself' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -677,7 +691,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/chats/archive')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Archive or unarchive a chat' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -706,7 +720,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/chats/mute')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mute or unmute a chat' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -742,7 +756,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/chats/pin')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Pin or unpin a chat at the top of the chat list' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -776,7 +790,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/chats/delete')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a chat from the chat list (e.g. a group you have left)' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -799,7 +813,7 @@ export class SessionController {
   }
 
   @Post(':sessionId/chats/typing')
-  @RequireRole(ApiKeyRole.OPERATOR)
+  @RequireCapability(ApiCapability.CHAT_OPERATE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Send a typing/recording presence indicator to a chat (or clear it with 'paused')" })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
@@ -821,6 +835,7 @@ export class SessionController {
 
 
   @Get('stats/overview')
+  @RequireCapability(ApiCapability.SESSION_READ)
   @ApiOperation({
     summary:
       'Get session statistics for multi-session monitoring',
@@ -853,4 +868,8 @@ export class SessionController {
     return this.sessionService.getStats(scope);
   }
 }
+
+
+
+
 

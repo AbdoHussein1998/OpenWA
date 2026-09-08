@@ -4,6 +4,10 @@
 
 
 
+
+
+
+
 import {
   BadRequestException,
   ConflictException,
@@ -155,6 +159,8 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.SESSION_CREATE,
     ApiCapability.SESSION_MANAGE,
     ApiCapability.SESSION_CONFIGURE,
+    ApiCapability.SESSION_START,
+    ApiCapability.SESSION_SHUTDOWN,
 
     ApiCapability.CHAT_READ,
     ApiCapability.CHAT_OPERATE,
@@ -164,6 +170,7 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.MESSAGE_BULK,
 
     ApiCapability.WEBHOOK_MANAGE,
+    ApiCapability.TEMPLATE_READ,
     ApiCapability.TEMPLATE_MANAGE,
     ApiCapability.SEARCH_MESSAGES,
 
@@ -180,6 +187,8 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.SESSION_CREATE,
     ApiCapability.SESSION_MANAGE,
     ApiCapability.SESSION_CONFIGURE,
+    ApiCapability.SESSION_START,
+    ApiCapability.SESSION_SHUTDOWN,
 
     ApiCapability.CHAT_READ,
     ApiCapability.CHAT_OPERATE,
@@ -189,6 +198,7 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.MESSAGE_BULK,
 
     ApiCapability.WEBHOOK_MANAGE,
+    ApiCapability.TEMPLATE_READ,
     ApiCapability.TEMPLATE_MANAGE,
     ApiCapability.SEARCH_MESSAGES,
   ]),
@@ -203,6 +213,8 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.SESSION_CREATE,
     ApiCapability.SESSION_MANAGE,
     ApiCapability.SESSION_CONFIGURE,
+    ApiCapability.SESSION_START,
+    ApiCapability.SESSION_SHUTDOWN,
 
     ApiCapability.CHAT_READ,
     ApiCapability.CHAT_OPERATE,
@@ -210,7 +222,7 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.MESSAGE_SEND,
     ApiCapability.MESSAGE_OPERATE,
 
-    ApiCapability.WEBHOOK_MANAGE,
+    ApiCapability.TEMPLATE_READ,
     ApiCapability.TEMPLATE_MANAGE,
     ApiCapability.SEARCH_MESSAGES,
 
@@ -219,12 +231,16 @@ const ROLE_CAPABILITIES: Readonly<
 
   [ApiKeyRole.AGENT]: new Set([
     ApiCapability.SESSION_READ,
+    ApiCapability.SESSION_START,
+    ApiCapability.SESSION_SHUTDOWN,
 
     ApiCapability.CHAT_READ,
     ApiCapability.CHAT_OPERATE,
 
     ApiCapability.MESSAGE_SEND,
     ApiCapability.MESSAGE_OPERATE,
+
+    ApiCapability.TEMPLATE_READ,
   ]),
 };
 
@@ -1464,6 +1480,9 @@ export class AuthService
     );
   }
 }
+
+
+
 
 
 

@@ -1,3 +1,6 @@
+
+
+
 /**
  * Fine-grained authorization capabilities.
  *
@@ -9,11 +12,13 @@
  * SessionTenantAccessService.
  */
 export enum ApiCapability {
-  // Session access
+  // Session access and lifecycle
   SESSION_READ = 'session_read',
   SESSION_CREATE = 'session_create',
   SESSION_MANAGE = 'session_manage',
   SESSION_CONFIGURE = 'session_configure',
+  SESSION_START = 'session_start',
+  SESSION_SHUTDOWN = 'session_shutdown',
 
   // Chat access
   CHAT_READ = 'chat_read',
@@ -26,6 +31,7 @@ export enum ApiCapability {
 
   // Session-scoped management features
   WEBHOOK_MANAGE = 'webhook_manage',
+  TEMPLATE_READ = 'template_read',
   TEMPLATE_MANAGE = 'template_manage',
   SEARCH_MESSAGES = 'search_messages',
 
@@ -38,3 +44,5 @@ export enum ApiCapability {
   INFRA_MANAGE = 'infra_manage',
   PLUGIN_MANAGE = 'plugin_manage',
 }
+
+
