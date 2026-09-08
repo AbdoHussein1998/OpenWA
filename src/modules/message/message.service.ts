@@ -1,3 +1,7 @@
+
+
+
+
 import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -145,6 +149,14 @@ export class MessageService implements PluginMessagePort {
     return this.sender.sendText(sessionId, dto);
   }
 
+  /**
+   * Send a stored template through the shared send path.
+   *
+   * Agent quota enforcement intentionally does not live in MessageService because
+   * this service has no authenticated-principal context and is also used by
+   * non-REST callers. The dedicated authenticated REST endpoint wraps this call
+   * with AgentTemplateQuotaService.
+   */
   sendTemplate(sessionId: string, dto: SendTemplateMessageDto): Promise<MessageResponseDto> {
     return this.sender.sendTemplate(sessionId, dto);
   }
@@ -532,3 +544,7 @@ export class MessageService implements PluginMessagePort {
     );
   }
 }
+
+
+
+

@@ -1,5 +1,6 @@
 
 
+
 import {
   Column,
   CreateDateColumn,
@@ -86,11 +87,31 @@ export class Agent {
   })
   assignedSessionId!: string | null;
 
+  /**
+   * Maximum number of stored-template sends allowed for this Agent in
+   * a rolling 24-hour window.
+   *
+   * null -> unlimited
+   * 0    -> stored-template sending disabled
+   * N    -> at most N stored-template sends during the previous 24 hours
+   *
+   * This value is only configuration. Actual quota accounting is handled
+   * separately by the template-send quota service.
+   */
+  @Column({
+    type: 'integer',
+    nullable: true,
+    default: null,
+  })
+  templateSendLimit24h!: number | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 
   @UpdateDateColumn()
   updatedAt!: Date;
 }
+
+
 
 

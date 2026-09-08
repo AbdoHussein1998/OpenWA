@@ -1,6 +1,10 @@
 
 
 
+
+
+
+
 import {
   ForbiddenException,
   NotFoundException,
@@ -144,6 +148,9 @@ function createAgent(
 
     assignedSessionId:
       'session-a',
+
+    templateSendLimit24h:
+      null,
 
     createdAt:
       new Date(
@@ -630,6 +637,51 @@ describe(
 
               sessionIds: [
                 'session-x',
+              ],
+            });
+          },
+        );
+
+
+        it(
+          'does not use templateSendLimit24h as part of session authorization',
+          async () => {
+            const apiKey =
+              createApiKey({
+                role:
+                  ApiKeyRole.AGENT,
+
+                agentId:
+                  'agent-1',
+              });
+
+            agentRepository.findOne
+              .mockResolvedValue(
+                createAgent({
+                  teamLeaderId:
+                    'team-leader-a',
+
+                  assignedSessionId:
+                    'session-a',
+
+                  templateSendLimit24h:
+                    0,
+                }),
+              );
+
+            await expect(
+              service.getEffectiveSessionScope(
+                apiKey,
+              ),
+            ).resolves.toEqual({
+              type:
+                SessionScopeType.OWNER_AND_IDS,
+
+              ownerTeamLeaderId:
+                'team-leader-a',
+
+              sessionIds: [
+                'session-a',
               ],
             });
           },
@@ -1840,6 +1892,9 @@ describe(
     );
   },
 );
+
+
+
 
 
 

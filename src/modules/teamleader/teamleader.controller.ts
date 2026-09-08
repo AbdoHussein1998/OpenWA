@@ -1,6 +1,9 @@
 
 
 
+
+
+
 import {
   Body,
   Controller,
@@ -170,6 +173,7 @@ export class TeamLeaderController {
           'name',
           'teamLeaderId',
           'assignedSessionId',
+          'templateSendLimit24h',
           'createdAt',
           'updatedAt',
         ],
@@ -198,6 +202,15 @@ export class TeamLeaderController {
             type: 'string',
             format: 'uuid',
             nullable: true,
+          },
+
+          templateSendLimit24h: {
+            type: 'integer',
+            minimum: 0,
+            nullable: true,
+            example: 20,
+            description:
+              'Maximum stored-template sends allowed in a rolling 24-hour window. Null means unlimited; 0 disables stored-template sending.',
           },
 
           createdAt: {
@@ -263,6 +276,7 @@ export class TeamLeaderController {
             'name',
             'teamLeaderId',
             'assignedSessionId',
+            'templateSendLimit24h',
             'createdAt',
             'updatedAt',
           ],
@@ -296,6 +310,15 @@ export class TeamLeaderController {
               format: 'uuid',
               nullable: true,
               example: null,
+            },
+
+            templateSendLimit24h: {
+              type: 'integer',
+              minimum: 0,
+              nullable: true,
+              example: 20,
+              description:
+                'Maximum stored-template sends allowed in a rolling 24-hour window. Null means unlimited; 0 disables stored-template sending.',
             },
 
             createdAt: {
@@ -456,6 +479,7 @@ export class TeamLeaderController {
         'name',
         'teamLeaderId',
         'assignedSessionId',
+        'templateSendLimit24h',
         'createdAt',
         'updatedAt',
       ],
@@ -484,6 +508,15 @@ export class TeamLeaderController {
           type: 'string',
           format: 'uuid',
           nullable: true,
+        },
+
+        templateSendLimit24h: {
+          type: 'integer',
+          minimum: 0,
+          nullable: true,
+          example: 20,
+          description:
+            'Maximum stored-template sends allowed in a rolling 24-hour window. Null means unlimited; 0 disables stored-template sending.',
         },
 
         createdAt: {
@@ -568,5 +601,7 @@ export class TeamLeaderController {
     return apiKey.teamLeaderId;
   }
 }
+
+
 
 

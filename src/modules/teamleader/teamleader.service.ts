@@ -2,6 +2,8 @@
 
 
 
+
+
 import {
   ConflictException,
   Injectable,
@@ -444,6 +446,10 @@ export class TeamLeaderService {
               teamLeader.id,
 
             assignedSessionId:
+              null,
+
+            templateSendLimit24h:
+              dto.templateSendLimit24h ??
               null,
           });
 
@@ -1052,6 +1058,8 @@ export class TeamLeaderService {
     );
   }
 }
+
+
 
 
 

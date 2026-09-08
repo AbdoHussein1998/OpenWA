@@ -1,5 +1,6 @@
 
 
+
 import {
   ApiProperty,
   ApiPropertyOptional,
@@ -7,10 +8,12 @@ import {
 
 import {
   IsEmail,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
+  Min,
 } from 'class-validator';
 
 /**
@@ -52,6 +55,19 @@ export class CreateAgentDto {
   @IsEmail()
   @MaxLength(255)
   email?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Maximum number of stored-template sends allowed in a rolling 24-hour window. Null or omitted means unlimited; 0 disables stored-template sending.',
+    example: 20,
+    minimum: 0,
+    nullable: true,
+    type: Number,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  templateSendLimit24h?: number | null;
 }
 
 

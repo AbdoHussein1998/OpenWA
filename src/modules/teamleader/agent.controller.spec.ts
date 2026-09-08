@@ -1,5 +1,8 @@
 
 
+
+
+
 import {
   ForbiddenException,
   NotFoundException,
@@ -68,6 +71,9 @@ function createAgent(
 
     assignedSessionId:
       'session-1',
+
+    templateSendLimit24h:
+      null,
 
     createdAt:
       new Date(
@@ -273,6 +279,59 @@ describe(
 
             expect(
               result.assignedSessionId,
+            ).toBeNull();
+          },
+        );
+
+
+        it(
+          'returns the configured rolling-24h stored-template send limit',
+          async () => {
+            const agent =
+              createAgent({
+                templateSendLimit24h:
+                  20,
+              });
+
+            teamLeaderService
+              .getAgentIdentity
+              .mockResolvedValue(
+                agent,
+              );
+
+            const result =
+              await controller.getMe(
+                createApiKey(),
+              );
+
+            expect(
+              result.templateSendLimit24h,
+            ).toBe(20);
+          },
+        );
+
+        it(
+          'returns templateSendLimit24h:null for an unlimited Agent',
+          async () => {
+            const agent =
+              createAgent({
+                templateSendLimit24h:
+                  null,
+              });
+
+            teamLeaderService
+              .getAgentIdentity
+              .mockResolvedValue(
+                agent,
+              );
+
+            const result =
+              await controller.getMe(
+                createApiKey(),
+              );
+
+            expect(
+              result.templateSendLimit24h,
             ).toBeNull();
           },
         );
@@ -549,3 +608,6 @@ describe(
     );
   },
 );
+
+
+

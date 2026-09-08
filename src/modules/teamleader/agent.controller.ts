@@ -87,7 +87,7 @@ export class AgentController {
     summary:
       'Get the authenticated Agent',
     description:
-      'Returns the Agent identity bound to the authenticated AGENT API key, including the owning Team Leader and current session assignment.',
+      'Returns the Agent identity bound to the authenticated AGENT API key, including the owning Team Leader, current session assignment, and stored-template send limit.',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -100,6 +100,7 @@ export class AgentController {
         'name',
         'teamLeaderId',
         'assignedSessionId',
+        'templateSendLimit24h',
         'createdAt',
         'updatedAt',
       ],
@@ -140,6 +141,15 @@ export class AgentController {
             'Currently assigned WhatsApp session, or null when the Agent is unassigned.',
           example:
             '0a941dac-a965-45e7-b318-74ae8be134f0',
+        },
+
+        templateSendLimit24h: {
+          type: 'integer',
+          minimum: 0,
+          nullable: true,
+          description:
+            'Maximum stored-template sends allowed in a rolling 24-hour window. Null means unlimited; 0 means stored-template sending is disabled.',
+          example: 20,
         },
 
         createdAt: {
@@ -212,4 +222,5 @@ export class AgentController {
     return apiKey.agentId;
   }
 }
+
 

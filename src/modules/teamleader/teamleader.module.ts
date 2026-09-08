@@ -1,8 +1,6 @@
 
 
 
-
-
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
@@ -13,8 +11,10 @@ import { Session } from '../session/entities/session.entity';
 
 import { TeamLeader } from './entities/team-leader.entity';
 import { Agent } from './entities/agent.entity';
+import { AgentTemplateSendUsage } from './entities/agent-template-send-usage.entity';
 
 import { TeamLeaderService } from './teamleader.service';
+import { AgentTemplateQuotaService } from './agent-template-quota.service';
 
 import { AdminTeamLeaderController } from './admin-teamleader.controller';
 import { TeamLeaderController } from './teamleader.controller';
@@ -23,14 +23,15 @@ import { AgentController } from './agent.controller';
 @Module({
   imports: [
     /**
-     * Management identities and their API credentials live in the
-     * `main` database.
+     * Management identities, credentials, and Agent template-quota usage
+     * records live in the `main` database.
      */
     TypeOrmModule.forFeature(
       [
         TeamLeader,
         Agent,
         ApiKey,
+        AgentTemplateSendUsage,
       ],
       'main',
     ),
@@ -68,16 +69,20 @@ import { AgentController } from './agent.controller';
 
   providers: [
     TeamLeaderService,
+    AgentTemplateQuotaService,
   ],
 
   /**
-   * Export the service so other modules can use Team Leader / Agent
-   * management operations without duplicating repository logic.
+   * AgentTemplateQuotaService is exported so MessageModule can apply the quota
+   * only around the dedicated stored-template send endpoint without duplicating
+   * Agent repository/quota logic.
    */
   exports: [
     TeamLeaderService,
+    AgentTemplateQuotaService,
   ],
 })
 export class TeamLeaderModule {}
+
 
 

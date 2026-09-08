@@ -2,6 +2,10 @@
 
 
 
+
+
+
+
 import {
   Body,
   Controller,
@@ -83,6 +87,18 @@ import {
 } from '../auth/capabilities/api-capability';
 
 import {
+  CurrentApiKey,
+} from '../auth/decorators/auth.decorators';
+
+import {
+  ApiKey,
+} from '../auth/entities/api-key.entity';
+
+import {
+  AgentTemplateQuotaService,
+} from '../teamleader/agent-template-quota.service';
+
+import {
   CHANNEL_MEDIA_501,
   CUSTOM_LINK_PREVIEW_501,
   ENGINE_NOT_READY_409,
@@ -97,6 +113,7 @@ export class MessageController {
   constructor(
     private readonly messageService: MessageService,
     private readonly bulkMessageService: BulkMessageService,
+    private readonly agentTemplateQuotaService: AgentTemplateQuotaService,
   ) {}
 
   // ===========================================================================
@@ -271,16 +288,73 @@ export class MessageController {
     description:
       ENGINE_NOT_READY_409,
   })
+  @ApiResponse({
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    description:
+      'Authenticated Agent has reached the stored-template send limit for the rolling 24-hour window, or stored-template sending is disabled for the Agent.',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: {
+          type: 'integer',
+          example: HttpStatus.TOO_MANY_REQUESTS,
+        },
+        error: {
+          type: 'string',
+          example: 'Too Many Requests',
+        },
+        code: {
+          type: 'string',
+          example: 'AGENT_TEMPLATE_SEND_LIMIT_REACHED',
+        },
+        message: {
+          type: 'string',
+          example:
+            'Template send limit reached for the rolling 24-hour window.',
+        },
+        templateSendLimit24h: {
+          type: 'integer',
+          minimum: 0,
+          example: 10,
+        },
+        used24h: {
+          type: 'integer',
+          minimum: 0,
+          example: 10,
+        },
+        remaining24h: {
+          type: 'integer',
+          minimum: 0,
+          nullable: true,
+          example: 0,
+        },
+        retryAfterSeconds: {
+          type: 'integer',
+          minimum: 1,
+          nullable: true,
+          example: 3600,
+        },
+      },
+    },
+  })
   async sendTemplate(
     @Param('sessionId')
     sessionId: string,
 
+    @CurrentApiKey()
+    apiKey: ApiKey,
+
     @Body()
     dto: SendTemplateMessageDto,
   ): Promise<MessageResponseDto> {
-    return this.messageService.sendTemplate(
+    return this.agentTemplateQuotaService.executeForApiKey(
+      apiKey,
       sessionId,
-      dto,
+      () =>
+        this.messageService.sendTemplate(
+          sessionId,
+          dto,
+        ),
     );
   }
 
@@ -1650,5 +1724,7 @@ export class MessageController {
     };
   }
 }
+
+
 
 

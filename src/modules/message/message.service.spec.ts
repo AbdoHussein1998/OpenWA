@@ -1,3 +1,6 @@
+
+
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -135,6 +138,47 @@ describe('MessageService', () => {
       await facade.reply('sess-1', body);
 
       expect(reply).toHaveBeenCalledWith('sess-1', body);
+    });
+
+
+    it('passes a stored-template send straight through to MessageSendService without applying principal quota here', async () => {
+      const sendTemplate = jest.fn().mockResolvedValue({
+        messageId: 'wa-msg-template-1',
+        timestamp: 1706868002,
+      });
+
+      const facade = new MessageService(
+        repository as Repository<Message>,
+        engines,
+        messageProjector as unknown as MessageProjector,
+        hookManager as HookManager,
+        lidMappingStore as unknown as LidMappingStoreService,
+        inertPacing(),
+        { sendTemplate } as unknown as MessageSendService,
+      );
+
+      const body = {
+        chatId: '628123@c.us',
+        templateId: 'template-1',
+        vars: {
+          name: 'Mohamed',
+        },
+      };
+
+      const result = await facade.sendTemplate(
+        'sess-1',
+        body,
+      );
+
+      expect(sendTemplate).toHaveBeenCalledWith(
+        'sess-1',
+        body,
+      );
+
+      expect(result).toEqual({
+        messageId: 'wa-msg-template-1',
+        timestamp: 1706868002,
+      });
     });
   });
 
@@ -997,3 +1041,5 @@ describe('spendInlineMediaBudget', () => {
     expect(mediaOf(rows[0]).omitted).toBe(true);
   });
 });
+
+

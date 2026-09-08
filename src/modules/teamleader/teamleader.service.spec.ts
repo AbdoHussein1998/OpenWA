@@ -1,6 +1,9 @@
 
 
 
+
+
+
 import {
   ConflictException,
   NotFoundException,
@@ -79,6 +82,9 @@ function createAgent(
       createTeamLeader(),
 
     assignedSessionId:
+      null,
+
+    templateSendLimit24h:
       null,
 
     createdAt:
@@ -1012,6 +1018,9 @@ describe(
 
               assignedSessionId:
                 null,
+
+              templateSendLimit24h:
+                null,
             });
 
             expect(
@@ -1106,7 +1115,120 @@ describe(
 
               assignedSessionId:
                 null,
+
+              templateSendLimit24h:
+                null,
             });
+          },
+        );
+
+        it.each([
+          {
+            label:
+              'explicit null as unlimited',
+            input:
+              null,
+            expected:
+              null,
+          },
+
+          {
+            label:
+              'zero as stored-template sending disabled',
+            input:
+              0,
+            expected:
+              0,
+          },
+
+          {
+            label:
+              'a positive rolling 24-hour limit',
+            input:
+              25,
+            expected:
+              25,
+          },
+        ])(
+          'persists $label without changing its semantics',
+          async ({
+            input,
+            expected,
+          }) => {
+            const teamLeader =
+              createTeamLeader();
+
+            teamLeaderRepository.findOne
+              .mockResolvedValue(
+                teamLeader,
+              );
+
+            agentRepository.create
+              .mockImplementation(
+                (
+                  value:
+                    Partial<Agent>,
+                ) =>
+                  createAgent({
+                    ...value,
+                  }),
+              );
+
+            agentRepository.save
+              .mockImplementation(
+                async (
+                  value: Agent,
+                ) => value,
+              );
+
+            authService
+              .createApiKeyInTransaction
+              .mockResolvedValue({
+                apiKey:
+                  createApiKey({
+                    role:
+                      ApiKeyRole.AGENT,
+                  }),
+
+                rawKey:
+                  'owa_k1_agent_quota',
+              });
+
+            const result =
+              await service.createAgent(
+                'team-leader-1',
+                {
+                  name:
+                    'Quota Agent',
+
+                  templateSendLimit24h:
+                    input,
+                },
+              );
+
+            expect(
+              agentRepository.create,
+            ).toHaveBeenCalledWith({
+              name:
+                'Quota Agent',
+
+              email: null,
+
+              teamLeaderId:
+                'team-leader-1',
+
+              assignedSessionId:
+                null,
+
+              templateSendLimit24h:
+                expected,
+            });
+
+            expect(
+              result.agent.templateSendLimit24h,
+            ).toBe(
+              expected,
+            );
           },
         );
 
@@ -2104,5 +2226,7 @@ describe(
     );
   },
 );
+
+
 
 

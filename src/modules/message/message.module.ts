@@ -1,28 +1,56 @@
+
+
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+
+import { SessionModule } from '../session/session.module';
+import { TemplateModule } from '../template/template.module';
+import { ChatMediaModule } from '../chat-media/chat-media.module';
+import { TeamLeaderModule } from '../teamleader/teamleader.module';
+
+import { Message } from './entities/message.entity';
+import { MessageBatch } from './entities/message-batch.entity';
+import { Session } from '../session/entities/session.entity';
+
 import { MessageService } from './message.service';
 import { MessageSendService } from './message-send.service';
 import { BulkMessageService } from './bulk-message.service';
 import { MessageTypeBackfillService } from './message-type-backfill.service';
 import { PendingMessageReaperService } from './pending-message-reaper.service';
-import { MessageController } from './message.controller';
-import { SessionModule } from '../session/session.module';
-import { TemplateModule } from '../template/template.module';
-import { ChatMediaModule } from '../chat-media/chat-media.module';
-import { Message } from './entities/message.entity';
-import { Session } from '../session/entities/session.entity';
 import { SendPacingService } from './send-pacing.service';
-import { MessageBatch } from './entities/message-batch.entity';
+
+import { MessageController } from './message.controller';
+
 import { PLUGIN_MESSAGE_PORT } from '../../core/plugins/plugin-host-ports';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Message, MessageBatch, Session], 'data'),
+    TypeOrmModule.forFeature(
+      [
+        Message,
+        MessageBatch,
+        Session,
+      ],
+      'data',
+    ),
+
     SessionModule,
     TemplateModule,
     ChatMediaModule,
+
+    /**
+     * TeamLeaderModule exports AgentTemplateQuotaService.
+     *
+     * MessageController uses it only for the authenticated stored-template
+     * endpoint. Normal text/media sends remain outside the Agent quota.
+     */
+    TeamLeaderModule,
   ],
-  controllers: [MessageController],
+
+  controllers: [
+    MessageController,
+  ],
+
   providers: [
     MessageService,
     MessageSendService,
@@ -30,12 +58,25 @@ import { PLUGIN_MESSAGE_PORT } from '../../core/plugins/plugin-host-ports';
     MessageTypeBackfillService,
     PendingMessageReaperService,
     SendPacingService,
+
     // Binds the core-owned plugin capability port to this module's service. The plugin runtime
     // resolves the token lazily via ModuleRef (PluginHostServices), which keeps its provider cycle
     // broken; this adapter is how core reaches the service without importing it.
     // An alias, not a factory, so lifecycle hooks are not dispatched twice on the same instance.
-    { provide: PLUGIN_MESSAGE_PORT, useExisting: MessageService },
+    {
+      provide: PLUGIN_MESSAGE_PORT,
+      useExisting: MessageService,
+    },
   ],
-  exports: [MessageService, BulkMessageService, SendPacingService],
+
+  exports: [
+    MessageService,
+    BulkMessageService,
+    SendPacingService,
+  ],
 })
 export class MessageModule {}
+
+
+
+
