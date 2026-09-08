@@ -1,3 +1,5 @@
+
+
 // Spread the real fs so every method passes through, but as configurable props the test can spy on
 // (the bare `import * as fs` namespace is non-configurable, so jest.spyOn can't redefine its methods).
 jest.mock('fs', () => ({ __esModule: true, ...jest.requireActual<typeof import('fs')>('fs') }));
@@ -5,11 +7,12 @@ jest.mock('fs', () => ({ __esModule: true, ...jest.requireActual<typeof import('
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { UnauthorizedException, NotFoundException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { createHash, createHmac } from 'crypto';
 import * as fs from 'fs';
 import { AuthService, resolveSeedApiKey, bannerKeyLine } from './auth.service';
 import { ApiKeyUsageTracker } from './api-key-usage-tracker.service';
+import { ApiCapability } from './capabilities/api-capability';
 import { ApiKey, ApiKeyRole } from './entities/api-key.entity';
 
 // Helpers
@@ -22,6 +25,10 @@ function createMockApiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     keyHash: hashKey('test-key'),
     keyPrefix: 'test-key-pre',
     role: ApiKeyRole.OPERATOR,
+    teamLeaderId: null,
+    teamLeader: null,
+    agentId: null,
+    agent: null,
     allowedIps: null,
     allowedSessions: null,
     isActive: true,
@@ -244,6 +251,16 @@ describe('AuthService', () => {
 
       expect(repository.create).toHaveBeenCalledWith(expect.objectContaining({ role: ApiKeyRole.ADMIN }));
     });
+
+    it.each([ApiKeyRole.TEAM_LEADER, ApiKeyRole.AGENT])(
+      'rejects management role %s through generic API-key creation',
+      async role => {
+        await expect(service.createApiKey({ name: 'Managed principal key', role })).rejects.toThrow(
+          BadRequestException,
+        );
+        expect(repository.create).not.toHaveBeenCalled();
+      },
+    );
 
     it('should store the SHA-256 hash, not the raw key', async () => {
       const mockSaved = createMockApiKey();
@@ -753,16 +770,18 @@ describe('AuthService', () => {
       await expect(service.validateApiKey('ip-malformed', '10.0.0.1abc')).rejects.toThrow('IP address not allowed');
     });
 
-    it('should throw UnauthorizedException when session not in allowedSessions', async () => {
+    it('does not enforce allowedSessions during credential authentication', async () => {
       const key = createMockApiKey({
         allowedSessions: ['session-A'],
         keyHash: hashKey('sess-restricted'),
       });
       (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
 
-      await expect(service.validateApiKey('sess-restricted', undefined, 'session-B')).rejects.toThrow(
-        'API key not authorized for this session',
-      );
+      await expect(service.validateApiKey('sess-restricted')).resolves.toBe(key);
+
+      // Session/tenant authorization belongs to SessionTenantAccessService, not AuthService.
+      expect(key.allowedSessions).toEqual(['session-A']);
     });
   });
 
@@ -1001,6 +1020,100 @@ describe('AuthService', () => {
       const key = createMockApiKey({ role: ApiKeyRole.OPERATOR });
       expect(service.hasPermission(key, ApiKeyRole.ADMIN)).toBe(false);
     });
+
+    it('keeps TEAM_LEADER compatible with legacy OPERATOR routes during migration', () => {
+      const key = createMockApiKey({ role: ApiKeyRole.TEAM_LEADER, teamLeaderId: 'tl-1' });
+      expect(service.hasPermission(key, ApiKeyRole.OPERATOR)).toBe(true);
+      expect(service.hasPermission(key, ApiKeyRole.VIEWER)).toBe(true);
+    });
+
+    it('does not let AGENT inherit legacy OPERATOR permission', () => {
+      const key = createMockApiKey({ role: ApiKeyRole.AGENT, agentId: 'agent-1' });
+      expect(service.hasPermission(key, ApiKeyRole.OPERATOR)).toBe(false);
+      expect(service.hasPermission(key, ApiKeyRole.VIEWER)).toBe(true);
+    });
+  });
+
+  // ── hasCapability ────────────────────────────────────────────────
+
+  describe('hasCapability', () => {
+    const keyFor = (role: ApiKeyRole): ApiKey =>
+      createMockApiKey({
+        role,
+        teamLeaderId: role === ApiKeyRole.TEAM_LEADER ? 'tl-1' : null,
+        agentId: role === ApiKeyRole.AGENT ? 'agent-1' : null,
+      });
+
+    it('grants Agent only the intended assigned-session operational capabilities', () => {
+      const key = keyFor(ApiKeyRole.AGENT);
+
+      const allowed = [
+        ApiCapability.SESSION_READ,
+        ApiCapability.SESSION_START,
+        ApiCapability.SESSION_SHUTDOWN,
+        ApiCapability.CHAT_READ,
+        ApiCapability.CHAT_OPERATE,
+        ApiCapability.MESSAGE_SEND,
+        ApiCapability.MESSAGE_OPERATE,
+        ApiCapability.TEMPLATE_READ,
+      ];
+
+      const denied = [
+        ApiCapability.SESSION_CREATE,
+        ApiCapability.SESSION_MANAGE,
+        ApiCapability.SESSION_CONFIGURE,
+        ApiCapability.MESSAGE_BULK,
+        ApiCapability.WEBHOOK_MANAGE,
+        ApiCapability.TEMPLATE_MANAGE,
+        ApiCapability.SEARCH_MESSAGES,
+        ApiCapability.TEAM_MANAGE,
+        ApiCapability.API_KEY_MANAGE,
+      ];
+
+      for (const capability of allowed) {
+        expect(service.hasCapability(key, capability)).toBe(true);
+      }
+      for (const capability of denied) {
+        expect(service.hasCapability(key, capability)).toBe(false);
+      }
+    });
+
+    it('grants Team Leader session/team/template management but not webhook management', () => {
+      const key = keyFor(ApiKeyRole.TEAM_LEADER);
+
+      expect(service.hasCapability(key, ApiCapability.SESSION_CREATE)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.SESSION_MANAGE)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.SESSION_CONFIGURE)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.SESSION_START)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.SESSION_SHUTDOWN)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.TEMPLATE_READ)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.TEMPLATE_MANAGE)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.TEAM_MANAGE)).toBe(true);
+
+      expect(service.hasCapability(key, ApiCapability.WEBHOOK_MANAGE)).toBe(false);
+      expect(service.hasCapability(key, ApiCapability.API_KEY_MANAGE)).toBe(false);
+      expect(service.hasCapability(key, ApiCapability.INFRA_MANAGE)).toBe(false);
+    });
+
+    it('keeps Viewer read-only and does not implicitly grant template access', () => {
+      const key = keyFor(ApiKeyRole.VIEWER);
+
+      expect(service.hasCapability(key, ApiCapability.SESSION_READ)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.CHAT_READ)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.SESSION_START)).toBe(false);
+      expect(service.hasCapability(key, ApiCapability.MESSAGE_SEND)).toBe(false);
+      expect(service.hasCapability(key, ApiCapability.TEMPLATE_READ)).toBe(false);
+    });
+
+    it('keeps Operator webhook/template/lifecycle capabilities', () => {
+      const key = keyFor(ApiKeyRole.OPERATOR);
+
+      expect(service.hasCapability(key, ApiCapability.SESSION_START)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.SESSION_SHUTDOWN)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.WEBHOOK_MANAGE)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.TEMPLATE_READ)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.TEMPLATE_MANAGE)).toBe(true);
+    });
   });
 
   // ── hashKey (via validateApiKey) ──────────────────────────────────
@@ -1095,3 +1208,5 @@ describe('AuthService', () => {
     });
   });
 });
+
+
