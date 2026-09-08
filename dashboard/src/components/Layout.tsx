@@ -1,32 +1,64 @@
-import { useState, useEffect, useRef } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
+
+
 import {
-  LayoutDashboard,
-  Smartphone,
-  MessageSquare,
-  Webhook,
-  Key,
-  FileText,
-  ClipboardList,
-  LogOut,
-  Send,
-  Server,
-  Puzzle,
-  Sun,
-  Moon,
-  Monitor,
-  Menu,
-  X,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import {
+  NavLink,
+  Outlet,
+} from 'react-router-dom';
+import {
+  useTranslation,
+} from 'react-i18next';
+import {
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
+  FileText,
+  Key,
   Languages,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  MessageSquare,
+  Monitor,
+  Moon,
+  Puzzle,
+  Send,
+  Server,
+  Smartphone,
+  Sun,
   Users,
+  Webhook,
+  X,
+  type LucideIcon,
 } from 'lucide-react';
-import { useTheme } from '../hooks/useTheme';
-import { type UserRole } from '../hooks/useRole';
-import { languageOptions, resolveSupportedLanguage, rtlLanguages, type SupportedLanguage } from '../i18n';
-import { healthApi } from '../services/api';
+
+import {
+  useTheme,
+} from '../hooks/useTheme';
+
+import type {
+  UserRole,
+} from '../types/role';
+
+import {
+  canAccessRoute,
+} from '../utils/roleAccess';
+
+import {
+  languageOptions,
+  resolveSupportedLanguage,
+  rtlLanguages,
+  type SupportedLanguage,
+} from '../i18n';
+
+import {
+  healthApi,
+} from '../services/api';
+
 import './Layout.css';
 
 interface LayoutProps {
@@ -34,134 +66,548 @@ interface LayoutProps {
   userRole: UserRole | null;
 }
 
-const allNavItems = [
-  { to: '/', icon: LayoutDashboard, key: 'dashboard' as const, adminOnly: false },
-  { to: '/sessions', icon: Smartphone, key: 'sessions' as const, adminOnly: false },
-  { to: '/chats', icon: MessageSquare, key: 'chats' as const, adminOnly: false },
-  { to: '/spg-agents', icon: Users, key: 'spgAgents' as const, adminOnly: false }, // ← ADD THIS
+interface NavItem {
+  to: string;
+  icon: LucideIcon;
+  key:
+    | 'dashboard'
+    | 'sessions'
+    | 'chats'
+    | 'teamLeader'
+    | 'agent'
+    | 'webhooks'
+    | 'templates'
+    | 'apiKeys'
+    | 'messageTester'
+    | 'infrastructure'
+    | 'plugins'
+    | 'logs';
+  fallbackLabel: string;
+}
 
-  { to: '/webhooks', icon: Webhook, key: 'webhooks' as const, adminOnly: false },
-  { to: '/templates', icon: ClipboardList, key: 'templates' as const, adminOnly: false },
-  { to: '/api-keys', icon: Key, key: 'apiKeys' as const, adminOnly: true },
-  { to: '/message-tester', icon: Send, key: 'messageTester' as const, adminOnly: false },
-  // Backend /infra/* is ADMIN-only; hide the nav item from non-admins (UX + defense-in-depth).
-  { to: '/infrastructure', icon: Server, key: 'infrastructure' as const, adminOnly: true },
-  { to: '/plugins', icon: Puzzle, key: 'plugins' as const, adminOnly: true },
-  { to: '/logs', icon: FileText, key: 'logs' as const, adminOnly: false },
+/**
+ * Complete navigation catalog.
+ *
+ * Visibility is decided below from the authenticated role instead of
+ * embedding adminOnly/nonAdminOnly flags into each item.
+ */
+const allNavItems: readonly NavItem[] = [
+  {
+    to: '/',
+    icon:
+      LayoutDashboard,
+    key:
+      'dashboard',
+    fallbackLabel:
+      'Dashboard',
+  },
+  {
+    to:
+      '/team-leader',
+    icon:
+      Users,
+    key:
+      'teamLeader',
+    fallbackLabel:
+      'Team Leader',
+  },
+  {
+    to:
+      '/agent',
+    icon:
+      Users,
+    key:
+      'agent',
+    fallbackLabel:
+      'Agent',
+  },
+  {
+    to:
+      '/sessions',
+    icon:
+      Smartphone,
+    key:
+      'sessions',
+    fallbackLabel:
+      'Sessions',
+  },
+  {
+    to:
+      '/chats',
+    icon:
+      MessageSquare,
+    key:
+      'chats',
+    fallbackLabel:
+      'Chats',
+  },
+  {
+    to:
+      '/webhooks',
+    icon:
+      Webhook,
+    key:
+      'webhooks',
+    fallbackLabel:
+      'Webhooks',
+  },
+  {
+    to:
+      '/templates',
+    icon:
+      ClipboardList,
+    key:
+      'templates',
+    fallbackLabel:
+      'Templates',
+  },
+  {
+    to:
+      '/api-keys',
+    icon:
+      Key,
+    key:
+      'apiKeys',
+    fallbackLabel:
+      'API Keys',
+  },
+  {
+    to:
+      '/message-tester',
+    icon:
+      Send,
+    key:
+      'messageTester',
+    fallbackLabel:
+      'Message Tester',
+  },
+  {
+    to:
+      '/infrastructure',
+    icon:
+      Server,
+    key:
+      'infrastructure',
+    fallbackLabel:
+      'Infrastructure',
+  },
+  {
+    to:
+      '/plugins',
+    icon:
+      Puzzle,
+    key:
+      'plugins',
+    fallbackLabel:
+      'Plugins',
+  },
+  {
+    to:
+      '/logs',
+    icon:
+      FileText,
+    key:
+      'logs',
+    fallbackLabel:
+      'Logs',
+  },
 ];
 
-const themeIcons = { light: Sun, dark: Moon, system: Monitor };
+/**
+ * Logs are retained for the three legacy dashboard roles.
+ *
+ * roleAccess.ts intentionally does not grant the audit surface to the
+ * new Team Leader/Agent roles yet.
+ */
+function canSeeNavItem(
+  role: UserRole | null,
+  path: string,
+): boolean {
+  if (!role) {
+    return false;
+  }
 
-export function Layout({ onLogout, userRole }: LayoutProps) {
-  const { t, i18n } = useTranslation();
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const ThemeIcon = themeIcons[theme];
-  const themeLabel = t(`theme.${theme}`);
+  if (path === '/logs') {
+    return (
+      role === 'admin' ||
+      role === 'operator' ||
+      role === 'viewer'
+    );
+  }
 
-  const navItems = allNavItems.filter(item => !item.adminOnly || userRole === 'admin');
+  return canAccessRoute(
+    role,
+    path,
+  );
+}
 
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  // Show the build-time version immediately, then replace it with the live running version from the
-  // backend so a stale-built bundle can't display the wrong number. Falls back silently on error.
-  const [version, setVersion] = useState(__APP_VERSION__);
-  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
-  const languageMenuRef = useRef<HTMLDivElement>(null);
+const themeIcons = {
+  light: Sun,
+  dark: Moon,
+  system: Monitor,
+};
+
+export function Layout({
+  onLogout,
+  userRole,
+}: LayoutProps) {
+  const {
+    t,
+    i18n,
+  } = useTranslation();
+
+  const {
+    theme,
+    setTheme,
+    resolvedTheme,
+  } = useTheme();
+
+  const ThemeIcon =
+    themeIcons[theme];
+
+  const themeLabel =
+    t(
+      `theme.${theme}`,
+    );
+
+  /**
+   * Navigation is now role-aware:
+   *
+   * - Team Leader sees the Team Leader workspace and tenant-scoped tools.
+   * - Agent sees only the Agent workspace.
+   * - Admin retains administrative surfaces.
+   * - Operator/Viewer keep their legacy dashboard access.
+   *
+   * This is UX only. NestJS remains the authorization boundary.
+   */
+  const navItems =
+    allNavItems.filter(
+      item =>
+        canSeeNavItem(
+          userRole,
+          item.to,
+        ),
+    );
+
+  const [
+    isCollapsed,
+    setIsCollapsed,
+  ] = useState(false);
+
+  const [
+    isMobileOpen,
+    setIsMobileOpen,
+  ] = useState(false);
+
+  const [
+    isMobile,
+    setIsMobile,
+  ] = useState(
+    window.innerWidth <
+      768,
+  );
+
+  /**
+   * Show the build-time version immediately, then replace it with the
+   * live backend version so a stale dashboard bundle cannot display the
+   * wrong running version.
+   */
+  const [
+    version,
+    setVersion,
+  ] = useState(
+    __APP_VERSION__,
+  );
+
+  const [
+    isLanguageMenuOpen,
+    setIsLanguageMenuOpen,
+  ] = useState(false);
+
+  const languageMenuRef =
+    useRef<HTMLDivElement>(
+      null,
+    );
 
   useEffect(() => {
-    const handleResize = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      if (!mobile) setIsMobileOpen(false);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const handleResize =
+      () => {
+        const mobile =
+          window.innerWidth <
+          768;
+
+        setIsMobile(
+          mobile,
+        );
+
+        if (!mobile) {
+          setIsMobileOpen(
+            false,
+          );
+        }
+      };
+
+    window.addEventListener(
+      'resize',
+      handleResize,
+    );
+
+    return () =>
+      window.removeEventListener(
+        'resize',
+        handleResize,
+      );
   }, []);
 
   useEffect(() => {
     let active = true;
+
     healthApi
       .check()
       .then(info => {
-        if (active && info?.version) setVersion(info.version);
+        if (
+          active &&
+          info?.version
+        ) {
+          setVersion(
+            info.version,
+          );
+        }
       })
       .catch(() => {
-        /* keep the build-time fallback */
+        /**
+         * Keep the build-time version fallback.
+         */
       });
+
     return () => {
       active = false;
     };
   }, []);
 
-  const handleNavClick = () => {
-    if (isMobile) setIsMobileOpen(false);
-  };
-
-  useEffect(() => {
-    document.body.style.overflow = isMobileOpen ? 'hidden' : '';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isMobileOpen]);
-
-  useEffect(() => {
-    if (!isLanguageMenuOpen) return;
-
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!languageMenuRef.current?.contains(event.target as Node)) {
-        setIsLanguageMenuOpen(false);
+  const handleNavClick =
+    () => {
+      if (isMobile) {
+        setIsMobileOpen(
+          false,
+        );
       }
     };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsLanguageMenuOpen(false);
-    };
 
-    document.addEventListener('mousedown', closeOnOutsideClick);
-    document.addEventListener('keydown', closeOnEscape);
+  useEffect(() => {
+    document.body.style.overflow =
+      isMobileOpen
+        ? 'hidden'
+        : '';
+
     return () => {
-      document.removeEventListener('mousedown', closeOnOutsideClick);
-      document.removeEventListener('keydown', closeOnEscape);
+      document.body.style.overflow =
+        '';
     };
-  }, [isLanguageMenuOpen]);
+  }, [
+    isMobileOpen,
+  ]);
 
-  const toggleCollapse = () => setIsCollapsed(!isCollapsed);
-  const toggleMobile = () => setIsMobileOpen(!isMobileOpen);
+  useEffect(() => {
+    if (
+      !isLanguageMenuOpen
+    ) {
+      return;
+    }
 
-  const currentLang = resolveSupportedLanguage(i18n.resolvedLanguage || i18n.language);
-  const languageLabel = languageOptions.find(option => option.value === currentLang)?.compactLabel ?? 'EN';
-  const changeLanguage = (language: SupportedLanguage) => {
-    setIsLanguageMenuOpen(false);
-    void i18n.changeLanguage(language);
-  };
-  const isRtl = rtlLanguages.includes(currentLang);
+    const closeOnOutsideClick =
+      (
+        event: MouseEvent,
+      ) => {
+        if (
+          !languageMenuRef.current?.contains(
+            event.target as Node,
+          )
+        ) {
+          setIsLanguageMenuOpen(
+            false,
+          );
+        }
+      };
+
+    const closeOnEscape =
+      (
+        event: KeyboardEvent,
+      ) => {
+        if (
+          event.key ===
+          'Escape'
+        ) {
+          setIsLanguageMenuOpen(
+            false,
+          );
+        }
+      };
+
+    document.addEventListener(
+      'mousedown',
+      closeOnOutsideClick,
+    );
+
+    document.addEventListener(
+      'keydown',
+      closeOnEscape,
+    );
+
+    return () => {
+      document.removeEventListener(
+        'mousedown',
+        closeOnOutsideClick,
+      );
+
+      document.removeEventListener(
+        'keydown',
+        closeOnEscape,
+      );
+    };
+  }, [
+    isLanguageMenuOpen,
+  ]);
+
+  const toggleCollapse =
+    () =>
+      setIsCollapsed(
+        value =>
+          !value,
+      );
+
+  const toggleMobile =
+    () =>
+      setIsMobileOpen(
+        value =>
+          !value,
+      );
+
+  const currentLang =
+    resolveSupportedLanguage(
+      i18n.resolvedLanguage ||
+        i18n.language,
+    );
+
+  const languageLabel =
+    languageOptions.find(
+      option =>
+        option.value ===
+        currentLang,
+    )?.compactLabel ??
+    'EN';
+
+  const changeLanguage =
+    (
+      language: SupportedLanguage,
+    ) => {
+      setIsLanguageMenuOpen(
+        false,
+      );
+
+      void i18n.changeLanguage(
+        language,
+      );
+    };
+
+  const isRtl =
+    rtlLanguages.includes(
+      currentLang,
+    );
 
   return (
     <div className="layout">
       {isMobile && (
         <header className="mobile-header">
-          <button className="mobile-menu-btn" onClick={toggleMobile} aria-label={t('common.expand')}>
-            {isMobileOpen ? <X size={24} /> : <Menu size={24} />}
+          <button
+            className="mobile-menu-btn"
+            onClick={
+              toggleMobile
+            }
+            aria-label={
+              t(
+                'common.expand',
+              )
+            }
+          >
+            {isMobileOpen ? (
+              <X
+                size={24}
+              />
+            ) : (
+              <Menu
+                size={24}
+              />
+            )}
           </button>
+
           <div className="mobile-brand">
-            <img src="/openwa_logo.webp" alt="OpenWA" className="sidebar-logo" />
-            <span className="brand-name">{t('common.appName')}</span>
+            <img
+              src="/openwa_logo.webp"
+              alt="OpenWA"
+              className="sidebar-logo"
+            />
+
+            <span className="brand-name">
+              {t(
+                'common.appName',
+              )}
+            </span>
           </div>
-          <div style={{ width: 40 }} />
+
+          <div
+            style={{
+              width: 40,
+            }}
+          />
         </header>
       )}
 
-      {isMobile && isMobileOpen && <div className="sidebar-overlay" onClick={() => setIsMobileOpen(false)} />}
+      {isMobile &&
+        isMobileOpen && (
+          <div
+            className="sidebar-overlay"
+            onClick={() =>
+              setIsMobileOpen(
+                false,
+              )
+            }
+          />
+        )}
 
       <aside
-        className={`sidebar ${isCollapsed ? 'collapsed' : ''} ${isMobile ? 'mobile' : ''} ${isMobileOpen ? 'open' : ''}`}
+        className={`sidebar ${
+          isCollapsed
+            ? 'collapsed'
+            : ''
+        } ${
+          isMobile
+            ? 'mobile'
+            : ''
+        } ${
+          isMobileOpen
+            ? 'open'
+            : ''
+        }`}
       >
         <div className="sidebar-header">
-          <img src="/openwa_logo.webp" alt="OpenWA" className="sidebar-logo" />
+          <img
+            src="/openwa_logo.webp"
+            alt="OpenWA"
+            className="sidebar-logo"
+          />
+
           {!isCollapsed && (
             <div className="sidebar-brand">
-              <span className="brand-name">{t('common.appName')}</span>
-              <span className="brand-version">v{version}</span>
+              <span className="brand-name">
+                {t(
+                  'common.appName',
+                )}
+              </span>
+
+              <span className="brand-version">
+                v{version}
+              </span>
             </div>
           )}
         </div>
@@ -169,95 +615,290 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
         {!isMobile && (
           <button
             className="collapse-toggle"
-            onClick={toggleCollapse}
-            title={isCollapsed ? t('common.expand') : t('common.collapse')}
-            aria-label={isCollapsed ? t('common.expand') : t('common.collapse')}
+            onClick={
+              toggleCollapse
+            }
+            title={
+              isCollapsed
+                ? t(
+                    'common.expand',
+                  )
+                : t(
+                    'common.collapse',
+                  )
+            }
+            aria-label={
+              isCollapsed
+                ? t(
+                    'common.expand',
+                  )
+                : t(
+                    'common.collapse',
+                  )
+            }
           >
             {isCollapsed ? (
               isRtl ? (
-                <ChevronLeft size={16} />
+                <ChevronLeft
+                  size={16}
+                />
               ) : (
-                <ChevronRight size={16} />
+                <ChevronRight
+                  size={16}
+                />
               )
             ) : isRtl ? (
-              <ChevronRight size={16} />
+              <ChevronRight
+                size={16}
+              />
             ) : (
-              <ChevronLeft size={16} />
+              <ChevronLeft
+                size={16}
+              />
             )}
           </button>
         )}
 
         <nav className="sidebar-nav">
-          {navItems.map(({ to, icon: Icon, key }) => {
-            const label = t(`nav.${key}`);
-            return (
-              <NavLink
-                key={to}
-                to={to}
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                end={to === '/'}
-                onClick={handleNavClick}
-                title={isCollapsed ? label : undefined}
-              >
-                <Icon size={20} />
-                {!isCollapsed && <span>{label}</span>}
-              </NavLink>
-            );
-          })}
+          {navItems.map(
+            ({
+              to,
+              icon: Icon,
+              key,
+              fallbackLabel,
+            }) => {
+              const label =
+                t(
+                  `nav.${key}`,
+                  {
+                    defaultValue:
+                      fallbackLabel,
+                  },
+                );
+
+              return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({
+                    isActive,
+                  }) =>
+                    `nav-item ${
+                      isActive
+                        ? 'active'
+                        : ''
+                    }`
+                  }
+                  end={
+                    to ===
+                    '/'
+                  }
+                  onClick={
+                    handleNavClick
+                  }
+                  title={
+                    isCollapsed
+                      ? label
+                      : undefined
+                  }
+                >
+                  <Icon
+                    size={20}
+                  />
+
+                  {!isCollapsed && (
+                    <span>
+                      {
+                        label
+                      }
+                    </span>
+                  )}
+                </NavLink>
+              );
+            },
+          )}
         </nav>
 
         <div className="sidebar-footer">
-          <div className="language-menu" ref={languageMenuRef}>
+          <div
+            className="language-menu"
+            ref={
+              languageMenuRef
+            }
+          >
             <button
               className="theme-toggle-btn"
-              onClick={() => setIsLanguageMenuOpen(open => !open)}
-              title={t('common.language')}
-              aria-label={t('common.language')}
+              onClick={() =>
+                setIsLanguageMenuOpen(
+                  open =>
+                    !open,
+                )
+              }
+              title={t(
+                'common.language',
+              )}
+              aria-label={t(
+                'common.language',
+              )}
               aria-haspopup="menu"
-              aria-expanded={isLanguageMenuOpen}
+              aria-expanded={
+                isLanguageMenuOpen
+              }
             >
-              <Languages size={18} />
-              {!isCollapsed && <span>{languageLabel}</span>}
+              <Languages
+                size={18}
+              />
+
+              {!isCollapsed && (
+                <span>
+                  {
+                    languageLabel
+                  }
+                </span>
+              )}
             </button>
+
             {isLanguageMenuOpen && (
-              <div className="language-menu-list" role="menu" aria-label={t('common.language')}>
-                {languageOptions.map(option => (
-                  <button
-                    key={option.value}
-                    className={`language-menu-item ${option.value === currentLang ? 'active' : ''}`}
-                    onClick={() => changeLanguage(option.value)}
-                    role="menuitemradio"
-                    aria-checked={option.value === currentLang}
-                  >
-                    <span>{option.label}</span>
-                  </button>
-                ))}
+              <div
+                className="language-menu-list"
+                role="menu"
+                aria-label={t(
+                  'common.language',
+                )}
+              >
+                {languageOptions.map(
+                  option => (
+                    <button
+                      key={
+                        option.value
+                      }
+                      className={`language-menu-item ${
+                        option.value ===
+                        currentLang
+                          ? 'active'
+                          : ''
+                      }`}
+                      onClick={() =>
+                        changeLanguage(
+                          option.value,
+                        )
+                      }
+                      role="menuitemradio"
+                      aria-checked={
+                        option.value ===
+                        currentLang
+                      }
+                    >
+                      <span>
+                        {
+                          option.label
+                        }
+                      </span>
+                    </button>
+                  ),
+                )}
               </div>
             )}
           </div>
+
           <div className="appearance-menu">
             <button
               className="theme-toggle-btn"
-              onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-              title={t('theme.toggleTo', { value: t(resolvedTheme === 'dark' ? 'theme.light' : 'theme.dark') })}
-              aria-label={t('theme.toggleTo', { value: t(resolvedTheme === 'dark' ? 'theme.light' : 'theme.dark') })}
+              onClick={() =>
+                setTheme(
+                  resolvedTheme ===
+                    'dark'
+                    ? 'light'
+                    : 'dark',
+                )
+              }
+              title={t(
+                'theme.toggleTo',
+                {
+                  value:
+                    t(
+                      resolvedTheme ===
+                        'dark'
+                        ? 'theme.light'
+                        : 'theme.dark',
+                    ),
+                },
+              )}
+              aria-label={t(
+                'theme.toggleTo',
+                {
+                  value:
+                    t(
+                      resolvedTheme ===
+                        'dark'
+                        ? 'theme.light'
+                        : 'theme.dark',
+                    ),
+                },
+              )}
             >
-              <span className="appearance-button-cue" aria-hidden="true">
-                <ThemeIcon size={16} />
+              <span
+                className="appearance-button-cue"
+                aria-hidden="true"
+              >
+                <ThemeIcon
+                  size={16}
+                />
               </span>
-              {!isCollapsed && <span>{themeLabel}</span>}
+
+              {!isCollapsed && (
+                <span>
+                  {
+                    themeLabel
+                  }
+                </span>
+              )}
             </button>
           </div>
-          <button className="logout-btn" onClick={onLogout} title={isCollapsed ? t('common.logout') : undefined}>
-            <LogOut size={20} />
-            {!isCollapsed && <span>{t('common.logout')}</span>}
+
+          <button
+            className="logout-btn"
+            onClick={
+              onLogout
+            }
+            title={
+              isCollapsed
+                ? t(
+                    'common.logout',
+                  )
+                : undefined
+            }
+          >
+            <LogOut
+              size={20}
+            />
+
+            {!isCollapsed && (
+              <span>
+                {t(
+                  'common.logout',
+                )}
+              </span>
+            )}
           </button>
         </div>
       </aside>
 
-      <main className={`main-content ${isCollapsed ? 'expanded' : ''} ${isMobile ? 'mobile' : ''}`}>
+      <main
+        className={`main-content ${
+          isCollapsed
+            ? 'expanded'
+            : ''
+        } ${
+          isMobile
+            ? 'mobile'
+            : ''
+        }`}
+      >
         <Outlet />
       </main>
     </div>
   );
 }
+
+

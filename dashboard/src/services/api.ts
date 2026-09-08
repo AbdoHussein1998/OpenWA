@@ -1,7 +1,13 @@
+
+
+
+
+
 // API Service Layer for OpenWA Dashboard
 // Centralized API client with TypeScript types
 
 import { warnIfInsecureHttpUrl } from '../utils/urlSecurity';
+import type { UserRole } from '../types/role';
 
 // Resolve the API base URL. By default this is the same-origin relative path '/api',
 // correct when the dashboard and API are served from the same origin (the default
@@ -55,6 +61,14 @@ export interface Session {
    */
   engineLoaded?: boolean;
   phone?: string | null;
+  /**
+   * Intended/display phone configured when the session is created.
+   *
+   * This is metadata only. It may differ from `phone`, which is the
+   * WhatsApp account actually connected to the session, and it must
+   * never be used for authorization.
+   */
+  targetPhone?: string | null;
   pushName?: string | null;
   connectedAt?: string | null;
   lastActive?: string | null;
@@ -102,6 +116,60 @@ export interface AccountRestriction {
   code: string;
   /** ISO timestamp when enforcement ends, when WhatsApp states one. */
   expiresAt?: string | null;
+}
+
+export interface CreateSessionInput {
+  name: string;
+  targetPhone?: string;
+  config?: Record<string, unknown>;
+  proxyUrl?: string;
+  proxyType?: 'http' | 'https' | 'socks4' | 'socks5';
+}
+
+export interface TeamLeader {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  email: string | null;
+  teamLeaderId: string;
+  assignedSessionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTeamLeaderInput {
+  name: string;
+  email: string;
+}
+
+export interface CreateAgentInput {
+  name: string;
+  email?: string;
+}
+
+export interface CreateTeamLeaderResult {
+  teamLeader: TeamLeader;
+  /**
+   * Plaintext TEAM_LEADER API key.
+   * Returned only once by the backend.
+   */
+  apiKey: string;
+}
+
+export interface CreateAgentResult {
+  agent: Agent;
+  /**
+   * Plaintext AGENT API key.
+   * Returned only once by the backend.
+   */
+  apiKey: string;
 }
 
 export interface SessionStats {
@@ -158,11 +226,17 @@ export interface TemplatePayload {
   footer?: string | null;
 }
 
+export type GenericApiKeyRole = Extract<UserRole, 'admin' | 'operator' | 'viewer'>;
+
 export interface ApiKey {
   id: string;
   name: string;
   keyPrefix: string;
-  role: 'admin' | 'operator' | 'viewer';
+  /**
+   * Listing may legitimately contain principal-bound Team Leader and
+   * Agent credentials. Generic creation is narrower; see GenericApiKeyRole.
+   */
+  role: UserRole;
   allowedIps?: string[];
   allowedSessions?: string[];
   isActive: boolean;
@@ -755,10 +829,22 @@ async function requestBlob(endpoint: string): Promise<Blob> {
 export const sessionApi = {
   list: () => request<Session[]>('/sessions'),
   get: (id: string) => request<Session>(`/sessions/${id}`),
-  create: (name: string) =>
+  /**
+   * Create a session.
+   *
+   * New code should pass CreateSessionInput so Team Leaders can include
+   * targetPhone/config/proxy settings. Accepting a string temporarily
+   * preserves existing dashboard call sites that still call create(name)
+   * until those pages are migrated.
+   */
+  create: (input: CreateSessionInput | string) =>
     request<Session>('/sessions', {
       method: 'POST',
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(
+        typeof input === 'string'
+          ? { name: input }
+          : input,
+      ),
     }),
   delete: (id: string) => request<void>(`/sessions/${id}`, { method: 'DELETE' }),
   getConfig: (id: string) => request<SessionConfig>(`/sessions/${id}/config`),
@@ -924,14 +1010,116 @@ export const contactApi = {
 };
 
 // =============================================================================
+// Team Leader / Agent Management API
+// =============================================================================
+
+/**
+ * ADMIN management surface.
+ *
+ * These routes require an unscoped ADMIN API key on the backend.
+ * Team Leader and Agent credentials are created through their domain
+ * endpoints so the API key is always bound to a real principal.
+ */
+export const adminTeamLeaderApi = {
+  list: () =>
+    request<TeamLeader[]>('/admin/team-leaders'),
+
+  get: (teamLeaderId: string) =>
+    request<TeamLeader>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}`,
+    ),
+
+  create: (data: CreateTeamLeaderInput) =>
+    request<CreateTeamLeaderResult>('/admin/team-leaders', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createAgent: (
+    teamLeaderId: string,
+    data: CreateAgentInput,
+  ) =>
+    request<CreateAgentResult>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/agents`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  delete: (teamLeaderId: string) =>
+    request<void>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}`,
+      {
+        method: 'DELETE',
+      },
+    ),
+};
+
+/**
+ * Self-service surface for the authenticated Team Leader.
+ *
+ * The Team Leader id is deliberately NOT supplied by the browser.
+ * The backend derives it from the authenticated TEAM_LEADER API key.
+ */
+export const teamLeaderApi = {
+  me: () =>
+    request<TeamLeader>('/team-leader/me'),
+
+  listAgents: () =>
+    request<Agent[]>('/team-leader/agents'),
+
+  createAgent: (data: CreateAgentInput) =>
+    request<CreateAgentResult>('/team-leader/agents', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  deleteAgent: (agentId: string) =>
+    request<void>(
+      `/team-leader/agents/${encodeURIComponent(agentId)}`,
+      {
+        method: 'DELETE',
+      },
+    ),
+
+  assignAgentSession: (
+    agentId: string,
+    sessionId: string | null,
+  ) =>
+    request<Agent>(
+      `/team-leader/agents/${encodeURIComponent(agentId)}/assignment`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ sessionId }),
+      },
+    ),
+};
+
+/**
+ * Self-service surface for the authenticated Agent.
+ *
+ * The backend derives the Agent identity from the AGENT API key.
+ */
+export const agentApi = {
+  me: () =>
+    request<Agent>('/agent/me'),
+};
+
+// =============================================================================
 // API Key API
 // =============================================================================
 
 export const apiKeyApi = {
   list: () => request<ApiKey[]>('/auth/api-keys'),
+  /**
+   * Generic API-key creation intentionally accepts only the legacy roles.
+   * TEAM_LEADER and AGENT credentials must be created together with their
+   * principal records through adminTeamLeaderApi.
+   */
   create: (data: {
     name: string;
-    role: string;
+    role: GenericApiKeyRole;
     allowedIps?: string[];
     allowedSessions?: string[];
     expiresAt?: string;
@@ -1361,6 +1549,13 @@ export const statsApi = {
   getOverview: () => request<OverviewStats>('/stats/overview'),
   getMessages: (period: StatsPeriod) => request<MessageStats>(`/stats/messages?period=${period}`),
 };
+
+
+
+
+
+
+
 
 
 

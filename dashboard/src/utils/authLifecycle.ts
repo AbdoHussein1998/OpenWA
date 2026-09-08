@@ -1,11 +1,22 @@
+
+
 // Auth-lifecycle helpers: logout cleanup and startup re-validation decisions.
 
 import type { UserRole } from '../types/role';
 
-const USER_ROLES: readonly UserRole[] = ['admin', 'operator', 'viewer'];
+const USER_ROLES: readonly UserRole[] = [
+  'admin',
+  'operator',
+  'viewer',
+  'team_leader',
+  'agent',
+];
 
 export function isUserRole(value: unknown): value is UserRole {
-  return typeof value === 'string' && (USER_ROLES as readonly string[]).includes(value);
+  return (
+    typeof value === 'string' &&
+    (USER_ROLES as readonly string[]).includes(value)
+  );
 }
 
 /** Structural cache surface (a TanStack QueryClient satisfies this) so tests can use a stub. */
@@ -22,7 +33,10 @@ export function clearActorState(...caches: ClearableCache[]): void {
   for (const cache of caches) cache.clear();
 }
 
-export type StartupValidation = { action: 'role'; role: UserRole } | { action: 'logout' } | { action: 'keep' };
+export type StartupValidation =
+  | { action: 'role'; role: UserRole }
+  | { action: 'logout' }
+  | { action: 'keep' };
 
 /**
  * Fold the startup /auth/validate answer into an auth decision:
@@ -39,8 +53,22 @@ export function resolveStartupValidation(
   status: number,
   body: { valid?: boolean; role?: string } | null,
 ): StartupValidation {
-  if (status === 401 || status === 403) return { action: 'logout' };
-  if (status < 200 || status >= 300) return { action: 'keep' };
-  if (body?.valid && isUserRole(body.role)) return { action: 'role', role: body.role };
+  if (status === 401 || status === 403) {
+    return { action: 'logout' };
+  }
+
+  if (status < 200 || status >= 300) {
+    return { action: 'keep' };
+  }
+
+  if (body?.valid && isUserRole(body.role)) {
+    return {
+      action: 'role',
+      role: body.role,
+    };
+  }
+
   return { action: 'keep' };
 }
+
+

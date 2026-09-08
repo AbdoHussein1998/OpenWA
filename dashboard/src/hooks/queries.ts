@@ -1,3 +1,8 @@
+
+
+
+
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   sessionApi,
@@ -9,12 +14,19 @@ import {
   pluginsApi,
   pluginInstancesApi,
   statsApi,
+  adminTeamLeaderApi,
+  teamLeaderApi,
+  agentApi,
   type Webhook,
   type WebhookFilters,
   type TemplatePayload,
   type StatsPeriod,
   type CreateInstanceInput,
   type UpdateInstanceInput,
+  type CreateSessionInput,
+  type CreateTeamLeaderInput,
+  type CreateAgentInput,
+  type GenericApiKeyRole,
 } from '../services/api';
 
 // ── Query Keys ────────────────────────────────────────────────────────
@@ -22,6 +34,10 @@ import {
 export const queryKeys = {
   sessions: ['sessions'] as const,
   sessionStats: ['sessions', 'stats'] as const,
+  adminTeamLeaders: ['admin', 'team-leaders'] as const,
+  teamLeaderMe: ['team-leader', 'me'] as const,
+  teamLeaderAgents: ['team-leader', 'agents'] as const,
+  agentMe: ['agent', 'me'] as const,
   sessionGroups: (sessionId: string) => ['sessions', sessionId, 'groups'] as const,
   sessionChats: (sessionId: string) => ['sessions', sessionId, 'chats'] as const,
   webhooks: ['webhooks'] as const,
@@ -44,6 +60,20 @@ export function useSessionsQuery() {
     queryKey: queryKeys.sessions,
     queryFn: sessionApi.list,
     staleTime: 30_000,
+  });
+}
+
+export function useCreateSessionMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: CreateSessionInput) =>
+      sessionApi.create(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions,
+      });
+    },
   });
 }
 
@@ -172,6 +202,149 @@ export function useDeleteTemplateMutation() {
   });
 }
 
+// ── Team Leader / Agent Queries ───────────────────────────────────────
+
+export function useAdminTeamLeadersQuery(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.adminTeamLeaders,
+    queryFn: adminTeamLeaderApi.list,
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateAdminTeamLeaderMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CreateTeamLeaderInput) =>
+      adminTeamLeaderApi.create(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaders,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.apiKeys,
+      });
+    },
+  });
+}
+
+export function useDeleteAdminTeamLeaderMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (teamLeaderId: string) =>
+      adminTeamLeaderApi.delete(teamLeaderId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaders,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.apiKeys,
+      });
+    },
+  });
+}
+
+export function useCreateAdminAgentMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      teamLeaderId,
+      data,
+    }: {
+      teamLeaderId: string;
+      data: CreateAgentInput;
+    }) =>
+      adminTeamLeaderApi.createAgent(
+        teamLeaderId,
+        data,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.apiKeys,
+      });
+    },
+  });
+}
+
+export function useTeamLeaderMeQuery() {
+  return useQuery({
+    queryKey: queryKeys.teamLeaderMe,
+    queryFn: teamLeaderApi.me,
+    staleTime: 60_000,
+  });
+}
+
+export function useTeamLeaderAgentsQuery() {
+  return useQuery({
+    queryKey: queryKeys.teamLeaderAgents,
+    queryFn: teamLeaderApi.listAgents,
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateTeamLeaderAgentMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CreateAgentInput) =>
+      teamLeaderApi.createAgent(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.teamLeaderAgents,
+      });
+    },
+  });
+}
+
+export function useDeleteTeamLeaderAgentMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (agentId: string) =>
+      teamLeaderApi.deleteAgent(agentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.teamLeaderAgents,
+      });
+    },
+  });
+}
+
+export function useAssignTeamLeaderAgentSessionMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      agentId,
+      sessionId,
+    }: {
+      agentId: string;
+      sessionId: string | null;
+    }) =>
+      teamLeaderApi.assignAgentSession(
+        agentId,
+        sessionId,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.teamLeaderAgents,
+      });
+    },
+  });
+}
+
+export function useAgentMeQuery() {
+  return useQuery({
+    queryKey: queryKeys.agentMe,
+    queryFn: agentApi.me,
+    staleTime: 30_000,
+  });
+}
+
 // ── API Key Queries ───────────────────────────────────────────────────
 
 export function useApiKeysQuery() {
@@ -187,7 +360,7 @@ export function useCreateApiKeyMutation() {
   return useMutation({
     mutationFn: (data: {
       name: string;
-      role: string;
+      role: GenericApiKeyRole;
       allowedIps?: string[];
       allowedSessions?: string[];
       expiresAt?: string;
@@ -319,11 +492,13 @@ export function useEnginesQuery() {
   });
 }
 
-export function useCurrentEngineQuery() {
+export function useCurrentEngineQuery(enabled = true) {
   return useQuery({
     queryKey: queryKeys.currentEngine,
     queryFn: pluginsApi.getCurrentEngine,
+    enabled,
     staleTime: 60_000,
+    retry: false,
   });
 }
 
@@ -347,3 +522,7 @@ export function useStatsMessagesQuery(period: StatsPeriod) {
     retry: false,
   });
 }
+
+
+
+

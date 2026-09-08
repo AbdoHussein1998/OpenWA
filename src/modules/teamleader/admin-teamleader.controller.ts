@@ -1,8 +1,8 @@
 
 
 
-
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -11,7 +11,6 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
-  Body,
 } from '@nestjs/common';
 
 import {
@@ -30,11 +29,16 @@ import {
 } from '../auth/entities/api-key.entity';
 
 import {
+  CreateAgentDto,
+} from './dto/create-agent.dto';
+
+import {
   CreateTeamLeaderDto,
 } from './dto/create-team-leader.dto';
 
 import {
   TeamLeaderService,
+  type CreateAgentResult,
   type CreateTeamLeaderResult,
 } from './teamleader.service';
 
@@ -154,6 +158,119 @@ export class AdminTeamLeaderController {
     dto: CreateTeamLeaderDto,
   ): Promise<CreateTeamLeaderResult> {
     return this.teamLeaderService.createTeamLeader(
+      dto,
+    );
+  }
+
+  /**
+   * Create an Agent under a specific Team Leader.
+   *
+   * The Team Leader id comes from the URL path, not from the request body.
+   * Agent principal + credential creation is transactional inside
+   * TeamLeaderService.
+   *
+   * The plaintext API key is returned only once.
+   */
+  @Post(':teamLeaderId/agents')
+  @ApiOperation({
+    summary:
+      'Create an Agent for a Team Leader',
+    description:
+      'Creates an Agent under the selected Team Leader and provisions its AGENT API key atomically. The plaintext API key is returned only once.',
+  })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description:
+      'Agent created successfully.',
+    schema: {
+      type: 'object',
+      required: [
+        'agent',
+        'apiKey',
+      ],
+      properties: {
+        agent: {
+          type: 'object',
+          required: [
+            'id',
+            'name',
+            'teamLeaderId',
+            'assignedSessionId',
+            'createdAt',
+            'updatedAt',
+          ],
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+            },
+            name: {
+              type: 'string',
+              example: 'Mohamed Ali',
+            },
+            email: {
+              type: 'string',
+              format: 'email',
+              nullable: true,
+              example:
+                'mohamed.ali@example.com',
+            },
+            teamLeaderId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            assignedSessionId: {
+              type: 'string',
+              format: 'uuid',
+              nullable: true,
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+
+        apiKey: {
+          type: 'string',
+          example:
+            'owa_k1_0123456789abcdef...',
+          description:
+            'Plaintext API key. Returned only once and never persisted in plaintext.',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description:
+      'Invalid Team Leader UUID or request body.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description:
+      'Team Leader not found.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description:
+      'Caller is not an unscoped ADMIN.',
+  })
+  async createAgent(
+    @Param(
+      'teamLeaderId',
+      new ParseUUIDPipe(),
+    )
+    teamLeaderId: string,
+    @Body()
+    dto: CreateAgentDto,
+  ): Promise<CreateAgentResult> {
+    return this.teamLeaderService.createAgent(
+      teamLeaderId,
       dto,
     );
   }

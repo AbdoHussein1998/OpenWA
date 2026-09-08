@@ -8,6 +8,7 @@ import {
 import {
   IsEmail,
   IsNotEmpty,
+  IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator';
@@ -47,8 +48,10 @@ export class CreateAgentDto {
     example: 'mohamed.ali@example.com',
     maxLength: 255,
   })
+  @IsOptional()
   @IsEmail()
   @MaxLength(255)
   email?: string;
 }
+
 

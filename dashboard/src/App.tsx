@@ -1,29 +1,141 @@
-import { useState, useEffect, useCallback, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { lazyWithRetry as lazy } from './utils/lazyWithRetry';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Loader2 } from 'lucide-react';
-import { Layout } from './components/Layout';
-import { ToastProvider } from './components/Toast';
-import { useRole } from './hooks/useRole';
-import { RoleProvider } from './components/RoleProvider';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import { API_BASE_URL } from './services/api';
-import { clearActorState, isUserRole, resolveStartupValidation } from './utils/authLifecycle';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+} from 'react-router-dom';
+import {
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query';
+import {
+  Loader2,
+} from 'lucide-react';
+
+import {
+  lazyWithRetry as lazy,
+} from './utils/lazyWithRetry';
+
+import {
+  Layout,
+} from './components/Layout';
+import {
+  ToastProvider,
+} from './components/Toast';
+import {
+  ErrorBoundary,
+} from './components/ErrorBoundary';
+import {
+  RoleProvider,
+} from './components/RoleProvider';
+
+import {
+  useRole,
+} from './hooks/useRole';
+
+import {
+  API_BASE_URL,
+} from './services/api';
+
+import {
+  clearActorState,
+  isUserRole,
+  resolveStartupValidation,
+} from './utils/authLifecycle';
+
+import {
+  canAccessRoute,
+  getRoleHome,
+} from './utils/roleAccess';
+
+import type {
+  UserRole,
+} from './types/role';
+
 import './App.css';
 
-const Login = lazy(() => import('./pages/Login').then(m => ({ default: m.Login })));
-const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
-const Sessions = lazy(() => import('./pages/Sessions').then(m => ({ default: m.Sessions })));
-const Chats = lazy(() => import('./pages/Chats').then(m => ({ default: m.Chats })));
-const Webhooks = lazy(() => import('./pages/Webhooks').then(m => ({ default: m.Webhooks })));
-const Templates = lazy(() => import('./pages/Templates').then(m => ({ default: m.Templates })));
-const Logs = lazy(() => import('./pages/Logs').then(m => ({ default: m.Logs })));
-const ApiKeys = lazy(() => import('./pages/ApiKeys').then(m => ({ default: m.ApiKeys })));
-const MessageTester = lazy(() => import('./pages/MessageTester').then(m => ({ default: m.MessageTester })));
-const Infrastructure = lazy(() => import('./pages/Infrastructure').then(m => ({ default: m.Infrastructure })));
-const Plugins = lazy(() => import('./pages/Plugins'));
-const SpgAgents = lazy(() => import('./pages/SpgAgents').then(m => ({ default: m.SpgAgents })));
+const Login = lazy(() =>
+  import('./pages/Login').then(m => ({
+    default: m.Login,
+  })),
+);
+
+const Dashboard = lazy(() =>
+  import('./pages/Dashboard').then(m => ({
+    default: m.Dashboard,
+  })),
+);
+
+const Sessions = lazy(() =>
+  import('./pages/Sessions').then(m => ({
+    default: m.Sessions,
+  })),
+);
+
+const Chats = lazy(() =>
+  import('./pages/Chats').then(m => ({
+    default: m.Chats,
+  })),
+);
+
+const Webhooks = lazy(() =>
+  import('./pages/Webhooks').then(m => ({
+    default: m.Webhooks,
+  })),
+);
+
+const Templates = lazy(() =>
+  import('./pages/Templates').then(m => ({
+    default: m.Templates,
+  })),
+);
+
+const Logs = lazy(() =>
+  import('./pages/Logs').then(m => ({
+    default: m.Logs,
+  })),
+);
+
+const ApiKeys = lazy(() =>
+  import('./pages/ApiKeys').then(m => ({
+    default: m.ApiKeys,
+  })),
+);
+
+const MessageTester = lazy(() =>
+  import('./pages/MessageTester').then(m => ({
+    default: m.MessageTester,
+  })),
+);
+
+const Infrastructure = lazy(() =>
+  import('./pages/Infrastructure').then(m => ({
+    default: m.Infrastructure,
+  })),
+);
+
+const Plugins = lazy(() =>
+  import('./pages/Plugins'),
+);
+
+const TeamLeader = lazy(() =>
+  import('./pages/TeamLeader').then(m => ({
+    default: m.TeamLeader,
+  })),
+);
+
+const Agent = lazy(() =>
+  import('./pages/Agent').then(m => ({
+    default: m.Agent,
+  })),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,71 +147,217 @@ const queryClient = new QueryClient({
   },
 });
 
+/**
+ * Logs are still a legacy dashboard surface.
+ *
+ * Phase-2 route access intentionally does not expose them to Team
+ * Leaders or Agents.
+ */
+function canAccessAppRoute(
+  role: UserRole,
+  path: string,
+): boolean {
+  if (path === '/logs') {
+    return (
+      role === 'admin' ||
+      role === 'operator' ||
+      role === 'viewer'
+    );
+  }
+
+  return canAccessRoute(
+    role,
+    path,
+  );
+}
+
+function RoleRoute({
+  role,
+  path,
+  children,
+}: {
+  role: UserRole;
+  path: string;
+  children: ReactNode;
+}) {
+  if (
+    !canAccessAppRoute(
+      role,
+      path,
+    )
+  ) {
+    return (
+      <Navigate
+        to={getRoleHome(role)}
+        replace
+      />
+    );
+  }
+
+  return <>{children}</>;
+}
+
 function AppContent() {
-  // Capture the key ONCE at mount. Read live per render, the null→key transition when
-  // handleLogin stores a fresh key would re-fire the startup re-validation effect below and
-  // double the /auth/validate request on every sign-in — the effect is for genuine page
-  // refreshes with a saved key only.
-  const [savedKey] = useState(() => sessionStorage.getItem('openwa_api_key'));
-  const [isAuthenticated, setIsAuthenticated] = useState(!!savedKey);
-  const [, setApiKey] = useState(savedKey || '');
-  const { setRole, role } = useRole();
+  /**
+   * Capture the key once at mount.
+   *
+   * The startup validation effect is for genuine page refreshes with a
+   * previously-saved key, not for the fresh login transition.
+   */
+  const [savedKey] =
+    useState(() =>
+      sessionStorage.getItem(
+        'openwa_api_key',
+      ),
+    );
 
-  const handleLogin = (key: string, validatedRole?: string) => {
+  const [
+    isAuthenticated,
+    setIsAuthenticated,
+  ] = useState(
+    !!savedKey,
+  );
+
+  const [
+    ,
+    setApiKey,
+  ] = useState(
+    savedKey || '',
+  );
+
+  const {
+    setRole,
+    role,
+  } = useRole();
+
+  /**
+   * Only used while a saved role is not yet available.
+   * Backend authorization remains authoritative.
+   */
+  const effectiveRole: UserRole =
+    role ?? 'viewer';
+
+  const handleLogin = (
+    key: string,
+    validatedRole?: string,
+  ) => {
     setApiKey(key);
-    sessionStorage.setItem('openwa_api_key', key);
 
-    // The login page's validate response already carried the role, so no second /auth/validate
-    // round-trip is needed here. An absent or unrecognized role falls back to viewer, the
-    // least-privileged default.
-    setRole(isUserRole(validatedRole) ? validatedRole : 'viewer');
+    sessionStorage.setItem(
+      'openwa_api_key',
+      key,
+    );
+
+    setRole(
+      isUserRole(validatedRole)
+        ? validatedRole
+        : 'viewer',
+    );
 
     setIsAuthenticated(true);
   };
 
-  const handleLogout = useCallback(() => {
-    setApiKey('');
-    setIsAuthenticated(false);
-    setRole(null);
-    sessionStorage.removeItem('openwa_api_key');
-    // Wipe the React Query cache too: it is keyed by resource, not actor, so without a full
-    // clear a logout → login in the same tab with a different key/scope shows the previous
-    // actor's sessions/messages/apiKeys/audit rows.
-    clearActorState(queryClient);
-  }, [setRole]);
+  const handleLogout =
+    useCallback(() => {
+      setApiKey('');
+      setIsAuthenticated(false);
+      setRole(null);
 
-  // Re-validate and refresh the role on mount if already authenticated
+      sessionStorage.removeItem(
+        'openwa_api_key',
+      );
+
+      clearActorState(
+        queryClient,
+      );
+    }, [
+      setRole,
+    ]);
+
   useEffect(() => {
-    if (!savedKey) return;
+    if (!savedKey) {
+      return;
+    }
 
-    fetch(`${API_BASE_URL}/auth/validate`, {
-      method: 'POST',
-      headers: { 'X-API-Key': savedKey },
-    })
-      .then(async res => {
-        const decision = resolveStartupValidation(res.status, await res.json().catch(() => null));
-        if (decision.action === 'logout') {
-          handleLogout();
-        } else if (decision.action === 'role') {
-          setRole(decision.role);
-        }
-      })
+    fetch(
+      `${API_BASE_URL}/auth/validate`,
+      {
+        method: 'POST',
+        headers: {
+          'X-API-Key':
+            savedKey,
+        },
+      },
+    )
+      .then(
+        async response => {
+          const decision =
+            resolveStartupValidation(
+              response.status,
+              await response
+                .json()
+                .catch(
+                  () => null,
+                ),
+            );
+
+          if (
+            decision.action ===
+            'logout'
+          ) {
+            handleLogout();
+          } else if (
+            decision.action ===
+            'role'
+          ) {
+            setRole(
+              decision.role,
+            );
+          }
+        },
+      )
       .catch(() => {
-        // Network failure (API unreachable): keep the cached role so a transient outage at
-        // page load doesn't eject the user — an explicit 401/403 above still logs out.
+        /**
+         * A network failure does not prove the key is invalid.
+         */
       });
-  }, [savedKey, setRole, handleLogout]);
+  }, [
+    savedKey,
+    setRole,
+    handleLogout,
+  ]);
 
   const loadingFallback = (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
-      <Loader2 className="animate-spin" size={32} />
+    <div
+      style={{
+        display: 'flex',
+        alignItems:
+          'center',
+        justifyContent:
+          'center',
+        minHeight:
+          '100vh',
+      }}
+    >
+      <Loader2
+        className="animate-spin"
+        size={32}
+      />
     </div>
   );
 
   if (!isAuthenticated) {
     return (
-      <Suspense fallback={loadingFallback}>
-        <Login onLogin={handleLogin} />
+      <Suspense
+        fallback={
+          loadingFallback
+        }
+      >
+        <Login
+          onLogin={
+            handleLogin
+          }
+        />
       </Suspense>
     );
   }
@@ -107,22 +365,218 @@ function AppContent() {
   return (
     <ToastProvider>
       <BrowserRouter>
-        <Suspense fallback={loadingFallback}>
+        <Suspense
+          fallback={
+            loadingFallback
+          }
+        >
           <Routes>
-            <Route path="/" element={<Layout onLogout={handleLogout} userRole={role} />}>
-              <Route index element={<Dashboard />} />
-              <Route path="sessions" element={<Sessions />} />
-              <Route path="chats" element={<Chats />} />
-              <Route path="webhooks" element={<Webhooks />} />
-              <Route path="templates" element={<Templates />} />
-              {role === 'admin' && <Route path="api-keys" element={<ApiKeys />} />}
-              <Route path="logs" element={<Logs />} />
-              <Route path="message-tester" element={<MessageTester />} />
-              {role === 'admin' && <Route path="infrastructure" element={<Infrastructure />} />}
-              {role === 'admin' && <Route path="plugins" element={<Plugins />} />}
-              <Route path="*" element={<Navigate to="/" replace />} />
-              <Route path="spg-agents" element={<SpgAgents />} />
+            <Route
+              path="/"
+              element={
+                <Layout
+                  onLogout={
+                    handleLogout
+                  }
+                  userRole={
+                    effectiveRole
+                  }
+                />
+              }
+            >
+              <Route
+                index
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/"
+                  >
+                    <Dashboard />
+                  </RoleRoute>
+                }
+              />
 
+              <Route
+                path="sessions"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/sessions"
+                  >
+                    <Sessions />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="chats"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/chats"
+                  >
+                    <Chats />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="webhooks"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/webhooks"
+                  >
+                    <Webhooks />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="templates"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/templates"
+                  >
+                    <Templates />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="api-keys"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/api-keys"
+                  >
+                    <ApiKeys />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="logs"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/logs"
+                  >
+                    <Logs />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="message-tester"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/message-tester"
+                  >
+                    <MessageTester />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="infrastructure"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/infrastructure"
+                  >
+                    <Infrastructure />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="plugins"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/plugins"
+                  >
+                    <Plugins />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="team-leader"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/team-leader"
+                  >
+                    <TeamLeader />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="agent"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/agent"
+                  >
+                    <Agent />
+                  </RoleRoute>
+                }
+              />
+
+              {/**
+               * Old bookmarks remain valid, but there is no longer a
+               * separate SPG/phone-discovery workspace.
+               */}
+              <Route
+                path="spg-agents"
+                element={
+                  <Navigate
+                    to="/agent"
+                    replace
+                  />
+                }
+              />
+
+              <Route
+                path="*"
+                element={
+                  <Navigate
+                    to={getRoleHome(
+                      effectiveRole,
+                    )}
+                    replace
+                  />
+                }
+              />
             </Route>
           </Routes>
         </Suspense>
@@ -134,7 +588,11 @@ function AppContent() {
 function App() {
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
+      <QueryClientProvider
+        client={
+          queryClient
+        }
+      >
         <RoleProvider>
           <AppContent />
         </RoleProvider>

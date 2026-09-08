@@ -1,5 +1,8 @@
+
+
 import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
 import { nextReconnectState } from '../utils/reconnectState';
 import { applyIncomingToChatList } from '../utils/chatList';
@@ -32,6 +35,7 @@ import {
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useToast } from '../hooks/useToast';
+import { RoleContext, useRole } from '../hooks/useRole';
 import { PageHeader } from '../components/PageHeader';
 import { GlobalSearch } from '../components/GlobalSearch';
 import { useChatMessages, useChatMessagesActions, messagesQueryKey } from '../hooks/useChatMessages';
@@ -106,7 +110,45 @@ const statusFontStyle = (font?: number): { fontFamily?: string; fontWeight?: num
 export function Chats() {
   const { t } = useTranslation();
   useDocumentTitle(t('nav.chats'));
-  const { error: showErrorToast } = useToast(); 
+
+  const {
+    error: showErrorToast,
+    warning: showWarningToast,
+  } = useToast();
+
+  const roleContext = useRole();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  /**
+   * Team Leaders have MESSAGE_SEND but intentionally keep the legacy
+   * broad `canWrite` flag false. The shared chat components still read
+   * canWrite, so this page narrows that legacy flag to the specific
+   * canSendMessages capability for chat-only descendants.
+   */
+  const chatRoleContext = useMemo(
+    () => ({
+      ...roleContext,
+      canWrite: roleContext.canSendMessages,
+    }),
+    [roleContext],
+  );
+
+  /**
+   * Global message search is backed by SEARCH_MESSAGES.
+   * Viewer does not have that capability; Admin, Operator and Team
+   * Leader do. Agent never enters the generic /chats route.
+   */
+  const canSearchMessages =
+    roleContext.role === 'admin' ||
+    roleContext.role === 'operator' ||
+    roleContext.role === 'team_leader';
+
+  const requestedSessionId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('session')?.trim() ?? '';
+  }, [location.search]);
+
   // Sessions list & active session
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
@@ -138,8 +180,12 @@ export function Chats() {
 
   // Channels tab: only whatsapp-web.js implements channel listing/reading — Baileys throws 501 for
   // both, so the query is gated off entirely (never fired) rather than left to fail per-request.
-  const currentEngine = useCurrentEngineQuery();
-  const channelsSupported = currentEngine.data?.engineType === 'whatsapp-web.js';
+  // /infra/engines/current is ADMIN-only. Do not issue a known-forbidden
+  // infrastructure request for Team Leader / Operator / Viewer actors.
+  const currentEngine = useCurrentEngineQuery(roleContext.role === 'admin');
+  const channelsSupported =
+    roleContext.role === 'admin' &&
+    currentEngine.data?.engineType === 'whatsapp-web.js';
   const channelsQuery = useQuery({
     queryKey: ['channels', selectedSessionId],
     queryFn: () => sessionApi.getSubscribedChannels(selectedSessionId!),
@@ -250,25 +296,172 @@ export function Chats() {
   const activePhoneText =
     activePhoneDisplay ?? (resolvedPhoneQ.data ? formatPhoneForDisplay(resolvedPhoneQ.data) : null);
 
-  // 1. Fetch available connected sessions on mount
+  // 1. Fetch the sessions visible to the authenticated actor.
+  //
+  // Security note: sessionApi.list() is already tenant / assignment scoped
+  // by the backend. The client never treats ?session= as authorization.
   useEffect(() => {
     const loadSessions = async () => {
       try {
         setLoadingSessions(true);
+
         const list = await sessionApi.list();
-        const readySessions = list.filter(s => s.status === 'ready');
-        setSessions(readySessions);
-        if (readySessions.length > 0) {
-          setSelectedSessionId(readySessions[0].id);
-        }
+
+        // The Chats workspace only operates connected sessions.
+        setSessions(
+          list.filter(session => session.status === 'ready'),
+        );
       } catch (err) {
-        showErrorToast(t('chats.errors.loadSessions'), err instanceof Error ? err.message : undefined);
+        setSessions([]);
+        showErrorToast(
+          t('chats.errors.loadSessions'),
+          err instanceof Error ? err.message : undefined,
+        );
       } finally {
         setLoadingSessions(false);
       }
     };
+
     void loadSessions();
   }, [t, showErrorToast]);
+
+  const rejectedDeepLinkRef = useRef<string | null>(null);
+
+  /**
+   * Resolve /chats?session=<id> only against the ready sessions returned
+   * by the authenticated actor's scoped /sessions request.
+   *
+   * An unknown, foreign, or non-ready id is never fetched directly. We
+   * discard it and fall back to an already-authorized ready session.
+   */
+  useEffect(() => {
+    if (loadingSessions) return;
+
+    if (sessions.length === 0) {
+      if (selectedSessionId) {
+        setSelectedSessionId('');
+      }
+      return;
+    }
+
+    if (requestedSessionId) {
+      const requestedSession = sessions.find(
+        session => session.id === requestedSessionId,
+      );
+
+      if (requestedSession) {
+        rejectedDeepLinkRef.current = null;
+
+        if (selectedSessionId !== requestedSession.id) {
+          setSelectedSessionId(requestedSession.id);
+        }
+
+        return;
+      }
+
+      if (rejectedDeepLinkRef.current !== requestedSessionId) {
+        rejectedDeepLinkRef.current = requestedSessionId;
+
+        showWarningToast(
+          t('chats.sessionUnavailableTitle', {
+            defaultValue: 'Session unavailable',
+          }),
+          t('chats.sessionUnavailableDescription', {
+            defaultValue:
+              'The requested session is not available in your authorized ready-session list.',
+          }),
+        );
+      }
+
+      const fallbackSessionId = sessions.some(
+        session => session.id === selectedSessionId,
+      )
+        ? selectedSessionId
+        : sessions[0].id;
+
+      if (fallbackSessionId !== selectedSessionId) {
+        setSelectedSessionId(fallbackSessionId);
+      }
+
+      const params = new URLSearchParams(location.search);
+      params.delete('session');
+
+      const nextSearch = params.toString();
+
+      navigate(
+        {
+          pathname: location.pathname,
+          search: nextSearch ? `?${nextSearch}` : '',
+        },
+        { replace: true },
+      );
+
+      return;
+    }
+
+    rejectedDeepLinkRef.current = null;
+
+    if (
+      !selectedSessionId ||
+      !sessions.some(session => session.id === selectedSessionId)
+    ) {
+      setSelectedSessionId(sessions[0].id);
+    }
+  }, [
+    loadingSessions,
+    location.pathname,
+    location.search,
+    navigate,
+    requestedSessionId,
+    selectedSessionId,
+    sessions,
+    showWarningToast,
+    t,
+  ]);
+
+  /**
+   * Session changes originating from the sidebar/search are also checked
+   * against the authorized ready-session list before becoming active.
+   */
+  const selectAuthorizedSession = useCallback(
+    (sessionId: string) => {
+      if (!sessions.some(session => session.id === sessionId)) {
+        showWarningToast(
+          t('chats.sessionUnavailableTitle', {
+            defaultValue: 'Session unavailable',
+          }),
+          t('chats.sessionUnavailableDescription', {
+            defaultValue:
+              'That session is not available in your authorized ready-session list.',
+          }),
+        );
+        return;
+      }
+
+      setSelectedSessionId(sessionId);
+
+      const params = new URLSearchParams(location.search);
+      params.set('session', sessionId);
+
+      const nextSearch = params.toString();
+
+      navigate(
+        {
+          pathname: location.pathname,
+          search: nextSearch ? `?${nextSearch}` : '',
+        },
+        { replace: true },
+      );
+    },
+    [
+      location.pathname,
+      location.search,
+      navigate,
+      sessions,
+      showWarningToast,
+      t,
+    ],
+  );
 
   // 2. Fetch chats when active session changes
   const loadChats = useCallback(
@@ -652,10 +845,26 @@ export function Chats() {
 
   const handleSearchHit = useCallback(
     (hit: SearchHit) => {
+      // Search results are still verified against the session list already
+      // authorized for this actor before a cross-session jump is accepted.
+      if (!sessions.some(session => session.id === hit.sessionId)) {
+        showWarningToast(
+          t('chats.sessionUnavailableTitle', {
+            defaultValue: 'Session unavailable',
+          }),
+          t('chats.sessionUnavailableDescription', {
+            defaultValue:
+              'The search result belongs to a session that is not available in your authorized ready-session list.',
+          }),
+        );
+        return;
+      }
+
       pendingHitRef.current = { chatId: hit.chatId, waMessageId: hit.waMessageId };
+
       if (hit.sessionId !== selectedSessionId) {
         // Switching session triggers loadChats; the effect below selects the chat once the list lands.
-        setSelectedSessionId(hit.sessionId);
+        selectAuthorizedSession(hit.sessionId);
       } else {
         const chat = chats.find(c => c.id === hit.chatId);
         if (chat) {
@@ -680,7 +889,15 @@ export function Chats() {
         }
       }
     },
-    [selectedSessionId, chats, switchTab],
+    [
+      chats,
+      selectAuthorizedSession,
+      selectedSessionId,
+      sessions,
+      showWarningToast,
+      switchTab,
+      t,
+    ],
   );
 
   // After a session switch the chats list reloads — pick up the pending chat once it appears.
@@ -790,11 +1007,21 @@ export function Chats() {
   );
 
   return (
-    <div className="chats-page">
+    <RoleContext.Provider value={chatRoleContext}>
+      <div className="chats-page">
       <PageHeader
         title={t('nav.chats')}
         subtitle={t('chats.subtitle')}
-        actions={sessions.length > 0 && <GlobalSearch currentSessionId={selectedSessionId} onHit={handleSearchHit} />}
+        actions={
+          canSearchMessages &&
+          sessions.length > 0 &&
+          Boolean(selectedSessionId) && (
+            <GlobalSearch
+              currentSessionId={selectedSessionId}
+              onHit={handleSearchHit}
+            />
+          )
+        }
       />
 
       {/* Real-time connection permanently dropped — let the user re-establish it instead of
@@ -830,7 +1057,7 @@ export function Chats() {
           <ChatSidebar
             sessions={sessions}
             selectedSessionId={selectedSessionId}
-            onSelectSession={setSelectedSessionId}
+            onSelectSession={selectAuthorizedSession}
             activeTab={activeTab}
             onSwitchTab={switchTab}
             searchQuery={searchQuery}
@@ -1046,6 +1273,9 @@ export function Chats() {
           onPosted={() => statusesQuery.refetch()}
         />
       )}
-    </div>
+      </div>
+    </RoleContext.Provider>
   );
 }
+
+

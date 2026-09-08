@@ -1,5 +1,7 @@
 
 
+
+
 import {
   ConflictException,
   Injectable,
@@ -734,6 +736,33 @@ export class TeamLeaderService {
           'Session not found',
         );
       }
+
+      /**
+       * Enforce the application-level one-Agent-per-session invariant.
+       *
+       * Agent and Session live in different databases, so there cannot
+       * be a cross-database FK for this relationship. Assignment is
+       * therefore guarded explicitly in the service layer.
+       *
+       * The current Agent is allowed to keep its own assignment so the
+       * operation remains idempotent.
+       */
+      const existingAssignment =
+        await this.agentRepository.findOne({
+          where: {
+            assignedSessionId:
+              sessionId,
+          },
+        });
+
+      if (
+        existingAssignment &&
+        existingAssignment.id !== agent.id
+      ) {
+        throw new ConflictException(
+          'Session is already assigned to another Agent',
+        );
+      }
     }
 
     const previousSessionId =
@@ -1023,5 +1052,7 @@ export class TeamLeaderService {
     );
   }
 }
+
+
 
 
