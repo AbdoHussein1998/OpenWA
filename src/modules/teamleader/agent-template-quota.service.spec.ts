@@ -1,6 +1,3 @@
-
-
-
 import {
   ForbiddenException,
   HttpException,
@@ -793,6 +790,3 @@ describe('AgentTemplateQuotaService', () => {
     });
   });
 });
-
-
-

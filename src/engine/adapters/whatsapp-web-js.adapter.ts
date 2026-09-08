@@ -135,7 +135,14 @@ export interface WhatsAppWebJsConfig {
      */
     profileBasePath?: string;
   };
-  braveProfileManager: BraveProfileManager;
+  /**
+   * Persistent Brave-profile manager.
+   *
+   * EngineFactory/plugin creation supplies this explicitly. It remains optional at the adapter
+   * boundary so direct construction (tests, standalone use, older integrations) keeps working;
+   * the constructor resolves a manager from brave.profileBasePath / BRAVE_PROFILE_PATH when absent.
+   */
+  braveProfileManager?: BraveProfileManager;
   // ═══════════════════════════════════════════════════════════════════════
   
   // Phase 3: Proxy per session
@@ -147,6 +154,10 @@ export interface WhatsAppWebJsConfig {
   // learns while resolving sends, letting the message read-path bridge `@c.us`/`@lid` rows (#583 R3).
   lidMappingStore?: LidMappingStore;
 }
+
+type ResolvedWhatsAppWebJsConfig = Omit<WhatsAppWebJsConfig, 'braveProfileManager'> & {
+  braveProfileManager: BraveProfileManager;
+};
 
 
 // WhatsApp Web version resolution (the #488 auto-resolve) lives in a dependency-free module so infra
@@ -186,6 +197,7 @@ export {
 export { READY_RECONCILE_TIMEOUT_MS, READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS } from './wwebjs-reconcile';
 
 export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngine {
+  private readonly config: ResolvedWhatsAppWebJsConfig;
   private readonly logger = createLogger('WhatsAppWebJsAdapter');
   // Bound concurrent inbound media downloads: downloadMedia() materialises the full base64 blob, so an
   // unbounded burst could stack many multi-MB allocations.
@@ -258,8 +270,21 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.calls.liveCalls;
   }
 
-  constructor(private readonly config: WhatsAppWebJsConfig) {
+  constructor(config: WhatsAppWebJsConfig) {
     super();
+
+    const braveProfileBasePath =
+      config.brave?.profileBasePath ??
+      process.env.BRAVE_PROFILE_PATH ??
+      './data/brave-profiles';
+
+    this.config = {
+      ...config,
+      braveProfileManager:
+        config.braveProfileManager ??
+        new BraveProfileManager(braveProfileBasePath),
+    };
+
     // API-surface clusters live in ./wwebjs-* delegates; the public methods below forward to them.
     // The host is one object literal shared by every delegate, and closures (not a `this` reference)
     // keep the delegates' surface exactly this narrow. Built in the constructor, not as a field
@@ -528,7 +553,16 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.stuckAuth.recoverFromStuckAuth();
   }
 
- 
+  /**
+   * Compatibility forwarding seam retained for older adapter-level tests/integrations.
+   *
+   * The implementation now clears the persistent Brave profile (NoAuth architecture), not the
+   * legacy LocalAuth session directory.
+   */
+  private clearLocalAuth(): Promise<void> {
+    return this.stuckAuth.clearLocalAuth();
+  }
+
   private reportActionRequired(reason: string): void {
     this.onboardingWatcher.reportActionRequired(reason);
   }

@@ -1,3 +1,6 @@
+
+
+
 import { globSync } from 'glob';
 import dataDataSource, { postgresDataSourceOptions, buildPostgresDataSourceOptions } from './data-source';
 
@@ -36,8 +39,14 @@ describe('data CLI DataSource', () => {
     // The migration CLI never runs ConfigModule's validate(), so the SQLite main/data collision
     // guard is applied at module load instead — data migrations must never run against the main
     // (auth/audit) file.
+    const prevType = process.env.DATABASE_TYPE;
     const prevMain = process.env.MAIN_DATABASE_NAME;
     const prevData = process.env.DATABASE_NAME;
+
+    // sqliteDataMainPathCollision() intentionally does nothing for PostgreSQL, because DATABASE_NAME
+    // is then a logical database name rather than a file path. Pin SQLite explicitly so a developer
+    // or CI shell with DATABASE_TYPE=postgres cannot silently bypass this SQLite-specific test.
+    process.env.DATABASE_TYPE = 'sqlite';
     process.env.MAIN_DATABASE_NAME = '/tmp/cli-guard-main.sqlite';
     // A non-normalized relative spelling of the same file must be caught too.
     process.env.DATABASE_NAME = '/tmp/../tmp/cli-guard-main.sqlite';
@@ -48,6 +57,9 @@ describe('data CLI DataSource', () => {
         require('./data-source');
       }).toThrow(/DATABASE_NAME/);
     } finally {
+      if (prevType !== undefined) process.env.DATABASE_TYPE = prevType;
+      else delete process.env.DATABASE_TYPE;
+
       if (prevMain !== undefined) process.env.MAIN_DATABASE_NAME = prevMain;
       else delete process.env.MAIN_DATABASE_NAME;
       if (prevData !== undefined) process.env.DATABASE_NAME = prevData;
@@ -104,3 +116,6 @@ describe('PostgreSQL schema selection (POSTGRES_SCHEMA)', () => {
     expect(opts.extra?.statement_timeout).toBeUndefined();
   });
 });
+
+
+

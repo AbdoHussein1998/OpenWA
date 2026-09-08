@@ -7,6 +7,7 @@ import { AuditAction } from '../audit/entities/audit-log.entity';
 import type { AnyToolDescriptor } from '../../core/agent-tools/tool-descriptor';
 import type { ToolRegistryService } from '../../core/agent-tools/tool-registry.service';
 import type { AuthService } from '../auth/auth.service';
+import type { SessionTenantAccessService } from '../access-control/session-tenant-access.service';
 import type { AuditService } from '../audit/audit.service';
 
 // The request-handling path news up an McpServer + StreamableHTTPServerTransport per POST. Both SDK
@@ -201,6 +202,7 @@ describe('mountMcpServer (raw-Express request-handling path)', () => {
     routeHandler: (req: Request, res: Response) => Promise<void>;
     tool: AnyToolDescriptor;
     authService: { validateApiKey: jest.Mock; hasPermission: jest.Mock };
+    sessionTenantAccessService: { assertSessionAccess: jest.Mock };
     auditService: { logWarn: jest.Mock };
   }
 
@@ -214,7 +216,13 @@ describe('mountMcpServer (raw-Express request-handling path)', () => {
       handler: jest.fn().mockResolvedValue({ sent: true }),
     } as unknown as AnyToolDescriptor;
     const registry = { list: jest.fn(() => [tool]) };
-    const authService = { validateApiKey: jest.fn(), hasPermission: jest.fn(() => true) };
+    const authService = {
+      validateApiKey: jest.fn().mockResolvedValue({ id: 'api-key-1' }),
+      hasPermission: jest.fn(() => true),
+    };
+    const sessionTenantAccessService = {
+      assertSessionAccess: jest.fn().mockResolvedValue({ id: 's1' }),
+    };
     const auditService = { logWarn: jest.fn() };
     let routeHandlers: unknown[] = [];
     const adapter = {
@@ -226,6 +234,7 @@ describe('mountMcpServer (raw-Express request-handling path)', () => {
       adapter as unknown as Parameters<typeof mountMcpServer>[0],
       registry as unknown as ToolRegistryService,
       authService as unknown as AuthService,
+      sessionTenantAccessService as unknown as SessionTenantAccessService,
       new KeyRateLimiter(1000, 60_000),
       new KeyRateLimiter(1000, 60_000),
       { readOnly: false },
@@ -234,7 +243,7 @@ describe('mountMcpServer (raw-Express request-handling path)', () => {
     // adapter.post received [createIpThrottle(...), express.json(...), mcpHandler]; the tests drive
     // the terminal handler directly with a pre-parsed body, as the file's middleware harness does.
     const routeHandler = routeHandlers[routeHandlers.length - 1] as Harness['routeHandler'];
-    return { routeHandler, tool, authService, auditService };
+    return { routeHandler, tool, authService, sessionTenantAccessService, auditService };
   };
 
   type ResMock = { on: jest.Mock; status: jest.Mock; json: jest.Mock; headersSent: boolean };
@@ -301,7 +310,7 @@ describe('mountMcpServer (raw-Express request-handling path)', () => {
       name: 'UnauthorizedException',
       message: 'API key is invalid',
     });
-    expect(h.authService.validateApiKey).toHaveBeenCalledWith('bad-key', undefined, 's1');
+    expect(h.authService.validateApiKey).toHaveBeenCalledWith('bad-key', undefined);
     expect(h.tool.handler).not.toHaveBeenCalled(); // refused before the tool runs
     // ...and the auth failure hits the audit trail with the real request context (mirrors REST).
     expect(h.auditService.logWarn).toHaveBeenCalledWith(
@@ -315,7 +324,7 @@ describe('mountMcpServer (raw-Express request-handling path)', () => {
     );
   });
 
-  it('fails closed on a session-scoped tool call without sessionId (guard fires before the auth lookup)', async () => {
+  it('fails closed on a session-scoped tool call without sessionId before tenant lookup or handler execution', async () => {
     const h = mount();
     await post(h, { jsonrpc: '2.0', id: 1 }, { authorization: 'Bearer good-key' });
 
@@ -329,9 +338,11 @@ describe('mountMcpServer (raw-Express request-handling path)', () => {
       success: false,
       message: 'sessionId is required for this tool',
     });
-    // Fenced at the runtime boundary before the auth DB lookup, so a session-restricted key can
-    // never ride an undefined scope past validateApiKey's allowedSessions check.
-    expect(h.authService.validateApiKey).not.toHaveBeenCalled();
+
+    // Credential validation now happens first. Session tenancy is owned exclusively by
+    // SessionTenantAccessService, so the missing-session guard fires before that service is called.
+    expect(h.authService.validateApiKey).toHaveBeenCalledWith('good-key', undefined);
+    expect(h.sessionTenantAccessService.assertSessionAccess).not.toHaveBeenCalled();
     expect(h.tool.handler).not.toHaveBeenCalled();
     expect(h.auditService.logWarn).not.toHaveBeenCalled(); // 400 parity with REST: not an auth failure
   });

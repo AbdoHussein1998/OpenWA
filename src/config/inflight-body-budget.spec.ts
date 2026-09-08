@@ -1,3 +1,6 @@
+
+
+
 import { EventEmitter } from 'events';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -673,6 +676,13 @@ describe('body-parser inflate backstop', () => {
   });
 
   it('mirrors the global cap and disabled inflate on the MCP route-level fallback parser', () => {
-    expect(read('../modules/mcp/mcp.server.ts')).toContain('express.json({ limit: bodyLimit, inflate: false })');
+    const source = read('../modules/mcp/mcp.server.ts');
+
+    expect(source).toMatch(
+      /express\.json\(\{\s*limit:\s*bodyLimit,\s*inflate:\s*false,?\s*\}\)/,
+    );
   });
 });
+
+
+

@@ -1,3 +1,5 @@
+
+
 import { allAgentTools } from './tools';
 import { ToolRegistryService } from './tool-registry.service';
 import type { ToolDescriptor } from './tool-descriptor';
@@ -10,6 +12,7 @@ const r: ToolDescriptor = {
   inputSchema: z.object({}),
   handler: () => Promise.resolve(1),
 };
+
 const w: ToolDescriptor = {
   name: 'W',
   description: 'd',
@@ -20,20 +23,40 @@ const w: ToolDescriptor = {
 
 describe('ToolRegistryService', () => {
   it('throws on duplicate tool names', () => {
-    expect(() => new ToolRegistryService([r, r])).toThrow(/duplicate/i);
+    expect(
+      () => new ToolRegistryService([r, r]),
+    ).toThrow(/duplicate/i);
   });
+
   it('list() returns all; list({readOnly}) returns only read tools', () => {
-    const reg = new ToolRegistryService([r, w]);
+    const reg =
+      new ToolRegistryService([r, w]);
+
     expect(
       reg
         .list()
         .map(t => t.name)
         .sort(),
-    ).toEqual(['R', 'W']);
-    expect(reg.list({ readOnly: true }).map(t => t.name)).toEqual(['R']);
+    ).toEqual([
+      'R',
+      'W',
+    ]);
+
+    expect(
+      reg
+        .list({
+          readOnly: true,
+        })
+        .map(t => t.name),
+    ).toEqual([
+      'R',
+    ]);
   });
+
   it('get() resolves by name', () => {
-    expect(new ToolRegistryService([r]).get('R')).toBe(r);
+    expect(
+      new ToolRegistryService([r]).get('R'),
+    ).toBe(r);
   });
 });
 
@@ -44,11 +67,10 @@ describe('v1 tool surface snapshot', () => {
       'SessionFindOne',
       'SessionGetChats',
       'SessionGetStats',
-      'SessionSubscribePresence',
-      'SessionGetPresence',
       'SessionMarkChatRead',
       'SessionMarkChatUnread',
       'SessionSendChatState',
+
       'MessageList',
       'MessageHistory',
       'MessageGetReactions',
@@ -64,6 +86,7 @@ describe('v1 tool surface snapshot', () => {
       'MessageReply',
       'MessageForward',
       'MessageReact',
+
       'ContactFindAll',
       'ContactFindOne',
       'ContactCheckNumber',
@@ -71,6 +94,7 @@ describe('v1 tool surface snapshot', () => {
       'ContactGetProfilePicture',
       'ContactBlock',
       'ContactUnblock',
+
       'GroupFindAll',
       'GroupFindOne',
       'GroupGetInviteCode',
@@ -78,9 +102,11 @@ describe('v1 tool surface snapshot', () => {
       'GroupAddParticipants',
       'GroupSetSubject',
       'GroupSetDescription',
+
       'WebhooksList',
       'WebhookFindBySession',
       'WebhookFindOne',
+
       'LabelFindAll',
       'LabelFindOne',
       'LabelListChats',
@@ -89,13 +115,27 @@ describe('v1 tool surface snapshot', () => {
       'LabelDelete',
       'LabelAddToChat',
       'LabelRemoveFromChat',
+
       'AutomationRuleFindAll',
       'AutomationRuleFindOne',
     ].sort();
 
-    const actualNames = [...allAgentTools({} as never)].map(t => t.name).sort();
+    const actualNames = [
+      ...allAgentTools(
+        {} as never,
+      ),
+    ]
+      .map(tool => tool.name)
+      .sort();
 
-    expect(actualNames).toEqual(expected);
-    expect(expected).toHaveLength(51);
+    expect(actualNames).toEqual(
+      expected,
+    );
+
+    expect(expected).toHaveLength(
+      49,
+    );
   });
 });
+
+

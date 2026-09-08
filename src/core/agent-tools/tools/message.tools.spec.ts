@@ -1,8 +1,12 @@
+
+
+
 import { invokeTool } from '../tool-invoker';
 import { messageTools } from './message.tools';
 import type { AnyToolDescriptor } from '../tool-descriptor';
 import type { MessageService } from '../../../modules/message/message.service';
 import type { AuthService } from '../../../modules/auth/auth.service';
+import type { SessionTenantAccessService } from '../../../modules/access-control/session-tenant-access.service';
 
 // Covers every messageTools execute() handler via the real invokeTool path (auth → zod → handler).
 // agent-tools.module.ts is pure Nest wiring, stays at 0% coverage, and is intentionally not a target.
@@ -18,8 +22,24 @@ function makeTools(svc: MessageService): Map<string, AnyToolDescriptor> {
   return new Map(messageTools(svc).map(t => [t.name, t]));
 }
 
+function makeSessionTenantAccess(): Pick<SessionTenantAccessService, 'assertSessionAccess'> {
+  return {
+    // These tests exercise message-tool schema/handler behavior, not tenant-policy decisions.
+    // Production invokeTool now authorizes every session-scoped tool through the shared
+    // SessionTenantAccessService before Zod validation and handler execution, so provide the
+    // successful-access side of that boundary here.
+    assertSessionAccess: jest.fn().mockResolvedValue({ id: 's1' }),
+  } as unknown as Pick<SessionTenantAccessService, 'assertSessionAccess'>;
+}
+
 async function run(tool: AnyToolDescriptor, input: unknown): Promise<unknown> {
-  return invokeTool(tool, input, 'key', makeAuth() as unknown as AuthService);
+  return invokeTool(
+    tool,
+    input,
+    'key',
+    makeAuth() as unknown as AuthService,
+    makeSessionTenantAccess() as unknown as SessionTenantAccessService,
+  );
 }
 
 describe('messageTools', () => {
@@ -395,3 +415,5 @@ describe('messageTools', () => {
     expect(out).toEqual({ success: true });
   });
 });
+
+

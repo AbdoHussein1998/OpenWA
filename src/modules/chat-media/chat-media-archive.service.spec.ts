@@ -360,39 +360,61 @@ describe('ChatMediaArchiveService', () => {
       expect(await storageService.getFile(key!)).toEqual(PNG);
     });
 
-    it('reconciles in bounded chunks instead of loading the whole store into memory', async () => {
-      // With the default TTL of 0 the archive grows without bound, so materialising every key AND
-      // every archived row (as the first implementation did) turns the hourly sweep into a memory
-      // spike proportional to the store. Each query must see only its own chunk of keys.
-      for (let i = 0; i < 1200; i++) await storageService.putFile(`${CHAT_MEDIA_PREFIX}sess-1/o${i}.png`, PNG);
-      const find = jest.spyOn(repository, 'find');
-      const svc = enabled({ 'chatMedia.orphanGraceMs': 0 });
+    it(
+      'reconciles in bounded chunks instead of loading the whole store into memory',
+      async () => {
+        // With the default TTL of 0 the archive grows without bound, so materialising every key AND
+        // every archived row (as the first implementation did) turns the hourly sweep into a memory
+        // spike proportional to the store. Each query must see only its own chunk of keys.
+        //
+        // This intentionally drives 1,200 real local-file writes + deletes. On Windows, a busy
+        // full-suite run can legitimately take longer than Jest's 5s default even though the sweep
+        // is making steady bounded progress, so give this filesystem stress test explicit headroom.
+        for (let i = 0; i < 1200; i++) {
+          await storageService.putFile(`${CHAT_MEDIA_PREFIX}sess-1/o${i}.png`, PNG);
+        }
+        const find = jest.spyOn(repository, 'find');
+        const svc = enabled({ 'chatMedia.orphanGraceMs': 0 });
 
-      expect(await svc.sweepOrphanedMedia(Date.now())).toBe(1200);
+        expect(await svc.sweepOrphanedMedia(Date.now())).toBe(1200);
 
-      expect(find.mock.calls.length).toBeGreaterThan(1);
-      for (const [opts] of find.mock.calls) {
-        const where = (opts as { where?: { mediaPath?: { _value?: unknown[] } } })?.where;
-        const ids = where?.mediaPath?._value;
-        // Every lookup is an IN over a bounded key list, never an unfiltered "all archived rows".
-        expect(Array.isArray(ids)).toBe(true);
-        expect((ids as unknown[]).length).toBeLessThanOrEqual(500);
-      }
-      find.mockRestore();
-    });
+        expect(find.mock.calls.length).toBeGreaterThan(1);
+        for (const [opts] of find.mock.calls) {
+          const where = (opts as { where?: { mediaPath?: { _value?: unknown[] } } })?.where;
+          const ids = where?.mediaPath?._value;
+          // Every lookup is an IN over a bounded key list, never an unfiltered "all archived rows".
+          expect(Array.isArray(ids)).toBe(true);
+          expect((ids as unknown[]).length).toBeLessThanOrEqual(500);
+        }
+        find.mockRestore();
+      },
+      30_000,
+    );
 
-    it('keeps referenced files across a chunk boundary', async () => {
-      // A referenced file must survive even when it lands in a different chunk from its row.
-      for (let i = 0; i < 600; i++) await storageService.putFile(`${CHAT_MEDIA_PREFIX}sess-1/p${i}.png`, PNG);
-      const row = await saveRow(undefined, {
-        mediaPath: `${CHAT_MEDIA_PREFIX}sess-1/p599.png`,
-        mediaMimetype: 'image/png',
-      });
-      const svc = enabled({ 'chatMedia.orphanGraceMs': 0 });
+    it(
+      'keeps referenced files across a chunk boundary',
+      async () => {
+        // A referenced file must survive even when it lands in a different chunk from its row.
+        //
+        // This test performs 600 real local-file writes and 599 deletes. If Jest aborts it at the
+        // default 5s timeout, the still-running sweep races afterEach() cleanup; on Windows that can
+        // surface as EPERM and can leak leftover chat-media files into the following test.
+        for (let i = 0; i < 600; i++) {
+          await storageService.putFile(`${CHAT_MEDIA_PREFIX}sess-1/p${i}.png`, PNG);
+        }
+        const row = await saveRow(undefined, {
+          mediaPath: `${CHAT_MEDIA_PREFIX}sess-1/p599.png`,
+          mediaMimetype: 'image/png',
+        });
+        const svc = enabled({ 'chatMedia.orphanGraceMs': 0 });
 
-      expect(await svc.sweepOrphanedMedia(Date.now())).toBe(599);
-      expect(await storageService.getFile((await repository.findOneByOrFail({ id: row.id })).mediaPath!)).toEqual(PNG);
-    });
+        expect(await svc.sweepOrphanedMedia(Date.now())).toBe(599);
+        expect(
+          await storageService.getFile((await repository.findOneByOrFail({ id: row.id })).mediaPath!),
+        ).toEqual(PNG);
+      },
+      30_000,
+    );
 
     it('never touches status media — the two sweeps share one bucket', async () => {
       await storageService.putFile('statuses/sess-1/story.jpg', PNG);

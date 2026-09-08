@@ -1,3 +1,6 @@
+
+
+
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { DataSource, getMetadataArgsStorage } from 'typeorm';
@@ -39,8 +42,14 @@ const DATA_ENTITY_ROOTS = [
   'modules/status-store',
   'modules/automation',
 ];
-// The main-connection (auth/audit) roots; their tables are not this endpoint's payload.
-const MAIN_ENTITY_ROOTS = ['modules/auth', 'modules/audit'];
+
+// The main-connection entity roots. Their tables belong to the separate management/auth database
+// and are intentionally not part of the InfraDataService data-DB backup payload.
+const MAIN_ENTITY_ROOTS = [
+  'modules/auth',
+  'modules/audit',
+  'modules/teamleader',
+];
 
 type Connection = 'data' | 'main' | 'unclassified';
 
@@ -58,13 +67,17 @@ function findEntityFiles(dir: string, found: string[] = []): string[] {
       found.push(join(dir, entry.name));
     }
   }
+
   return found;
 }
 
 function classify(relativeToSrc: string): Connection {
-  const under = (roots: string[]): boolean => roots.some(root => relativeToSrc.startsWith(`${root}/`));
+  const under = (roots: string[]): boolean =>
+    roots.some(root => relativeToSrc.startsWith(`${root}/`));
+
   if (under(DATA_ENTITY_ROOTS)) return 'data';
   if (under(MAIN_ENTITY_ROOTS)) return 'main';
+
   // Not a deliberate catch-all: an unclassified file fails the suite below, and its tables are held
   // to the data-connection coverage rule in the meantime, so nothing can fall between the lists.
   return 'unclassified';
@@ -72,40 +85,80 @@ function classify(relativeToSrc: string): Connection {
 
 async function loadEntityFiles(): Promise<EntityFile[]> {
   const discovered: Array<{ file: string; classes: unknown[] }> = [];
+
   for (const file of findEntityFiles(SRC_ROOT)) {
     const relativePath = relative(SRC_ROOT, file).split(sep).join('/');
     const module = (await import(file)) as Record<string, unknown>;
+
     // Only classes the entity decorators registered; a file may export anything alongside them.
     const entityClasses = Object.values(module).filter(
-      value => typeof value === 'function' && getMetadataArgsStorage().tables.some(t => t.target === value),
+      value =>
+        typeof value === 'function' &&
+        getMetadataArgsStorage().tables.some(table => table.target === value),
     );
-    if (entityClasses.length === 0) continue;
-    discovered.push({ file: relativePath, classes: entityClasses });
+
+    if (entityClasses.length === 0) {
+      continue;
+    }
+
+    discovered.push({
+      file: relativePath,
+      classes: entityClasses,
+    });
   }
+
   // ONE DataSource over every discovered class, mirroring the app's single connection: entity
   // relations cross files, so building metadata per file would not resolve the inverse sides.
   const ds = new DataSource({
     type: 'better-sqlite3',
     database: ':memory:',
-    entities: discovered.flatMap(entry => entry.classes) as Array<new () => unknown>,
+    entities: discovered.flatMap(entry => entry.classes) as Array<
+      new () => unknown
+    >,
     synchronize: false,
   });
+
   await ds.initialize();
-  const tableOf = new Map<unknown, string>(ds.entityMetadatas.map(metadata => [metadata.target, metadata.tableName]));
+
+  const tableOf = new Map<unknown, string>(
+    ds.entityMetadatas.map(metadata => [
+      metadata.target,
+      metadata.tableName,
+    ]),
+  );
+
   await ds.destroy();
+
   return discovered.map(entry => ({
     file: entry.file,
     connection: classify(entry.file),
-    tables: entry.classes.map(cls => tableOf.get(cls)).filter((table): table is string => typeof table === 'string'),
+    tables: entry.classes
+      .map(cls => tableOf.get(cls))
+      .filter((table): table is string => typeof table === 'string'),
   }));
 }
 
 /** Top-level property names of a published schema, read from the committed OpenAPI contract. */
 function publishedProperties(schema: string): string[] {
-  const snapshot = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'openapi.json'), 'utf8')) as {
-    components: { schemas: Record<string, { properties?: Record<string, unknown> }> };
+  const snapshot = JSON.parse(
+    readFileSync(
+      join(__dirname, '..', '..', '..', 'openapi.json'),
+      'utf8',
+    ),
+  ) as {
+    components: {
+      schemas: Record<
+        string,
+        {
+          properties?: Record<string, unknown>;
+        }
+      >;
+    };
   };
-  return Object.keys(snapshot.components.schemas[schema]?.properties ?? {});
+
+  return Object.keys(
+    snapshot.components.schemas[schema]?.properties ?? {},
+  );
 }
 
 describe('export-tables registry: every data-DB entity table has a backup decision', () => {
@@ -116,86 +169,170 @@ describe('export-tables registry: every data-DB entity table has a backup decisi
   });
 
   it('finds the data connection non-empty (the discovery itself is not vacuous)', () => {
-    expect(entityFiles.filter(f => f.connection === 'data').length).toBeGreaterThanOrEqual(14);
+    expect(
+      entityFiles.filter(file => file.connection === 'data').length,
+    ).toBeGreaterThanOrEqual(14);
   });
 
   it('classifies every entity file under src — a new entity root must be classified here', () => {
-    const unclassified = entityFiles.filter(f => f.connection === 'unclassified').map(f => f.file);
+    const unclassified = entityFiles
+      .filter(file => file.connection === 'unclassified')
+      .map(file => file.file);
+
     expect(unclassified).toEqual([]);
   });
 
   it('exports or explicitly excludes every data-connection entity table', () => {
-    const registered = new Set(EXPORT_TABLES.map(entry => entry.table));
-    const excluded = new Set(Object.keys(EXPORT_TABLE_EXCLUSIONS));
+    const registered = new Set(
+      EXPORT_TABLES.map(entry => entry.table),
+    );
+
+    const excluded = new Set(
+      Object.keys(EXPORT_TABLE_EXCLUSIONS),
+    );
+
     const missing: string[] = [];
+
     for (const file of entityFiles) {
       // 'unclassified' is asserted empty above; holding its tables to the data rule keeps a
       // mis-classified file from slipping through as neither exported nor excluded.
-      if (file.connection === 'main') continue;
+      if (file.connection === 'main') {
+        continue;
+      }
+
       for (const table of file.tables) {
-        if (!registered.has(table) && !excluded.has(table)) missing.push(`${table} (${file.file})`);
+        if (!registered.has(table) && !excluded.has(table)) {
+          missing.push(`${table} (${file.file})`);
+        }
       }
     }
+
     expect(missing).toEqual([]);
   });
 
   it('gives every exclusion a one-line reason naming a real data-connection table', () => {
-    const dataTables = new Set(entityFiles.filter(f => f.connection !== 'main').flatMap(f => f.tables));
-    for (const [table, reason] of Object.entries(EXPORT_TABLE_EXCLUSIONS)) {
+    const dataTables = new Set(
+      entityFiles
+        .filter(file => file.connection !== 'main')
+        .flatMap(file => file.tables),
+    );
+
+    for (const [table, reason] of Object.entries(
+      EXPORT_TABLE_EXCLUSIONS,
+    )) {
       expect(dataTables.has(table)).toBe(true);
-      expect(typeof reason === 'string' && reason.trim().length > 0).toBe(true);
+      expect(
+        typeof reason === 'string' && reason.trim().length > 0,
+      ).toBe(true);
     }
   });
 
   it('registers no table the entity metadata does not know (stale entry after a rename/drop)', () => {
-    const dataTables = new Set(entityFiles.filter(f => f.connection === 'data').flatMap(f => f.tables));
-    const stale = EXPORT_TABLES.filter(entry => !dataTables.has(entry.table)).map(entry => entry.table);
+    const dataTables = new Set(
+      entityFiles
+        .filter(file => file.connection === 'data')
+        .flatMap(file => file.tables),
+    );
+
+    const stale = EXPORT_TABLES
+      .filter(entry => !dataTables.has(entry.table))
+      .map(entry => entry.table);
+
     expect(stale).toEqual([]);
   });
 
   it('exports and imports the same tables in the same FK-safe order', () => {
-    expect(EXPORT_TABLES.map(entry => entry.key)).toEqual(TABLE_IMPORTERS.map(importer => importer.key));
+    expect(
+      EXPORT_TABLES.map(entry => entry.key),
+    ).toEqual(
+      TABLE_IMPORTERS.map(importer => importer.key),
+    );
   });
 
   it('publishes exactly the registry keys in the export response DTOs', () => {
     const keys = EXPORT_TABLES.map(entry => entry.key);
-    expect(publishedProperties('TableCountsDto')).toEqual(keys);
-    expect(publishedProperties('MigrationTablesDto')).toEqual(keys);
+
+    expect(
+      publishedProperties('TableCountsDto'),
+    ).toEqual(keys);
+
+    expect(
+      publishedProperties('MigrationTablesDto'),
+    ).toEqual(keys);
   });
 
   it('keeps only sessions and webhooks required — every other table stays optional-but-reported', () => {
     // Required tables fail the export when absent; optional ones land in skippedTables. Flipping an
     // existing table between the two changes the observable contract and must be a conscious edit.
-    expect(EXPORT_TABLES.filter(entry => !entry.optional).map(entry => entry.key)).toEqual(['sessions', 'webhooks']);
+    expect(
+      EXPORT_TABLES
+        .filter(entry => !entry.optional)
+        .map(entry => entry.key),
+    ).toEqual([
+      'sessions',
+      'webhooks',
+    ]);
   });
 });
 
 describe('InfraDataService.exportData validates the registry against live entity metadata', () => {
-  const cfg = { get: () => 'sqlite' };
-  const registryTables = () => EXPORT_TABLES.map(entry => entry.table);
-  const build = (ds: unknown) => new InfraDataService(cfg as never, ds as never);
+  const cfg = {
+    get: () => 'sqlite',
+  };
+
+  const registryTables = (): string[] =>
+    EXPORT_TABLES.map(entry => entry.table);
+
+  const build = (ds: unknown): InfraDataService =>
+    new InfraDataService(
+      cfg as never,
+      ds as never,
+    );
 
   it('refuses rather than exporting empty when a registered table is unknown to the metadata', async () => {
     // A renamed entity leaves the old table name in the registry: reading it would export the stale
     // table (or report it skipped) and a restore would repopulate a table nothing reads.
     const query = jest.fn().mockResolvedValue([]);
+
     const ds = {
       query,
       entityMetadatas: registryTables()
         .filter(table => table !== 'messages')
-        .map(tableName => ({ tableName })),
+        .map(tableName => ({
+          tableName,
+        })),
     };
-    await expect(build(ds).exportData()).rejects.toThrow(/entity metadata does not know it/);
-    expect(query).not.toHaveBeenCalled(); // refused BEFORE a single table was read
+
+    await expect(
+      build(ds).exportData(),
+    ).rejects.toThrow(
+      /entity metadata does not know it/,
+    );
+
+    // Refused BEFORE a single table was read.
+    expect(query).not.toHaveBeenCalled();
   });
 
   it('refuses when a data entity table has no backup decision at all', async () => {
     const query = jest.fn().mockResolvedValue([]);
+
     const ds = {
       query,
-      entityMetadatas: [...registryTables(), 'shiny_new_table'].map(tableName => ({ tableName })),
+      entityMetadatas: [
+        ...registryTables(),
+        'shiny_new_table',
+      ].map(tableName => ({
+        tableName,
+      })),
     };
-    await expect(build(ds).exportData()).rejects.toThrow(/no backup decision/);
+
+    await expect(
+      build(ds).exportData(),
+    ).rejects.toThrow(
+      /no backup decision/,
+    );
+
     expect(query).not.toHaveBeenCalled();
   });
 });
+

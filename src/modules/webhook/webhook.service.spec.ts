@@ -1,3 +1,6 @@
+
+
+
 // SSRF protection is now ON by default; resolve any host to a public IP so existing
 // dispatch/create tests stay offline. Literal-IP tests (8.8.8.8 / 127.0.0.1) bypass lookup.
 jest.mock('dns/promises', () => ({
@@ -27,6 +30,7 @@ import { userPart } from '../../engine/identity/wa-id';
 import { HookManager } from '../../core/hooks';
 import { QUEUE_NAMES } from '../queue/queue-names';
 import { Session } from '../session/entities/session.entity';
+import { SessionScopes } from '../access-control/session-scope';
 
 function createMockWebhook(overrides: Partial<Webhook> = {}): Webhook {
   return {
@@ -334,7 +338,7 @@ describe('WebhookService', () => {
     it('should return all webhooks ordered by createdAt DESC', async () => {
       (repository.find as jest.Mock).mockResolvedValue([]);
 
-      await service.findAll();
+      await service.findAll(SessionScopes.all());
 
       expect(repository.find).toHaveBeenCalledWith({ order: { createdAt: 'DESC' }, take: 1000, skip: 0 });
     });
@@ -342,7 +346,7 @@ describe('WebhookService', () => {
     it('applies bounded pagination to cross-session listing', async () => {
       (repository.find as jest.Mock).mockResolvedValue([]);
 
-      await service.findAll(['sess-1'], { limit: 5000, offset: -5 });
+      await service.findAll(SessionScopes.ids(['sess-1']), { limit: 5000, offset: -5 });
 
       expect(repository.find).toHaveBeenCalledWith({
         where: { sessionId: In(['sess-1']) },
@@ -506,7 +510,10 @@ describe('WebhookService', () => {
     it('queries most-recent-first, optionally scoped to a session', async () => {
       (failureRepository.find as jest.Mock).mockResolvedValue([{ id: 'f1' }]);
 
-      const out = await service.listDeliveryFailures({ sessionId: 's1', limit: 10 });
+      const out = await service.listDeliveryFailures(
+        { sessionId: 's1', limit: 10 },
+        SessionScopes.all(),
+      );
 
       expect(out).toHaveLength(1);
       // sessionId resolves through resolveSessionScope, so the WHERE is an IN over the effective scope
@@ -517,3 +524,5 @@ describe('WebhookService', () => {
     });
   });
 });
+
+

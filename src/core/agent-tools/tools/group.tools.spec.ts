@@ -1,7 +1,10 @@
+
+
 import { invokeTool } from '../tool-invoker';
 import { groupTools } from './group.tools';
 import type { GroupService } from '../../../modules/group/group.service';
 import type { AuthService } from '../../../modules/auth/auth.service';
+import type { SessionTenantAccessService } from '../../../modules/access-control/session-tenant-access.service';
 import type { ParticipantOperationResult } from '../../../engine/interfaces/whatsapp-engine.interface';
 
 function makeAuth(): Pick<AuthService, 'validateApiKey' | 'hasPermission'> {
@@ -9,6 +12,27 @@ function makeAuth(): Pick<AuthService, 'validateApiKey' | 'hasPermission'> {
     validateApiKey: jest.fn().mockResolvedValue({ id: 'k1', allowedSessions: null }),
     hasPermission: jest.fn().mockReturnValue(true),
   };
+}
+
+function makeSessionTenantAccess(): Pick<SessionTenantAccessService, 'assertSessionAccess'> {
+  return {
+    // These tests exercise group-tool schema/handler behaviour, not tenant-policy decisions.
+    // invokeTool authorizes every session-scoped tool before input validation/handler execution,
+    // so provide the successful-access side of that shared boundary here.
+    assertSessionAccess: jest.fn().mockResolvedValue({ id: 's1' }),
+  } as unknown as Pick<SessionTenantAccessService, 'assertSessionAccess'>;
+}
+
+type GroupTool = ReturnType<typeof groupTools>[number];
+
+async function run(tool: GroupTool, input: unknown): Promise<unknown> {
+  return invokeTool(
+    tool,
+    input,
+    'key',
+    makeAuth() as unknown as AuthService,
+    makeSessionTenantAccess() as unknown as SessionTenantAccessService,
+  );
 }
 
 describe('GroupAddParticipants', () => {
@@ -21,12 +45,11 @@ describe('GroupAddParticipants', () => {
     const groupSvc = { addParticipants } as unknown as GroupService;
 
     const tool = groupTools(groupSvc).find(t => t.name === 'GroupAddParticipants')!;
-    const out = (await invokeTool(
-      tool,
-      { sessionId: 's1', groupId: '120363@g.us', participants: ['628111@c.us', '628222@c.us'] },
-      'key',
-      makeAuth() as unknown as AuthService,
-    )) as { success: boolean; message: string; results: ParticipantOperationResult[] };
+    const out = (await run(tool, {
+      sessionId: 's1',
+      groupId: '120363@g.us',
+      participants: ['628111@c.us', '628222@c.us'],
+    })) as { success: boolean; message: string; results: ParticipantOperationResult[] };
 
     expect(addParticipants).toHaveBeenCalledWith('s1', '120363@g.us', ['628111@c.us', '628222@c.us']);
     // Partial batch: success stays true (one did join) but the message must not claim a clean run.
@@ -45,12 +68,11 @@ describe('GroupAddParticipants', () => {
     const groupSvc = { addParticipants: jest.fn().mockResolvedValue(results) } as unknown as GroupService;
 
     const tool = groupTools(groupSvc).find(t => t.name === 'GroupAddParticipants')!;
-    const out = (await invokeTool(
-      tool,
-      { sessionId: 's1', groupId: '120363@g.us', participants: ['628111@c.us', '628222@c.us'] },
-      'key',
-      makeAuth() as unknown as AuthService,
-    )) as { success: boolean; message: string };
+    const out = (await run(tool, {
+      sessionId: 's1',
+      groupId: '120363@g.us',
+      participants: ['628111@c.us', '628222@c.us'],
+    })) as { success: boolean; message: string };
 
     expect(out.success).toBe(false);
     expect(out.message).toContain('0/2');
@@ -61,12 +83,11 @@ describe('GroupAddParticipants', () => {
     const groupSvc = { addParticipants: jest.fn().mockResolvedValue(results) } as unknown as GroupService;
 
     const tool = groupTools(groupSvc).find(t => t.name === 'GroupAddParticipants')!;
-    const out = (await invokeTool(
-      tool,
-      { sessionId: 's1', groupId: '120363@g.us', participants: ['628111@c.us'] },
-      'key',
-      makeAuth() as unknown as AuthService,
-    )) as { success: boolean; message: string };
+    const out = (await run(tool, {
+      sessionId: 's1',
+      groupId: '120363@g.us',
+      participants: ['628111@c.us'],
+    })) as { success: boolean; message: string };
 
     expect(out).toEqual({ success: true, message: 'Participants added', results });
   });
@@ -76,12 +97,13 @@ describe('groupTools execute handlers', () => {
   it('GroupFindAll delegates to getGroups with paging', async () => {
     const getGroups = jest.fn().mockResolvedValue([{ id: 'g1' }]);
     const tool = groupTools({ getGroups } as unknown as GroupService).find(t => t.name === 'GroupFindAll')!;
-    const out = await invokeTool(
-      tool,
-      { sessionId: 's1', limit: 10, offset: 5 },
-      'key',
-      makeAuth() as unknown as AuthService,
-    );
+
+    const out = await run(tool, {
+      sessionId: 's1',
+      limit: 10,
+      offset: 5,
+    });
+
     expect(getGroups).toHaveBeenCalledWith('s1', { limit: 10, offset: 5 });
     expect(out).toEqual([{ id: 'g1' }]);
   });
@@ -89,12 +111,12 @@ describe('groupTools execute handlers', () => {
   it('GroupFindOne delegates to getGroupInfo', async () => {
     const getGroupInfo = jest.fn().mockResolvedValue({ id: 'g1' });
     const tool = groupTools({ getGroupInfo } as unknown as GroupService).find(t => t.name === 'GroupFindOne')!;
-    const out = await invokeTool(
-      tool,
-      { sessionId: 's1', groupId: '120363@g.us' },
-      'key',
-      makeAuth() as unknown as AuthService,
-    );
+
+    const out = await run(tool, {
+      sessionId: 's1',
+      groupId: '120363@g.us',
+    });
+
     expect(getGroupInfo).toHaveBeenCalledWith('s1', '120363@g.us');
     expect(out).toEqual({ id: 'g1' });
   });
@@ -104,12 +126,12 @@ describe('groupTools execute handlers', () => {
     const tool = groupTools({ getGroupInviteCode } as unknown as GroupService).find(
       t => t.name === 'GroupGetInviteCode',
     )!;
-    const out = await invokeTool(
-      tool,
-      { sessionId: 's1', groupId: '120363@g.us' },
-      'key',
-      makeAuth() as unknown as AuthService,
-    );
+
+    const out = await run(tool, {
+      sessionId: 's1',
+      groupId: '120363@g.us',
+    });
+
     expect(getGroupInviteCode).toHaveBeenCalledWith('s1', '120363@g.us');
     expect(out).toEqual({ inviteCode: 'abc123', inviteLink: 'https://chat.whatsapp.com/abc123' });
   });
@@ -117,12 +139,13 @@ describe('groupTools execute handlers', () => {
   it('GroupCreate delegates to createGroup', async () => {
     const createGroup = jest.fn().mockResolvedValue({ id: 'g1' });
     const tool = groupTools({ createGroup } as unknown as GroupService).find(t => t.name === 'GroupCreate')!;
-    const out = await invokeTool(
-      tool,
-      { sessionId: 's1', name: 'New group', participants: ['628111@c.us'] },
-      'key',
-      makeAuth() as unknown as AuthService,
-    );
+
+    const out = await run(tool, {
+      sessionId: 's1',
+      name: 'New group',
+      participants: ['628111@c.us'],
+    });
+
     expect(createGroup).toHaveBeenCalledWith('s1', 'New group', ['628111@c.us']);
     expect(out).toEqual({ id: 'g1' });
   });
@@ -130,12 +153,13 @@ describe('groupTools execute handlers', () => {
   it('GroupSetSubject delegates to setGroupSubject and reports success', async () => {
     const setGroupSubject = jest.fn().mockResolvedValue(undefined);
     const tool = groupTools({ setGroupSubject } as unknown as GroupService).find(t => t.name === 'GroupSetSubject')!;
-    const out = await invokeTool(
-      tool,
-      { sessionId: 's1', groupId: '120363@g.us', subject: 'Renamed' },
-      'key',
-      makeAuth() as unknown as AuthService,
-    );
+
+    const out = await run(tool, {
+      sessionId: 's1',
+      groupId: '120363@g.us',
+      subject: 'Renamed',
+    });
+
     expect(setGroupSubject).toHaveBeenCalledWith('s1', '120363@g.us', 'Renamed');
     expect(out).toEqual({ success: true, message: 'Group subject updated' });
   });
@@ -145,13 +169,17 @@ describe('groupTools execute handlers', () => {
     const tool = groupTools({ setGroupDescription } as unknown as GroupService).find(
       t => t.name === 'GroupSetDescription',
     )!;
-    const out = await invokeTool(
-      tool,
-      { sessionId: 's1', groupId: '120363@g.us', description: 'About us' },
-      'key',
-      makeAuth() as unknown as AuthService,
-    );
+
+    const out = await run(tool, {
+      sessionId: 's1',
+      groupId: '120363@g.us',
+      description: 'About us',
+    });
+
     expect(setGroupDescription).toHaveBeenCalledWith('s1', '120363@g.us', 'About us');
     expect(out).toEqual({ success: true, message: 'Group description updated' });
   });
 });
+
+
+

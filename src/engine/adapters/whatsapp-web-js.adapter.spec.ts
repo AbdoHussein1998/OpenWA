@@ -38,6 +38,7 @@ import { GroupNotFoundError } from '../../common/errors/group-not-found.error';
 import { LabelNotFoundError } from '../../common/errors/label-not-found.error';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { fetch as undiciFetch } from 'undici';
+import { BraveProfileManager } from '../brave/brave-profile.manager';
 
 // Allowlisted hosts are PINNED to their DNS answer (ssrf-guard pins allowlisted hosts to their DNS answers), so the specs that exercise
 // the SSRF_ALLOWED_HOSTS escape-hatch need a deterministic resolver. Default answers are PUBLIC
@@ -70,6 +71,53 @@ jest.mock('qrcode', () => ({
 // namespace wrapper that `import * as childProcess` yields has non-configurable members, so
 // jest.spyOn cannot redefine execFile on it. The adapter reads execFile live off this same object.
 const childProcess = jest.requireActual<typeof import('child_process')>('child_process');
+
+type WwebjsTestConfig = ConstructorParameters<typeof WhatsAppWebJsAdapter>[0];
+
+function createTestBraveProfileManager(
+  baseProfilePath = './data/test-brave-profiles',
+): BraveProfileManager {
+  const resolvedBase = path.resolve(baseProfilePath);
+
+  return {
+    getProfilePath: jest.fn((sessionId: string) => path.join(resolvedBase, sessionId)),
+    profileExists: jest.fn().mockResolvedValue(true),
+    ensureProfile: jest.fn().mockResolvedValue(undefined),
+    deleteProfile: jest.fn().mockResolvedValue(undefined),
+    killOrphanedBraveProcesses: jest.fn().mockResolvedValue(undefined),
+    removeStaleSingletonFiles: jest.fn().mockResolvedValue(undefined),
+  } as unknown as BraveProfileManager;
+}
+
+function createWwebjsTestConfig(
+  sessionId: string,
+  puppeteer: WwebjsTestConfig['puppeteer'] = {},
+  braveProfileManager: BraveProfileManager = createTestBraveProfileManager(),
+): WwebjsTestConfig {
+  return {
+    sessionId,
+    sessionDataPath: './data/sessions',
+    puppeteer: {
+      ...puppeteer,
+      // Client.initialize() is mocked in initialization tests. Pointing the resolver at the current
+      // Node executable gives it a guaranteed-existing path without requiring Brave on the test host.
+      executablePath: process.execPath,
+    },
+    brave: {
+      executablePath: process.execPath,
+      profileBasePath: './data/test-brave-profiles',
+    },
+    braveProfileManager,
+  };
+}
+
+function braveProfileManagerOf(adapter: WhatsAppWebJsAdapter): BraveProfileManager {
+  return (
+    adapter as unknown as {
+      config: { braveProfileManager: BraveProfileManager };
+    }
+  ).config.braveProfileManager;
+}
 
 describe('wwebjsAckToDeliveryStatus (engine ack-int -> neutral DeliveryStatus boundary, #265)', () => {
   // Regression-locks the integer boundary the decoupling moved behaviour into, incl. the
@@ -150,9 +198,8 @@ describe('isExecutionContextDestroyedError (#708 — Puppeteer context loss duri
 // next step. The hint has to travel WITH the reason, not beside it.
 describe('WhatsAppWebJsAdapter initialize() failure reason (#1081)', () => {
   const newAdapter = (): WhatsAppWebJsAdapter =>
-    new WhatsAppWebJsAdapter({ sessionId: 'sess-advisory', sessionDataPath: './data/sessions', puppeteer: {} });
+    new WhatsAppWebJsAdapter(createWwebjsTestConfig('sess-advisory'));
 
-  let rmSpy: jest.SpyInstance;
   let clientInitSpy: jest.SpyInstance;
   let savedWebVersion: string | undefined;
 
@@ -161,12 +208,10 @@ describe('WhatsAppWebJsAdapter initialize() failure reason (#1081)', () => {
     // data dir is never touched by the pre-launch Singleton cleanup.
     savedWebVersion = process.env.WWEBJS_WEB_VERSION;
     process.env.WWEBJS_WEB_VERSION = 'off';
-    rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
     clientInitSpy = jest.spyOn(Client.prototype as unknown as { initialize: () => Promise<void> }, 'initialize');
   });
 
   afterEach(() => {
-    rmSpy.mockRestore();
     clientInitSpy.mockRestore();
     if (savedWebVersion === undefined) {
       delete process.env.WWEBJS_WEB_VERSION;
@@ -210,11 +255,10 @@ describe('WhatsAppWebJsAdapter initialize() failure reason (#1081)', () => {
 // one-navigation death into a normal slow start (#1081).
 describe('WhatsAppWebJsAdapter initialize() retry on a navigation-killed first inject (#1081)', () => {
   const newAdapter = (): WhatsAppWebJsAdapter =>
-    new WhatsAppWebJsAdapter({ sessionId: 'sess-nav-retry', sessionDataPath: './data/sessions', puppeteer: {} });
+    new WhatsAppWebJsAdapter(createWwebjsTestConfig('sess-nav-retry'));
 
   const EXEC_CTX = 'Protocol error (Runtime.callFunctionOn): Execution context was destroyed.';
 
-  let rmSpy: jest.SpyInstance;
   let clientInitSpy: jest.SpyInstance;
   let clientDestroySpy: jest.SpyInstance;
   let savedWebVersion: string | undefined;
@@ -227,7 +271,6 @@ describe('WhatsAppWebJsAdapter initialize() retry on a navigation-killed first i
     // (a documented operator knob, #353) would widen it and flip their expectations.
     savedAuthTimeout = process.env.WWEBJS_AUTH_TIMEOUT_MS;
     delete process.env.WWEBJS_AUTH_TIMEOUT_MS;
-    rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
     clientInitSpy = jest.spyOn(Client.prototype as unknown as { initialize: () => Promise<void> }, 'initialize');
     // The inter-attempt cleanup destroys the failed client; the real destroy() would throw on a
     // browserless Client, which is best-effort-tolerated but noisy — keep it deterministic.
@@ -237,7 +280,6 @@ describe('WhatsAppWebJsAdapter initialize() retry on a navigation-killed first i
   });
 
   afterEach(() => {
-    rmSpy.mockRestore();
     clientInitSpy.mockRestore();
     clientDestroySpy.mockRestore();
     jest.useRealTimers();
@@ -255,14 +297,18 @@ describe('WhatsAppWebJsAdapter initialize() retry on a navigation-killed first i
     clientInitSpy.mockRejectedValueOnce(new Error(EXEC_CTX)).mockResolvedValueOnce(undefined);
     const onError = jest.fn();
 
-    await expect(newAdapter().initialize({ onError })).resolves.toBeUndefined();
+    const adapter = newAdapter();
+    const manager = braveProfileManagerOf(adapter);
+    const singletonCleanup = manager.removeStaleSingletonFiles as jest.Mock;
+
+    await expect(adapter.initialize({ onError })).resolves.toBeUndefined();
 
     expect(clientInitSpy).toHaveBeenCalledTimes(2);
     expect(onError).not.toHaveBeenCalled();
-    // The inter-attempt reset destroys attempt 1's client, and BOTH attempts run the pre-launch
-    // Singleton sweep (3 rm's each) — the docblocks present both as load-bearing.
+    // The inter-attempt reset destroys attempt 1's client, and BOTH attempts rerun the manager-owned
+    // pre-launch cleanup before Client.initialize().
     expect(clientDestroySpy).toHaveBeenCalledTimes(1);
-    expect(rmSpy).toHaveBeenCalledTimes(6);
+    expect(singletonCleanup).toHaveBeenCalledTimes(2);
   });
 
   it('still retries with exactly the minimum outer budget remaining', async () => {
@@ -1397,9 +1443,10 @@ describe('WhatsAppWebJsAdapter.forceDestroy (recover a wedged session, #351)', (
 // promise to the lifecycle via onCredentialTeardownStarted SYNCHRONOUSLY, before the awaited settle,
 // so a concurrent start()/delete()/reconnect for the same session NAME sees the in-flight rm and waits
 // for it instead of re-creating/purging credentials the rm is about to delete.
-describe('WhatsAppWebJsAdapter credential-teardown observation', () => {
+describe('WhatsAppWebJsAdapter NoAuth/Brave logout profile semantics', () => {
   const newAdapter = (): WhatsAppWebJsAdapter =>
-    new WhatsAppWebJsAdapter({ sessionId: 'sess-1', sessionDataPath: './data/sessions', puppeteer: {} });
+    new WhatsAppWebJsAdapter(createWwebjsTestConfig('sess-1'));
+
   type FakeClient = EventEmitter & {
     info?: { wid?: { user?: string }; pushname?: string };
     getState: jest.Mock;
@@ -1408,45 +1455,39 @@ describe('WhatsAppWebJsAdapter credential-teardown observation', () => {
     logout?: jest.Mock;
   };
 
-  // Mirrors the ready-reconciliation helper but wires the credential-teardown callback too.
   const attach = (
     adapter: WhatsAppWebJsAdapter,
     overrides: Partial<FakeClient> = {},
-  ): { client: FakeClient; onCredentialTeardownStarted: jest.Mock } => {
+  ): {
+    client: FakeClient;
+    onCredentialTeardownStarted: jest.Mock;
+    onDisconnected: jest.Mock;
+  } => {
     const client = Object.assign(new EventEmitter(), {
       info: { wid: { user: '628123' }, pushname: 'Tester' },
       getState: jest.fn().mockResolvedValue(WAState.CONNECTED),
       pupPage: { evaluate: jest.fn().mockResolvedValue(true) },
       ...overrides,
     }) as FakeClient;
+
     const onCredentialTeardownStarted = jest.fn();
+    const onDisconnected = jest.fn();
+
     (adapter as unknown as { client: unknown }).client = client;
-    (adapter as unknown as { callbacks: unknown }).callbacks = { onCredentialTeardownStarted };
+    (adapter as unknown as { callbacks: unknown }).callbacks = {
+      onCredentialTeardownStarted,
+      onDisconnected,
+    };
     (adapter as unknown as { setupEventHandlers: () => void }).setupEventHandlers();
-    return { client, onCredentialTeardownStarted };
+
+    return { client, onCredentialTeardownStarted, onDisconnected };
   };
 
-  // clearLocalAuth() really removes `<sessionDataPath>/session-<sessionId>`, and these tests assert
-  // the registration contract rather than the removal itself. Stub the rm: unmocked, a developer whose
-  // machine happens to hold a session named 'sess-1' would have its WhatsApp credentials deleted just
-  // by running the suite — and force:true makes that silent.
-  let rmSpy: jest.SpyInstance;
-
-  beforeEach(() => {
-    rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
-  });
-
   afterEach(() => {
-    rmSpy.mockRestore();
     jest.useRealTimers();
   });
 
-  // A caller-initiated logout is tracked from OUTSIDE the adapter: SessionService hands the session
-  // name to teardownEngineSafely, which registers the whole engine.logout() promise — a superset of
-  // the in-page unlink and the profile rm that follows it — and that is the single owner for both
-  // engines (the Baileys adapter reports nothing here either). Registering again from inside would
-  // add a second, narrower promise for the same removal.
-  it('logout() does not register a credential teardown — the lifecycle already tracks this call', async () => {
+  it('logout() does not register a filesystem credential teardown in NoAuth mode', async () => {
     const adapter = newAdapter();
     const { onCredentialTeardownStarted } = attach(adapter, {
       logout: jest.fn().mockResolvedValue(undefined),
@@ -1458,43 +1499,40 @@ describe('WhatsAppWebJsAdapter credential-teardown observation', () => {
     expect(onCredentialTeardownStarted).not.toHaveBeenCalled();
   });
 
-  // …and the stand-in the 'disconnected' handler adds for a WhatsApp-initiated logout must not fire
-  // for this one either, or the same removal would be registered twice from two directions.
-  it('logout() suppresses the disconnected-LOGOUT stand-in for its own unlink', async () => {
+  it('a deliberate logout event does not create a second teardown fence', async () => {
     const adapter = newAdapter();
-    const { client, onCredentialTeardownStarted } = attach(adapter, {
-      // client.logout() triggers the in-page logout, which surfaces as disconnected:LOGOUT while the
-      // adapter is still awaiting it.
+    let client!: FakeClient;
+    const attached = attach(adapter, {
       logout: jest.fn().mockImplementation(() => {
         client.emit('disconnected', 'LOGOUT');
         return Promise.resolve();
       }),
       destroy: jest.fn().mockResolvedValue(undefined),
     });
+    client = attached.client;
 
     await adapter.logout();
 
-    expect(onCredentialTeardownStarted).not.toHaveBeenCalled();
+    expect(attached.onCredentialTeardownStarted).not.toHaveBeenCalled();
+    expect(attached.onDisconnected).not.toHaveBeenCalled();
   });
 
-  it('a WhatsApp-originated disconnected:LOGOUT registers the credential-teardown promise synchronously before the event loop can run', async () => {
-    // The lib emits disconnected:LOGOUT BEFORE it awaits authStrategy.logout() (the fs.rm). The adapter
-    // must register the destructive cleanup synchronously within the event handler so a start()/reconnect
-    // that races on the next tick observes the in-flight rm.
+  it('a WhatsApp-originated LOGOUT preserves the Brave profile and reports a disconnect', () => {
     const adapter = newAdapter();
-    const { client, onCredentialTeardownStarted } = attach(adapter);
+    const manager = braveProfileManagerOf(adapter);
+    const deleteProfile = manager.deleteProfile as jest.Mock;
+    const { client, onCredentialTeardownStarted, onDisconnected } = attach(adapter);
 
     client.emit('disconnected', 'LOGOUT');
 
-    // Synchronous: the callback was handed a promise before any await settled.
-    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
-    const [tracked] = onCredentialTeardownStarted.mock.calls[0] as [Promise<void>];
-    expect(tracked).toBeInstanceOf(Promise);
-    // The fence survives until the tracked rm settles (here it resolves).
-    await expect(tracked).resolves.toBeUndefined();
+    expect(deleteProfile).not.toHaveBeenCalled();
+    expect(onCredentialTeardownStarted).not.toHaveBeenCalled();
+    expect(onDisconnected).toHaveBeenCalledTimes(1);
+    expect(onDisconnected).toHaveBeenCalledWith('LOGOUT');
+    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
   });
 
-  it('does not register a credential teardown for a non-LOGOUT disconnect (a transient drop, not credential removal)', () => {
+  it('a transient disconnect also never creates a credential teardown fence', () => {
     const adapter = newAdapter();
     const { client, onCredentialTeardownStarted } = attach(adapter);
 
@@ -1503,139 +1541,49 @@ describe('WhatsAppWebJsAdapter credential-teardown observation', () => {
     expect(onCredentialTeardownStarted).not.toHaveBeenCalled();
   });
 
-  it('does not register a second credential teardown when THIS adapter started the logout', () => {
-    // client.logout() during adapter.logout() also fires disconnected:LOGOUT. That path already
-    // registered the real client.logout() promise, which covers the same rm, so the handler must not
-    // add a redundant stand-in. Keyed on logoutInitiated — NOT on tearingDown, which every teardown
-    // path sets (see the next test).
+  it('deduplicates repeated LOGOUT events without deleting the persistent profile', () => {
     const adapter = newAdapter();
-    const { client, onCredentialTeardownStarted } = attach(adapter);
-    (adapter as unknown as { logoutInitiated: boolean }).logoutInitiated = true;
+    const manager = braveProfileManagerOf(adapter);
+    const deleteProfile = manager.deleteProfile as jest.Mock;
+    const { client, onDisconnected } = attach(adapter);
+
+    client.emit('disconnected', 'LOGOUT');
+    client.emit('disconnected', 'LOGOUT');
+
+    expect(deleteProfile).not.toHaveBeenCalled();
+    expect(onDisconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a late LOGOUT after teardown has already begun', () => {
+    const adapter = newAdapter();
+    const { client, onCredentialTeardownStarted, onDisconnected } = attach(adapter);
     (adapter as unknown as { tearingDown: boolean }).tearingDown = true;
 
     client.emit('disconnected', 'LOGOUT');
 
     expect(onCredentialTeardownStarted).not.toHaveBeenCalled();
-  });
-
-  // The regression this pair guards: whatsapp-web.js runs authStrategy.logout() → fs.rm(userDataDir)
-  // whatever our listener does. If a stop()/destroy() has already latched the finished flags, an
-  // early return would hide that in-flight rm from the name fence, and a later start() under the same
-  // session name could have its freshly written profile deleted by it.
-  it('registers the credential teardown for a WhatsApp LOGOUT that lands after a stop/destroy set tearingDown', () => {
-    const adapter = newAdapter();
-    const { client, onCredentialTeardownStarted } = attach(adapter);
-    // disconnect()/destroy()/forceDestroy() all set this WITHOUT owning a credential teardown.
-    (adapter as unknown as { tearingDown: boolean }).tearingDown = true;
-
-    client.emit('disconnected', 'LOGOUT');
-
-    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
-    const [tracked] = onCredentialTeardownStarted.mock.calls[0] as [Promise<void>];
-    expect(tracked).toBeInstanceOf(Promise);
-    // The registered promise is the profile removal itself, not an unrelated resolved promise — and
-    // asserting on the spy also proves the stub above is the fs call being made, not the real one.
-    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('session-sess-1'), {
-      recursive: true,
-      force: true,
-      maxRetries: 4,
-    });
-  });
-
-  it('registers the credential teardown for a WhatsApp LOGOUT that lands after a disconnect was already reported', () => {
-    const adapter = newAdapter();
-    const { client, onCredentialTeardownStarted } = attach(adapter);
-    // setStatus(DISCONNECTED) latches this on the first drop; a LOGOUT arriving afterwards still
-    // means the library is deleting the profile.
-    (adapter as unknown as { disconnectReported: boolean }).disconnectReported = true;
-
-    client.emit('disconnected', 'LOGOUT');
-
-    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
-  });
-
-  // #1072: whatsapp-web.js emits 'disconnected' from a `.on('framenavigated')` listener with no guard
-  // of its own — it resets `lastLoggedOut` only after three awaits and never filters on the main frame
-  // — so one unlink can raise the event more than once. The registration above is keyed on
-  // `logoutInitiated`, which stays false throughout a WhatsApp-initiated unlink, and it sits ABOVE the
-  // duplicate-event latch on purpose (#994), so every repeat used to start another rm of the same
-  // profile. The reporter's log is that signature exactly: two deletion lines, one disconnect, one
-  // reconnect — with the two rms racing each other and a still-open Chromium.
-  it('removes the credentials once for a repeated WhatsApp LOGOUT (one unlink can raise the event twice)', () => {
-    const adapter = newAdapter();
-    const { client, onCredentialTeardownStarted } = attach(adapter);
-
-    client.emit('disconnected', 'LOGOUT');
-    client.emit('disconnected', 'LOGOUT');
-
-    // One unlink, one removal — and one fence for the lifecycle to await.
-    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
-    expect(rmSpy).toHaveBeenCalledTimes(1);
-  });
-
-  // The latch is one-shot per adapter, not a coalescing window: it must hold even when the repeat
-  // arrives after the rest of the handler has latched, which is the ordering the reporter hit.
-  it('holds the once-only removal when the repeat lands after the disconnect was reported', () => {
-    const adapter = newAdapter();
-    const { client, onCredentialTeardownStarted } = attach(adapter);
-
-    client.emit('disconnected', 'LOGOUT');
-    (adapter as unknown as { disconnectReported: boolean }).disconnectReported = true;
-    client.emit('disconnected', 'LOGOUT');
-
-    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
-    expect(rmSpy).toHaveBeenCalledTimes(1);
-  });
-
-  // #1072: the reporter's second cycle logged ENOTEMPTY on the leveldb dir. On a WhatsApp-initiated
-  // unlink whatsapp-web.js does NOT close the browser first (Client.js emits from `framenavigated`;
-  // only the explicit Client.logout() closes it), so Chromium is still rotating IndexedDB files while
-  // the removal walks the tree. LocalAuth's own rm survives that with `rmMaxRetries ?? 4`; ours passed
-  // no budget at all, leaving Node's default of 0 — which is why the error surfaced on ours and not
-  // the library's.
-  it('gives the removal the retry budget LocalAuth uses, so a live Chromium cannot fail it', async () => {
-    const adapter = newAdapter();
-
-    await (adapter as unknown as { clearLocalAuth: () => Promise<void> }).clearLocalAuth.call(adapter);
-
-    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('session-sess-1'), {
-      recursive: true,
-      force: true,
-      maxRetries: 4,
-    });
-  });
-
-  it('still reports nothing else for a latched LOGOUT — no status change and no onDisconnected', () => {
-    // Registering the rm must NOT resurrect the rest of the handler: a finished adapter still must
-    // not drive a status transition or schedule a reconnect for its replacement.
-    const adapter = newAdapter();
-    const client = Object.assign(new EventEmitter(), {
-      getState: jest.fn().mockResolvedValue(WAState.CONNECTED),
-      pupPage: { evaluate: jest.fn().mockResolvedValue(true) },
-    }) as FakeClient;
-    const onCredentialTeardownStarted = jest.fn();
-    const onDisconnected = jest.fn();
-    const onStateChanged = jest.fn();
-    (adapter as unknown as { client: unknown }).client = client;
-    (adapter as unknown as { callbacks: unknown }).callbacks = {
-      onCredentialTeardownStarted,
-      onDisconnected,
-      onStateChanged,
-    };
-    (adapter as unknown as { setupEventHandlers: () => void }).setupEventHandlers();
-    (adapter as unknown as { tearingDown: boolean }).tearingDown = true;
-
-    client.emit('disconnected', 'LOGOUT');
-
-    expect(onCredentialTeardownStarted).toHaveBeenCalledTimes(1);
     expect(onDisconnected).not.toHaveBeenCalled();
-    expect(onStateChanged).not.toHaveBeenCalled();
+  });
+
+  it('keeps clearLocalAuth as a compatibility proxy, but it now deletes the Brave profile', async () => {
+    const adapter = newAdapter();
+    const manager = braveProfileManagerOf(adapter);
+    const deleteProfile = manager.deleteProfile as jest.Mock;
+
+    await (
+      adapter as unknown as {
+        clearLocalAuth: () => Promise<void>;
+      }
+    ).clearLocalAuth.call(adapter);
+
+    expect(deleteProfile).toHaveBeenCalledTimes(1);
+    expect(deleteProfile).toHaveBeenCalledWith('sess-1');
   });
 });
 
 describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
   const newAdapter = (): WhatsAppWebJsAdapter =>
-    new WhatsAppWebJsAdapter({ sessionId: 'sess-1', sessionDataPath: './data/sessions', puppeteer: {} });
+    new WhatsAppWebJsAdapter(createWwebjsTestConfig('sess-1'));
   type FakeClient = EventEmitter & {
     info?: { wid?: { user?: string }; pushname?: string };
     getState: jest.Mock;
@@ -1816,7 +1764,10 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     });
 
     client.emit('authenticated');
-    await jest.advanceTimersByTimeAsync(READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS + 2100);
+    // The bridge-grace clock starts on the first reconciliation probe (~2s after
+    // authentication), not at the authenticated event itself. Advance far enough
+    // to cross that observation-relative grace and reach the following 2s tick.
+    await jest.advanceTimersByTimeAsync(READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS + 4100);
 
     expect(reload).toHaveBeenCalledTimes(1);
 
@@ -1868,8 +1819,7 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     });
     const onError = jest.fn();
     (adapter as unknown as { callbacks: unknown }).callbacks = { onReady, onStateChanged, onError };
-    const clearLocalAuth = jest.fn();
-    (adapter as unknown as { clearLocalAuth: unknown }).clearLocalAuth = clearLocalAuth;
+    const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
 
     client.emit('authenticated');
     await jest.advanceTimersByTimeAsync(91_000);
@@ -1877,7 +1827,7 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     // The link itself is healthy — wiping the only copy of the credentials would trade a
     // restart-fixable fault for a forced re-pair. FAILED with the reason, auth left alone.
     expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
-    expect(clearLocalAuth).not.toHaveBeenCalled();
+    expect(deleteProfile).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledWith(expect.stringContaining('event bridge'));
     expect(onReady).not.toHaveBeenCalled();
     expect(jest.getTimerCount()).toBe(0);
@@ -2033,7 +1983,18 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
 
     const adapter = newAdapter();
     // Runtime never reports the WWebJS global, so the probe never promotes and ticks to the deadline.
-    const { client } = attachFakeClient(adapter, { pupPage: { evaluate: jest.fn().mockResolvedValue(false) } });
+    const { client, onReady, onStateChanged } = attachFakeClient(adapter, {
+      pupPage: { evaluate: jest.fn().mockResolvedValue(false) },
+      destroy: jest.fn().mockResolvedValue(undefined),
+    });
+    const recoveryDone = deferredVoid();
+    const onDisconnected = jest.fn(() => recoveryDone.resolve());
+    (adapter as unknown as { callbacks: unknown }).callbacks = {
+      onReady,
+      onStateChanged,
+      onDisconnected,
+    };
+    const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
 
     client.emit('authenticated');
     await jest.advanceTimersByTimeAsync(80_000);
@@ -2041,9 +2002,14 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
 
     client.emit('authenticated'); // re-fire 80s in — must not restart the window
     await jest.advanceTimersByTimeAsync(11_000); // 91s total since the FIRST authenticated
+    await recoveryDone.promise;
 
-    expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
-    expect(jest.getTimerCount()).toBe(0); // gave up at 90s; not reset by the re-fire
+    // Hitting the original 90s deadline starts the one-shot stuck-auth recovery.
+    // The successful recovery intentionally clears the profile and disconnects so
+    // the session layer can start a fresh generation and re-pair.
+    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+    expect(deleteProfile).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0); // deadline was not reset by the re-fire
   });
 
   // beginClientTeardown sets DISCONNECTED before the awaited destroy/logout; an 'authenticated' event
@@ -2111,6 +2077,9 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     const qrDone = deferredVoid();
     const onQRCode = jest.fn(() => qrDone.resolve());
     (adapter as unknown as { callbacks: { onQRCode: jest.Mock } }).callbacks.onQRCode = onQRCode;
+    // attachFakeClient() bypasses initialize(), whose first lifecycle transition is INITIALIZING.
+    // The QR handler deliberately rejects QR events from a constructor-default DISCONNECTED adapter.
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.INITIALIZING;
 
     client.emit('qr', '2@abc');
     await qrDone.promise;
@@ -2131,6 +2100,9 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     (adapter as unknown as { attachPuppeteerLifecycleListeners: () => void }).attachPuppeteerLifecycleListeners();
     const qrDone = deferredVoid();
     (adapter as unknown as { callbacks: { onQRCode: jest.Mock } }).callbacks.onQRCode = jest.fn(() => qrDone.resolve());
+    // This harness wires a fake client directly, so emulate initialize()'s lifecycle state before
+    // asking the QR handler to accept a real first-generation QR.
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.INITIALIZING;
 
     client.emit('qr', '2@abc');
     await qrDone.promise;
@@ -2195,7 +2167,9 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
       onStateChanged,
     };
 
-    // Pre-await guard passes: the adapter is fresh, no teardown, no disconnect reported.
+    // Pre-await guard passes: emulate the initialized client generation. The adapter constructor
+    // itself starts DISCONNECTED; initialize() would have moved it to INITIALIZING before this client existed.
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.INITIALIZING;
     client.emit('qr', '2@late');
     await Promise.resolve();
     // The encode is in flight (handler is parked on the awaited toDataURL).
@@ -2218,10 +2192,10 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     expect(onStateChanged).not.toHaveBeenCalledWith(EngineStatus.QR_READY);
   });
 
-  // #982: 'LOGOUT' is not a transient drop and the lifecycle cannot recover the link from it —
-  // whatsapp-web.js has already deleted the auth profile by the time the event arrives. The opaque
-  // engine token alone left operators reading it as an ordinary disconnect, so the adapter explains it.
-  it('explains a LOGOUT disconnect (credentials deleted, re-scan required)', () => {
+  // #982: LOGOUT is not an ordinary transient drop. Under NoAuth + persistent Brave, WhatsApp has
+  // unlinked the device but OpenWA preserves the browser profile container; emit a dedicated advisory
+  // without pretending OpenWA deleted LocalAuth credentials (there is no LocalAuth in this architecture).
+  it('explains a LOGOUT disconnect without deleting the persistent Brave profile', () => {
     const adapter = newAdapter();
     const logger = (adapter as unknown as { logger: { warn: (m: string) => void } }).logger;
     const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
@@ -2229,12 +2203,19 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
 
     client.emit('disconnected', 'LOGOUT');
 
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0][0]).toMatch(/re-scan/i);
-    expect(warnSpy.mock.calls[0][0]).toMatch(/credential/i);
+    // Every disconnect now has one structured diagnostic warning. LOGOUT adds a second,
+    // reason-specific advisory. Under NoAuth + persistent Brave, the profile container is
+    // intentionally preserved; WhatsApp has unlinked the device and the next generation may pair again.
+    const logoutAdvisory = warnSpy.mock.calls.find(
+      ([, context]) => (context as { action?: string } | undefined)?.action === 'wwebjs_logout_disconnect',
+    );
+    expect(logoutAdvisory).toBeDefined();
+    expect(String(logoutAdvisory?.[0])).toMatch(/unlinked/i);
+    expect(String(logoutAdvisory?.[0])).toMatch(/profile|pairing/i);
   });
 
-  // Guards against over-explaining: an ordinary transient reason must not gain the re-scan advisory.
+  // Guards against over-explaining: an ordinary transient reason gets the generic diagnostic only,
+  // never the LOGOUT-specific unlink/pairing advisory.
   it('does not explain an ordinary transient disconnect reason', () => {
     const adapter = newAdapter();
     const logger = (adapter as unknown as { logger: { warn: (m: string) => void } }).logger;
@@ -2243,7 +2224,16 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
 
     client.emit('disconnected', 'CONFLICT');
 
-    expect(warnSpy).not.toHaveBeenCalled();
+    // Ordinary disconnects still get the generic structured diagnostic; they must not receive
+    // the LOGOUT-specific unlink/pairing advisory.
+    expect(warnSpy).toHaveBeenCalledWith(
+      'WhatsApp Web client disconnected',
+      expect.objectContaining({ reason: 'CONFLICT', action: 'wwebjs_disconnected' }),
+    );
+    const logoutAdvisory = warnSpy.mock.calls.find(
+      ([, context]) => (context as { action?: string } | undefined)?.action === 'wwebjs_logout_disconnect',
+    );
+    expect(logoutAdvisory).toBeUndefined();
   });
 
   // A deliberate logout() also raises this event: client.logout() triggers the in-page Cmd 'logout'
@@ -2322,63 +2312,74 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
   // own cadence (a hung probe can't stall the loop) and still honor the 90s give-up deadline.
   it('keeps probing and self-heals (clears auth + disconnects) when getState hangs past the deadline', async () => {
     jest.useFakeTimers();
-    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
 
     const adapter = newAdapter();
+    const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
     const { client } = attachFakeClient(adapter, {
       getState: jest.fn().mockReturnValue(new Promise<never>(() => {})),
       destroy: jest.fn().mockResolvedValue(undefined),
     });
-    const onDisconnected = jest.fn();
+    const recoveryDone = deferredVoid();
+    const onDisconnected = jest.fn(() => recoveryDone.resolve());
     (adapter as unknown as { callbacks: { onDisconnected?: jest.Mock } }).callbacks.onDisconnected = onDisconnected;
 
     client.emit('authenticated');
     await jest.advanceTimersByTimeAsync(50_000);
-    expect(jest.getTimerCount()).toBe(1); // chain still alive despite the hung probe
+
+    // The reconciliation cadence is still armed. While a probe is actively waiting,
+    // withProbeTimeout() owns a second timer for its 5s bound, so the exact Jest timer
+    // count can legitimately be 2 here. What matters is that reconciliation is still
+    // alive and has retried the hung getState() rather than stalling permanently.
+    expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
+    expect(jest.getTimerCount()).toBeGreaterThanOrEqual(1);
+    expect(client.getState.mock.calls.length).toBeGreaterThan(1);
 
     await jest.advanceTimersByTimeAsync(45_000); // ~95s total
+    // recoverFromStuckAuth() is intentionally launched fire-and-forget by the deadline tick.
+    // Wait for its externally observable completion instead of assuming timer advancement also
+    // drained the whole async destroy -> orphan-check -> profile-delete chain.
+    await recoveryDone.promise;
     expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED); // never falsely promoted; self-healed
     expect(jest.getTimerCount()).toBe(0); // gave up at the 90s deadline
-    expect(client.getState).toHaveBeenCalledTimes(1); // at-most-one-in-flight guard held
+    // Repeated calls are expected: each reconciliation wait is bounded to 5s, then a later
+    // cadence tick may start another probe. The guard prevents concurrent wrapper probes;
+    // it does not promise one getState() call for the entire 90s reconciliation window.
+    expect(client.getState.mock.calls.length).toBeGreaterThan(1);
     // Self-heal: the broken auth is cleared and a disconnect surfaced so the lifecycle re-pairs (QR).
-    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('session-sess-1'), {
-      recursive: true,
-      force: true,
-      maxRetries: 4,
-    });
+    expect(deleteProfile).toHaveBeenCalledTimes(1);
+    expect(deleteProfile).toHaveBeenCalledWith('sess-1');
     expect(onDisconnected).toHaveBeenCalled();
-
-    rmSpy.mockRestore();
   });
 
   // #981: clearing the auth dir destroys the ONLY copy of the session's WhatsApp credentials, and the
   // loss is permanent — every later start finds an empty profile and can only show a QR. Until now the
   // adapter logged only the FAILURE to delete, so a successful wipe left no trace at all and triage
   // could not tell an OpenWA self-heal apart from a WhatsApp-side logout or an untouched profile.
-  it('records the credential deletion, naming the session and the directory removed', async () => {
-    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+  it('records the Brave-profile deletion, naming the session and the directory removed', async () => {
     const adapter = newAdapter();
+    const manager = braveProfileManagerOf(adapter);
     const logger = (adapter as unknown as { logger: { warn: jest.Mock } }).logger;
     const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
-    await (adapter as unknown as { clearLocalAuth: () => Promise<void> }).clearLocalAuth.call(adapter);
+    await (
+      adapter as unknown as {
+        clearLocalAuth: () => Promise<void>;
+      }
+    ).clearLocalAuth.call(adapter);
 
-    expect(rmSpy).toHaveBeenCalled();
+    expect(manager.deleteProfile as jest.Mock).toHaveBeenCalledWith('sess-1');
     const deletion = warnSpy.mock.calls.find(([message]) => /deleted/i.test(String(message)));
     expect(deletion).toBeDefined();
-    expect(String(deletion?.[0])).toContain('session-sess-1'); // which profile is gone
-    expect(deletion?.[1]).toMatchObject({ sessionId: 'sess-1' }); // which session, for a multi-session host
+    expect(String(deletion?.[0])).toContain(manager.getProfilePath('sess-1'));
+    expect(deletion?.[1]).toMatchObject({ sessionId: 'sess-1' });
 
     warnSpy.mockRestore();
-    rmSpy.mockRestore();
   });
 
   // #981: the reporter saw "all sessions" come back as QR. Without a sessionId on the timeout warning
   // there is no way to tell from the logs whether one session timed out or every one of them did.
   it('identifies the session in the readiness-timeout warning that precedes the deletion', async () => {
     jest.useFakeTimers();
-    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
-
     const adapter = newAdapter();
     const logger = (adapter as unknown as { logger: { warn: jest.Mock } }).logger;
     const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
@@ -2395,12 +2396,11 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     expect(timeout?.[1]).toMatchObject({ sessionId: 'sess-1' });
 
     warnSpy.mockRestore();
-    rmSpy.mockRestore();
   });
 
   it('fails terminally on a second stuck-auth cycle (no QR -> timeout -> clear loop)', async () => {
-    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
     const adapter = newAdapter();
+    const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
     const onError = jest.fn();
     (adapter as unknown as { callbacks: { onError?: jest.Mock } }).callbacks = { onError };
     const recover = (adapter as unknown as { recoverFromStuckAuth: () => Promise<void> }).recoverFromStuckAuth.bind(
@@ -2412,8 +2412,7 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     await recover(); // second: terminal failure, not another clear
     expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
     expect(onError).toHaveBeenCalled();
-    expect(rmSpy).toHaveBeenCalledTimes(1); // auth cleared only once
-    rmSpy.mockRestore();
+    expect(deleteProfile).toHaveBeenCalledTimes(1); // profile cleared only once
   });
 
   // Stuck-auth recovery budget is now owned by the SESSION, not the adapter. The adapter asks the
@@ -2422,18 +2421,16 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
   // adapter use/test where no callback is supplied.)
   describe('stuck-auth recovery claim/deny path', () => {
     const newAdapter = (): WhatsAppWebJsAdapter =>
-      new WhatsAppWebJsAdapter({ sessionId: 'sess-1', sessionDataPath: './data/sessions', puppeteer: {} });
+      new WhatsAppWebJsAdapter(createWwebjsTestConfig('sess-1'));
 
-    // Failing assertions throw before the per-test rmSpy.mockRestore() runs, which would leave the
-    // fs.promises.rm spy installed and let its call count leak into the next test. Restore every spy
-    // after each test so each starts from a clean fs.
+    // Keep spy state isolated between recovery-policy cases.
     afterEach(() => {
       jest.restoreAllMocks();
     });
 
     it('does NOT clear auth and goes terminal FAILED when the claim callback DENIES (budget already spent by an earlier generation)', async () => {
-      const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
       const adapter = newAdapter();
+      const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
       const onError = jest.fn();
       const onDisconnected = jest.fn();
       // The session denies: a prior generation already used the one-shot budget.
@@ -2449,18 +2446,17 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
       await recover();
 
       // The destructive rm must NEVER run — denial is terminal before any I/O.
-      expect(rmSpy).not.toHaveBeenCalled();
+      expect(deleteProfile).not.toHaveBeenCalled();
       expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
       expect(onError).toHaveBeenCalledTimes(1);
       expect(onError).toHaveBeenCalledWith(expect.stringMatching(/could not reach readiness after re-pairing/i));
       // A denied claim does NOT drive the reconnect path: no disconnect, no re-pair.
       expect(onDisconnected).not.toHaveBeenCalled();
-      rmSpy.mockRestore();
     });
 
     it('clears auth and disconnects when the claim callback GRANTS (the recovery is allowed to proceed)', async () => {
-      const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
       const adapter = newAdapter();
+      const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
       const onDisconnected = jest.fn();
       (adapter as unknown as { callbacks: unknown }).callbacks = {
         onDisconnected,
@@ -2472,15 +2468,14 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
 
       await recover();
 
-      expect(rmSpy).toHaveBeenCalledTimes(1);
+      expect(deleteProfile).toHaveBeenCalledTimes(1);
       expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
       expect(onDisconnected).toHaveBeenCalledWith(expect.stringContaining('cleared for re-pairing'));
-      rmSpy.mockRestore();
     });
 
     it('still grants only once via the fallback instance-local boolean when NO claim callback is supplied (standalone adapter use stays one-shot)', async () => {
-      const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
       const adapter = newAdapter();
+      const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
       const onError = jest.fn();
       // No claimStuckAuthRecovery callback — standalone adapter (no session lifecycle).
       (adapter as unknown as { callbacks: { onError?: jest.Mock } }).callbacks = { onError };
@@ -2493,13 +2488,12 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
       await recover(); // fallback denies: terminal
       expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
       expect(onError).toHaveBeenCalled();
-      expect(rmSpy).toHaveBeenCalledTimes(1);
-      rmSpy.mockRestore();
+      expect(deleteProfile).toHaveBeenCalledTimes(1);
     });
 
     it('treats a claim callback that THROWS as a denial (fail-closed: never wipe credentials on an unsettled claim)', async () => {
-      const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
       const adapter = newAdapter();
+      const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
       const onError = jest.fn();
       const onDisconnected = jest.fn();
       (adapter as unknown as { callbacks: unknown }).callbacks = {
@@ -2515,11 +2509,10 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
 
       await recover();
 
-      expect(rmSpy).not.toHaveBeenCalled();
+      expect(deleteProfile).not.toHaveBeenCalled();
       expect(adapter.getStatus()).toBe(EngineStatus.FAILED);
       expect(onError).toHaveBeenCalled();
       expect(onDisconnected).not.toHaveBeenCalled();
-      rmSpy.mockRestore();
     });
   });
 });
@@ -5291,29 +5284,27 @@ describe('WhatsAppWebJsAdapter navigation re-inject grace (#1081)', () => {
   });
 });
 
-describe('WhatsAppWebJsAdapter stale Singleton cleanup (pre-launch)', () => {
+describe('WhatsAppWebJsAdapter Brave pre-launch cleanup', () => {
   const SESSION_ID = 'sess-singleton';
-  const newAdapter = (): WhatsAppWebJsAdapter =>
-    new WhatsAppWebJsAdapter({ sessionId: SESSION_ID, sessionDataPath: './data/sessions', puppeteer: {} });
+  let manager: BraveProfileManager;
 
-  let rmSpy: jest.SpyInstance;
+  const newAdapter = (): WhatsAppWebJsAdapter => {
+    manager = createTestBraveProfileManager();
+    return new WhatsAppWebJsAdapter(createWwebjsTestConfig(SESSION_ID, {}, manager));
+  };
+
   let clientInitSpy: jest.SpyInstance;
   let savedWebVersion: string | undefined;
 
   beforeEach(() => {
-    // Keep initialize() offline: 'off' skips the wa-version registry fetch in resolveWebVersionPin.
     savedWebVersion = process.env.WWEBJS_WEB_VERSION;
     process.env.WWEBJS_WEB_VERSION = 'off';
-    rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
-    // Stub Client.prototype.initialize so the real wwebjs Client is built but no browser launches.
-    // (Structural cast: the wwebjs Client typings don't resolve under the lint project.)
     clientInitSpy = jest
       .spyOn(Client.prototype as unknown as { initialize: () => Promise<void> }, 'initialize')
       .mockResolvedValue(undefined);
   });
 
   afterEach(() => {
-    rmSpy.mockRestore();
     clientInitSpy.mockRestore();
     if (savedWebVersion === undefined) {
       delete process.env.WWEBJS_WEB_VERSION;
@@ -5322,90 +5313,80 @@ describe('WhatsAppWebJsAdapter stale Singleton cleanup (pre-launch)', () => {
     }
   });
 
-  it('removes the three Singleton files from the LocalAuth profile dir right before client.initialize()', async () => {
+  it('runs orphan verification and Singleton cleanup before client.initialize()', async () => {
     const order: string[] = [];
-    rmSpy.mockImplementation(() => {
-      order.push('rm');
-      return Promise.resolve(undefined);
+    const adapter = newAdapter();
+
+    (manager.killOrphanedBraveProcesses as jest.Mock).mockImplementation(() => {
+      order.push('orphan-verification');
+      return Promise.resolve();
+    });
+    (manager.removeStaleSingletonFiles as jest.Mock).mockImplementation(() => {
+      order.push('singleton-cleanup');
+      return Promise.resolve();
     });
     clientInitSpy.mockImplementation(() => {
       order.push('client.initialize');
-      return Promise.resolve(undefined);
+      return Promise.resolve();
     });
 
-    await newAdapter().initialize({});
+    await adapter.initialize({});
 
-    // Same dir LocalAuth uses as userDataDir: <resolved dataPath>/session-<clientId>.
-    const profileDir = path.join(path.resolve('./data/sessions'), `session-${SESSION_ID}`);
-    expect(rmSpy).toHaveBeenCalledTimes(3);
-    expect(rmSpy).toHaveBeenCalledWith(path.join(profileDir, 'SingletonLock'), { force: true });
-    expect(rmSpy).toHaveBeenCalledWith(path.join(profileDir, 'SingletonSocket'), { force: true });
-    expect(rmSpy).toHaveBeenCalledWith(path.join(profileDir, 'SingletonCookie'), { force: true });
-    expect(clientInitSpy).toHaveBeenCalledTimes(1);
-    expect(order).toEqual(['rm', 'rm', 'rm', 'client.initialize']);
+    expect(manager.ensureProfile as jest.Mock).toHaveBeenCalledWith(SESSION_ID);
+    expect(manager.killOrphanedBraveProcesses as jest.Mock).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.anything(),
+    );
+    expect(manager.removeStaleSingletonFiles as jest.Mock).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.anything(),
+    );
+    expect(order).toEqual(['orphan-verification', 'singleton-cleanup', 'client.initialize']);
   });
 
-  it('still initializes when the Singleton files cannot be removed (best-effort, never fails the start)', async () => {
-    rmSpy.mockRejectedValue(new Error('EPERM: operation not permitted'));
+  it('fails closed when process ownership cannot be verified before profile-lock cleanup', async () => {
+    const adapter = newAdapter();
+    (manager.killOrphanedBraveProcesses as jest.Mock).mockRejectedValue(
+      new Error('process enumeration unavailable'),
+    );
 
-    await expect(newAdapter().initialize({})).resolves.toBeUndefined();
+    await expect(adapter.initialize({})).rejects.toThrow('process enumeration unavailable');
 
-    expect(rmSpy).toHaveBeenCalledTimes(3); // all three attempted even though each failed
-    expect(clientInitSpy).toHaveBeenCalledTimes(1);
+    expect(manager.removeStaleSingletonFiles as jest.Mock).not.toHaveBeenCalled();
+    expect(clientInitSpy).not.toHaveBeenCalled();
   });
 });
 
-describe('WhatsAppWebJsAdapter orphaned Chromium sweep (pre-launch)', () => {
+describe('WhatsAppWebJsAdapter Brave launch marker and pre-launch orchestration', () => {
   const SESSION_ID = 'sess-orphan';
-  const newAdapter = (): WhatsAppWebJsAdapter =>
-    new WhatsAppWebJsAdapter({ sessionId: SESSION_ID, sessionDataPath: './data/sessions', puppeteer: {} });
 
-  type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) => void;
-
-  let execFileSpy: jest.SpyInstance;
-  let killSpy: jest.SpyInstance;
-  let rmSpy: jest.SpyInstance;
+  let manager: BraveProfileManager;
   let clientInitSpy: jest.SpyInstance;
   let savedWebVersion: string | undefined;
 
-  // execFile is overloaded, so spy through a structural shape like the Client.prototype spies above.
-  // The adapter invokes it as execFile('ps', args, opts, callback); the callback is always last.
-  const mockPsResult = (result: { stdout?: string; error?: Error }): void => {
-    execFileSpy.mockImplementation((...args: unknown[]) => {
-      const cb = args[args.length - 1] as ExecFileCallback;
-      cb(result.error ?? null, result.stdout ?? '', '');
-    });
-  };
-  // `ps -eo pid=,args=` rows: leading whitespace, pid, then the full command line.
-  const psTable = (rows: [number, string][]): string => rows.map(([pid, args]) => `  ${pid} ${args}`).join('\n') + '\n';
-  const loggerLogSpy = (adapter: WhatsAppWebJsAdapter): jest.SpyInstance => {
-    const logger = (adapter as unknown as { logger: { log: (message: string, context?: unknown) => void } }).logger;
-    return jest.spyOn(logger, 'log').mockImplementation(() => undefined);
+  const newAdapter = (
+    sessionId = SESSION_ID,
+    args?: string[],
+  ): WhatsAppWebJsAdapter => {
+    manager = createTestBraveProfileManager();
+    return new WhatsAppWebJsAdapter(
+      createWwebjsTestConfig(
+        sessionId,
+        args ? { args } : {},
+        manager,
+      ),
+    );
   };
 
   beforeEach(() => {
-    // Keep initialize() offline: 'off' skips the wa-version registry fetch in resolveWebVersionPin.
     savedWebVersion = process.env.WWEBJS_WEB_VERSION;
     process.env.WWEBJS_WEB_VERSION = 'off';
-    // Default: an empty process table (nothing to sweep); tests override via mockPsResult.
-    execFileSpy = jest
-      .spyOn(childProcess as unknown as { execFile: (...args: unknown[]) => void }, 'execFile')
-      .mockImplementation((...args: unknown[]) => {
-        (args[args.length - 1] as ExecFileCallback)(null, '', '');
-      });
-    // Never let a test signal a real process.
-    killSpy = jest.spyOn(process, 'kill').mockImplementation(() => true);
-    rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
-    // Stub Client.prototype.initialize so the real wwebjs Client is built but no browser launches.
     clientInitSpy = jest
       .spyOn(Client.prototype as unknown as { initialize: () => Promise<void> }, 'initialize')
       .mockResolvedValue(undefined);
   });
 
   afterEach(() => {
-    execFileSpy.mockRestore();
-    killSpy.mockRestore();
-    rmSpy.mockRestore();
     clientInitSpy.mockRestore();
     if (savedWebVersion === undefined) {
       delete process.env.WWEBJS_WEB_VERSION;
@@ -5419,26 +5400,26 @@ describe('WhatsAppWebJsAdapter orphaned Chromium sweep (pre-launch)', () => {
 
     await adapter.initialize({});
 
-    const client = (adapter as unknown as { client: { options: { puppeteer?: { args?: string[] } } } }).client;
+    const client = (
+      adapter as unknown as {
+        client: { options: { puppeteer?: { args?: string[] } } };
+      }
+    ).client;
+
     expect(client.options.puppeteer?.args).toContain(`--openwa-session=${SESSION_ID}`);
   });
 
   it('does not mutate the caller-owned puppeteer args array shared across sessions', async () => {
-    // Every adapter receives the SAME array instance — ConfigService.get() returns a live reference
-    // into the cached config tree, via the plugin path (engine/builtin/whatsapp-web-js) and the
-    // factory fallback alike. Appending in place therefore rewrites global config for the rest of
-    // the process lifetime, leaking one session's flags (proxy, session marker) into every later
-    // launch. Without the defensive copy this assertion sees both session markers accumulate.
     const sharedArgs = ['--no-sandbox'];
+
     const argsFor = async (sessionId: string): Promise<string[] | undefined> => {
-      const adapter = new WhatsAppWebJsAdapter({
-        sessionId,
-        sessionDataPath: './data/sessions',
-        puppeteer: { args: sharedArgs },
-      });
+      const adapter = newAdapter(sessionId, sharedArgs);
       await adapter.initialize({});
-      return (adapter as unknown as { client: { options: { puppeteer?: { args?: string[] } } } }).client.options
-        .puppeteer?.args;
+      return (
+        adapter as unknown as {
+          client: { options: { puppeteer?: { args?: string[] } } };
+        }
+      ).client.options.puppeteer?.args;
     };
 
     await argsFor('sess-a');
@@ -5446,137 +5427,42 @@ describe('WhatsAppWebJsAdapter orphaned Chromium sweep (pre-launch)', () => {
 
     expect(sharedArgs).toEqual(['--no-sandbox']);
     expect(argsB).toContain('--openwa-session=sess-b');
-    // The cross-session leak that let a restart of sess-a SIGKILL sess-b's live browser: the sweep
-    // substring-matches this marker against the full `ps` command line.
     expect(argsB).not.toContain('--openwa-session=sess-a');
   });
 
-  it('SIGKILLs a Chromium process carrying this session marker and logs the sweep', async () => {
-    mockPsResult({
-      stdout: psTable([
-        [
-          1501,
-          `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --headless --openwa-session=${SESSION_ID}`,
-        ],
-        [1502, '/usr/bin/node dist/main.js'],
-      ]),
-    });
+  it('delegates orphan-process verification to BraveProfileManager before initialization', async () => {
     const adapter = newAdapter();
-    const logSpy = loggerLogSpy(adapter);
 
     await adapter.initialize({});
 
-    expect(execFileSpy).toHaveBeenCalledTimes(1);
-    // No shell: ps is exec'd directly with an argv array, an options object, and a callback.
-    expect(execFileSpy).toHaveBeenCalledWith('ps', ['-eo', 'pid=,args='], expect.any(Object), expect.any(Function));
-    expect(killSpy).toHaveBeenCalledTimes(1);
-    expect(killSpy).toHaveBeenCalledWith(1501, 'SIGKILL');
-    expect(logSpy).toHaveBeenCalledWith(
-      'Killed 1 orphaned Chromium process(es) left over from a previous process lifetime',
-      {
-        sessionId: SESSION_ID,
-        pids: [1501],
-      },
+    expect(manager.killOrphanedBraveProcesses as jest.Mock).toHaveBeenCalledTimes(1);
+    expect(manager.killOrphanedBraveProcesses as jest.Mock).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.anything(),
     );
-  });
-
-  it('does NOT kill a non-browser process that merely carries the marker string', async () => {
-    mockPsResult({
-      stdout: psTable([
-        [1601, `/bin/grep --openwa-session=${SESSION_ID}`],
-        [1602, `/usr/bin/node scan-sessions.js --openwa-session=${SESSION_ID}`],
-      ]),
-    });
-
-    await newAdapter().initialize({});
-
-    expect(killSpy).not.toHaveBeenCalled();
-  });
-
-  it('does NOT kill a Chromium process belonging to a different session', async () => {
-    mockPsResult({
-      stdout: psTable([[1701, '/usr/lib/chromium/chromium --headless --no-sandbox --openwa-session=session-lain']]),
-    });
-
-    await newAdapter().initialize({});
-
-    expect(killSpy).not.toHaveBeenCalled();
-  });
-
-  it('does NOT kill a live sibling whose marker merely SHARES A PREFIX with ours (sess vs sess-2)', async () => {
-    // `--openwa-session=sess-orphan` is a substring of `--openwa-session=sess-orphan-2`: a substring
-    // match would SIGKILL the sibling's live browser; the token-exact match must spare it.
-    mockPsResult({
-      stdout: psTable([
-        [1801, `/usr/lib/chromium/chromium --headless --no-sandbox --openwa-session=${SESSION_ID}-2`],
-        [1802, `/usr/lib/chromium/chromium --headless --no-sandbox --openwa-session=${SESSION_ID}extra`],
-      ]),
-    });
-
-    await newAdapter().initialize({});
-
-    expect(killSpy).not.toHaveBeenCalled();
-  });
-
-  it('kills the orphan when the marker is the LAST token on the command line', async () => {
-    mockPsResult({
-      stdout: psTable([[1803, `/usr/lib/chromium/chromium --headless --no-sandbox --openwa-session=${SESSION_ID}`]]),
-    });
-
-    await newAdapter().initialize({});
-
-    expect(killSpy).toHaveBeenCalledTimes(1);
-    expect(killSpy).toHaveBeenCalledWith(1803, 'SIGKILL');
-  });
-
-  it('skips the sweep on platforms other than darwin/linux (no ps, no kill)', async () => {
-    const platform = Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor;
-    Object.defineProperty(process, 'platform', { value: 'win32' });
-    try {
-      await newAdapter().initialize({});
-    } finally {
-      Object.defineProperty(process, 'platform', platform);
-    }
-
-    expect(execFileSpy).not.toHaveBeenCalled();
-    expect(killSpy).not.toHaveBeenCalled();
-  });
-
-  it('still initializes when ps fails (best-effort, never fails the start)', async () => {
-    mockPsResult({ error: new Error('spawn ps ENOENT') });
-
-    await expect(newAdapter().initialize({})).resolves.toBeUndefined();
-
-    expect(killSpy).not.toHaveBeenCalled();
     expect(clientInitSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('runs the orphan sweep before the Singleton cleanup and client.initialize()', async () => {
+  it('runs orphan verification before Singleton cleanup and client.initialize()', async () => {
     const order: string[] = [];
-    execFileSpy.mockImplementation((...args: unknown[]) => {
-      order.push('ps');
-      (args[args.length - 1] as ExecFileCallback)(
-        null,
-        psTable([[1801, `/usr/bin/chromium --headless --openwa-session=${SESSION_ID}`]]),
-        '',
-      );
+    const adapter = newAdapter();
+
+    (manager.killOrphanedBraveProcesses as jest.Mock).mockImplementation(() => {
+      order.push('orphan-verification');
+      return Promise.resolve();
     });
-    killSpy.mockImplementation(() => {
-      order.push('kill');
-      return true;
-    });
-    rmSpy.mockImplementation(() => {
-      order.push('rm');
-      return Promise.resolve(undefined);
+    (manager.removeStaleSingletonFiles as jest.Mock).mockImplementation(() => {
+      order.push('singleton-cleanup');
+      return Promise.resolve();
     });
     clientInitSpy.mockImplementation(() => {
       order.push('client.initialize');
-      return Promise.resolve(undefined);
+      return Promise.resolve();
     });
 
-    await newAdapter().initialize({});
+    await adapter.initialize({});
 
-    expect(order).toEqual(['ps', 'kill', 'rm', 'rm', 'rm', 'client.initialize']);
+    expect(order).toEqual(['orphan-verification', 'singleton-cleanup', 'client.initialize']);
   });
 });
 
@@ -7011,14 +6897,8 @@ describe('collectDialogDiagnostics (in-page dialog diagnostics)', () => {
 describe('WhatsAppWebJsAdapter account-restriction reporting', () => {
   type FakeClient = EventEmitter & { getState: jest.Mock; pupPage: { evaluate: jest.Mock } };
 
-  // These tests emit disconnected:LOGOUT, whose handler reaches clearLocalAuth() → fs.rm(force:true)
-  // of `<sessionDataPath>/session-sess-1`. Stub it: unmocked, running this suite on a machine that
-  // happens to hold a session with that name would silently delete its WhatsApp credentials.
-  let rmSpy: jest.SpyInstance;
-  beforeEach(() => {
-    rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
-  });
-  afterEach(() => rmSpy.mockRestore());
+  // NoAuth preserves the Brave profile on a LOGOUT event; these tests therefore need no filesystem
+  // deletion stub. Only the explicit one-shot stuck-auth recovery deletes a profile.
 
   const attachRestrictionAware = (): {
     client: FakeClient;
@@ -7071,9 +6951,7 @@ describe('WhatsAppWebJsAdapter account-restriction reporting', () => {
     client.emit('disconnected', state);
 
     expect(onAccountRestriction).not.toHaveBeenCalled();
-    // Guards the stub above rather than the feature: proves no LOGOUT path in these tests reached a
-    // real credential removal, so a future change here cannot start deleting a developer's profile.
-    expect(rmSpy).not.toHaveBeenCalled();
+    // NoAuth does not delete the persistent Brave profile on a normal disconnect/LOGOUT event.
   });
 
   // The restriction explains the disconnect, so it has to be known before the disconnect is handled —

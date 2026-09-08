@@ -1,3 +1,6 @@
+
+
+
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { DockerService, MANAGED_DOCKER_PROFILES } from './docker.service';
@@ -349,21 +352,44 @@ describe('DockerService managed specs ↔ docker-compose.yml parity', () => {
     },
   );
 
-  // A compose `environment:` entry overrides the image ENV even when it renders BLANK, and the blank
-  // is then cleared by load-env, so a `- PUPPETEER_EXECUTABLE_PATH=${PUPPETEER_EXECUTABLE_PATH:-}`
-  // forward deletes the Dockerfile's path inside the container and puppeteer falls back to a
-  // bundled Chromium the image deliberately does not ship (PUPPETEER_SKIP_CHROMIUM_DOWNLOAD). The
-  // forward must therefore carry the image's own value as its default, kept in sync by this test.
-  it('forwards PUPPETEER_EXECUTABLE_PATH with the Dockerfile default, not blank', () => {
-    const imageValue = /^ENV PUPPETEER_EXECUTABLE_PATH=(\S+)$/m.exec(
-      readFileSync(join(__dirname, '../../../Dockerfile'), 'utf8'),
-    )?.[1];
-    expect(imageValue).toBeDefined();
+  // whatsapp-web.js now launches the Brave binary resolved by the engine configuration. The
+  // production image installs Brave at /usr/bin/brave and deliberately does NOT define a
+  // PUPPETEER_EXECUTABLE_PATH image ENV anymore. That variable remains only as a legacy fallback
+  // behind BRAVE_EXECUTABLE, so compose must forward it as optional/blank rather than pinning the
+  // removed Chrome-for-Testing path.
+  it('keeps legacy PUPPETEER_EXECUTABLE_PATH optional now that the image ships Brave', () => {
+    const dockerfile = readFileSync(
+      join(__dirname, '../../../Dockerfile'),
+      'utf8',
+    );
+
+    expect(dockerfile).toContain(
+      'apt-get install -y --no-install-recommends brave-browser',
+    );
+    expect(dockerfile).toContain(
+      'ln -sf /opt/brave.com/brave/brave /usr/bin/brave',
+    );
+    expect(dockerfile).not.toMatch(
+      /^ENV PUPPETEER_EXECUTABLE_PATH=/m,
+    );
+
     for (const file of ['docker-compose.yml', 'docker-compose.dev.yml']) {
-      const line = readFileSync(join(__dirname, '../../..', file), 'utf8')
+      const line = readFileSync(
+        join(__dirname, '../../..', file),
+        'utf8',
+      )
         .split('\n')
-        .find(l => l.trim().startsWith('- PUPPETEER_EXECUTABLE_PATH='));
-      expect(line?.trim()).toBe(`- PUPPETEER_EXECUTABLE_PATH=\${PUPPETEER_EXECUTABLE_PATH:-${imageValue}}`);
+        .find(l =>
+          l
+            .trim()
+            .startsWith(
+              '- PUPPETEER_EXECUTABLE_PATH=',
+            ),
+        );
+
+      expect(line?.trim()).toBe(
+        '- PUPPETEER_EXECUTABLE_PATH=${PUPPETEER_EXECUTABLE_PATH:-}',
+      );
     }
   });
 
@@ -451,3 +477,5 @@ describe('PostgreSQL client is not older than the servers the stack ships', () =
     }).toEqual({ client, composeServerCovered: true, managedServerCovered: true });
   });
 });
+
+

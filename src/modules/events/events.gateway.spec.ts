@@ -1,38 +1,30 @@
+
+
+
 import { UnauthorizedException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 
 // ConfigService stub for the media-shed knob: no override means the default cap applies.
 const asConfig = (): { get: jest.Mock } => ({ get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue) });
 import { Socket } from 'socket.io';
-import { EventsGateway, isSessionSubscriptionAllowed } from './events.gateway';
+import { EventsGateway } from './events.gateway';
 import { AuthService } from '../auth/auth.service';
+import { SessionTenantAccessService } from '../access-control/session-tenant-access.service';
+import { SessionScopeType } from '../access-control/session-scope';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { SUBSCRIBABLE_EVENTS, buildRoomName } from './dto/ws-messages.dto';
 import type { WSClientMessage, WSErrorResponse, WSSubscribedResponse, WSEventMessage } from './dto/ws-messages.dto';
 import { WEBHOOK_RESERVED_EVENTS } from '../webhook/dto/webhook.dto';
 
-describe('isSessionSubscriptionAllowed (WS session-scope enforcement)', () => {
-  it('allows an unrestricted key (null allowedSessions) to subscribe to anything, including *', () => {
-    expect(isSessionSubscriptionAllowed(null, '*')).toBe(true);
-    expect(isSessionSubscriptionAllowed(null, 'sess-1')).toBe(true);
-  });
+type SessionTenantAccessMock = {
+  assertSessionAccess: jest.Mock;
+  getEffectiveSessionScope: jest.Mock;
+};
 
-  it('allows an unrestricted key (empty allowedSessions) to subscribe to *', () => {
-    expect(isSessionSubscriptionAllowed([], '*')).toBe(true);
-  });
-
-  it('forbids a session-scoped key from subscribing to the * wildcard', () => {
-    expect(isSessionSubscriptionAllowed(['sess-1'], '*')).toBe(false);
-  });
-
-  it('allows a session-scoped key to subscribe to a session in its allowlist', () => {
-    expect(isSessionSubscriptionAllowed(['sess-1', 'sess-2'], 'sess-2')).toBe(true);
-  });
-
-  it('forbids a session-scoped key from subscribing to a session outside its allowlist', () => {
-    expect(isSessionSubscriptionAllowed(['sess-1'], 'sess-2')).toBe(false);
-  });
+const buildSessionTenantAccessMock = (): SessionTenantAccessMock => ({
+  assertSessionAccess: jest.fn().mockResolvedValue({}),
+  getEffectiveSessionScope: jest.fn().mockResolvedValue({ type: SessionScopeType.ALL }),
 });
 
 interface MockSocket {
@@ -53,6 +45,7 @@ interface MockSocket {
 describe('EventsGateway connection auth + subscribe re-validation', () => {
   let gateway: EventsGateway;
   let authService: { validateApiKey: jest.Mock };
+  let sessionTenantAccessService: SessionTenantAccessMock;
 
   const makeSocket = (auth: { apiKey?: string } = {}): MockSocket => ({
     id: 'sock-1',
@@ -72,10 +65,12 @@ describe('EventsGateway connection auth + subscribe re-validation', () => {
   beforeEach(() => {
     authService = { validateApiKey: jest.fn() };
     auditService = { logWarn: jest.fn().mockResolvedValue(null) };
+    sessionTenantAccessService = buildSessionTenantAccessMock();
     gateway = new EventsGateway(
       authService as unknown as AuthService,
       auditService as unknown as AuditService,
       asConfig() as unknown as ConfigService,
+      sessionTenantAccessService as unknown as SessionTenantAccessService,
     );
   });
 
@@ -190,13 +185,14 @@ describe('EventsGateway connection auth + subscribe re-validation', () => {
     expect(sock.join).toHaveBeenCalledWith(buildRoomName('sess-1', 'message.received'));
   });
 
-  // Cross-tenant guard (#221): a session-scoped key must not subscribe to a foreign session or '*'.
-  // The pure predicate is covered above; these drive it through handleSubscribe so a regression that
-  // drops the check (or reads the stale connect-time key) is caught end-to-end.
+  // Cross-tenant guard (#221): EventsGateway delegates tenancy to SessionTenantAccessService.
+  // These tests pin that delegation at the WebSocket boundary; role/ownership/allowedSessions
+  // resolution itself belongs to SessionTenantAccessService, the shared REST/WS/MCP authority.
   it('forbids a session-scoped key from subscribing to a session outside its allowlist', async () => {
     authService.validateApiKey.mockResolvedValue({ name: 'k', allowedSessions: ['sess-1'] });
     const sock = makeSocket({ apiKey: 'good' });
     await gateway.handleConnection(asSocket(sock));
+    sessionTenantAccessService.assertSessionAccess.mockRejectedValueOnce(new Error('Session not found'));
 
     const res = (await gateway.handleMessage(asSocket(sock), subscribeMsg('sess-2', ['*']))) as WSErrorResponse;
 
@@ -209,6 +205,10 @@ describe('EventsGateway connection auth + subscribe re-validation', () => {
     authService.validateApiKey.mockResolvedValue({ name: 'k', allowedSessions: ['sess-1'] });
     const sock = makeSocket({ apiKey: 'good' });
     await gateway.handleConnection(asSocket(sock));
+    sessionTenantAccessService.getEffectiveSessionScope.mockResolvedValueOnce({
+      type: SessionScopeType.IDS,
+      sessionIds: ['sess-1'],
+    });
 
     const res = (await gateway.handleMessage(
       asSocket(sock),
@@ -230,22 +230,30 @@ describe('EventsGateway connection auth + subscribe re-validation', () => {
     )) as WSSubscribedResponse;
 
     expect(res.type).toBe('subscribed');
+    expect(sessionTenantAccessService.assertSessionAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedSessions: ['sess-1'] }),
+      'sess-1',
+    );
     expect(sock.join).toHaveBeenCalledWith(buildRoomName('sess-1', 'message.received'));
   });
 
   it('enforces scope using the FRESH re-validated key, not the connect-time key', async () => {
-    // Connect with an unrestricted key, but the key is narrowed to ['sess-1'] by the subscribe re-check.
-    authService.validateApiKey.mockResolvedValueOnce({ name: 'k', allowedSessions: null }); // connect
+    // Connect with an unrestricted key, but the key is narrowed by the subscribe re-check.
+    const connectKey = { name: 'k', allowedSessions: null };
+    const freshKey = { name: 'k', allowedSessions: ['sess-1'] };
+    authService.validateApiKey.mockResolvedValueOnce(connectKey);
     const sock = makeSocket({ apiKey: 'good' });
     await gateway.handleConnection(asSocket(sock));
 
-    authService.validateApiKey.mockResolvedValueOnce({ name: 'k', allowedSessions: ['sess-1'] }); // subscribe re-check
+    authService.validateApiKey.mockResolvedValueOnce(freshKey);
+    sessionTenantAccessService.assertSessionAccess.mockRejectedValueOnce(new Error('Session not found'));
     const res = (await gateway.handleMessage(
       asSocket(sock),
       subscribeMsg('sess-2', ['message.received']),
     )) as WSErrorResponse;
 
     expect(res.code).toBe('FORBIDDEN_SESSION');
+    expect(sessionTenantAccessService.assertSessionAccess).toHaveBeenCalledWith(freshKey, 'sess-2');
     expect(sock.join).not.toHaveBeenCalled();
   });
 
@@ -396,6 +404,7 @@ describe('EventsGateway inline-media shedding on message events', () => {
       { validateApiKey: jest.fn() } as unknown as AuthService,
       { logWarn: jest.fn().mockResolvedValue(null) } as unknown as AuditService,
       config as unknown as ConfigService,
+      buildSessionTenantAccessMock() as unknown as SessionTenantAccessService,
     );
   };
   const bigMedia = (): Record<string, unknown> => ({
@@ -465,6 +474,7 @@ describe('EventsGateway.emitToRooms fan-out', () => {
       { validateApiKey: jest.fn() } as unknown as AuthService,
       { logWarn: jest.fn().mockResolvedValue(null) } as unknown as AuditService,
       asConfig() as unknown as ConfigService,
+      buildSessionTenantAccessMock() as unknown as SessionTenantAccessService,
     );
 
   it('delivers one event with a single broadcast across all four rooms (no per-room duplicate emit)', () => {
@@ -502,6 +512,7 @@ describe('event catalog ⇔ emitter invariants (drift guard)', () => {
       { validateApiKey: jest.fn() } as unknown as AuthService,
       { logWarn: jest.fn().mockResolvedValue(null) } as unknown as AuditService,
       asConfig() as unknown as ConfigService,
+      buildSessionTenantAccessMock() as unknown as SessionTenantAccessService,
     );
     const captured: string[] = [];
     const op: { to: () => unknown; emit: (ch: string, msg: WSEventMessage) => boolean } = {
@@ -588,6 +599,7 @@ describe('EventsGateway rate limiting', () => {
       authService as unknown as AuthService,
       auditService as unknown as AuditService,
       asConfig() as unknown as ConfigService,
+      buildSessionTenantAccessMock() as unknown as SessionTenantAccessService,
     );
     return gateway;
   };
@@ -837,3 +849,5 @@ describe('EventsGateway rate limiting', () => {
     });
   });
 });
+
+

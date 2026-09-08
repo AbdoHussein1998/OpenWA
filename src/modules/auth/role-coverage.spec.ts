@@ -106,13 +106,17 @@ describe('AuthService capability matrix — TEAM_LEADER / AGENT', () => {
         ApiCapability.WEBHOOK_MANAGE,
 
       /*
-       * Phase H/J webhook operations are tenant-scoped for Team Leaders.
+       * Webhook management is intentionally restricted to the roles that
+       * AuthService grants WEBHOOK_MANAGE (currently ADMIN / OPERATOR).
+       *
+       * TEAM_LEADER still has tenant-scoped session/message/template powers,
+       * but webhook configuration is outside its capability set.
        */
       teamLeader:
-        true,
+        false,
 
       /*
-       * Explicitly excluded from the Agent capability set.
+       * Explicitly excluded from the Agent capability set as well.
        */
       agent:
         false,
@@ -225,11 +229,13 @@ describe('AuthService capability matrix — TEAM_LEADER / AGENT', () => {
         },
 
         [ApiCapability.WEBHOOK_MANAGE]: {
-          teamLeader: true,
+          teamLeader: false,
           agent: false,
         },
       });
     },
   );
 });
+
+
 

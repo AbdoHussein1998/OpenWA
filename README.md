@@ -218,7 +218,6 @@ dumb-init (PID 1)
 - **dumb-init** is PID 1 and forwards signals (SIGTERM, etc.) for graceful shutdown.
 - **docker-entrypoint.sh** runs as root only long enough to `chown` the named-volume mount points so the `openwa` user can write to them.
 - **gosu** performs a clean `exec`-based privilege drop — no `su` or `sudo` wrappers, so the node process is the direct child of dumb-init.
-
 Named volumes (e.g. `openwa-data`) get their ownership corrected automatically on every start, so no manual `chown` step is needed after volume creation.
 
 ---
@@ -275,9 +274,9 @@ docker compose --profile full up -d
 ### Create a Session
 
 ```bash
-curl -X POST http://localhost:2785/api/sessions \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: YOUR_API_KEY" \
+curl -X POST http://localhost:2785/api/sessions \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
   -d '{"name": "my-bot"}'
 ```
 
@@ -285,20 +284,20 @@ curl -X POST http://localhost:2785/api/sessions \
 
 ```bash
 # Start the session
-curl -X POST http://localhost:2785/api/sessions/{sessionId}/start \
+curl -X POST http://localhost:2785/api/sessions/{sessionId}/start \\
   -H "X-API-Key: YOUR_API_KEY"
 
 # Get QR code (scan with WhatsApp)
-curl http://localhost:2785/api/sessions/{sessionId}/qr \
+curl http://localhost:2785/api/sessions/{sessionId}/qr \\
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
 ### Send a Message
 
 ```bash
-curl -X POST http://localhost:2785/api/sessions/{sessionId}/messages/send-text \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: YOUR_API_KEY" \
+curl -X POST http://localhost:2785/api/sessions/{sessionId}/messages/send-text \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
   -d '{
     "chatId": "628123456789@c.us",
     "text": "Hello from OpenWA!"
@@ -308,9 +307,9 @@ curl -X POST http://localhost:2785/api/sessions/{sessionId}/messages/send-text \
 ### Setup Webhook
 
 ```bash
-curl -X POST http://localhost:2785/api/sessions/{sessionId}/webhooks \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: YOUR_API_KEY" \
+curl -X POST http://localhost:2785/api/sessions/{sessionId}/webhooks \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
   -d '{
     "url": "https://your-server.com/webhook",
     "events": ["message.received", "session.status"],
@@ -327,7 +326,7 @@ curl -X POST http://localhost:2785/api/sessions/{sessionId}/webhooks \
 
 OpenWA can expose a **curated set of tools over the [Model Context Protocol](https://modelcontextprotocol.io)** so AI agents (Claude, Cursor, …) can drive WhatsApp. It is **off by default** and **additive** — every REST route keeps working unchanged.
 
-Set `MCP_ENABLED=true` to mount a stateless Streamable-HTTP transport at **`POST /mcp`** on the existing server (same port, no extra process). It mounts **25 read-only tools** by default — session, message, contact, group, webhook, label and automation-rule _reads_ — because the surface is read-only unless you opt out. Add `MCP_READONLY=false` to mount all **51 tools**, adding the write tier (send, reply, group operations). Either way it is a focused surface rather than the full API, so agents aren't overwhelmed.
+Set `MCP_ENABLED=true` to mount a stateless Streamable-HTTP transport at **`POST /mcp`** on the existing server (same port, no extra process). It mounts **24 read-only tools** by default — session, message, contact, group, webhook, label and automation-rule _reads_ — because the surface is read-only unless you opt out. Add `MCP_READONLY=false` to mount all **49 tools**, adding the write tier (send, reply, group operations). Either way it is a focused surface rather than the full API, so agents aren't overwhelmed.
 
 ```bash
 MCP_ENABLED=true npm run start:prod   # or set MCP_ENABLED in your .env / compose

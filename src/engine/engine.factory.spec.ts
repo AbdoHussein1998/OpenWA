@@ -166,13 +166,26 @@ describe('EngineFactory', () => {
       };
     };
 
+    const expectOwnerOnlyDir = (dir: string): void => {
+      const stat = fs.statSync(dir);
+      expect(stat.isDirectory()).toBe(true);
+
+      // POSIX exposes owner/group/other mode bits, so we can verify the exact 0700 hardening.
+      // Windows does not implement those distinctions through chmod/stat: Node documents that
+      // only the writable bit is mutable there. The production helper still attempts chmod(0700),
+      // but asserting a POSIX mode value on Windows would test an unsupported filesystem contract.
+      if (process.platform !== 'win32') {
+        expect(stat.mode & 0o777).toBe(0o700);
+      }
+    };
+
     it.each([false, true])('hardens both engine shapes on a %s install', preLoosen => {
       const { factory, wwjsDir, baileysDir } = buildTmpFactory(preLoosen);
 
       factory.create({ sessionId: 'alice', dbSessionId: 'db-1' });
 
-      expect(fs.statSync(wwjsDir).mode & 0o777).toBe(0o700);
-      expect(fs.statSync(baileysDir).mode & 0o777).toBe(0o700);
+      expectOwnerOnlyDir(wwjsDir);
+      expectOwnerOnlyDir(baileysDir);
     });
   });
 

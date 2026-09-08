@@ -1,8 +1,13 @@
+
+
+
+
 import { Callback } from 'puppeteer-core/lib/cjs/puppeteer/common/CallbackRegistry.js';
 import { Client } from 'whatsapp-web.js';
 import configuration, { MAX_TIMER_MS } from '../../config/configuration';
 import { validateEnv } from '../../config/env.validation';
 import { WhatsAppWebJsAdapter } from './whatsapp-web-js.adapter';
+import type { BraveProfileManager } from '../brave/brave-profile.manager';
 
 /**
  * The per-CDP-command budget handed to Puppeteer, and the one error it produces.
@@ -16,6 +21,24 @@ describe('whatsapp-web.js protocol timeout', () => {
   let clientInitSpy: jest.SpyInstance;
   let savedWebVersion: string | undefined;
 
+  /**
+   * This suite verifies protocol-timeout plumbing, not Brave process management.
+   *
+   * The real BraveProfileManager performs OS-level process discovery during initialize()
+   * (PowerShell/CIM on Windows), which turns this focused unit test into a slow integration
+   * test and can exceed Jest's default 5-second per-test budget when several adapters are
+   * initialized sequentially.
+   *
+   * Keep the lifecycle path intact, but replace those unrelated side effects with immediate
+   * successful test doubles.
+   */
+  const braveProfileManager = {
+    getProfilePath: jest.fn((sessionId: string) => `./data/brave-profiles/${sessionId}`),
+    ensureProfile: jest.fn().mockResolvedValue(undefined),
+    killOrphanedBraveProcesses: jest.fn().mockResolvedValue(undefined),
+    removeStaleSingletonFiles: jest.fn().mockResolvedValue(undefined),
+  } as unknown as BraveProfileManager;
+
   const launchedPuppeteerOptions = async (
     protocolTimeoutMs?: number,
   ): Promise<{ protocolTimeout?: number } | undefined> => {
@@ -23,24 +46,54 @@ describe('whatsapp-web.js protocol timeout', () => {
       sessionId: SESSION_ID,
       sessionDataPath: './data/sessions',
       puppeteer: { protocolTimeoutMs },
+
+      // resolveBraveExecutable() validates configured paths before accepting them.
+      // process.execPath is guaranteed to exist on the running Node process.
+      //
+      // Client.initialize() is mocked below, so Node is NEVER actually launched as
+      // a browser; this only lets the lifecycle reach Client construction immediately.
+      brave: {
+        executablePath: process.execPath,
+      },
+
+      braveProfileManager,
     });
+
     await adapter.initialize({});
-    return (adapter as unknown as { client: { options: { puppeteer?: { protocolTimeout?: number } } } }).client.options
-      .puppeteer;
+
+    return (
+      adapter as unknown as {
+        client: {
+          options: {
+            puppeteer?: {
+              protocolTimeout?: number;
+            };
+          };
+        };
+      }
+    ).client.options.puppeteer;
   };
 
   beforeEach(() => {
     // Keep initialize() offline: 'off' skips the wa-version registry fetch in resolveWebVersionPin.
     savedWebVersion = process.env.WWEBJS_WEB_VERSION;
     process.env.WWEBJS_WEB_VERSION = 'off';
-    // Build the real wwebjs Client — that is what carries the launch options — but launch no browser.
+
+    // Build the real whatsapp-web.js Client — that is what carries the launch options —
+    // but launch no browser.
     clientInitSpy = jest
-      .spyOn(Client.prototype as unknown as { initialize: () => Promise<void> }, 'initialize')
+      .spyOn(
+        Client.prototype as unknown as {
+          initialize: () => Promise<void>;
+        },
+        'initialize',
+      )
       .mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     clientInitSpy.mockRestore();
+
     if (savedWebVersion === undefined) {
       delete process.env.WWEBJS_WEB_VERSION;
     } else {
@@ -49,7 +102,9 @@ describe('whatsapp-web.js protocol timeout', () => {
   });
 
   it('hands a configured budget to the Client as puppeteer.protocolTimeout', async () => {
-    expect(await launchedPuppeteerOptions(300_000)).toMatchObject({ protocolTimeout: 300_000 });
+    expect(await launchedPuppeteerOptions(300_000)).toMatchObject({
+      protocolTimeout: 300_000,
+    });
   });
 
   it('omits the option when unset, leaving Puppeteer its own default', async () => {
@@ -67,32 +122,83 @@ describe('whatsapp-web.js protocol timeout', () => {
     expect(await launchedPuppeteerOptions(0)).not.toHaveProperty('protocolTimeout');
     expect(await launchedPuppeteerOptions(-1)).not.toHaveProperty('protocolTimeout');
     expect(await launchedPuppeteerOptions(MAX_TIMER_MS + 1)).not.toHaveProperty('protocolTimeout');
-    expect(await launchedPuppeteerOptions(MAX_TIMER_MS)).toMatchObject({ protocolTimeout: MAX_TIMER_MS });
+    expect(await launchedPuppeteerOptions(MAX_TIMER_MS)).toMatchObject({
+      protocolTimeout: MAX_TIMER_MS,
+    });
   });
 
   describe('the bounds this knob exists to enforce', () => {
     it('rejects a non-positive or over-range value at boot instead of handing it to Puppeteer', () => {
-      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: '0' })).toThrow(/positive integer/);
-      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: '-1' })).toThrow(/positive integer/);
-      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: 'abc' })).toThrow(/positive integer/);
+      expect(() =>
+        validateEnv({
+          PUPPETEER_PROTOCOL_TIMEOUT_MS: '0',
+        }),
+      ).toThrow(/positive integer/);
+
+      expect(() =>
+        validateEnv({
+          PUPPETEER_PROTOCOL_TIMEOUT_MS: '-1',
+        }),
+      ).toThrow(/positive integer/);
+
+      expect(() =>
+        validateEnv({
+          PUPPETEER_PROTOCOL_TIMEOUT_MS: 'abc',
+        }),
+      ).toThrow(/positive integer/);
+
       // The row of nines an operator reaches for when the docs forbid 0.
-      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: String(MAX_TIMER_MS + 1) })).toThrow(/must not exceed/);
-      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: '999999999999' })).toThrow(/must not exceed/);
-      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: String(MAX_TIMER_MS) })).not.toThrow();
-      expect(() => validateEnv({ PUPPETEER_PROTOCOL_TIMEOUT_MS: '300000' })).not.toThrow();
+      expect(() =>
+        validateEnv({
+          PUPPETEER_PROTOCOL_TIMEOUT_MS: String(MAX_TIMER_MS + 1),
+        }),
+      ).toThrow(/must not exceed/);
+
+      expect(() =>
+        validateEnv({
+          PUPPETEER_PROTOCOL_TIMEOUT_MS: '999999999999',
+        }),
+      ).toThrow(/must not exceed/);
+
+      expect(() =>
+        validateEnv({
+          PUPPETEER_PROTOCOL_TIMEOUT_MS: String(MAX_TIMER_MS),
+        }),
+      ).not.toThrow();
+
+      expect(() =>
+        validateEnv({
+          PUPPETEER_PROTOCOL_TIMEOUT_MS: '300000',
+        }),
+      ).not.toThrow();
     });
 
     it('leaves the option unset for anything out of range, never falsy', () => {
       const parsed = (raw?: string): number | undefined => {
         const saved = process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS;
-        if (raw === undefined) delete process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS;
-        else process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS = raw;
+
+        if (raw === undefined) {
+          delete process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS;
+        } else {
+          process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS = raw;
+        }
+
         try {
-          return (configuration() as { engine: { puppeteer: { protocolTimeoutMs?: number } } }).engine.puppeteer
-            .protocolTimeoutMs;
+          return (
+            configuration() as {
+              engine: {
+                puppeteer: {
+                  protocolTimeoutMs?: number;
+                };
+              };
+            }
+          ).engine.puppeteer.protocolTimeoutMs;
         } finally {
-          if (saved === undefined) delete process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS;
-          else process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS = saved;
+          if (saved === undefined) {
+            delete process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS;
+          } else {
+            process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS = saved;
+          }
         }
       };
 
@@ -114,10 +220,21 @@ describe('whatsapp-web.js protocol timeout', () => {
         sessionId: SESSION_ID,
         sessionDataPath: './data/sessions',
         puppeteer: {},
+
+        // This adapter is never initialized, but keep construction aligned with the
+        // current required WhatsAppWebJsConfig shape.
+        brave: {
+          executablePath: process.execPath,
+        },
+
+        braveProfileManager,
       });
-      return (adapter as unknown as { isPageTransportError: (error: unknown) => boolean }).isPageTransportError(
-        new Error(message),
-      );
+
+      return (
+        adapter as unknown as {
+          isPageTransportError: (error: unknown) => boolean;
+        }
+      ).isPageTransportError(new Error(message));
     };
 
     /**
@@ -129,11 +246,13 @@ describe('whatsapp-web.js protocol timeout', () => {
      */
     const puppeteerProtocolTimeoutMessage = async (): Promise<string> => {
       const callback = new Callback(1, 'Runtime.callFunctionOn', 1);
+
       try {
         await callback.promise;
       } catch (error) {
         return error instanceof Error ? error.message : String(error);
       }
+
       throw new Error('puppeteer-core did not reject on an expired protocolTimeout');
     };
 
@@ -154,7 +273,15 @@ describe('whatsapp-web.js protocol timeout', () => {
     it('reports a death whose message also mentions a timeout', () => {
       // Why the guard matches Puppeteer's full phrase instead of a bare /timed out/: the broad
       // version swallows this, turning a reportable dead page into a silent one.
-      expect(classify('Protocol error (Runtime.callFunctionOn): Session closed. Request timed out')).toBe(true);
+      expect(
+        classify(
+          'Protocol error (Runtime.callFunctionOn): Session closed. Request timed out',
+        ),
+      ).toBe(true);
     });
   });
 });
+
+
+
+

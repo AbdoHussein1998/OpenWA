@@ -237,10 +237,9 @@ services:
       - BAILEYS_MESSAGE_STORE_LIMIT=${BAILEYS_MESSAGE_STORE_LIMIT:-}
       - BAILEYS_SESSION_STORE_MAX_ENTRIES=${BAILEYS_SESSION_STORE_MAX_ENTRIES:-}
       - WWEBJS_ONBOARDING_CONTINUE_LABELS=${WWEBJS_ONBOARDING_CONTINUE_LABELS:-}
-      # Default matches the image's ENV (Dockerfile); a blank forward would shadow it and make
-      # puppeteer fall back to a bundled Chromium the image does not ship. compose-parity.spec.ts
-      # asserts the default stays in sync with the Dockerfile value.
-      - PUPPETEER_EXECUTABLE_PATH=${PUPPETEER_EXECUTABLE_PATH:-/usr/local/bin/puppeteer-chrome}
+      # Legacy Puppeteer path.
+      # Brave is the primary browser now, so this is intentionally blank.
+      - PUPPETEER_EXECUTABLE_PATH=${PUPPETEER_EXECUTABLE_PATH:-}
       - SHUTDOWN_DELAY_MS=${SHUTDOWN_DELAY_MS:-}
       - SIMULATE_TYPING_MAX_MS=${SIMULATE_TYPING_MAX_MS:-}
       - LID_MAPPING_CACHE_MAX=${LID_MAPPING_CACHE_MAX:-}

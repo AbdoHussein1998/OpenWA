@@ -1,3 +1,6 @@
+
+
+
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DataSource } from 'typeorm';
@@ -30,7 +33,11 @@ describe('docs/05 documents the real column names', () => {
     'modules/integration',
     'modules/status-store',
   ].map(entities);
-  const MAIN_ENTITIES = ['modules/auth', 'modules/audit'].map(entities);
+
+  // MAIN owns auth/audit plus the Team Leader / Agent principals referenced by ApiKey relations.
+  // TypeORM must see the full relation graph when building metadata, even though this test only
+  // compares documented column names.
+  const MAIN_ENTITIES = ['modules/auth', 'modules/audit', 'modules/teamleader'].map(entities);
 
   /** table -> real column names, built by letting TypeORM create the schema it actually uses. */
   const realSchema = async (globs: string[]): Promise<Map<string, Set<string>>> => {
@@ -109,3 +116,5 @@ describe('docs/05 documents the real column names', () => {
     expect(readFileSync(DOC, 'utf8')).toContain('The exception is **`message_batches`**');
   });
 });
+
+

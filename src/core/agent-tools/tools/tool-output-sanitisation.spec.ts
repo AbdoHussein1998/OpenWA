@@ -9,17 +9,53 @@ import { sessionTools } from './session.tools';
 import type { WebhookService } from '../../../modules/webhook/webhook.service';
 import type { SessionService } from '../../../modules/session/session.service';
 import type { AuthService } from '../../../modules/auth/auth.service';
+import type { SessionTenantAccessService } from '../../../modules/access-control/session-tenant-access.service';
+import { SessionScopes } from '../../../modules/access-control/session-scope';
 import { handleToolError } from '../../../modules/mcp/tool-result';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeAuth(over: Partial<Record<string, unknown>> = {}): Pick<AuthService, 'validateApiKey' | 'hasPermission'> {
+function makeAuth(
+  over: Partial<Record<string, unknown>> = {},
+): Pick<AuthService, 'validateApiKey' | 'hasPermission' | 'hasCapability'> {
   return {
-    validateApiKey: jest.fn().mockResolvedValue({ id: 'k1', allowedSessions: null, ...over }),
+    validateApiKey: jest
+      .fn()
+      .mockResolvedValue({
+        id: 'k1',
+        allowedSessions: null,
+        ...over,
+      }),
     hasPermission: jest.fn().mockReturnValue(true),
+    hasCapability: jest.fn().mockReturnValue(true),
   };
+}
+
+function makeSessionTenantAccess(): Pick<
+  SessionTenantAccessService,
+  'assertSessionAccess' | 'getEffectiveSessionScope'
+> {
+  return {
+    assertSessionAccess: jest.fn().mockResolvedValue({ id: 'sess-1' }),
+    getEffectiveSessionScope: jest
+      .fn()
+      .mockResolvedValue(SessionScopes.all()),
+  };
+}
+
+async function runTool(
+  tool: Parameters<typeof invokeTool>[0],
+  input: unknown,
+): Promise<unknown> {
+  return invokeTool(
+    tool,
+    input,
+    'key',
+    makeAuth() as unknown as AuthService,
+    makeSessionTenantAccess() as unknown as SessionTenantAccessService,
+  );
 }
 
 /** Minimal webhook entity shape that carries the sensitive fields. */
@@ -73,8 +109,7 @@ describe('FIX 1: webhook tools strip secret + headers', () => {
     } as unknown as WebhookService;
 
     const tool = webhookTools(webhookSvc).find(t => t.name === 'WebhooksList')!;
-    const auth = makeAuth();
-    const result = (await invokeTool(tool, {}, 'key', auth as unknown as AuthService)) as object[];
+    const result = (await runTool(tool, {})) as object[];
 
     expect(result).toHaveLength(1);
     expect(result[0]).not.toHaveProperty('secret');
@@ -88,8 +123,10 @@ describe('FIX 1: webhook tools strip secret + headers', () => {
     } as unknown as WebhookService;
 
     const tool = webhookTools(webhookSvc).find(t => t.name === 'WebhookFindBySession')!;
-    const auth = makeAuth();
-    const result = (await invokeTool(tool, { sessionId: 'sess-1' }, 'key', auth as unknown as AuthService)) as object[];
+    const result = (await runTool(
+      tool,
+      { sessionId: 'sess-1' },
+    )) as object[];
 
     expect(result).toHaveLength(1);
     expect(result[0]).not.toHaveProperty('secret');
@@ -102,12 +139,12 @@ describe('FIX 1: webhook tools strip secret + headers', () => {
     } as unknown as WebhookService;
 
     const tool = webhookTools(webhookSvc).find(t => t.name === 'WebhookFindOne')!;
-    const auth = makeAuth();
-    const result = await invokeTool(
+    const result = await runTool(
       tool,
-      { sessionId: 'sess-1', webhookId: 'wh-1' },
-      'key',
-      auth as unknown as AuthService,
+      {
+        sessionId: 'sess-1',
+        webhookId: 'wh-1',
+      },
     );
 
     expect(result).not.toHaveProperty('secret');
@@ -130,8 +167,10 @@ describe('FIX 2: session tools strip config + proxyUrl', () => {
     } as unknown as SessionService;
 
     const tool = sessionTools(sessionSvc).find(t => t.name === 'SessionFindOne')!;
-    const auth = makeAuth();
-    const result = await invokeTool(tool, { sessionId: 'sess-1' }, 'key', auth as unknown as AuthService);
+    const result = await runTool(
+      tool,
+      { sessionId: 'sess-1' },
+    );
 
     expect(result).not.toHaveProperty('config');
     expect(result).not.toHaveProperty('proxyUrl');
@@ -145,8 +184,7 @@ describe('FIX 2: session tools strip config + proxyUrl', () => {
     } as unknown as SessionService;
 
     const tool = sessionTools(sessionSvc).find(t => t.name === 'SessionFindAll')!;
-    const auth = makeAuth();
-    const result = (await invokeTool(tool, {}, 'key', auth as unknown as AuthService)) as object[];
+    const result = (await runTool(tool, {})) as object[];
 
     expect(result).toHaveLength(1);
     expect(result[0]).not.toHaveProperty('config');
@@ -167,10 +205,23 @@ describe('FIX 5: empty sessionId is rejected at validation', () => {
 
     const tool = sessionTools(sessionSvc).find(t => t.name === 'SessionFindOne')!;
     const auth = makeAuth();
+    const tenantAccess = makeSessionTenantAccess();
 
-    await expect(invokeTool(tool, { sessionId: '' }, 'key', auth as unknown as AuthService)).rejects.toBeInstanceOf(
+    await expect(
+      invokeTool(
+        tool,
+        { sessionId: '' },
+        'key',
+        auth as unknown as AuthService,
+        tenantAccess as unknown as SessionTenantAccessService,
+      ),
+    ).rejects.toBeInstanceOf(
       BadRequestException,
     );
+
+    expect(
+      tenantAccess.assertSessionAccess,
+    ).not.toHaveBeenCalled();
   });
 
   it('a webhook sessionScoped tool rejects sessionId: "" with BadRequestException', async () => {
@@ -180,10 +231,23 @@ describe('FIX 5: empty sessionId is rejected at validation', () => {
 
     const tool = webhookTools(webhookSvc).find(t => t.name === 'WebhookFindBySession')!;
     const auth = makeAuth();
+    const tenantAccess = makeSessionTenantAccess();
 
-    await expect(invokeTool(tool, { sessionId: '' }, 'key', auth as unknown as AuthService)).rejects.toBeInstanceOf(
+    await expect(
+      invokeTool(
+        tool,
+        { sessionId: '' },
+        'key',
+        auth as unknown as AuthService,
+        tenantAccess as unknown as SessionTenantAccessService,
+      ),
+    ).rejects.toBeInstanceOf(
       BadRequestException,
     );
+
+    expect(
+      tenantAccess.assertSessionAccess,
+    ).not.toHaveBeenCalled();
   });
 });
 

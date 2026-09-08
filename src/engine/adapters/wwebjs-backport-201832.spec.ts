@@ -1,3 +1,6 @@
+
+
+
 import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -21,6 +24,58 @@ const {
 const WWJS_SRC = path.join(__dirname, '..', '..', '..', 'node_modules', 'whatsapp-web.js');
 /** The patcher's CLI entrypoint — the `--best-effort` cases exercise the process, not just applyBackport. */
 const SCRIPT = path.join(__dirname, '..', '..', '..', 'scripts', 'patch-wwebjs-201832.js');
+
+/** Resolve an executable using the host-native locator before tests intentionally rewrite PATH. */
+function resolveExecutable(command: string): string {
+  const locator = process.platform === 'win32' ? 'where.exe' : 'which';
+  const output = execFileSync(locator, [command], { encoding: 'utf8' });
+  const resolved = output
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(Boolean);
+
+  if (!resolved) {
+    throw new Error(`Could not resolve ${command} for the test fixture`);
+  }
+
+  return resolved;
+}
+
+/**
+ * A PATH that exposes git but not patch.
+ *
+ * On native Windows, the normal Git-for-Windows PATH entry is `Git\\cmd`, which contains git.exe
+ * but not patch.exe, so use that directory directly. On POSIX, git and patch commonly share
+ * /usr/bin, so place only a symlink to git in a temporary directory.
+ */
+function createGitOnlyPath(tmpDirs: string[]): string {
+  const git = resolveExecutable('git');
+
+  if (process.platform === 'win32') {
+    const candidates = execFileSync('where.exe', ['git'], { encoding: 'utf8' })
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+
+    const isolated = candidates.find(candidate => {
+      const dir = path.dirname(candidate);
+      return !['patch.exe', 'patch.cmd', 'patch.bat'].some(name => fs.existsSync(path.join(dir, name)));
+    });
+
+    if (isolated) {
+      return path.dirname(isolated);
+    }
+
+    throw new Error(
+      `Could not find a Git-for-Windows PATH entry without patch.exe. Resolved git candidates: ${candidates.join(', ')}`,
+    );
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wwjs-gitonly-'));
+  tmpDirs.push(dir);
+  fs.symlinkSync(git, path.join(dir, 'git'));
+  return dir;
+}
 
 /**
  * Guards the build-time backport of upstream whatsapp-web.js#201832
@@ -83,20 +138,73 @@ describe('patch-wwebjs-201832 (build-time backport of upstream #201832)', () => 
     if (!/static _normalizeId/.test(fs.readFileSync(baseJs, 'utf8'))) return copy; // already pristine
 
     // Reverse-apply the same diff rather than hand-unpicking it: symmetric with the forward path, and
-    // it stays correct by construction if the patch file changes. Exits 1 on the Contact.js hunk that
-    // was never applied in the first place — expected, hence the ignored status.
+    // it stays correct by construction if the patch file changes. The fixture must be cross-platform:
+    // native Windows normally has git.exe but no patch.exe, exactly the production fallback this suite
+    // is meant to exercise. Normalize CRLF here too so an autocrlf checkout cannot break fixture setup
+    // before the dedicated CRLF tests even run.
+    const reversePatch = path.join(tmp, 'wwebjs-201832.reverse.patch');
+    fs.writeFileSync(
+      reversePatch,
+      fs.readFileSync(PATCH_FILE, 'utf8').replace(/\r\n/g, '\n'),
+    );
+
     try {
       execFileSync(
         'patch',
-        ['-p1', '-d', copy, '-R', '--no-backup-if-mismatch', '-f', '-F0', '--ignore-whitespace', '-i', PATCH_FILE],
+        [
+          '-p1',
+          '-d',
+          copy,
+          '-R',
+          '--no-backup-if-mismatch',
+          '-f',
+          '-F0',
+          '--ignore-whitespace',
+          '-i',
+          reversePatch,
+        ],
         { stdio: 'pipe' },
       );
     } catch (e) {
-      if ((e as { status?: number }).status !== 1) throw e;
+      const patchError = e as NodeJS.ErrnoException & { status?: number };
+
+      if (patchError.code === 'ENOENT') {
+        // `patch` is absent on native Windows. `git apply -R --reject` produces the same useful
+        // fixture shape: the known Contact.js hunk rejects because that forward hunk never landed.
+        try {
+          execFileSync(
+            'git',
+            [
+              '-c',
+              'core.autocrlf=false',
+              'apply',
+              '-R',
+              '-p1',
+              '--reject',
+              '--ignore-whitespace',
+              reversePatch,
+            ],
+            {
+              cwd: copy,
+              env: {
+                ...process.env,
+                GIT_CEILING_DIRECTORIES: path.dirname(copy),
+              },
+              stdio: 'pipe',
+            },
+          );
+        } catch (gitError) {
+          if ((gitError as { status?: number }).status !== 1) throw gitError;
+        }
+      } else if (patchError.status !== 1) {
+        throw e;
+      }
     }
+
     for (const rej of ['src/structures/Contact.js.rej']) {
       fs.rmSync(path.join(copy, rej), { force: true });
     }
+
     return copy;
   }
 
@@ -271,9 +379,7 @@ describe('patch-wwebjs-201832 (build-time backport of upstream #201832)', () => 
       // reported success. Anyone installing from source has git by definition, so the dep gets
       // patched instead of silently shipping broken.
       const dir = copyWwjs();
-      const gitOnly = fs.mkdtempSync(path.join(os.tmpdir(), 'wwjs-gitonly-'));
-      tmpDirs.push(gitOnly);
-      fs.symlinkSync(execFileSync('which', ['git'], { encoding: 'utf8' }).trim(), path.join(gitOnly, 'git'));
+      const gitOnly = createGitOnlyPath(tmpDirs);
 
       const res = spawnSync(process.execPath, [SCRIPT, '--best-effort', dir], {
         encoding: 'utf8',
@@ -309,14 +415,6 @@ describe('patch-wwebjs-201832 (build-time backport of upstream #201832)', () => 
   });
 
   describe('a Windows checkout of the patch file', () => {
-    /** A PATH holding git and nothing else — the Windows shape: git.exe present, patch.exe absent. */
-    function gitOnlyPath(): string {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wwjs-gitonly-'));
-      tmpDirs.push(dir);
-      fs.symlinkSync(execFileSync('which', ['git'], { encoding: 'utf8' }).trim(), path.join(dir, 'git'));
-      return dir;
-    }
-
     /**
      * A standalone copy of the patcher beside a patch file of our choosing. DEFAULT_PATCH is resolved
      * as the script's sibling, so this is exactly how the patcher sees a working tree — including one
@@ -340,7 +438,7 @@ describe('patch-wwebjs-201832 (build-time backport of upstream #201832)', () => 
 
       const res = spawnSync(process.execPath, [script, dir], {
         encoding: 'utf8',
-        env: { ...process.env, PATH: gitOnlyPath() },
+        env: { ...process.env, PATH: createGitOnlyPath(tmpDirs) },
       });
 
       expect(res.stderr).toBe('');
@@ -360,7 +458,7 @@ describe('patch-wwebjs-201832 (build-time backport of upstream #201832)', () => 
 
       const res = spawnSync(process.execPath, [script, '--best-effort', dir], {
         encoding: 'utf8',
-        env: { ...process.env, PATH: gitOnlyPath() },
+        env: { ...process.env, PATH: createGitOnlyPath(tmpDirs) },
       });
 
       expect(res.status).toBe(0);
@@ -370,3 +468,6 @@ describe('patch-wwebjs-201832 (build-time backport of upstream #201832)', () => 
     });
   });
 });
+
+
+

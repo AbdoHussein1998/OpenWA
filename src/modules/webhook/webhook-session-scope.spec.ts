@@ -1,5 +1,8 @@
+
+
+
 // webhook by-id operations (findOne/update/delete/test) must be scoped to the URL
-// :sessionId, and GET /webhooks must be scoped to the key's allowedSessions. Without it, an
+// :sessionId, and GET /webhooks must respect the caller's effective SessionScope. Without it, an
 // OPERATOR key for one session can read/edit/delete/redirect/fire another session's webhook,
 // and enumerate every session's webhook URLs. These run against a real in-memory DB so the
 // scoping is exercised end-to-end, not asserted on a mock's WHERE clause.
@@ -8,6 +11,7 @@ import { NotFoundException } from '@nestjs/common';
 import { WebhookService } from './webhook.service';
 import { Webhook } from './entities/webhook.entity';
 import { Session, SessionStatus } from '../session/entities/session.entity';
+import { SessionScopes } from '../access-control/session-scope';
 
 describe('WebhookService session-scoped access', () => {
   let ds: DataSource;
@@ -26,8 +30,9 @@ describe('WebhookService session-scoped access', () => {
     const repo = ds.getRepository(Webhook);
     const cfg = { get: () => false }; // queue.enabled = false
     // 2nd arg is the delivery-failure repo, 3rd the session repo, and 5th the delivery service —
-    // the scoped read/update/delete paths under test never touch them (only create() checks
-    // session existence; test() would probe via the delivery service's header/signature helpers).
+    // the scoped by-id paths and the ALL/IDS/NONE findAll cases below do not need those collaborators.
+    // OWNER / OWNER_AND_IDS coverage belongs in the tenant-scope integration tests where the real
+    // session repository is supplied.
     service = new WebhookService(repo, {} as never, {} as never, cfg as never, {} as never);
 
     const sessions = ds.getRepository(Session);
@@ -77,9 +82,18 @@ describe('WebhookService session-scoped access', () => {
     await expect(service.test('sessA', whB.id)).rejects.toThrow(NotFoundException);
   });
 
-  it('findAll scopes to allowedSessions when set, returns all when unrestricted', async () => {
-    expect((await service.findAll(['sessA'])).map(w => w.id)).toEqual([whA.id]);
-    expect((await service.findAll(null)).map(w => w.id).sort()).toEqual([whA.id, whB.id].sort());
-    expect((await service.findAll([])).length).toBe(2); // empty allowlist = unrestricted (matches the guard)
+  it('findAll applies the effective SessionScope supplied by the tenant-access layer', async () => {
+    // A legacy non-empty allowedSessions ceiling is normalized to IDS before WebhookService sees it.
+    expect((await service.findAll(SessionScopes.ids(['sessA']))).map(w => w.id)).toEqual([whA.id]);
+
+    // Legacy null / undefined / [] allowedSessions for an otherwise-global identity normalize to ALL
+    // in SessionTenantAccessService. WebhookService consumes that effective scope rather than raw
+    // allowedSessions values.
+    expect((await service.findAll(SessionScopes.all())).map(w => w.id).sort()).toEqual([whA.id, whB.id].sort());
+
+    // Fail closed when the effective authorization layer says this identity can reach no sessions.
+    expect(await service.findAll(SessionScopes.none())).toEqual([]);
   });
 });
+
+

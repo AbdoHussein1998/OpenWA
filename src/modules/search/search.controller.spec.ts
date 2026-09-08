@@ -1,64 +1,211 @@
-import { BadRequestException, NotImplementedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotImplementedException,
+} from '@nestjs/common';
+
 import { SearchController } from './search.controller';
 import { SearchService } from './search.service';
 import { SearchQueryDto } from './dto/search-query.dto';
+
 import type { ApiKey } from '../auth/entities/api-key.entity';
+import type { SessionTenantAccessService } from '../access-control/session-tenant-access.service';
+import {
+  SessionScopes,
+  type SessionScope,
+} from '../access-control/session-scope';
+
 import type { SearchResults } from './search.types';
 
 describe('SearchController', () => {
   const search = jest.fn();
-  const ctrl = new SearchController({ search } as unknown as SearchService);
+  const getEffectiveSessionScope = jest.fn();
 
-  const ok = { hits: [], total: 0, tookMs: 1, provider: 'builtin-fts' } satisfies SearchResults;
+  const ctrl = new SearchController(
+    { search } as unknown as SearchService,
+    {
+      getEffectiveSessionScope,
+    } as unknown as SessionTenantAccessService,
+  );
+
+  const ok = {
+    hits: [],
+    total: 0,
+    tookMs: 1,
+    provider: 'builtin-fts',
+  } satisfies SearchResults;
+
+  const apiKey = {
+    id: 'k1',
+  } as unknown as ApiKey;
 
   beforeEach(() => {
     search.mockReset();
+    getEffectiveSessionScope.mockReset();
   });
 
   it('throws 400 when q is empty', async () => {
-    const dto: SearchQueryDto = { q: '' };
-    await expect(ctrl.search(dto, undefined)).rejects.toBeInstanceOf(BadRequestException);
+    const dto: SearchQueryDto = {
+      q: '',
+    };
+
+    await expect(
+      ctrl.search(
+        dto,
+        apiKey,
+      ),
+    ).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+
+    expect(
+      getEffectiveSessionScope,
+    ).not.toHaveBeenCalled();
+
+    expect(search).not.toHaveBeenCalled();
   });
 
   it('throws 400 when q is only whitespace', async () => {
     // @IsNotEmpty() on the DTO passes for '   ' (non-empty), so the controller's own trim guard is
     // what rejects whitespace-only q — this test pins that guard in place.
-    const dto: SearchQueryDto = { q: '   ' };
-    await expect(ctrl.search(dto, undefined)).rejects.toBeInstanceOf(BadRequestException);
+    const dto: SearchQueryDto = {
+      q: '   ',
+    };
+
+    await expect(
+      ctrl.search(
+        dto,
+        apiKey,
+      ),
+    ).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+
+    expect(
+      getEffectiveSessionScope,
+    ).not.toHaveBeenCalled();
+
     expect(search).not.toHaveBeenCalled();
   });
 
-  it('returns results and forwards the key allowedSessions as callerSessionIds', async () => {
+  it('returns results and forwards the effective SessionScope', async () => {
     search.mockResolvedValue(ok);
-    const apiKey = { allowedSessions: ['s1', 's2'] } as unknown as ApiKey;
-    const dto: SearchQueryDto = { q: 'hello', limit: 5 };
-    const res = await ctrl.search(dto, apiKey);
-    expect(search).toHaveBeenCalledWith(dto, ['s1', 's2']);
+
+    const scope: SessionScope =
+      SessionScopes.ids([
+        's1',
+        's2',
+      ]);
+
+    getEffectiveSessionScope.mockResolvedValue(
+      scope,
+    );
+
+    const dto: SearchQueryDto = {
+      q: 'hello',
+      limit: 5,
+    };
+
+    const res = await ctrl.search(
+      dto,
+      apiKey,
+    );
+
+    expect(
+      getEffectiveSessionScope,
+    ).toHaveBeenCalledWith(
+      apiKey,
+    );
+
+    expect(search).toHaveBeenCalledWith(
+      dto,
+      scope,
+    );
+
     expect(res).toBe(ok);
   });
 
-  it('passes undefined (no scope) for an unrestricted key (null allowedSessions)', async () => {
+  it('forwards ALL for an unrestricted key', async () => {
     search.mockResolvedValue(ok);
-    // A null/empty allowlist (e.g. ADMIN) sees all sessions — mirrors GET /webhooks behavior.
-    const apiKey = { allowedSessions: null } as unknown as ApiKey;
-    const dto: SearchQueryDto = { q: 'hello' };
-    await ctrl.search(dto, apiKey);
-    expect(search).toHaveBeenCalledWith(dto, undefined);
+
+    const scope =
+      SessionScopes.all();
+
+    getEffectiveSessionScope.mockResolvedValue(
+      scope,
+    );
+
+    const dto: SearchQueryDto = {
+      q: 'hello',
+    };
+
+    await ctrl.search(
+      dto,
+      apiKey,
+    );
+
+    expect(search).toHaveBeenCalledWith(
+      dto,
+      scope,
+    );
   });
 
-  it('derives callerSessionIds only from the key, never from the query (anti-smuggling)', async () => {
+  it('takes authorization scope only from SessionTenantAccessService; query sessionId can only narrow later', async () => {
     search.mockResolvedValue(ok);
-    // `sessionIds` is not a field on SearchQueryDto, so it cannot be expressed in the query at all;
-    // the global ValidationPipe (forbidNonWhitelisted) would reject it, and SearchService clobbers
-    // any sessionIds at the provider boundary. The controller itself derives scope solely from the
-    // key — here there is no key → undefined.
-    const dto: SearchQueryDto = { q: 'hello' };
-    await ctrl.search(dto, undefined);
-    expect(search).toHaveBeenCalledWith(dto, undefined);
+
+    const scope =
+      SessionScopes.ids([
+        's1',
+      ]);
+
+    getEffectiveSessionScope.mockResolvedValue(
+      scope,
+    );
+
+    const dto: SearchQueryDto = {
+      q: 'hello',
+      sessionId: 's2',
+    };
+
+    await ctrl.search(
+      dto,
+      apiKey,
+    );
+
+    expect(
+      getEffectiveSessionScope,
+    ).toHaveBeenCalledWith(
+      apiKey,
+    );
+
+    expect(search).toHaveBeenCalledWith(
+      dto,
+      scope,
+    );
   });
 
   it('propagates 501 (NotImplementedException) from the service when no provider is active', async () => {
-    search.mockRejectedValue(new NotImplementedException('none'));
-    await expect(ctrl.search({ q: 'x' }, undefined)).rejects.toBeInstanceOf(NotImplementedException);
+    const scope =
+      SessionScopes.all();
+
+    getEffectiveSessionScope.mockResolvedValue(
+      scope,
+    );
+
+    search.mockRejectedValue(
+      new NotImplementedException(
+        'none',
+      ),
+    );
+
+    await expect(
+      ctrl.search(
+        {
+          q: 'x',
+        },
+        apiKey,
+      ),
+    ).rejects.toBeInstanceOf(
+      NotImplementedException,
+    );
   });
 });

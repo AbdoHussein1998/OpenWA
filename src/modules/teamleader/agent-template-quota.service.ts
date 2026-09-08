@@ -86,6 +86,17 @@ export class AgentTemplateQuotaService {
   private readonly logger =
     createLogger('AgentTemplateQuotaService');
 
+  /**
+   * better-sqlite3 exposes one physical connection per DataSource. TypeORM can
+   * create multiple QueryRunner objects over that same connection, so quota DB
+   * operations must not overlap on that connection inside this process.
+   *
+   * Cross-process contention is still handled by SQLite itself plus the
+   * SQLITE_BUSY/SQLITE_LOCKED retry loop below.
+   */
+  private sqliteOperationTail: Promise<void> =
+    Promise.resolve();
+
   constructor(
     @InjectDataSource('main')
     private readonly mainDataSource: DataSource,
@@ -315,9 +326,21 @@ export class AgentTemplateQuotaService {
               null,
           });
 
+        /**
+         * This reservation already runs inside the raw BEGIN IMMEDIATE
+         * transaction created by withImmediateMainTransaction().
+         *
+         * Because that transaction was started with queryRunner.query(),
+         * TypeORM does not mark the QueryRunner as transaction-active.
+         * Repository.save() would otherwise start its own transaction and
+         * SQLite would reject the nested BEGIN.
+         */
         const saved =
           await usageRepository.save(
             usage,
+            {
+              transaction: false,
+            },
           );
 
         return {
@@ -610,124 +633,164 @@ export class AgentTemplateQuotaService {
       manager: EntityManager,
     ) => Promise<T>,
   ): Promise<T> {
-    let lastError: unknown;
+    return this.withLocalSqliteSerialization(
+      async () => {
+        let lastError: unknown;
 
-    for (
-      let attempt = 0;
-      attempt < SQLITE_BUSY_MAX_ATTEMPTS;
-      attempt += 1
-    ) {
-      const queryRunner =
-        this.mainDataSource.createQueryRunner();
+        for (
+          let attempt = 0;
+          attempt < SQLITE_BUSY_MAX_ATTEMPTS;
+          attempt += 1
+        ) {
+          const queryRunner =
+            this.mainDataSource.createQueryRunner();
 
-      let transactionStarted =
-        false;
+          let transactionStarted =
+            false;
 
-      try {
-        await queryRunner.connect();
-
-        await queryRunner.query(
-          'BEGIN IMMEDIATE',
-        );
-
-        transactionStarted =
-          true;
-
-        const result =
-          await operation(
-            queryRunner.manager,
-          );
-
-        await queryRunner.query(
-          'COMMIT',
-        );
-
-        transactionStarted =
-          false;
-
-        return result;
-      } catch (error) {
-        lastError =
-          error;
-
-        if (transactionStarted) {
           try {
+            await queryRunner.connect();
+
             await queryRunner.query(
-              'ROLLBACK',
+              'BEGIN IMMEDIATE',
             );
-          } catch (rollbackError) {
-            this.logger.warn(
-              'Failed to roll back Agent template quota transaction',
-              {
-                error:
-                  this.errorMessage(
-                    rollbackError,
-                  ),
-              },
+
+            transactionStarted =
+              true;
+
+            const result =
+              await operation(
+                queryRunner.manager,
+              );
+
+            await queryRunner.query(
+              'COMMIT',
             );
+
+            transactionStarted =
+              false;
+
+            return result;
+          } catch (error) {
+            lastError =
+              error;
+
+            if (transactionStarted) {
+              try {
+                await queryRunner.query(
+                  'ROLLBACK',
+                );
+              } catch (rollbackError) {
+                this.logger.warn(
+                  'Failed to roll back Agent template quota transaction',
+                  {
+                    error:
+                      this.errorMessage(
+                        rollbackError,
+                      ),
+                  },
+                );
+              }
+            }
+
+            if (
+              !this.isSqliteBusy(error) ||
+              attempt ===
+                SQLITE_BUSY_MAX_ATTEMPTS - 1
+            ) {
+              throw error;
+            }
+
+            await this.sleep(
+              SQLITE_BUSY_BASE_DELAY_MS *
+                (attempt + 1),
+            );
+          } finally {
+            await queryRunner.release();
           }
         }
 
-        if (
-          !this.isSqliteBusy(error) ||
-          attempt ===
-            SQLITE_BUSY_MAX_ATTEMPTS - 1
-        ) {
-          throw error;
-        }
-
-        await this.sleep(
-          SQLITE_BUSY_BASE_DELAY_MS *
-            (attempt + 1),
-        );
-      } finally {
-        await queryRunner.release();
-      }
-    }
-
-    throw lastError instanceof Error
-      ? lastError
-      : new Error(
-          'Failed to reserve Agent template quota',
-        );
+        throw lastError instanceof Error
+          ? lastError
+          : new Error(
+              'Failed to reserve Agent template quota',
+            );
+      },
+    );
   }
 
   private async withSqliteBusyRetry<T>(
     operation: () => Promise<T>,
   ): Promise<T> {
-    let lastError: unknown;
+    return this.withLocalSqliteSerialization(
+      async () => {
+        let lastError: unknown;
 
-    for (
-      let attempt = 0;
-      attempt < SQLITE_BUSY_MAX_ATTEMPTS;
-      attempt += 1
-    ) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError =
-          error;
-
-        if (
-          !this.isSqliteBusy(error) ||
-          attempt ===
-            SQLITE_BUSY_MAX_ATTEMPTS - 1
+        for (
+          let attempt = 0;
+          attempt < SQLITE_BUSY_MAX_ATTEMPTS;
+          attempt += 1
         ) {
-          throw error;
+          try {
+            return await operation();
+          } catch (error) {
+            lastError =
+              error;
+
+            if (
+              !this.isSqliteBusy(error) ||
+              attempt ===
+                SQLITE_BUSY_MAX_ATTEMPTS - 1
+            ) {
+              throw error;
+            }
+
+            await this.sleep(
+              SQLITE_BUSY_BASE_DELAY_MS *
+                (attempt + 1),
+            );
+          }
         }
 
-        await this.sleep(
-          SQLITE_BUSY_BASE_DELAY_MS *
-            (attempt + 1),
-        );
-      }
-    }
+        throw lastError instanceof Error
+          ? lastError
+          : new Error(
+              'SQLite quota operation failed',
+            );
+      },
+    );
+  }
 
-    throw lastError instanceof Error
-      ? lastError
-      : new Error(
-          'SQLite quota operation failed',
-        );
+  /**
+   * Serialize quota DB work within this process.
+   *
+   * SQLite file locking protects separate connections/processes, but
+   * better-sqlite3 QueryRunners share one physical connection. Without this
+   * queue, concurrent logical quota operations can overlap on that connection
+   * and produce nested-transaction errors.
+   */
+  private async withLocalSqliteSerialization<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous =
+      this.sqliteOperationTail;
+
+    let release!: () => void;
+
+    this.sqliteOperationTail =
+      new Promise<void>(
+        resolve => {
+          release = resolve;
+        },
+      );
+
+    await previous;
+
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private isSqliteBusy(

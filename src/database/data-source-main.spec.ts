@@ -57,21 +57,35 @@ describe('main CLI DataSource', () => {
     // The migration CLI never runs ConfigModule's validate(), so the SQLite main/data collision
     // guard is applied at module load instead — a shared broken env must fail the CLI too, before
     // any migration runs against the wrong file.
+    //
+    // Pin DATABASE_TYPE explicitly because loadCliEnv() preserves existing process.env values.
+    // A developer/CI shell configured for Postgres must not silently turn this SQLite-specific
+    // regression test into the intentionally non-colliding Postgres branch.
+    const prevType = process.env.DATABASE_TYPE;
     const prevMain = process.env.MAIN_DATABASE_NAME;
     const prevData = process.env.DATABASE_NAME;
+
+    process.env.DATABASE_TYPE = 'sqlite';
     process.env.MAIN_DATABASE_NAME = '/tmp/cli-guard-main.sqlite';
     process.env.DATABASE_NAME = '/tmp/cli-guard-main.sqlite';
+
     jest.resetModules();
+
     try {
       expect(() => {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('./data-source-main');
       }).toThrow(/DATABASE_NAME/);
     } finally {
+      if (prevType !== undefined) process.env.DATABASE_TYPE = prevType;
+      else delete process.env.DATABASE_TYPE;
+
       if (prevMain !== undefined) process.env.MAIN_DATABASE_NAME = prevMain;
       else delete process.env.MAIN_DATABASE_NAME;
+
       if (prevData !== undefined) process.env.DATABASE_NAME = prevData;
       else delete process.env.DATABASE_NAME;
+
       jest.resetModules();
     }
   });

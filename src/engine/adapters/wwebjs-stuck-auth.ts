@@ -1,3 +1,6 @@
+
+
+
 import { type Client } from 'whatsapp-web.js';
 import { type EngineEventCallbacks, EngineStatus } from '../interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
@@ -58,12 +61,11 @@ export class WwebjsStuckAuth {
 
     if (!granted) {
       this.host.setStatus(EngineStatus.FAILED);
-      this.host
-        .getCallbacks()
-        .onError?.(
-          'WhatsApp Web could not reach readiness after the one allowed re-pair recovery. ' +
-            'Pin WWEBJS_WEB_VERSION to a known-good build and try again.',
-        );
+      this.host.getCallbacks().onError?.(
+        'WhatsApp Web could not reach readiness after re-pairing. ' +
+          'The one allowed re-pair recovery has already been used. ' +
+          'Pin WWEBJS_WEB_VERSION to a known-good build and try again.',
+      );
       return;
     }
 
@@ -88,19 +90,17 @@ export class WwebjsStuckAuth {
         },
       );
       this.host.setStatus(EngineStatus.FAILED);
-      this.host
-        .getCallbacks()
-        .onError?.(
-          'WhatsApp Web authentication is stuck, but OpenWA could not safely reset the Brave profile. ' +
-            'The session was stopped to avoid corrupting its browser data. Check the server logs and restart it manually.',
-        );
+      this.host.getCallbacks().onError?.(
+        'WhatsApp Web authentication is stuck, but OpenWA could not safely reset the Brave profile. ' +
+          'The session was stopped to avoid corrupting its browser data. Check the server logs and restart it manually.',
+      );
       return;
     }
 
     this.host.setStatus(EngineStatus.DISCONNECTED);
-    this.host
-      .getCallbacks()
-      .onDisconnected?.('Saved Brave session could not be restored; profile cleared for re-pairing');
+    this.host.getCallbacks().onDisconnected?.(
+      'Saved Brave session could not be restored; profile cleared for re-pairing',
+    );
   }
 
   /**
@@ -150,8 +150,13 @@ export class WwebjsStuckAuth {
       }
     }
 
+    const manager = this.host.config.braveProfileManager;
+    if (!manager) {
+      throw new Error('Brave profile manager is unavailable');
+    }
+
     // This is not merely cleanup: it independently proves the profile has no live Brave owner.
-    await this.host.config.braveProfileManager.killOrphanedBraveProcesses(
+    await manager.killOrphanedBraveProcesses(
       this.host.config.sessionId,
       this.host.logger,
     );
@@ -164,6 +169,10 @@ export class WwebjsStuckAuth {
    */
   async clearBraveProfile(): Promise<void> {
     const manager = this.host.config.braveProfileManager;
+    if (!manager) {
+      throw new Error('Brave profile manager is unavailable');
+    }
+
     const profilePath = manager.getProfilePath(this.host.config.sessionId);
 
     await manager.deleteProfile(this.host.config.sessionId);
@@ -187,3 +196,6 @@ export class WwebjsStuckAuth {
     await this.clearBraveProfile();
   }
 }
+
+
+

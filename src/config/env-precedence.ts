@@ -112,6 +112,9 @@ export const BLANK_SHADOWED_ENV_KEYS: string[] = [
   'SESSION_DATA_PATH',
   'PUPPETEER_ARGS',
   'PUPPETEER_PROTOCOL_TIMEOUT_MS',
+  // Legacy browser-path fallback. Production compose forwards this blank now that Brave is the
+  // primary browser; clear the empty value so a real lower-priority override can still apply.
+  'PUPPETEER_EXECUTABLE_PATH',
   // Rate-limit values are blank-forwarded by Compose so a host value can take precedence without an
   // empty forward masking the lower-priority loaded .env / data/.env.generated value.
   'RATE_LIMIT_SHORT_TTL',
