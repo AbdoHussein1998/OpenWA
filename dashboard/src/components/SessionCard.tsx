@@ -1,3 +1,6 @@
+
+
+
 import {
   Eye,
   Play,
@@ -10,7 +13,10 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import type { Session, AccountRestriction } from '../services/api';
+import type {
+  AccountRestriction,
+  Session,
+} from '../services/api';
 import {
   canForceKillSession,
   canUnlinkSession,
@@ -22,7 +28,19 @@ import './SessionCard.css';
 interface SessionCardProps {
   session: Session;
 
-  canWrite: boolean;
+  /**
+   * Fine-grained frontend capability flags.
+   *
+   * These mirror the backend distinction between:
+   * - SESSION_START
+   * - SESSION_SHUTDOWN
+   * - SESSION_MANAGE
+   *
+   * Backend authorization remains authoritative.
+   */
+  canStartSessions: boolean;
+  canShutdownSessions: boolean;
+  canManageSessions: boolean;
 
   onView: (session: Session) => void;
   onStart: (session: Session) => void;
@@ -45,7 +63,9 @@ interface SessionCardProps {
 
 export function SessionCard({
   session,
-  canWrite,
+  canStartSessions,
+  canShutdownSessions,
+  canManageSessions,
   onView,
   onStart,
   onStop,
@@ -62,12 +82,23 @@ export function SessionCard({
       defaultValue: status,
     });
 
-  const formatLastActive = (date?: string | null) => {
+  const formatLastActive = (
+    date?: string | null,
+  ) => {
     if (!date) {
       return t('common.never');
     }
 
-    const diff = Date.now() - new Date(date).getTime();
+    const parsed = new Date(date);
+    const timestamp = parsed.getTime();
+
+    if (Number.isNaN(timestamp)) {
+      return t('common.never');
+    }
+
+    const diff =
+      Date.now() -
+      timestamp;
 
     if (diff < 60000) {
       return t('common.justNow');
@@ -75,20 +106,55 @@ export function SessionCard({
 
     if (diff < 3600000) {
       return t('common.minAgo', {
-        count: Math.floor(diff / 60000),
+        count:
+          Math.floor(
+            diff / 60000,
+          ),
       });
     }
 
-    return new Date(date).toLocaleDateString();
+    return parsed.toLocaleDateString();
   };
 
   const isQrState =
-    session.status === 'initializing' ||
-    session.status === 'qr_ready';
+    session.status ===
+      'initializing' ||
+    session.status ===
+      'qr_ready';
 
-  const started = isSessionStarted(session);
-  const unlinkAllowed = canUnlinkSession(session, canWrite);
-  const forceKillAllowed = canForceKillSession(session, canWrite);
+  /**
+   * `engineLoaded` is authoritative when present.
+   *
+   * Do not infer running/stopped state only from `status`: a
+   * `disconnected` session can still own a live engine while it is in
+   * reconnect backoff.
+   */
+  const started =
+    isSessionStarted(
+      session,
+    );
+
+  const unlinkAllowed =
+    canUnlinkSession(
+      session,
+      canShutdownSessions,
+    );
+
+  const forceKillAllowed =
+    canForceKillSession(
+      session,
+      canShutdownSessions,
+    );
+
+  const canStart =
+    canStartSessions &&
+    !started;
+
+  const startActionIsInitial =
+    session.status ===
+      'created' ||
+    session.status ===
+      'disconnected';
 
   return (
     <div className="session-card">
@@ -96,10 +162,20 @@ export function SessionCard({
           HEADER
          ===================================================== */}
       <div className="card-header">
-        <h3 title={session.name}>{session.name}</h3>
+        <h3
+          title={
+            session.name
+          }
+        >
+          {session.name}
+        </h3>
 
-        <span className={`status-pill ${session.status}`}>
-          {formatStatus(session.status)}
+        <span
+          className={`status-pill ${session.status}`}
+        >
+          {formatStatus(
+            session.status,
+          )}
         </span>
       </div>
 
@@ -108,24 +184,46 @@ export function SessionCard({
          ===================================================== */}
       {isQrState ? (
         <div className="qr-placeholder">
-          <QrCode size={80} className="qr-icon" />
+          <QrCode
+            size={80}
+            className="qr-icon"
+          />
 
           <p>
-            {session.status === 'qr_ready'
-              ? t('sessions.qr.scanToConnect')
-              : t('sessions.qr.preparing')}
+            {session.status ===
+            'qr_ready'
+              ? t(
+                  'sessions.qr.scanToConnect',
+                )
+              : t(
+                  'sessions.qr.preparing',
+                )}
           </p>
 
-          <button
-            type="button"
-            className="btn-sm"
-            onClick={() => onShowQR(session)}
-            disabled={session.status !== 'qr_ready'}
-          >
-            {session.status === 'qr_ready'
-              ? t('sessions.qr.showQr')
-              : t('sessions.qr.loading')}
-          </button>
+          {canManageSessions && (
+            <button
+              type="button"
+              className="btn-sm"
+              onClick={() =>
+                onShowQR(
+                  session,
+                )
+              }
+              disabled={
+                session.status !==
+                'qr_ready'
+              }
+            >
+              {session.status ===
+              'qr_ready'
+                ? t(
+                    'sessions.qr.showQr',
+                  )
+                : t(
+                    'sessions.qr.loading',
+                  )}
+            </button>
+          )}
         </div>
       ) : (
         /* ===================================================
@@ -134,49 +232,69 @@ export function SessionCard({
         <div className="session-info">
           <div className="info-row">
             <span className="info-label">
-              {t('sessions.card.phone')}
+              {t(
+                'sessions.card.phone',
+              )}
             </span>
 
             <span className="info-value">
-              {session.phone || '—'}
+              {session.phone ||
+                '—'}
             </span>
           </div>
 
           <div className="info-row">
             <span className="info-label">
-              {t('sessions.card.sessionId')}
+              {t(
+                'sessions.card.sessionId',
+              )}
             </span>
 
             <span className="info-value mono">
-              {session.id.substring(0, 12)}
+              {session.id.substring(
+                0,
+                12,
+              )}
             </span>
           </div>
 
           <div className="info-row">
             <span className="info-label">
-              {t('sessions.card.lastActive')}
+              {t(
+                'sessions.card.lastActive',
+              )}
             </span>
 
             <span className="info-value">
-              {formatLastActive(session.lastActive)}
+              {formatLastActive(
+                session.lastActive,
+              )}
             </span>
           </div>
 
           {(
-            session.status === 'failed' ||
-            session.status === 'action_required'
+            session.status ===
+              'failed' ||
+            session.status ===
+              'action_required'
           ) &&
             session.lastError && (
               <div className="info-row session-error">
                 <span className="info-label">
-                  {t('sessions.card.error')}
+                  {t(
+                    'sessions.card.error',
+                  )}
                 </span>
 
                 <span
                   className="info-value error-text"
-                  title={session.lastError}
+                  title={
+                    session.lastError
+                  }
                 >
-                  {session.lastError}
+                  {
+                    session.lastError
+                  }
                 </span>
               </div>
             )}
@@ -184,7 +302,9 @@ export function SessionCard({
           {session.restriction && (
             <div className="info-row session-restriction">
               <span className="info-label">
-                {t('sessions.card.restriction')}
+                {t(
+                  'sessions.card.restriction',
+                )}
               </span>
 
               <span
@@ -195,7 +315,8 @@ export function SessionCard({
                         session.restriction,
                         session,
                       )
-                    : session.restriction.code
+                    : session.restriction
+                        .code
                 }
               >
                 {t(
@@ -214,40 +335,67 @@ export function SessionCard({
         <button
           type="button"
           className="btn-action"
-          onClick={() => onView(session)}
+          onClick={() =>
+            onView(
+              session,
+            )
+          }
         >
-          <Eye size={16} />
-          {t('sessions.actions.view')}
+          <Eye
+            size={16}
+          />
+
+          {t(
+            'sessions.actions.view',
+          )}
         </button>
 
-        {canWrite && started ? (
+        {canShutdownSessions &&
+        started ? (
           <button
             type="button"
             className="btn-action"
-            onClick={() => onStop(session)}
+            onClick={() =>
+              onStop(
+                session,
+              )
+            }
           >
-            <Square size={16} />
-            {t('sessions.actions.stop')}
+            <Square
+              size={16}
+            />
+
+            {t(
+              'sessions.actions.stop',
+            )}
           </button>
-        ) : canWrite &&
-          (session.status === 'created' ||
-            session.status === 'disconnected') ? (
+        ) : canStart ? (
           <button
             type="button"
             className="btn-action"
-            onClick={() => onStart(session)}
+            onClick={() =>
+              onStart(
+                session,
+              )
+            }
           >
-            <Play size={16} />
-            {t('sessions.actions.start')}
-          </button>
-        ) : canWrite ? (
-          <button
-            type="button"
-            className="btn-action"
-            onClick={() => onStart(session)}
-          >
-            <RefreshCw size={16} />
-            {t('sessions.actions.reconnect')}
+            {startActionIsInitial ? (
+              <Play
+                size={16}
+              />
+            ) : (
+              <RefreshCw
+                size={16}
+              />
+            )}
+
+            {startActionIsInitial
+              ? t(
+                  'sessions.actions.start',
+                )
+              : t(
+                  'sessions.actions.reconnect',
+                )}
           </button>
         ) : null}
 
@@ -255,21 +403,39 @@ export function SessionCard({
           <button
             type="button"
             className="btn-action danger"
-            onClick={() => onUnlink(session)}
+            onClick={() =>
+              onUnlink(
+                session,
+              )
+            }
           >
-            <Unlink size={16} />
-            {t('sessions.actions.unlink')}
+            <Unlink
+              size={16}
+            />
+
+            {t(
+              'sessions.actions.unlink',
+            )}
           </button>
         )}
 
-        {canWrite && (
+        {canManageSessions && (
           <button
             type="button"
             className="btn-action danger"
-            onClick={() => onDelete(session)}
+            onClick={() =>
+              onDelete(
+                session,
+              )
+            }
           >
-            <Trash2 size={16} />
-            {t('sessions.actions.delete')}
+            <Trash2
+              size={16}
+            />
+
+            {t(
+              'sessions.actions.delete',
+            )}
           </button>
         )}
 
@@ -277,13 +443,24 @@ export function SessionCard({
           <button
             type="button"
             className="btn-action danger"
-            onClick={() => onForceKill(session)}
+            onClick={() =>
+              onForceKill(
+                session,
+              )
+            }
           >
-            <Skull size={16} />
-            {t('sessions.actions.killStuck')}
+            <Skull
+              size={16}
+            />
+
+            {t(
+              'sessions.actions.killStuck',
+            )}
           </button>
         )}
       </div>
     </div>
   );
 }
+
+

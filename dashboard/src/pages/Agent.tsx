@@ -1,3 +1,6 @@
+
+
+
 import {
   useCallback,
   useEffect,
@@ -23,8 +26,12 @@ import {
   ArrowLeft,
   Loader2,
   MessageSquare,
+  Play,
   RefreshCw,
+  Skull,
   Smartphone,
+  Square,
+  Unlink,
   UserRound,
 } from 'lucide-react';
 
@@ -35,15 +42,16 @@ import {
   type Channel,
   type Chat,
   type ChatKind,
+  type Session,
 } from '../services/api';
 
 import {
+  queryKeys,
   useAgentMeQuery,
   useSessionsQuery,
 } from '../hooks/queries';
 
 import {
-  RoleContext,
   useRole,
 } from '../hooks/useRole';
 
@@ -101,6 +109,13 @@ import {
 import {
   useMarkChatRead,
 } from '../hooks/useMarkChatRead';
+
+import {
+  canForceKillSession,
+  canUnlinkSession,
+  classifyUnlinkError,
+  isSessionStarted,
+} from '../utils/sessionActions';
 
 import ChatSidebar from '../components/chats/ChatSidebar';
 
@@ -315,6 +330,26 @@ function statusLabel(
     );
 }
 
+function templateQuotaLabel(
+  limit: number | null,
+): string {
+  if (limit === null) {
+    return 'Unlimited';
+  }
+
+  if (limit === 0) {
+    return 'Disabled';
+  }
+
+  return `${limit} / 24h`;
+}
+
+type AgentSessionAction =
+  | 'start'
+  | 'stop'
+  | 'logout'
+  | 'force-kill';
+
 /* ================================================================
    PAGE
    ================================================================ */
@@ -339,7 +374,10 @@ export function Agent() {
   const queryClient =
     useQueryClient();
 
-  const roleContext =
+  const {
+    canStartSessions,
+    canShutdownSessions,
+  } =
     useRole();
 
   /**
@@ -462,6 +500,14 @@ export function Agent() {
     setLightboxIndex,
   ] =
     useState<number | null>(
+      null,
+    );
+
+  const [
+    sessionAction,
+    setSessionAction,
+  ] =
+    useState<AgentSessionAction | null>(
       null,
     );
 
@@ -883,6 +929,244 @@ export function Agent() {
         loadChats,
         sessionsQuery,
       ],
+    );
+
+  const applyUpdatedSession =
+    useCallback(
+      (
+        updated:
+          Session,
+      ) => {
+        queryClient.setQueryData<
+          Session[]
+        >(
+          queryKeys.sessions,
+          previous =>
+            previous
+              ? previous.map(
+                  session =>
+                    session.id ===
+                    updated.id
+                      ? updated
+                      : session,
+                )
+              : [
+                  updated,
+                ],
+        );
+      },
+      [
+        queryClient,
+      ],
+    );
+
+  const runSessionAction =
+    useCallback(
+      async (
+        action:
+          AgentSessionAction,
+      ) => {
+        const session =
+          assignedSession;
+
+        if (
+          !session ||
+          sessionAction
+        ) {
+          return;
+        }
+
+        if (
+          action ===
+            'start' &&
+          !canStartSessions
+        ) {
+          return;
+        }
+
+        if (
+          action !==
+            'start' &&
+          !canShutdownSessions
+        ) {
+          return;
+        }
+
+        if (
+          action ===
+            'logout' &&
+          typeof window !==
+            'undefined' &&
+          !window.confirm(
+            t(
+              'agent.logoutConfirm',
+              'Unlink this WhatsApp session? A fresh QR scan or pairing code will be required before it can connect again.',
+            ),
+          )
+        ) {
+          return;
+        }
+
+        if (
+          action ===
+            'force-kill' &&
+          typeof window !==
+            'undefined' &&
+          !window.confirm(
+            t(
+              'agent.forceKillConfirm',
+              'Force-kill the assigned session engine? Use this only when the normal stop action cannot recover a stuck engine.',
+            ),
+          )
+        ) {
+          return;
+        }
+
+        setSessionAction(
+          action,
+        );
+
+        try {
+          const updated =
+            action ===
+            'start'
+              ? await sessionApi.start(
+                  session.id,
+                )
+              : action ===
+                  'stop'
+                ? await sessionApi.stop(
+                    session.id,
+                  )
+                : action ===
+                    'logout'
+                  ? await sessionApi.logout(
+                      session.id,
+                    )
+                  : await sessionApi.forceKill(
+                      session.id,
+                    );
+
+          applyUpdatedSession(
+            updated,
+          );
+
+          toast.success(
+            action ===
+              'start'
+              ? t(
+                  'agent.sessionStarted',
+                  'Session start requested',
+                )
+              : action ===
+                  'stop'
+                ? t(
+                    'agent.sessionStopped',
+                    'Session stopped',
+                  )
+                : action ===
+                    'logout'
+                  ? t(
+                      'agent.sessionUnlinked',
+                      'Session unlinked',
+                    )
+                  : t(
+                      'agent.sessionForceKilled',
+                      'Session force-killed',
+                    ),
+          );
+        } catch (
+          error
+        ) {
+          if (
+            action ===
+              'logout' &&
+            classifyUnlinkError(
+              error,
+            ) ===
+              'incomplete'
+          ) {
+            await sessionsQuery.refetch();
+
+            toast.warning(
+              t(
+                'agent.logoutIncompleteTitle',
+                'Unlink did not complete',
+              ),
+              t(
+                'agent.logoutIncompleteDescription',
+                'The session was stopped locally, but unlinking remained incomplete. Start the session again and retry the unlink.',
+              ),
+            );
+
+            return;
+          }
+
+          toast.error(
+            t(
+              'agent.sessionActionFailed',
+              'Session action failed',
+            ),
+            error instanceof
+              Error
+              ? error.message
+              : undefined,
+          );
+        } finally {
+          setSessionAction(
+            null,
+          );
+        }
+      },
+      [
+        applyUpdatedSession,
+        assignedSession,
+        canShutdownSessions,
+        canStartSessions,
+        sessionAction,
+        sessionsQuery,
+        t,
+        toast,
+      ],
+    );
+
+  const assignedSessionStarted =
+    assignedSession
+      ? isSessionStarted(
+          assignedSession,
+        )
+      : false;
+
+  const canStartAssignedSession =
+    Boolean(
+      assignedSession &&
+        canStartSessions &&
+        !assignedSessionStarted,
+    );
+
+  const canStopAssignedSession =
+    Boolean(
+      assignedSession &&
+        canShutdownSessions &&
+        assignedSessionStarted,
+    );
+
+  const canUnlinkAssignedSession =
+    Boolean(
+      assignedSession &&
+        canUnlinkSession(
+          assignedSession,
+          canShutdownSessions,
+        ),
+    );
+
+  const canForceKillAssignedSession =
+    Boolean(
+      assignedSession &&
+        canForceKillSession(
+          assignedSession,
+          canShutdownSessions,
+        ),
     );
 
   /* ================================================================
@@ -2327,6 +2611,15 @@ export function Agent() {
               'Your Team Leader has not assigned a WhatsApp session to this Agent account. Contact your Team Leader.',
             )}
           </p>
+
+          <span className="agent-status">
+            {t(
+              'agent.templateQuotaSummary',
+              `Template quota: ${templateQuotaLabel(
+                agent.templateSendLimit24h,
+              )}`,
+            )}
+          </span>
         </div>
       </div>
     );
@@ -2433,30 +2726,171 @@ export function Agent() {
           </p>
         </div>
 
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={() =>
-            void refreshWorkspace()
-          }
-          disabled={
-            refreshing
-          }
-        >
-          <RefreshCw
-            size={17}
-            className={
-              refreshing
-                ? 'animate-spin'
-                : undefined
-            }
-          />
+        <div className="agent-session-actions">
+          {canStartAssignedSession && (
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() =>
+                void runSessionAction(
+                  'start',
+                )
+              }
+              disabled={
+                Boolean(
+                  sessionAction,
+                )
+              }
+            >
+              {sessionAction ===
+              'start' ? (
+                <Loader2
+                  size={17}
+                  className="animate-spin"
+                />
+              ) : (
+                <Play
+                  size={17}
+                />
+              )}
 
-          {t(
-            'common.refresh',
-            'Refresh',
+              {t(
+                'sessions.actions.start',
+                'Start',
+              )}
+            </button>
           )}
-        </button>
+
+          {canStopAssignedSession && (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() =>
+                void runSessionAction(
+                  'stop',
+                )
+              }
+              disabled={
+                Boolean(
+                  sessionAction,
+                )
+              }
+            >
+              {sessionAction ===
+              'stop' ? (
+                <Loader2
+                  size={17}
+                  className="animate-spin"
+                />
+              ) : (
+                <Square
+                  size={17}
+                />
+              )}
+
+              {t(
+                'sessions.actions.stop',
+                'Stop',
+              )}
+            </button>
+          )}
+
+          {canUnlinkAssignedSession && (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() =>
+                void runSessionAction(
+                  'logout',
+                )
+              }
+              disabled={
+                Boolean(
+                  sessionAction,
+                )
+              }
+            >
+              {sessionAction ===
+              'logout' ? (
+                <Loader2
+                  size={17}
+                  className="animate-spin"
+                />
+              ) : (
+                <Unlink
+                  size={17}
+                />
+              )}
+
+              {t(
+                'sessions.actions.unlink',
+                'Unlink',
+              )}
+            </button>
+          )}
+
+          {canForceKillAssignedSession && (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() =>
+                void runSessionAction(
+                  'force-kill',
+                )
+              }
+              disabled={
+                Boolean(
+                  sessionAction,
+                )
+              }
+            >
+              {sessionAction ===
+              'force-kill' ? (
+                <Loader2
+                  size={17}
+                  className="animate-spin"
+                />
+              ) : (
+                <Skull
+                  size={17}
+                />
+              )}
+
+              {t(
+                'sessions.actions.killStuck',
+                'Force kill',
+              )}
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() =>
+              void refreshWorkspace()
+            }
+            disabled={
+              refreshing ||
+              Boolean(
+                sessionAction,
+              )
+            }
+          >
+            <RefreshCw
+              size={17}
+              className={
+                refreshing
+                  ? 'animate-spin'
+                  : undefined
+              }
+            />
+
+            {t(
+              'common.refresh',
+              'Refresh',
+            )}
+          </button>
+        </div>
       </header>
 
       <section
@@ -2557,6 +2991,40 @@ export function Agent() {
             )}
           </span>
         </article>
+
+        <article className="agent-info-card">
+          <span className="agent-info-label">
+            {t(
+              'agent.templateQuota',
+              'Template quota',
+            )}
+          </span>
+
+          <strong>
+            {templateQuotaLabel(
+              agent.templateSendLimit24h,
+            )}
+          </strong>
+
+          <span className="agent-info-secondary">
+            {agent.templateSendLimit24h ===
+            null
+              ? t(
+                  'agent.templateQuotaUnlimitedHint',
+                  'No rolling 24-hour stored-template limit',
+                )
+              : agent.templateSendLimit24h ===
+                  0
+                ? t(
+                    'agent.templateQuotaDisabledHint',
+                    'Stored-template sending is disabled',
+                  )
+                : t(
+                    'agent.templateQuotaLimitedHint',
+                    'Rolling 24-hour stored-template limit',
+                  )}
+          </span>
+        </article>
       </section>
 
       {!sessionReady ? (
@@ -2575,7 +3043,7 @@ export function Agent() {
           <p>
             {t(
               'agent.sessionNotReadyDescription',
-              'The assigned WhatsApp session is currently unavailable for chat. Session lifecycle controls belong to your Team Leader.',
+              'The assigned WhatsApp session is currently unavailable for chat. You can start or stop the assigned engine when permitted; QR/pairing and session configuration remain Team Leader responsibilities.',
             )}
           </p>
 
@@ -2787,64 +3255,44 @@ export function Agent() {
                       }
                     />
 
-                    {/**
-                     * Compatibility bridge:
-                     *
-                     * ChatComposer still reads legacy `canWrite`.
-                     * Agent authorization is represented by the specific
-                     * `canSendMessages` capability, so only this subtree
-                     * receives canWrite=canSendMessages.
-                     *
-                     * Once ChatComposer itself switches to
-                     * canSendMessages, this nested provider can be
-                     * removed.
-                     */}
-                    <RoleContext.Provider
-                      value={{
-                        ...roleContext,
-                        canWrite:
-                          roleContext.canSendMessages,
-                      }}
-                    >
-                      <ChatComposer
-                        selectedSessionId={
-                          assignedSession.id
-                        }
-                        activeChat={
-                          activeChat
-                        }
-                        replyingTo={
-                          replyingTo
-                        }
-                        setReplyingTo={
-                          setReplyingTo
-                        }
-                        onMessageAppended={
-                          onMessageAppended
-                        }
-                        setChats={
-                          setChatsWithRef
-                        }
-                        messageInput={
-                          messageInput
-                        }
-                        setMessageInput={
-                          setMessageInput
-                        }
-                        attachment={
-                          attachment
-                        }
-                        setAttachment={
-                          setAttachment
-                        }
-                        previewUrl={
-                          previewUrl
-                        }
-                        setPreviewUrl={
-                          setPreviewUrl
-                        }
-                      />
-                    </RoleContext.Provider>
+                    <ChatComposer
+                      selectedSessionId={
+                        assignedSession.id
+                      }
+                      activeChat={
+                        activeChat
+                      }
+                      replyingTo={
+                        replyingTo
+                      }
+                      setReplyingTo={
+                        setReplyingTo
+                      }
+                      onMessageAppended={
+                        onMessageAppended
+                      }
+                      setChats={
+                        setChatsWithRef
+                      }
+                      messageInput={
+                        messageInput
+                      }
+                      setMessageInput={
+                        setMessageInput
+                      }
+                      attachment={
+                        attachment
+                      }
+                      setAttachment={
+                        setAttachment
+                      }
+                      previewUrl={
+                        previewUrl
+                      }
+                      setPreviewUrl={
+                        setPreviewUrl
+                      }
+                    />
                   </div>
                 ) : (
                   <div className="chats-room-placeholder">
@@ -2893,3 +3341,6 @@ export function Agent() {
     </div>
   );
 }
+
+
+

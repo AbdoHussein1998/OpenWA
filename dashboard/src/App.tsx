@@ -1,3 +1,6 @@
+
+
+
 import {
   Suspense,
   useCallback,
@@ -148,21 +151,17 @@ const queryClient = new QueryClient({
 });
 
 /**
- * Logs are still a legacy dashboard surface.
+ * Audit logs are currently Admin-only on the backend.
  *
- * Phase-2 route access intentionally does not expose them to Team
- * Leaders or Agents.
+ * Keep this explicit until /logs is represented directly in the
+ * centralized roleAccess.ts route matrix.
  */
 function canAccessAppRoute(
   role: UserRole,
   path: string,
 ): boolean {
   if (path === '/logs') {
-    return (
-      role === 'admin' ||
-      role === 'operator' ||
-      role === 'viewer'
-    );
+    return role === 'admin';
   }
 
   return canAccessRoute(
@@ -559,10 +558,17 @@ function AppContent() {
               <Route
                 path="spg-agents"
                 element={
-                  <Navigate
-                    to="/agent"
-                    replace
-                  />
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/spg-agents"
+                  >
+                    <Navigate
+                      to="/agent"
+                      replace
+                    />
+                  </RoleRoute>
                 }
               />
 
@@ -602,3 +608,6 @@ function App() {
 }
 
 export default App;
+
+
+

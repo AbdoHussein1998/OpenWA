@@ -1,5 +1,10 @@
 
-import type { UserRole } from '../types/role';
+
+
+import type {
+  RoleCapabilities,
+  UserRole,
+} from '../types/role';
 
 /**
  * Frontend UX capabilities.
@@ -9,24 +14,15 @@ import type { UserRole } from '../types/role';
  * The NestJS guards/services remain authoritative for tenant and
  * assignment access. This file only controls what the dashboard shows
  * and which client-side routes it allows a role to enter.
- */
-export interface RoleCapabilities {
-  canWrite: boolean;
-  canManageSessions: boolean;
-  canReadSessions: boolean;
-  canOperateChats: boolean;
-  canSendMessages: boolean;
-  canManageTeam: boolean;
-  canManageApiKeys: boolean;
-  canManageInfrastructure: boolean;
-}
-
-/**
- * Keep every role's frontend capabilities in one place.
  *
- * `canWrite` is retained for backwards compatibility with existing
- * dashboard components. New code should prefer the specific capability
- * that matches the operation being rendered.
+ * The specific flags below intentionally mirror the backend distinctions
+ * needed by the current dashboard work:
+ *
+ * - Agents may start/shutdown their assigned session, but may not manage
+ *   session configuration/lifecycle broadly.
+ * - Agents may read stored templates, but may not manage them.
+ * - Team Leaders may manage stored templates.
+ * - Team Leaders and Agents may not manage webhooks.
  */
 export const ROLE_CAPABILITIES: Readonly<
   Record<UserRole, Readonly<RoleCapabilities>>
@@ -35,8 +31,13 @@ export const ROLE_CAPABILITIES: Readonly<
     canWrite: true,
     canManageSessions: true,
     canReadSessions: true,
+    canStartSessions: true,
+    canShutdownSessions: true,
     canOperateChats: true,
     canSendMessages: true,
+    canReadTemplates: true,
+    canManageTemplates: true,
+    canManageWebhooks: true,
     canManageTeam: true,
     canManageApiKeys: true,
     canManageInfrastructure: true,
@@ -46,8 +47,13 @@ export const ROLE_CAPABILITIES: Readonly<
     canWrite: true,
     canManageSessions: true,
     canReadSessions: true,
+    canStartSessions: true,
+    canShutdownSessions: true,
     canOperateChats: true,
     canSendMessages: true,
+    canReadTemplates: true,
+    canManageTemplates: true,
+    canManageWebhooks: true,
     canManageTeam: false,
     canManageApiKeys: false,
     canManageInfrastructure: false,
@@ -57,8 +63,13 @@ export const ROLE_CAPABILITIES: Readonly<
     canWrite: false,
     canManageSessions: false,
     canReadSessions: true,
-    canOperateChats: true,
+    canStartSessions: false,
+    canShutdownSessions: false,
+    canOperateChats: false,
     canSendMessages: false,
+    canReadTemplates: false,
+    canManageTemplates: false,
+    canManageWebhooks: false,
     canManageTeam: false,
     canManageApiKeys: false,
     canManageInfrastructure: false,
@@ -76,8 +87,13 @@ export const ROLE_CAPABILITIES: Readonly<
     canWrite: false,
     canManageSessions: true,
     canReadSessions: true,
+    canStartSessions: true,
+    canShutdownSessions: true,
     canOperateChats: true,
     canSendMessages: true,
+    canReadTemplates: true,
+    canManageTemplates: true,
+    canManageWebhooks: false,
     canManageTeam: true,
     canManageApiKeys: false,
     canManageInfrastructure: false,
@@ -85,15 +101,23 @@ export const ROLE_CAPABILITIES: Readonly<
 
   agent: {
     /**
-     * Agents can send messages, but they cannot manage session
-     * lifecycle. Keeping `canWrite` false prevents old broad write gates
-     * from accidentally exposing management controls.
+     * Agents are assignment-scoped operators.
+     *
+     * They may read/start/shutdown only the session authorized by the
+     * backend assignment fence, operate chats, send messages, and read
+     * stored templates. They may not create/delete/configure sessions,
+     * manage templates, or manage webhooks.
      */
     canWrite: false,
     canManageSessions: false,
     canReadSessions: true,
+    canStartSessions: true,
+    canShutdownSessions: true,
     canOperateChats: true,
     canSendMessages: true,
+    canReadTemplates: true,
+    canManageTemplates: false,
+    canManageWebhooks: false,
     canManageTeam: false,
     canManageApiKeys: false,
     canManageInfrastructure: false,
@@ -101,8 +125,6 @@ export const ROLE_CAPABILITIES: Readonly<
 };
 
 /**
- * Return the capability set for a role.
- *
  * Null means there is no authenticated/known dashboard role yet, so
  * every capability is false.
  */
@@ -110,8 +132,13 @@ const NO_CAPABILITIES: Readonly<RoleCapabilities> = {
   canWrite: false,
   canManageSessions: false,
   canReadSessions: false,
+  canStartSessions: false,
+  canShutdownSessions: false,
   canOperateChats: false,
   canSendMessages: false,
+  canReadTemplates: false,
+  canManageTemplates: false,
+  canManageWebhooks: false,
   canManageTeam: false,
   canManageApiKeys: false,
   canManageInfrastructure: false,
@@ -205,6 +232,9 @@ export function canAccessRoute(
   const pathname =
     normalizePath(path);
 
+  const capabilities =
+    getRoleCapabilities(role);
+
   /**
    * Existing dashboard home.
    *
@@ -234,48 +264,54 @@ export function canAccessRoute(
   }
 
   /**
-   * Sessions are visible to legacy dashboard roles and Team Leaders.
-   *
-   * Agents should use the assignment-driven /agent workspace instead of
-   * browsing or selecting arbitrary sessions.
+   * Generic Sessions remains unavailable to Agents because their
+   * workspace is assignment-driven and must not expose a free session
+   * selector.
    */
   if (matchesRoute(pathname, '/sessions')) {
     return (
-      role === 'admin' ||
-      role === 'operator' ||
-      role === 'viewer' ||
-      role === 'team_leader'
+      capabilities.canReadSessions &&
+      role !== 'agent'
     );
   }
 
   /**
-   * Generic Chats remains available to the legacy dashboard roles and
-   * Team Leaders. Agents use /agent so they cannot choose another
-   * session from a generic session selector.
+   * Generic Chats follows the same rule: Agents use /agent so the
+   * selected session always comes from their backend assignment.
    */
   if (matchesRoute(pathname, '/chats')) {
     return (
-      role === 'admin' ||
-      role === 'operator' ||
-      role === 'viewer' ||
-      role === 'team_leader'
+      capabilities.canReadSessions &&
+      role !== 'agent'
     );
   }
 
   /**
-   * Team Leaders are expected to retain access to their tenant-scoped
-   * operational tools. The backend must scope every returned resource.
+   * Webhook management is available only where the backend grants the
+   * corresponding management capability.
    */
-  if (
-    matchesRoute(pathname, '/webhooks') ||
-    matchesRoute(pathname, '/templates') ||
-    matchesRoute(pathname, '/message-tester')
-  ) {
+  if (matchesRoute(pathname, '/webhooks')) {
+    return capabilities.canManageWebhooks;
+  }
+
+  /**
+   * Stored templates are readable by Admin, Operator, Team Leader and
+   * Agent. The Templates page uses canManageTemplates separately to
+   * decide whether create/edit/delete controls are enabled.
+   */
+  if (matchesRoute(pathname, '/templates')) {
+    return capabilities.canReadTemplates;
+  }
+
+  /**
+   * The generic message tester needs send permission, but Agents stay on
+   * their assignment-driven /agent workspace to avoid a generic session
+   * selector.
+   */
+  if (matchesRoute(pathname, '/message-tester')) {
     return (
-      role === 'admin' ||
-      role === 'operator' ||
-      role === 'viewer' ||
-      role === 'team_leader'
+      capabilities.canSendMessages &&
+      role !== 'agent'
     );
   }
 
@@ -289,7 +325,7 @@ export function canAccessRoute(
     matchesRoute(pathname, '/api-keys') ||
     matchesRoute(pathname, '/apikeys')
   ) {
-    return role === 'admin';
+    return capabilities.canManageApiKeys;
   }
 
   /**
@@ -299,10 +335,11 @@ export function canAccessRoute(
     matchesRoute(pathname, '/infrastructure') ||
     matchesRoute(pathname, '/plugins')
   ) {
-    return role === 'admin';
+    return capabilities.canManageInfrastructure;
   }
 
   return false;
 }
+
 
 

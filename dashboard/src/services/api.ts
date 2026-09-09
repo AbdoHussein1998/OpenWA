@@ -3,6 +3,7 @@
 
 
 
+
 // API Service Layer for OpenWA Dashboard
 // Centralized API client with TypeScript types
 
@@ -140,6 +141,14 @@ export interface Agent {
   email: string | null;
   teamLeaderId: string;
   assignedSessionId: string | null;
+  /**
+   * Stored-template send quota for the rolling previous 24 hours.
+   *
+   * null -> unlimited
+   * 0    -> stored-template sending disabled
+   * N    -> at most N successful stored-template sends in the rolling window
+   */
+  templateSendLimit24h: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -152,6 +161,10 @@ export interface CreateTeamLeaderInput {
 export interface CreateAgentInput {
   name: string;
   email?: string;
+  /**
+   * null/omitted -> unlimited; 0 -> disabled; positive integer -> rolling 24-hour limit.
+   */
+  templateSendLimit24h?: number | null;
 }
 
 export interface CreateTeamLeaderResult {
@@ -274,6 +287,75 @@ export interface AuditLog {
 export interface MessageResponse {
   messageId: string;
   timestamp: number;
+}
+
+/**
+ * Body accepted by POST /sessions/:sessionId/messages/send-template.
+ *
+ * The backend accepts either a template id or a template name. Dashboard composer flows should
+ * normally keep and send the stable templateId selected from templateApi.list().
+ */
+export type SendTemplatePayload = {
+  chatId: string;
+  vars?: Record<string, string>;
+  mentions?: string[];
+  linkPreview?: boolean;
+} & (
+  | { templateId: string; templateName?: never }
+  | { templateName: string; templateId?: never }
+);
+
+/** Structured 429 body returned when an Agent cannot send another stored template. */
+export interface AgentTemplateQuotaErrorResponse {
+  statusCode: 429;
+  error: string;
+  code: 'AGENT_TEMPLATE_SEND_LIMIT_REACHED';
+  message: string;
+  templateSendLimit24h: number;
+  used24h: number;
+  remaining24h: number | null;
+  retryAfterSeconds: number | null;
+}
+
+/**
+ * Error thrown by the dashboard API client for non-2xx responses.
+ *
+ * `status` and `code` preserve the existing contract used by recovery UI. Quota fields are copied
+ * onto the Error as well so ChatComposer can render useful 429 feedback without parsing strings.
+ * `response` keeps the structured gateway body available for future machine-readable errors.
+ */
+export interface ApiRequestError extends Error {
+  status?: number;
+  code?: string;
+  response?: Record<string, unknown>;
+  templateSendLimit24h?: number;
+  used24h?: number;
+  remaining24h?: number | null;
+  retryAfterSeconds?: number | null;
+}
+
+export interface AgentTemplateQuotaError extends ApiRequestError {
+  status: 429;
+  code: 'AGENT_TEMPLATE_SEND_LIMIT_REACHED';
+  templateSendLimit24h: number;
+  used24h: number;
+  remaining24h: number | null;
+  retryAfterSeconds: number | null;
+}
+
+/** Narrow an arbitrary caught value to the stable Agent stored-template quota error. */
+export function isAgentTemplateQuotaError(error: unknown): error is AgentTemplateQuotaError {
+  if (!(error instanceof Error)) return false;
+
+  const candidate = error as ApiRequestError;
+  return (
+    candidate.status === 429 &&
+    candidate.code === 'AGENT_TEMPLATE_SEND_LIMIT_REACHED' &&
+    typeof candidate.templateSendLimit24h === 'number' &&
+    typeof candidate.used24h === 'number' &&
+    (typeof candidate.remaining24h === 'number' || candidate.remaining24h === null) &&
+    (typeof candidate.retryAfterSeconds === 'number' || candidate.retryAfterSeconds === null)
+  );
 }
 
 // Mirrors the backend engine ChatKind (dashboard cannot import wa-id.ts).
@@ -745,19 +827,39 @@ async function handleErrorResponse<T>(response: Response): Promise<T> {
   // On a non-JSON body (e.g. a reverse-proxy 502/503 HTML page) fall through to `HTTP <status>`
   // rather than statusText: the status code is what the toast connection-lost de-dup matches on,
   // and statusText is empty over HTTP/2 anyway.
-  const error = await response.json().catch(() => ({}));
+  const error = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   // Carry the HTTP status on the Error (message unchanged, so the toast de-dup still matches) so
   // callers can tell apart a permission 403 from a real server 5xx instead of guessing from text.
   // Carry the machine `code` too: the gateway's stable codes (SESSION_LOGOUT_INCOMPLETE,
   // SESSION_NAME_TEARDOWN_PENDING, …) drive specific recovery UI, and a reverse-proxy 502 that
   // never reached the gateway carries no code at all — that distinction is exactly what the unlink
   // classifier keys on instead of fragile message heuristics.
-  const err = new Error(error.message || `HTTP ${response.status}`) as Error & {
-    status?: number;
-    code?: string;
-  };
+  const err = new Error(
+    typeof error.message === 'string' && error.message ? error.message : `HTTP ${response.status}`,
+  ) as ApiRequestError;
+
   err.status = response.status;
-  if (typeof error.code === 'string') err.code = error.code;
+  err.response = error;
+
+  if (typeof error.code === 'string') {
+    err.code = error.code;
+  }
+
+  // Preserve the stable quota metadata returned by send-template. These guards also make this safe
+  // for unrelated error bodies and for reverse proxies that return non-JSON responses.
+  if (typeof error.templateSendLimit24h === 'number') {
+    err.templateSendLimit24h = error.templateSendLimit24h;
+  }
+  if (typeof error.used24h === 'number') {
+    err.used24h = error.used24h;
+  }
+  if (typeof error.remaining24h === 'number' || error.remaining24h === null) {
+    err.remaining24h = error.remaining24h;
+  }
+  if (typeof error.retryAfterSeconds === 'number' || error.retryAfterSeconds === null) {
+    err.retryAfterSeconds = error.retryAfterSeconds;
+  }
+
   throw err;
 }
 
@@ -1221,14 +1323,11 @@ export const messageApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  sendTemplate: (
-  sessionId: string,
-  data: { chatId: string; templateId: string },
-) =>
-  request<MessageResponse>(`/sessions/${sessionId}/messages/send-template`, {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
+  sendTemplate: (sessionId: string, data: SendTemplatePayload) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/send-template`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // =============================================================================
@@ -1549,6 +1648,9 @@ export const statsApi = {
   getOverview: () => request<OverviewStats>('/stats/overview'),
   getMessages: (period: StatsPeriod) => request<MessageStats>(`/stats/messages?period=${period}`),
 };
+
+
+
 
 
 

@@ -1,3 +1,6 @@
+
+
+
 import {
   useMemo,
   useState,
@@ -52,9 +55,16 @@ import type {
 
 import './TeamLeader.css';
 
+type TemplateQuotaMode =
+  | 'unlimited'
+  | 'disabled'
+  | 'custom';
+
 interface ProvisioningFormState {
   agentName: string;
   agentEmail: string;
+  templateQuotaMode: TemplateQuotaMode;
+  templateQuotaLimit: string;
   sessionName: string;
   targetPhone: string;
 }
@@ -72,6 +82,8 @@ interface ProvisioningOutcome {
 const EMPTY_FORM: ProvisioningFormState = {
   agentName: '',
   agentEmail: '',
+  templateQuotaMode: 'unlimited',
+  templateQuotaLimit: '',
   sessionName: '',
   targetPhone: '',
 };
@@ -117,6 +129,43 @@ function sessionStatusLabel(
       char =>
         char.toUpperCase(),
     );
+}
+
+function templateQuotaLabel(
+  limit: number | null,
+): string {
+  if (limit === null) {
+    return 'Unlimited';
+  }
+
+  if (limit === 0) {
+    return 'Disabled';
+  }
+
+  return `${limit} / 24h`;
+}
+
+function templateQuotaFromForm(
+  form: ProvisioningFormState,
+): number | null {
+  if (
+    form.templateQuotaMode ===
+    'unlimited'
+  ) {
+    return null;
+  }
+
+  if (
+    form.templateQuotaMode ===
+    'disabled'
+  ) {
+    return 0;
+  }
+
+  return Number.parseInt(
+    form.templateQuotaLimit,
+    10,
+  );
 }
 
 export function TeamLeader() {
@@ -340,10 +389,12 @@ export function TeamLeader() {
     };
 
   const updateForm =
-    (
-      field:
-        keyof ProvisioningFormState,
-      value: string,
+    <
+      K extends keyof ProvisioningFormState,
+    >(
+      field: K,
+      value:
+        ProvisioningFormState[K],
     ) => {
       setForm(
         current => ({
@@ -395,6 +446,37 @@ export function TeamLeader() {
       }
 
       if (
+        form.templateQuotaMode ===
+        'custom'
+      ) {
+        const rawLimit =
+          form.templateQuotaLimit.trim();
+
+        if (
+          !/^\d+$/.test(
+            rawLimit,
+          )
+        ) {
+          return 'Custom template quota must be a whole number.';
+        }
+
+        const limit =
+          Number.parseInt(
+            rawLimit,
+            10,
+          );
+
+        if (
+          !Number.isSafeInteger(
+            limit,
+          ) ||
+          limit < 1
+        ) {
+          return 'Custom template quota must be a positive whole number.';
+        }
+      }
+
+      if (
         !SESSION_NAME_PATTERN.test(
           sessionName,
         )
@@ -441,6 +523,10 @@ export function TeamLeader() {
                 form.agentEmail.trim(),
             }
           : {}),
+        templateSendLimit24h:
+          templateQuotaFromForm(
+            form,
+          ),
       };
 
       let createdSession:
@@ -1143,6 +1229,10 @@ export function TeamLeader() {
                   </th>
 
                   <th>
+                    Template quota
+                  </th>
+
+                  <th>
                     Session
                   </th>
 
@@ -1197,6 +1287,14 @@ export function TeamLeader() {
                                 'No email'}
                             </span>
                           </div>
+                        </td>
+
+                        <td>
+                          <span className="team-leader-status-pill">
+                            {templateQuotaLabel(
+                              agent.templateSendLimit24h,
+                            )}
+                          </span>
                         </td>
 
                         <td>
@@ -1490,6 +1588,73 @@ export function TeamLeader() {
                 Optional
               </small>
             </label>
+
+            <label>
+              <span>
+                Stored-template quota
+              </span>
+
+              <select
+                value={
+                  form.templateQuotaMode
+                }
+                onChange={
+                  event =>
+                    updateForm(
+                      'templateQuotaMode',
+                      event.target.value as TemplateQuotaMode,
+                    )
+                }
+              >
+                <option value="unlimited">
+                  Unlimited
+                </option>
+
+                <option value="disabled">
+                  Disabled
+                </option>
+
+                <option value="custom">
+                  Custom rolling 24h limit
+                </option>
+              </select>
+
+              <small>
+                Unlimited = no Agent stored-template limit; Disabled = 0 sends; Custom = N successful stored-template sends per rolling 24 hours.
+              </small>
+            </label>
+
+            {form.templateQuotaMode ===
+              'custom' && (
+              <label>
+                <span>
+                  Custom template limit
+                </span>
+
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  value={
+                    form.templateQuotaLimit
+                  }
+                  onChange={
+                    event =>
+                      updateForm(
+                        'templateQuotaLimit',
+                        event.target.value,
+                      )
+                  }
+                  placeholder="20"
+                  autoComplete="off"
+                />
+
+                <small>
+                  Positive whole number. The backend enforces the rolling 24-hour window.
+                </small>
+              </label>
+            )}
           </div>
         </div>
 
@@ -1736,6 +1901,20 @@ export function TeamLeader() {
                 <dd>
                   {provisioningOutcome.agent?.name ??
                     provisioningOutcome.agentInput.name}
+                </dd>
+              </div>
+
+              <div>
+                <dt>
+                  Template quota
+                </dt>
+
+                <dd>
+                  {templateQuotaLabel(
+                    provisioningOutcome.agent?.templateSendLimit24h ??
+                      provisioningOutcome.agentInput.templateSendLimit24h ??
+                      null,
+                  )}
                 </dd>
               </div>
 
@@ -2067,3 +2246,6 @@ export function TeamLeader() {
     </div>
   );
 }
+
+
+

@@ -1,5 +1,7 @@
 
 
+
+
 import {
   useEffect,
   useRef,
@@ -214,10 +216,10 @@ const allNavItems: readonly NavItem[] = [
 ];
 
 /**
- * Logs are retained for the three legacy dashboard roles.
+ * Audit logs are currently an Admin-only backend surface.
  *
- * roleAccess.ts intentionally does not grant the audit surface to the
- * new Team Leader/Agent roles yet.
+ * Keep this explicit until /logs is moved into the centralized
+ * roleAccess.ts route matrix.
  */
 function canSeeNavItem(
   role: UserRole | null,
@@ -228,11 +230,7 @@ function canSeeNavItem(
   }
 
   if (path === '/logs') {
-    return (
-      role === 'admin' ||
-      role === 'operator' ||
-      role === 'viewer'
-    );
+    return role === 'admin';
   }
 
   return canAccessRoute(
@@ -273,10 +271,10 @@ export function Layout({
   /**
    * Navigation is now role-aware:
    *
-   * - Team Leader sees the Team Leader workspace and tenant-scoped tools.
-   * - Agent sees only the Agent workspace.
-   * - Admin retains administrative surfaces.
-   * - Operator/Viewer keep their legacy dashboard access.
+   * - Team Leader sees the Team Leader workspace plus allowed tenant-scoped tools.
+   * - Agent sees the assignment-driven Agent workspace plus read-only Templates.
+   * - Admin retains administrative surfaces, including Logs.
+   * - Operator/Viewer keep only routes allowed by roleAccess.ts.
    *
    * This is UX only. NestJS remains the authorization boundary.
    */
@@ -900,5 +898,8 @@ export function Layout({
     </div>
   );
 }
+
+
+
 
 

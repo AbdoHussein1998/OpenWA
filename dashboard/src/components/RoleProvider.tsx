@@ -1,7 +1,9 @@
 
 
+
 import {
   useCallback,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react';
@@ -14,6 +16,10 @@ import type {
 import {
   isUserRole,
 } from '../utils/authLifecycle';
+
+import {
+  getRoleCapabilities,
+} from '../utils/roleAccess';
 
 import {
   RoleContext,
@@ -70,81 +76,44 @@ export function RoleProvider({
     [],
   );
 
-  const isAdmin =
-    role === 'admin';
+  /**
+   * Capabilities are resolved from one centralized matrix instead of
+   * being duplicated in this provider. That keeps route visibility and
+   * component-level permission checks in sync.
+   */
+  const capabilities =
+    getRoleCapabilities(role);
 
-  const isOperator =
-    role === 'operator';
+  const value =
+    useMemo<RoleContextType>(
+      () => ({
+        role,
 
-  const isViewer =
-    role === 'viewer';
+        setRole,
 
-  const isTeamLeader =
-    role === 'team_leader';
+        isAdmin:
+          role === 'admin',
 
-  const isAgent =
-    role === 'agent';
+        isOperator:
+          role === 'operator',
 
-  const value: RoleContextType = {
-    role,
+        isViewer:
+          role === 'viewer',
 
-    setRole,
+        isTeamLeader:
+          role === 'team_leader',
 
-    isAdmin,
+        isAgent:
+          role === 'agent',
 
-    isOperator,
-
-    isViewer,
-
-    isTeamLeader,
-
-    isAgent,
-
-    /**
-     * Preserve the legacy meaning of canWrite.
-     *
-     * Team Leaders and Agents use the more specific capabilities below,
-     * preventing an Agent from accidentally receiving session-lifecycle
-     * controls simply because they are allowed to send messages.
-     */
-    canWrite:
-      isAdmin ||
-      isOperator,
-
-    canManageSessions:
-      isAdmin ||
-      isOperator ||
-      isTeamLeader,
-
-    canReadSessions:
-      isAdmin ||
-      isOperator ||
-      isViewer ||
-      isTeamLeader ||
-      isAgent,
-
-    canOperateChats:
-      isAdmin ||
-      isOperator ||
-      isTeamLeader ||
-      isAgent,
-
-    canSendMessages:
-      isAdmin ||
-      isOperator ||
-      isTeamLeader ||
-      isAgent,
-
-    canManageTeam:
-      isAdmin ||
-      isTeamLeader,
-
-    canManageApiKeys:
-      isAdmin,
-
-    canManageInfrastructure:
-      isAdmin,
-  };
+        ...capabilities,
+      }),
+      [
+        capabilities,
+        role,
+        setRole,
+      ],
+    );
 
   return (
     <RoleContext.Provider value={value}>
@@ -152,5 +121,6 @@ export function RoleProvider({
     </RoleContext.Provider>
   );
 }
+
 
 

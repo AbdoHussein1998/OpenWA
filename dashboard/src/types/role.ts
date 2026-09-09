@@ -1,4 +1,5 @@
 
+
 // Role types for RBAC
 
 export type UserRole =
@@ -8,7 +9,46 @@ export type UserRole =
   | 'team_leader'
   | 'agent';
 
-export interface RoleContextType {
+/**
+ * Frontend UX capabilities.
+ *
+ * These flags only control dashboard behavior and visibility. Backend
+ * NestJS authorization remains authoritative.
+ *
+ * `canWrite` is retained for backwards compatibility with existing
+ * dashboard components and deliberately remains limited to the legacy
+ * Admin/Operator behavior. New code should prefer the specific
+ * capability that matches the operation being rendered.
+ */
+export interface RoleCapabilities {
+  canWrite: boolean;
+
+  canManageSessions: boolean;
+
+  canReadSessions: boolean;
+
+  canStartSessions: boolean;
+
+  canShutdownSessions: boolean;
+
+  canOperateChats: boolean;
+
+  canSendMessages: boolean;
+
+  canReadTemplates: boolean;
+
+  canManageTemplates: boolean;
+
+  canManageWebhooks: boolean;
+
+  canManageTeam: boolean;
+
+  canManageApiKeys: boolean;
+
+  canManageInfrastructure: boolean;
+}
+
+export interface RoleContextType extends RoleCapabilities {
   role: UserRole | null;
 
   setRole: (role: UserRole | null) => void;
@@ -22,29 +62,6 @@ export interface RoleContextType {
   isTeamLeader: boolean;
 
   isAgent: boolean;
-
-  /**
-   * Legacy broad write flag.
-   *
-   * Keep this limited to the existing admin/operator behavior.
-   * New Team Leader and Agent features should use the explicit
-   * capability flags below instead.
-   */
-  canWrite: boolean;
-
-  canManageSessions: boolean;
-
-  canReadSessions: boolean;
-
-  canOperateChats: boolean;
-
-  canSendMessages: boolean;
-
-  canManageTeam: boolean;
-
-  canManageApiKeys: boolean;
-
-  canManageInfrastructure: boolean;
 }
 
 
