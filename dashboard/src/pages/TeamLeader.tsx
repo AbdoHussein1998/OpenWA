@@ -35,7 +35,6 @@ import {
 } from '../hooks/useDocumentTitle';
 
 import {
-  useAgentMeQuery,
   useAssignTeamLeaderAgentSessionMutation,
   useCreateSessionMutation,
   useCreateTeamLeaderAgentMutation,
