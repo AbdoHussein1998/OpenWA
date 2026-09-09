@@ -370,6 +370,161 @@ export class TeamLeaderController {
   }
 
   /**
+   * Replace an Agent's API key.
+   *
+   * The previous AGENT credential(s) are revoked atomically with
+   * provisioning the replacement. The plaintext replacement key is
+   * returned only in this response.
+   */
+  @Post(
+    'agents/:agentId/api-key/rotate',
+  )
+  @HttpCode(
+    HttpStatus.OK,
+  )
+  @ApiOperation({
+    summary:
+      'Rotate an Agent API key',
+    description:
+      'Revokes the Agent\'s previous AGENT credential(s), creates a replacement credential, disconnects sessions authenticated with the previous key, and returns the replacement plaintext key exactly once.',
+  })
+  @ApiParam({
+    name: 'agentId',
+    description:
+      'Agent UUID',
+    format: 'uuid',
+  })
+  @ApiResponse({
+    status:
+      HttpStatus.OK,
+    description:
+      'Agent API key rotated successfully.',
+    schema: {
+      type: 'object',
+      required: [
+        'agent',
+        'apiKey',
+      ],
+      properties: {
+        agent: {
+          type: 'object',
+          required: [
+            'id',
+            'name',
+            'teamLeaderId',
+            'assignedSessionId',
+            'templateSendLimit24h',
+            'createdAt',
+            'updatedAt',
+          ],
+          properties: {
+            id: {
+              type:
+                'string',
+              format:
+                'uuid',
+            },
+
+            name: {
+              type:
+                'string',
+            },
+
+            email: {
+              type:
+                'string',
+              format:
+                'email',
+              nullable:
+                true,
+            },
+
+            teamLeaderId: {
+              type:
+                'string',
+              format:
+                'uuid',
+            },
+
+            assignedSessionId: {
+              type:
+                'string',
+              format:
+                'uuid',
+              nullable:
+                true,
+            },
+
+            templateSendLimit24h: {
+              type:
+                'integer',
+              minimum:
+                0,
+              nullable:
+                true,
+            },
+
+            createdAt: {
+              type:
+                'string',
+              format:
+                'date-time',
+            },
+
+            updatedAt: {
+              type:
+                'string',
+              format:
+                'date-time',
+            },
+          },
+        },
+
+        apiKey: {
+          type:
+            'string',
+          description:
+            'Replacement plaintext Agent API key. Returned only once and never stored in plaintext.',
+          example:
+            'owa_k1_0123456789abcdef...',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status:
+      HttpStatus.NOT_FOUND,
+    description:
+      'Agent does not exist or does not belong to this Team Leader.',
+  })
+  @ApiResponse({
+    status:
+      HttpStatus.FORBIDDEN,
+    description:
+      'Caller is not a valid Team Leader principal.',
+  })
+  async rotateAgentApiKey(
+    @CurrentApiKey()
+    apiKey: ApiKey,
+
+    @Param(
+      'agentId',
+      ParseUUIDPipe,
+    )
+    agentId: string,
+  ): Promise<CreateAgentResult> {
+    const teamLeaderId =
+      this.requireTeamLeaderId(
+        apiKey,
+      );
+
+    return this.teamLeaderService.rotateAgentApiKey(
+      teamLeaderId,
+      agentId,
+    );
+  }
+
+  /**
    * Delete one Agent belonging to the authenticated Team Leader.
    *
    * Foreign Agent IDs intentionally return 404 from the service rather

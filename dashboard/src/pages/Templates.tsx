@@ -1,11 +1,15 @@
 
 
+
+
+
 import {
   useEffect,
   useMemo,
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import {
   Copy,
   FileText,
@@ -174,6 +178,17 @@ export function Templates() {
   } =
     useRole();
 
+  const [
+    searchParams,
+    setSearchParams,
+  ] =
+    useSearchParams();
+
+  const requestedSessionId =
+    searchParams.get(
+      'session',
+    ) ?? '';
+
   const {
     data:
       sessions = [],
@@ -328,54 +343,84 @@ export function Templates() {
     createMutation.isPending ||
     updateMutation.isPending;
 
-  useEffect(() => {
-    if (
-      !selectedSessionId &&
-      sessions.length >
-        0
-    ) {
-      setSelectedSessionId(
-        sessions[0].id,
-      );
-    }
-  }, [
-    selectedSessionId,
-    sessions,
-  ]);
-
   /**
-   * If the effective session scope changes and the previously selected session disappears, select
-   * the first authorized session instead of retaining a stale id.
+   * Resolve the selected session only from the sessions authorized for
+   * the current API key.
+   *
+   * `/templates?session=<id>` is a navigation hint, not an authorization
+   * mechanism. If the requested id is not present in the backend-scoped
+   * sessions list (for example, an Agent pastes another session id), we
+   * fall back to the first authorized session and normalize the URL.
    */
   useEffect(() => {
-    if (
-      !selectedSessionId ||
+    const requestedIsAuthorized =
+      Boolean(
+        requestedSessionId,
+      ) &&
+      sessions.some(
+        session =>
+          session.id ===
+          requestedSessionId,
+      );
+
+    const currentIsAuthorized =
+      Boolean(
+        selectedSessionId,
+      ) &&
       sessions.some(
         session =>
           session.id ===
           selectedSessionId,
-      )
+      );
+
+    const nextSessionId =
+      requestedIsAuthorized
+        ? requestedSessionId
+        : currentIsAuthorized
+          ? selectedSessionId
+          : sessions[0]?.id ??
+            '';
+
+    if (
+      nextSessionId !==
+      selectedSessionId
     ) {
-      return;
+      setSelectedSessionId(
+        nextSessionId,
+      );
+
+      setForm(
+        EMPTY_FORM,
+      );
+
+      setEditingTemplate(
+        null,
+      );
+
+      setPreviewValues({});
     }
 
-    setSelectedSessionId(
-      sessions[0]?.id ??
-        '',
-    );
-
-    setForm(
-      EMPTY_FORM,
-    );
-
-    setEditingTemplate(
-      null,
-    );
-
-    setPreviewValues({});
+    if (
+      nextSessionId &&
+      requestedSessionId !==
+        nextSessionId
+    ) {
+      setSearchParams(
+        {
+          session:
+            nextSessionId,
+        },
+        {
+          replace:
+            true,
+        },
+      );
+    }
   }, [
+    requestedSessionId,
     selectedSessionId,
     sessions,
+    setSearchParams,
   ]);
 
   useEffect(() => {
@@ -639,8 +684,24 @@ export function Templates() {
             }
             onChange={
               event => {
+                const sessionId =
+                  event.target.value;
+
                 setSelectedSessionId(
-                  event.target.value,
+                  sessionId,
+                );
+
+                setSearchParams(
+                  sessionId
+                    ? {
+                        session:
+                          sessionId,
+                      }
+                    : {},
+                  {
+                    replace:
+                      true,
+                  },
                 );
 
                 resetForm();
@@ -1285,6 +1346,9 @@ export function Templates() {
     </div>
   );
 }
+
+
+
 
 
 

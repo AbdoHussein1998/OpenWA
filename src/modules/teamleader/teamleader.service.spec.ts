@@ -218,6 +218,7 @@ describe(
     let apiKeyRepository: {
       find: jest.Mock;
       save: jest.Mock;
+      remove: jest.Mock;
     };
 
     let sessionRepository: {
@@ -281,6 +282,9 @@ describe(
           jest.fn(),
 
         save:
+          jest.fn(),
+
+        remove:
           jest.fn(),
       };
 
@@ -1312,6 +1316,337 @@ describe(
             ).toHaveBeenCalledTimes(
               1,
             );
+          },
+        );
+      },
+    );
+
+    // -------------------------------------------------------------------------
+    // rotateAgentApiKey()
+    // -------------------------------------------------------------------------
+
+    describe(
+      'rotateAgentApiKey',
+      () => {
+        it(
+          'atomically replaces the Agent credential and evicts previous live keys after commit',
+          async () => {
+            const agent =
+              createAgent();
+
+            const oldKeyA =
+              createApiKey({
+                id:
+                  'agent-key-old-a',
+
+                role:
+                  ApiKeyRole.AGENT,
+
+                agentId:
+                  agent.id,
+              });
+
+            const oldKeyB =
+              createApiKey({
+                id:
+                  'agent-key-old-b',
+
+                role:
+                  ApiKeyRole.AGENT,
+
+                agentId:
+                  agent.id,
+              });
+
+            agentRepository.findOne
+              .mockResolvedValue(
+                agent,
+              );
+
+            apiKeyRepository.find
+              .mockResolvedValue([
+                oldKeyA,
+                oldKeyB,
+              ]);
+
+            apiKeyRepository.remove
+              .mockResolvedValue([
+                oldKeyA,
+                oldKeyB,
+              ]);
+
+            authService
+              .createApiKeyInTransaction
+              .mockResolvedValue({
+                apiKey:
+                  createApiKey({
+                    id:
+                      'agent-key-new',
+
+                    role:
+                      ApiKeyRole.AGENT,
+
+                    agentId:
+                      agent.id,
+                  }),
+
+                rawKey:
+                  'owa_k1_replacement_agent_key',
+              });
+
+            const result =
+              await service.rotateAgentApiKey(
+                'team-leader-1',
+                'agent-1',
+              );
+
+            expect(
+              mainDataSource.transaction,
+            ).toHaveBeenCalledTimes(
+              1,
+            );
+
+            expect(
+              transactionManager.getRepository,
+            ).toHaveBeenCalledWith(
+              Agent,
+            );
+
+            expect(
+              transactionManager.getRepository,
+            ).toHaveBeenCalledWith(
+              ApiKey,
+            );
+
+            expect(
+              agentRepository.findOne,
+            ).toHaveBeenCalledWith({
+              where: {
+                id:
+                  'agent-1',
+
+                teamLeaderId:
+                  'team-leader-1',
+              },
+            });
+
+            expect(
+              apiKeyRepository.find,
+            ).toHaveBeenCalledWith({
+              where: {
+                agentId:
+                  'agent-1',
+
+                role:
+                  ApiKeyRole.AGENT,
+              },
+            });
+
+            expect(
+              apiKeyRepository.remove,
+            ).toHaveBeenCalledWith([
+              oldKeyA,
+              oldKeyB,
+            ]);
+
+            expect(
+              authService
+                .createApiKeyInTransaction,
+            ).toHaveBeenCalledWith(
+              transactionManager,
+              {
+                name:
+                  'Agent: Mohamed Ali',
+
+                role:
+                  ApiKeyRole.AGENT,
+
+                agentId:
+                  'agent-1',
+
+                teamLeaderId:
+                  null,
+
+                allowedSessions:
+                  null,
+              },
+            );
+
+            expect(
+              result,
+            ).toEqual({
+              agent,
+
+              apiKey:
+                'owa_k1_replacement_agent_key',
+            });
+
+            expect(
+              eventsGateway.evictApiKey,
+            ).toHaveBeenCalledTimes(
+              2,
+            );
+
+            expect(
+              eventsGateway.evictApiKey,
+            ).toHaveBeenCalledWith(
+              'agent-key-old-a',
+              'revoked',
+            );
+
+            expect(
+              eventsGateway.evictApiKey,
+            ).toHaveBeenCalledWith(
+              'agent-key-old-b',
+              'revoked',
+            );
+          },
+        );
+
+        it(
+          'creates a replacement key even if the Agent currently has no credential row',
+          async () => {
+            const agent =
+              createAgent();
+
+            agentRepository.findOne
+              .mockResolvedValue(
+                agent,
+              );
+
+            apiKeyRepository.find
+              .mockResolvedValue([]);
+
+            authService
+              .createApiKeyInTransaction
+              .mockResolvedValue({
+                apiKey:
+                  createApiKey({
+                    id:
+                      'agent-key-new',
+                  }),
+
+                rawKey:
+                  'owa_k1_repaired_agent_key',
+              });
+
+            await expect(
+              service.rotateAgentApiKey(
+                'team-leader-1',
+                'agent-1',
+              ),
+            ).resolves.toEqual({
+              agent,
+
+              apiKey:
+                'owa_k1_repaired_agent_key',
+            });
+
+            expect(
+              apiKeyRepository.remove,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              moduleRef.get,
+            ).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          'returns 404 for a foreign Agent without touching credentials',
+          async () => {
+            agentRepository.findOne
+              .mockResolvedValue(
+                null,
+              );
+
+            await expect(
+              service.rotateAgentApiKey(
+                'team-leader-a',
+                'agent-owned-by-b',
+              ),
+            ).rejects.toBeInstanceOf(
+              NotFoundException,
+            );
+
+            expect(
+              apiKeyRepository.find,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              apiKeyRepository.remove,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              authService
+                .createApiKeyInTransaction,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              eventsGateway.evictApiKey,
+            ).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          'does not evict old sockets when replacement provisioning fails and the transaction rejects',
+          async () => {
+            const agent =
+              createAgent();
+
+            const oldKey =
+              createApiKey({
+                id:
+                  'agent-key-old',
+
+                role:
+                  ApiKeyRole.AGENT,
+
+                agentId:
+                  agent.id,
+              });
+
+            agentRepository.findOne
+              .mockResolvedValue(
+                agent,
+              );
+
+            apiKeyRepository.find
+              .mockResolvedValue([
+                oldKey,
+              ]);
+
+            apiKeyRepository.remove
+              .mockResolvedValue([
+                oldKey,
+              ]);
+
+            authService
+              .createApiKeyInTransaction
+              .mockRejectedValue(
+                new Error(
+                  'replacement key failed',
+                ),
+              );
+
+            await expect(
+              service.rotateAgentApiKey(
+                'team-leader-1',
+                'agent-1',
+              ),
+            ).rejects.toThrow(
+              'replacement key failed',
+            );
+
+            expect(
+              mainDataSource.transaction,
+            ).toHaveBeenCalledTimes(
+              1,
+            );
+
+            expect(
+              eventsGateway.evictApiKey,
+            ).not.toHaveBeenCalled();
           },
         );
       },

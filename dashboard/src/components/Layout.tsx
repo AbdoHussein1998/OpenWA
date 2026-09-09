@@ -2,6 +2,9 @@
 
 
 
+
+
+
 import {
   useEffect,
   useRef,
@@ -215,30 +218,6 @@ const allNavItems: readonly NavItem[] = [
   },
 ];
 
-/**
- * Audit logs are currently an Admin-only backend surface.
- *
- * Keep this explicit until /logs is moved into the centralized
- * roleAccess.ts route matrix.
- */
-function canSeeNavItem(
-  role: UserRole | null,
-  path: string,
-): boolean {
-  if (!role) {
-    return false;
-  }
-
-  if (path === '/logs') {
-    return role === 'admin';
-  }
-
-  return canAccessRoute(
-    role,
-    path,
-  );
-}
-
 const themeIcons = {
   light: Sun,
   dark: Moon,
@@ -269,10 +248,11 @@ export function Layout({
     );
 
   /**
-   * Navigation is now role-aware:
+   * Navigation is role-aware and uses the same centralized route matrix
+   * as App.tsx.
    *
    * - Team Leader sees the Team Leader workspace plus allowed tenant-scoped tools.
-   * - Agent sees the assignment-driven Agent workspace plus read-only Templates.
+   * - Agent sees the Agent workspace and Templates. Assigned-session operations live inside /agent.
    * - Admin retains administrative surfaces, including Logs.
    * - Operator/Viewer keep only routes allowed by roleAccess.ts.
    *
@@ -281,7 +261,8 @@ export function Layout({
   const navItems =
     allNavItems.filter(
       item =>
-        canSeeNavItem(
+        userRole !== null &&
+        canAccessRoute(
           userRole,
           item.to,
         ),
@@ -898,6 +879,9 @@ export function Layout({
     </div>
   );
 }
+
+
+
 
 
 

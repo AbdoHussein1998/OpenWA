@@ -1,20 +1,25 @@
 
 
 
+
 import {
   useMemo,
   useState,
 } from 'react';
+
 import {
   useNavigate,
 } from 'react-router-dom';
+
 import {
   Check,
-  Clipboard,
+  Copy,
   ExternalLink,
+  KeyRound,
   Loader2,
   Plus,
   RefreshCw,
+  Smartphone,
   Trash2,
   Unlink,
   UserRound,
@@ -30,6 +35,14 @@ import {
 } from '../components/Modal';
 
 import {
+  GeneratedKeyField,
+} from '../components/GeneratedKeyField';
+
+import {
+  copyToClipboard,
+} from '../utils/clipboard';
+
+import {
   useToast,
 } from '../hooks/useToast';
 
@@ -39,9 +52,9 @@ import {
 
 import {
   useAssignTeamLeaderAgentSessionMutation,
-  useCreateSessionMutation,
   useCreateTeamLeaderAgentMutation,
   useDeleteTeamLeaderAgentMutation,
+  useReissueTeamLeaderAgentApiKeyMutation,
   useSessionsQuery,
   useTeamLeaderAgentsQuery,
   useTeamLeaderMeQuery,
@@ -60,39 +73,25 @@ type TemplateQuotaMode =
   | 'disabled'
   | 'custom';
 
-interface ProvisioningFormState {
+interface AgentFormState {
   agentName: string;
   agentEmail: string;
   templateQuotaMode: TemplateQuotaMode;
   templateQuotaLimit: string;
-  sessionName: string;
-  targetPhone: string;
 }
 
-interface ProvisioningOutcome {
-  session: Session;
-  agentInput: CreateAgentInput;
-  agent?: Agent;
-  apiKey?: string;
-  assigned: boolean;
-  failedStage?: 'agent' | 'assignment';
-  error?: string;
+interface AgentCredentialResult {
+  agent: Agent;
+  apiKey: string;
+  reason: 'created' | 'reissued';
 }
 
-const EMPTY_FORM: ProvisioningFormState = {
+const EMPTY_FORM: AgentFormState = {
   agentName: '',
   agentEmail: '',
   templateQuotaMode: 'unlimited',
   templateQuotaLimit: '',
-  sessionName: '',
-  targetPhone: '',
 };
-
-const SESSION_NAME_PATTERN =
-  /^[a-zA-Z0-9-]{3,50}$/;
-
-const TARGET_PHONE_PATTERN =
-  /^\+?[1-9]\d{6,14}$/;
 
 function errorMessage(
   error: unknown,
@@ -106,7 +105,9 @@ function formatDate(
   value: string,
 ): string {
   const parsed =
-    new Date(value);
+    new Date(
+      value,
+    );
 
   if (
     Number.isNaN(
@@ -123,7 +124,10 @@ function sessionStatusLabel(
   status: Session['status'],
 ): string {
   return status
-    .replaceAll('_', ' ')
+    .replaceAll(
+      '_',
+      ' ',
+    )
     .replace(
       /\b\w/g,
       char =>
@@ -146,7 +150,7 @@ function templateQuotaLabel(
 }
 
 function templateQuotaFromForm(
-  form: ProvisioningFormState,
+  form: AgentFormState,
 ): number | null {
   if (
     form.templateQuotaMode ===
@@ -188,21 +192,6 @@ export function TeamLeader() {
   const sessionsQuery =
     useSessionsQuery();
 
-  /**
-   * Phase-5 orchestration:
-   *
-   * 1. Create tenant-owned session.
-   * 2. Create Agent + API key.
-   * 3. Assign Agent to that session.
-   *
-   * These are deliberately three backend operations. We preserve any
-   * successfully-created resource when a later step fails and surface a
-   * retry path instead of pretending this cross-resource workflow is one
-   * database transaction.
-   */
-  const createSessionMutation =
-    useCreateSessionMutation();
-
   const createAgentMutation =
     useCreateTeamLeaderAgentMutation();
 
@@ -212,16 +201,20 @@ export function TeamLeader() {
   const deleteAgentMutation =
     useDeleteTeamLeaderAgentMutation();
 
+  const reissueAgentKeyMutation =
+    useReissueTeamLeaderAgentApiKeyMutation();
+
   const [
     showCreateModal,
     setShowCreateModal,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     form,
     setForm,
   ] =
-    useState<ProvisioningFormState>(
+    useState<AgentFormState>(
       EMPTY_FORM,
     );
 
@@ -234,18 +227,35 @@ export function TeamLeader() {
     );
 
   const [
-    provisioningOutcome,
-    setProvisioningOutcome,
+    agentCredentialResult,
+    setAgentCredentialResult,
   ] =
-    useState<ProvisioningOutcome | null>(
+    useState<AgentCredentialResult | null>(
       null,
     );
 
+  /**
+   * Plaintext Agent keys are intentionally kept only in memory.
+   *
+   * The backend stores only a hash/prefix and cannot reconstruct an
+   * existing plaintext key. This map therefore contains only keys that
+   * were created or reissued while this Team Leader page is mounted.
+   */
   const [
-    isRetryingProvisioning,
-    setIsRetryingProvisioning,
+    knownAgentKeys,
+    setKnownAgentKeys,
   ] =
-    useState(false);
+    useState<Record<string, string>>(
+      {},
+    );
+
+  const [
+    copiedAgentId,
+    setCopiedAgentId,
+  ] =
+    useState<string | null>(
+      null,
+    );
 
   const [
     assignmentAgent,
@@ -268,12 +278,6 @@ export function TeamLeader() {
     useState<Agent | null>(
       null,
     );
-
-  const [
-    copiedApiKey,
-    setCopiedApiKey,
-  ] =
-    useState(false);
 
   const agents =
     agentsQuery.data ??
@@ -307,7 +311,10 @@ export function TeamLeader() {
           Agent
         >();
 
-      for (const agent of agents) {
+      for (
+        const agent of
+        agents
+      ) {
         if (
           agent.assignedSessionId
         ) {
@@ -345,11 +352,6 @@ export function TeamLeader() {
     agentsQuery.isFetching ||
     sessionsQuery.isFetching;
 
-  const isProvisioning =
-    createSessionMutation.isPending ||
-    createAgentMutation.isPending ||
-    assignMutation.isPending;
-
   const combinedLoadError =
     [
       meQuery.error,
@@ -364,9 +366,11 @@ export function TeamLeader() {
       setForm(
         EMPTY_FORM,
       );
+
       setFormError(
         null,
       );
+
       setShowCreateModal(
         true,
       );
@@ -375,7 +379,7 @@ export function TeamLeader() {
   const closeCreateModal =
     () => {
       if (
-        isProvisioning
+        createAgentMutation.isPending
       ) {
         return;
       }
@@ -383,6 +387,7 @@ export function TeamLeader() {
       setShowCreateModal(
         false,
       );
+
       setFormError(
         null,
       );
@@ -390,11 +395,11 @@ export function TeamLeader() {
 
   const updateForm =
     <
-      K extends keyof ProvisioningFormState,
+      K extends keyof AgentFormState,
     >(
       field: K,
       value:
-        ProvisioningFormState[K],
+        AgentFormState[K],
     ) => {
       setForm(
         current => ({
@@ -404,26 +409,22 @@ export function TeamLeader() {
         }),
       );
 
-      if (formError) {
+      if (
+        formError
+      ) {
         setFormError(
           null,
         );
       }
     };
 
-  const validateProvisioningForm =
+  const validateAgentForm =
     (): string | null => {
       const agentName =
         form.agentName.trim();
 
       const agentEmail =
         form.agentEmail.trim();
-
-      const sessionName =
-        form.sessionName.trim();
-
-      const targetPhone =
-        form.targetPhone.trim();
 
       if (!agentName) {
         return 'Agent name is required.';
@@ -476,30 +477,13 @@ export function TeamLeader() {
         }
       }
 
-      if (
-        !SESSION_NAME_PATTERN.test(
-          sessionName,
-        )
-      ) {
-        return 'Session name must be 3-50 characters and contain only letters, numbers, and hyphens.';
-      }
-
-      if (
-        targetPhone &&
-        !TARGET_PHONE_PATTERN.test(
-          targetPhone,
-        )
-      ) {
-        return 'Target phone must be a valid international number with 7-15 digits, optionally prefixed with +.';
-      }
-
       return null;
     };
 
-  const handleProvision =
+  const handleCreateAgent =
     async () => {
       const validationError =
-        validateProvisioningForm();
+        validateAgentForm();
 
       if (
         validationError
@@ -507,59 +491,29 @@ export function TeamLeader() {
         setFormError(
           validationError,
         );
+
         return;
       }
+
+      const agentInput:
+        CreateAgentInput = {
+          name:
+            form.agentName.trim(),
+          ...(form.agentEmail.trim()
+            ? {
+                email:
+                  form.agentEmail.trim(),
+              }
+            : {}),
+          templateSendLimit24h:
+            templateQuotaFromForm(
+              form,
+            ),
+        };
 
       setFormError(
         null,
       );
-
-      const agentInput: CreateAgentInput = {
-        name:
-          form.agentName.trim(),
-        ...(form.agentEmail.trim()
-          ? {
-              email:
-                form.agentEmail.trim(),
-            }
-          : {}),
-        templateSendLimit24h:
-          templateQuotaFromForm(
-            form,
-          ),
-      };
-
-      let createdSession:
-        Session;
-
-      try {
-        createdSession =
-          await createSessionMutation.mutateAsync(
-            {
-              name:
-                form.sessionName.trim(),
-              ...(form.targetPhone.trim()
-                ? {
-                    targetPhone:
-                      form.targetPhone.trim(),
-                  }
-                : {}),
-            },
-          );
-      } catch (error) {
-        setFormError(
-          errorMessage(
-            error,
-          ),
-        );
-        return;
-      }
-
-      let createdAgent:
-        Agent;
-
-      let apiKey:
-        string;
 
       try {
         const result =
@@ -567,283 +521,142 @@ export function TeamLeader() {
             agentInput,
           );
 
-        createdAgent =
-          result.agent;
-
-        apiKey =
-          result.apiKey;
-      } catch (error) {
         setShowCreateModal(
           false,
         );
 
-        setProvisioningOutcome(
-          {
-            session:
-              createdSession,
-            agentInput,
-            assigned:
-              false,
-            failedStage:
-              'agent',
-            error:
-              errorMessage(
-                error,
-              ),
-          },
+        setKnownAgentKeys(
+          current => ({
+            ...current,
+            [result.agent.id]:
+              result.apiKey,
+          }),
         );
 
-        toast.warning(
-          'Session created, Agent not created',
-          'The session was kept. Retry Agent creation from the recovery dialog.',
-        );
-
-        return;
-      }
-
-      try {
-        const assignedAgent =
-          await assignMutation.mutateAsync(
-            {
-              agentId:
-                createdAgent.id,
-              sessionId:
-                createdSession.id,
-            },
-          );
-
-        setProvisioningOutcome(
+        setAgentCredentialResult(
           {
-            session:
-              createdSession,
-            agentInput,
             agent:
-              assignedAgent,
-            apiKey,
-            assigned:
-              true,
+              result.agent,
+            apiKey:
+              result.apiKey,
+            reason:
+              'created',
           },
-        );
-
-        setShowCreateModal(
-          false,
         );
 
         toast.success(
-          'Agent session created',
-          `${assignedAgent.name} is assigned to ${createdSession.name}.`,
+          'Agent created',
+          `${result.agent.name} was created. Assign a session when ready.`,
         );
-      } catch (error) {
-        setShowCreateModal(
-          false,
-        );
-
-        setProvisioningOutcome(
-          {
-            session:
-              createdSession,
-            agentInput,
-            agent:
-              createdAgent,
-            apiKey,
-            assigned:
-              false,
-            failedStage:
-              'assignment',
-            error:
-              errorMessage(
-                error,
-              ),
-          },
-        );
-
-        toast.warning(
-          'Agent created, assignment failed',
-          'The Agent and session were kept. Retry the assignment from the recovery dialog.',
-        );
-      }
-    };
-
-  const retryProvisioning =
-    async () => {
-      const outcome =
-        provisioningOutcome;
-
-      if (
-        !outcome ||
-        !outcome.failedStage
+      } catch (
+        error
       ) {
-        return;
-      }
-
-      setIsRetryingProvisioning(
-        true,
-      );
-
-      try {
-        if (
-          outcome.failedStage ===
-          'agent'
-        ) {
-          const result =
-            await createAgentMutation.mutateAsync(
-              outcome.agentInput,
-            );
-
-          try {
-            const assignedAgent =
-              await assignMutation.mutateAsync(
-                {
-                  agentId:
-                    result.agent.id,
-                  sessionId:
-                    outcome.session.id,
-                },
-              );
-
-            setProvisioningOutcome(
-              {
-                ...outcome,
-                agent:
-                  assignedAgent,
-                apiKey:
-                  result.apiKey,
-                assigned:
-                  true,
-                failedStage:
-                  undefined,
-                error:
-                  undefined,
-              },
-            );
-
-            toast.success(
-              'Provisioning recovered',
-              `${assignedAgent.name} is now assigned to ${outcome.session.name}.`,
-            );
-          } catch (error) {
-            setProvisioningOutcome(
-              {
-                ...outcome,
-                agent:
-                  result.agent,
-                apiKey:
-                  result.apiKey,
-                assigned:
-                  false,
-                failedStage:
-                  'assignment',
-                error:
-                  errorMessage(
-                    error,
-                  ),
-              },
-            );
-          }
-
-          return;
-        }
-
-        if (
-          outcome.failedStage ===
-            'assignment' &&
-          outcome.agent
-        ) {
-          const assignedAgent =
-            await assignMutation.mutateAsync(
-              {
-                agentId:
-                  outcome.agent.id,
-                sessionId:
-                  outcome.session.id,
-              },
-            );
-
-          setProvisioningOutcome(
-            {
-              ...outcome,
-              agent:
-                assignedAgent,
-              assigned:
-                true,
-              failedStage:
-                undefined,
-              error:
-                undefined,
-            },
-          );
-
-          toast.success(
-            'Assignment recovered',
-            `${assignedAgent.name} is now assigned to ${outcome.session.name}.`,
-          );
-        }
-      } catch (error) {
-        setProvisioningOutcome(
-          current =>
-            current
-              ? {
-                  ...current,
-                  error:
-                    errorMessage(
-                      error,
-                    ),
-                }
-              : current,
-        );
-      } finally {
-        setIsRetryingProvisioning(
-          false,
+        setFormError(
+          errorMessage(
+            error,
+          ),
         );
       }
     };
 
-  const handleCopyApiKey =
-    async () => {
+  const closeAgentCredential =
+    () => {
+      setAgentCredentialResult(
+        null,
+      );
+    };
+
+  const copyAgentApiKey =
+    async (
+      agentId: string,
+    ) => {
       const apiKey =
-        provisioningOutcome?.apiKey;
+        knownAgentKeys[agentId];
 
       if (!apiKey) {
         return;
       }
 
-      try {
-        await navigator.clipboard.writeText(
+      const copied =
+        await copyToClipboard(
           apiKey,
         );
 
-        setCopiedApiKey(
-          true,
+      if (!copied) {
+        toast.error(
+          'Copy failed',
+          'The API key could not be copied to the clipboard.',
+        );
+        return;
+      }
+
+      setCopiedAgentId(
+        agentId,
+      );
+
+      window.setTimeout(
+        () => {
+          setCopiedAgentId(
+            current =>
+              current ===
+              agentId
+                ? null
+                : current,
+          );
+        },
+        1600,
+      );
+    };
+
+  const reissueAgentApiKey =
+    async (
+      agent: Agent,
+    ) => {
+      if (
+        reissueAgentKeyMutation.isPending
+      ) {
+        return;
+      }
+
+      try {
+        const result =
+          await reissueAgentKeyMutation.mutateAsync(
+            agent.id,
+          );
+
+        setKnownAgentKeys(
+          current => ({
+            ...current,
+            [agent.id]:
+              result.apiKey,
+          }),
+        );
+
+        setAgentCredentialResult(
+          {
+            agent:
+              result.agent,
+            apiKey:
+              result.apiKey,
+            reason:
+              'reissued',
+          },
         );
 
         toast.success(
-          'API key copied',
-          'Store it securely. The plaintext key cannot be retrieved later.',
+          'Agent API key reissued',
+          `${agent.name} now has a new API key. The previous key is no longer valid.`,
         );
-
-        window.setTimeout(
-          () =>
-            setCopiedApiKey(
-              false,
-            ),
-          2000,
-        );
-      } catch {
+      } catch (
+        error
+      ) {
         toast.error(
-          'Copy failed',
-          'Select the API key manually and copy it.',
+          'API key reissue failed',
+          errorMessage(
+            error,
+          ),
         );
       }
-    };
-
-  const closeProvisioningOutcome =
-    () => {
-      setProvisioningOutcome(
-        null,
-      );
-      setCopiedApiKey(
-        false,
-      );
     };
 
   const openAssignmentModal =
@@ -871,6 +684,7 @@ export function TeamLeader() {
       setAssignmentAgent(
         null,
       );
+
       setSelectedSessionId(
         '',
       );
@@ -892,6 +706,7 @@ export function TeamLeader() {
           'Choose a session',
           'Select a session or use Unassign.',
         );
+
         return;
       }
 
@@ -912,7 +727,9 @@ export function TeamLeader() {
         );
 
         closeAssignmentModal();
-      } catch (error) {
+      } catch (
+        error
+      ) {
         toast.error(
           'Assignment failed',
           errorMessage(
@@ -947,7 +764,9 @@ export function TeamLeader() {
         ) {
           closeAssignmentModal();
         }
-      } catch (error) {
+      } catch (
+        error
+      ) {
         toast.error(
           'Unassign failed',
           errorMessage(
@@ -976,10 +795,24 @@ export function TeamLeader() {
           `${agent.name} was deleted. Its session, if any, was kept.`,
         );
 
+        setKnownAgentKeys(
+          current => {
+            const next = {
+              ...current,
+            };
+
+            delete next[agent.id];
+
+            return next;
+          },
+        );
+
         setDeleteAgentTarget(
           null,
         );
-      } catch (error) {
+      } catch (
+        error
+      ) {
         toast.error(
           'Delete failed',
           errorMessage(
@@ -1003,7 +836,9 @@ export function TeamLeader() {
       sessionId: string,
     ) => {
       navigate(
-        `/chats?session=${encodeURIComponent(sessionId)}`,
+        `/chats?session=${encodeURIComponent(
+          sessionId,
+        )}`,
       );
     };
 
@@ -1032,8 +867,8 @@ export function TeamLeader() {
         title="Team Leader"
         subtitle={
           meQuery.data
-            ? `Manage Agents and tenant-owned WhatsApp sessions for ${meQuery.data.name}.`
-            : 'Manage your Agents and assigned WhatsApp sessions.'
+            ? `Manage Agents and session assignments for ${meQuery.data.name}. Session operations are handled from the Sessions tab.`
+            : 'Manage your Agents and their WhatsApp session assignments.'
         }
         badge={
           meQuery.data ? (
@@ -1042,9 +877,8 @@ export function TeamLeader() {
                 size={14}
               />
 
-              {
-                meQuery.data.email
-              }
+              {meQuery.data.email ||
+                meQuery.data.name}
             </span>
           ) : undefined
         }
@@ -1074,6 +908,22 @@ export function TeamLeader() {
 
             <button
               type="button"
+              className="btn-secondary"
+              onClick={() =>
+                navigate(
+                  '/sessions',
+                )
+              }
+            >
+              <Smartphone
+                size={17}
+              />
+
+              Sessions
+            </button>
+
+            <button
+              type="button"
               className="btn-primary"
               onClick={
                 openCreateModal
@@ -1083,7 +933,7 @@ export function TeamLeader() {
                 size={18}
               />
 
-              Create Agent Session
+              Create Agent
             </button>
           </div>
         }
@@ -1138,7 +988,7 @@ export function TeamLeader() {
           </strong>
 
           <span className="team-leader-summary-hint">
-            Agents with an active session assignment
+            Agents with a session assignment
           </span>
         </article>
 
@@ -1170,7 +1020,7 @@ export function TeamLeader() {
           </strong>
 
           <span className="team-leader-summary-hint">
-            Sessions returned by the tenant-scoped API
+            Sessions available for assignment
           </span>
         </article>
       </section>
@@ -1183,7 +1033,7 @@ export function TeamLeader() {
             </h2>
 
             <p>
-              Assign one tenant-owned WhatsApp session to each Agent.
+              Create Agents independently, then assign, reassign, or unassign an existing tenant-owned session.
             </p>
           </div>
         </div>
@@ -1202,7 +1052,7 @@ export function TeamLeader() {
             </h3>
 
             <p>
-              Create your first Agent together with a tenant-owned WhatsApp session.
+              Create your first Agent. Session creation and operational controls remain in the Sessions tab.
             </p>
 
             <button
@@ -1216,7 +1066,7 @@ export function TeamLeader() {
                 size={18}
               />
 
-              Create Agent Session
+              Create Agent
             </button>
           </div>
         ) : (
@@ -1226,6 +1076,10 @@ export function TeamLeader() {
                 <tr>
                   <th>
                     Agent
+                  </th>
+
+                  <th>
+                    API key
                   </th>
 
                   <th>
@@ -1268,6 +1122,16 @@ export function TeamLeader() {
                           )
                         : undefined;
 
+                    const knownApiKey =
+                      knownAgentKeys[
+                        agent.id
+                      ];
+
+                    const reissuingThisAgent =
+                      reissueAgentKeyMutation.isPending &&
+                      reissueAgentKeyMutation.variables ===
+                        agent.id;
+
                     return (
                       <tr
                         key={
@@ -1287,6 +1151,116 @@ export function TeamLeader() {
                                 'No email'}
                             </span>
                           </div>
+                        </td>
+
+                        <td>
+                          {knownApiKey ? (
+                            <div
+                              style={{
+                                display:
+                                  'flex',
+                                alignItems:
+                                  'center',
+                                gap:
+                                  '0.4rem',
+                                minWidth:
+                                  0,
+                              }}
+                            >
+                              <code
+                                title={
+                                  knownApiKey
+                                }
+                                style={{
+                                  display:
+                                    'inline-block',
+                                  maxWidth:
+                                    '210px',
+                                  overflow:
+                                    'hidden',
+                                  textOverflow:
+                                    'ellipsis',
+                                  whiteSpace:
+                                    'nowrap',
+                                }}
+                              >
+                                {
+                                  knownApiKey
+                                }
+                              </code>
+
+                              <button
+                                type="button"
+                                className="team-leader-action-btn"
+                                onClick={() =>
+                                  void copyAgentApiKey(
+                                    agent.id,
+                                  )
+                                }
+                                title="Copy Agent API key"
+                                aria-label={`Copy API key for ${agent.name}`}
+                                style={{
+                                  padding:
+                                    '0.35rem',
+                                }}
+                              >
+                                {copiedAgentId ===
+                                agent.id ? (
+                                  <Check
+                                    size={15}
+                                  />
+                                ) : (
+                                  <Copy
+                                    size={15}
+                                  />
+                                )}
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              style={{
+                                display:
+                                  'flex',
+                                alignItems:
+                                  'center',
+                                gap:
+                                  '0.5rem',
+                                flexWrap:
+                                  'wrap',
+                              }}
+                            >
+                              <span className="team-leader-muted">
+                                Not recoverable
+                              </span>
+
+                              <button
+                                type="button"
+                                className="team-leader-action-btn"
+                                onClick={() =>
+                                  void reissueAgentApiKey(
+                                    agent,
+                                  )
+                                }
+                                disabled={
+                                  reissueAgentKeyMutation.isPending
+                                }
+                                title="Reissue Agent API key"
+                              >
+                                {reissuingThisAgent ? (
+                                  <Loader2
+                                    size={15}
+                                    className="animate-spin"
+                                  />
+                                ) : (
+                                  <KeyRound
+                                    size={15}
+                                  />
+                                )}
+
+                                Reissue
+                              </button>
+                            </div>
+                          )}
                         </td>
 
                         <td>
@@ -1378,22 +1352,41 @@ export function TeamLeader() {
                         <td>
                           <div className="team-leader-row-actions">
                             {agent.assignedSessionId && (
-                              <button
-                                type="button"
-                                className="team-leader-action-btn"
-                                onClick={() =>
-                                  openChats(
-                                    agent.assignedSessionId!,
-                                  )
-                                }
-                                title="Open chats"
-                              >
-                                <ExternalLink
-                                  size={16}
-                                />
+                              <>
+                                <button
+                                  type="button"
+                                  className="team-leader-action-btn"
+                                  onClick={() =>
+                                    navigate(
+                                      '/sessions',
+                                    )
+                                  }
+                                  title="Manage session"
+                                >
+                                  <Smartphone
+                                    size={16}
+                                  />
 
-                                Chats
-                              </button>
+                                  Session
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="team-leader-action-btn"
+                                  onClick={() =>
+                                    openChats(
+                                      agent.assignedSessionId!,
+                                    )
+                                  }
+                                  title="Open chats"
+                                >
+                                  <ExternalLink
+                                    size={16}
+                                  />
+
+                                  Chats
+                                </button>
+                              </>
                             )}
 
                             <button
@@ -1469,10 +1462,10 @@ export function TeamLeader() {
         onClose={
           closeCreateModal
         }
-        title="Create Agent Session"
+        title="Create Agent"
         className="team-leader-modal"
         hideCloseButton={
-          isProvisioning
+          createAgentMutation.isPending
         }
         footer={
           <>
@@ -1483,7 +1476,7 @@ export function TeamLeader() {
                 closeCreateModal
               }
               disabled={
-                isProvisioning
+                createAgentMutation.isPending
               }
             >
               Cancel
@@ -1493,13 +1486,13 @@ export function TeamLeader() {
               type="button"
               className="btn-primary"
               onClick={() =>
-                void handleProvision()
+                void handleCreateAgent()
               }
               disabled={
-                isProvisioning
+                createAgentMutation.isPending
               }
             >
-              {isProvisioning ? (
+              {createAgentMutation.isPending ? (
                 <Loader2
                   size={17}
                   className="animate-spin"
@@ -1510,9 +1503,9 @@ export function TeamLeader() {
                 />
               )}
 
-              {isProvisioning
+              {createAgentMutation.isPending
                 ? 'Creating...'
-                : 'Create Agent Session'}
+                : 'Create Agent'}
             </button>
           </>
         }
@@ -1529,7 +1522,7 @@ export function TeamLeader() {
               </strong>
 
               <span>
-                The Team Leader ownership is derived from your authenticated API key.
+                The Team Leader ownership is derived from your authenticated API key. Session assignment is handled separately after creation.
               </span>
             </div>
           </div>
@@ -1658,86 +1651,6 @@ export function TeamLeader() {
           </div>
         </div>
 
-        <div className="team-leader-form-divider" />
-
-        <div className="team-leader-form-section">
-          <div className="team-leader-form-section-title">
-            <span className="team-leader-step">
-              2
-            </span>
-
-            <div>
-              <strong>
-                WhatsApp session
-              </strong>
-
-              <span>
-                The session is created inside your tenant and then assigned to the Agent.
-              </span>
-            </div>
-          </div>
-
-          <div className="team-leader-form-grid">
-            <label>
-              <span>
-                Session name
-              </span>
-
-              <input
-                type="text"
-                value={
-                  form.sessionName
-                }
-                onChange={
-                  event =>
-                    updateForm(
-                      'sessionName',
-                      event.target.value,
-                    )
-                }
-                maxLength={
-                  50
-                }
-                placeholder="support-01"
-                autoComplete="off"
-              />
-
-              <small>
-                3-50 characters; letters, numbers and hyphens only.
-              </small>
-            </label>
-
-            <label>
-              <span>
-                Target phone
-              </span>
-
-              <input
-                type="tel"
-                value={
-                  form.targetPhone
-                }
-                onChange={
-                  event =>
-                    updateForm(
-                      'targetPhone',
-                      event.target.value,
-                    )
-                }
-                maxLength={
-                  20
-                }
-                placeholder="+201234567890"
-                autoComplete="off"
-              />
-
-              <small>
-                Optional display/intention metadata; not used for authorization.
-              </small>
-            </label>
-          </div>
-        </div>
-
         {formError && (
           <div
             className="team-leader-inline-error"
@@ -1748,120 +1661,58 @@ export function TeamLeader() {
             }
           </div>
         )}
-
-        <div className="team-leader-workflow-note">
-          <strong>
-            Creation order
-          </strong>
-
-          <span>
-            Session → Agent/API key → assignment. If a later step fails, completed resources are kept and a recovery action is shown.
-          </span>
-        </div>
       </Modal>
 
       <Modal
         open={
           Boolean(
-            provisioningOutcome,
+            agentCredentialResult,
           )
         }
         onClose={
-          closeProvisioningOutcome
+          closeAgentCredential
         }
         title={
-          provisioningOutcome?.failedStage
-            ? 'Provisioning needs attention'
-            : 'Agent Session Created'
+          agentCredentialResult?.reason ===
+          'reissued'
+            ? 'Agent API Key Reissued'
+            : 'Agent Created'
         }
         className="team-leader-modal"
-        hideCloseButton={
-          isRetryingProvisioning
-        }
         footer={
-          provisioningOutcome ? (
-            <>
-              {provisioningOutcome.failedStage && (
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={() =>
-                    void retryProvisioning()
-                  }
-                  disabled={
-                    isRetryingProvisioning
-                  }
-                >
-                  {isRetryingProvisioning ? (
-                    <Loader2
-                      size={17}
-                      className="animate-spin"
-                    />
-                  ) : (
-                    <RefreshCw
-                      size={17}
-                    />
-                  )}
-
-                  Retry {
-                    provisioningOutcome.failedStage ===
-                    'agent'
-                      ? 'Agent creation'
-                      : 'assignment'
-                  }
-                </button>
-              )}
-
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={
-                  closeProvisioningOutcome
-                }
-                disabled={
-                  isRetryingProvisioning
-                }
-              >
-                Close
-              </button>
-            </>
-          ) : null
+          agentCredentialResult ? (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={
+                closeAgentCredential
+              }
+            >
+              Close
+            </button>
+          ) : undefined
         }
       >
-        {provisioningOutcome && (
+        {agentCredentialResult && (
           <div className="team-leader-result">
-            <div
-              className={`team-leader-result-status ${
-                provisioningOutcome.failedStage
-                  ? 'team-leader-result-status--warning'
-                  : 'team-leader-result-status--success'
-              }`}
-            >
-              {provisioningOutcome.failedStage ? (
-                <RefreshCw
-                  size={22}
-                />
-              ) : (
-                <Check
-                  size={22}
-                />
-              )}
+            <div className="team-leader-result-status team-leader-result-status--success">
+              <Check
+                size={22}
+              />
 
               <div>
                 <strong>
-                  {provisioningOutcome.failedStage
-                    ? 'Partial provisioning completed'
-                    : 'Provisioning completed'}
+                  {agentCredentialResult.reason ===
+                  'reissued'
+                    ? 'Agent API key reissued'
+                    : 'Agent created'}
                 </strong>
 
                 <span>
-                  {provisioningOutcome.failedStage ===
-                  'agent'
-                    ? 'The session exists, but the Agent was not created.'
-                    : provisioningOutcome.failedStage ===
-                        'assignment'
-                      ? 'The session and Agent exist, but assignment did not complete.'
-                      : 'The Agent is assigned to the new session.'}
+                  {agentCredentialResult.reason ===
+                  'reissued'
+                    ? 'The previous Agent API key is no longer valid. Copy the replacement key now.'
+                    : 'The Agent has not been assigned a session automatically. Use Assign when you are ready.'}
                 </span>
               </div>
             </div>
@@ -1869,38 +1720,13 @@ export function TeamLeader() {
             <dl className="team-leader-result-details">
               <div>
                 <dt>
-                  Session
-                </dt>
-
-                <dd>
-                  {
-                    provisioningOutcome.session.name
-                  }
-                </dd>
-              </div>
-
-              <div>
-                <dt>
-                  Session ID
-                </dt>
-
-                <dd>
-                  <code>
-                    {
-                      provisioningOutcome.session.id
-                    }
-                  </code>
-                </dd>
-              </div>
-
-              <div>
-                <dt>
                   Agent
                 </dt>
 
                 <dd>
-                  {provisioningOutcome.agent?.name ??
-                    provisioningOutcome.agentInput.name}
+                  {
+                    agentCredentialResult.agent.name
+                  }
                 </dd>
               </div>
 
@@ -1911,9 +1737,7 @@ export function TeamLeader() {
 
                 <dd>
                   {templateQuotaLabel(
-                    provisioningOutcome.agent?.templateSendLimit24h ??
-                      provisioningOutcome.agentInput.templateSendLimit24h ??
-                      null,
+                    agentCredentialResult.agent.templateSendLimit24h,
                   )}
                 </dd>
               </div>
@@ -1924,70 +1748,27 @@ export function TeamLeader() {
                 </dt>
 
                 <dd>
-                  {provisioningOutcome.assigned
+                  {agentCredentialResult.agent.assignedSessionId
                     ? 'Assigned'
-                    : 'Not assigned'}
+                    : 'Unassigned'}
                 </dd>
               </div>
             </dl>
 
-            {provisioningOutcome.error && (
-              <div
-                className="team-leader-inline-error"
-                role="alert"
-              >
-                {
-                  provisioningOutcome.error
+            <div className="team-leader-api-key-panel">
+              <GeneratedKeyField
+                value={
+                  agentCredentialResult.apiKey
                 }
-              </div>
-            )}
-
-            {provisioningOutcome.apiKey && (
-              <div className="team-leader-api-key-panel">
-                <div>
-                  <strong>
-                    Agent API key
-                  </strong>
-
-                  <span>
-                    This plaintext key is returned only once. Save it before closing this dialog.
-                  </span>
-                </div>
-
-                <div className="team-leader-api-key-row">
-                  <input
-                    type="text"
-                    readOnly
-                    value={
-                      provisioningOutcome.apiKey
-                    }
-                    aria-label="Agent API key"
-                  />
-
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() =>
-                      void handleCopyApiKey()
-                    }
-                  >
-                    {copiedApiKey ? (
-                      <Check
-                        size={17}
-                      />
-                    ) : (
-                      <Clipboard
-                        size={17}
-                      />
-                    )}
-
-                    {copiedApiKey
-                      ? 'Copied'
-                      : 'Copy'}
-                  </button>
-                </div>
-              </div>
-            )}
+                label="Agent API key"
+                description={
+                  agentCredentialResult.reason ===
+                  'reissued'
+                    ? 'This replacement plaintext key is returned only once. The old key is invalid. Copy and store the new key now.'
+                    : 'This plaintext key is returned only once. It is hidden by default; Copy always copies the complete key.'
+                }
+              />
+            </div>
           </div>
         )}
       </Modal>
@@ -2152,14 +1933,38 @@ export function TeamLeader() {
               </select>
 
               <small>
-                Sessions already assigned to another Agent are disabled. The backend also enforces this invariant.
+                Sessions already assigned to another Agent are disabled. The backend remains authoritative for the assignment invariant.
               </small>
             </label>
 
             {sessions.length ===
               0 && (
               <div className="team-leader-inline-warning">
-                No tenant-owned sessions are available. Create an Agent Session first.
+                No tenant-owned sessions are available. Create and manage sessions from the Sessions tab.
+
+                <div
+                  style={{
+                    marginTop:
+                      '0.75rem',
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      closeAssignmentModal();
+                      navigate(
+                        '/sessions',
+                      );
+                    }}
+                  >
+                    <Smartphone
+                      size={17}
+                    />
+
+                    Open Sessions
+                  </button>
+                </div>
               </div>
             )}
           </div>

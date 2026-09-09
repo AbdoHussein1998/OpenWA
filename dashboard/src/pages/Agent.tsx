@@ -1,6 +1,9 @@
 
 
 
+
+
+
 import {
   useCallback,
   useEffect,
@@ -18,15 +21,21 @@ import {
 } from '@tanstack/react-query';
 
 import {
+  useNavigate,
+} from 'react-router-dom';
+
+import {
   useTranslation,
 } from 'react-i18next';
 
 import {
   AlertCircle,
   ArrowLeft,
+  ClipboardList,
   Loader2,
   MessageSquare,
   Play,
+  QrCode,
   RefreshCw,
   Skull,
   Smartphone,
@@ -46,7 +55,6 @@ import {
 } from '../services/api';
 
 import {
-  queryKeys,
   useAgentMeQuery,
   useSessionsQuery,
 } from '../hooks/queries';
@@ -54,6 +62,21 @@ import {
 import {
   useRole,
 } from '../hooks/useRole';
+
+import {
+  useSessionPairing,
+} from '../hooks/useSessionPairing';
+
+import {
+  canForceKillSession,
+  canUnlinkSession,
+  classifyUnlinkError,
+  isSessionStarted,
+} from '../utils/sessionActions';
+
+import {
+  isValidPairingPhone,
+} from '../utils/sessionForm';
 
 import {
   useDocumentTitle,
@@ -110,12 +133,6 @@ import {
   useMarkChatRead,
 } from '../hooks/useMarkChatRead';
 
-import {
-  canForceKillSession,
-  canUnlinkSession,
-  classifyUnlinkError,
-  isSessionStarted,
-} from '../utils/sessionActions';
 
 import ChatSidebar from '../components/chats/ChatSidebar';
 
@@ -142,6 +159,9 @@ const MESSAGE_QUERY_PREFIX =
   'messages';
 
 const AGENT_WS_EVENTS = [
+  'session.status',
+  'session.qr',
+  'session.restriction',
   'message.received',
   'message.sent',
   'message.ack',
@@ -344,11 +364,6 @@ function templateQuotaLabel(
   return `${limit} / 24h`;
 }
 
-type AgentSessionAction =
-  | 'start'
-  | 'stop'
-  | 'logout'
-  | 'force-kill';
 
 /* ================================================================
    PAGE
@@ -374,7 +389,11 @@ export function Agent() {
   const queryClient =
     useQueryClient();
 
+  const navigate =
+    useNavigate();
+
   const {
+    canReadTemplates,
     canStartSessions,
     canShutdownSessions,
   } =
@@ -507,7 +526,13 @@ export function Agent() {
     sessionAction,
     setSessionAction,
   ] =
-    useState<AgentSessionAction | null>(
+    useState<
+      | 'start'
+      | 'stop'
+      | 'unlink'
+      | 'kill'
+      | null
+    >(
       null,
     );
 
@@ -544,6 +569,21 @@ export function Agent() {
       selectedSessionId,
     );
 
+  const sessionsRef =
+    useRef<Session[]>(
+      sessions,
+    );
+
+  const qrAutoOpenKeyRef =
+    useRef<string | null>(
+      null,
+    );
+
+  const previousAssignedSessionIdRef =
+    useRef(
+      selectedSessionId,
+    );
+
   const chatsRef =
     useRef<Chat[]>(
       [],
@@ -572,6 +612,59 @@ export function Agent() {
     >(
       null,
     );
+
+  const refetchSessions =
+    sessionsQuery.refetch;
+
+  const reloadSessions =
+    useCallback(
+      async (): Promise<Session[]> => {
+        const result =
+          await refetchSessions();
+
+        return (
+          result.data ??
+          []
+        );
+      },
+      [
+        refetchSessions,
+      ],
+    );
+
+  const {
+    qrData,
+    pairingMode,
+    phoneNumber,
+    pairingCode,
+    requestingPairing,
+    pairingError,
+    setPhoneNumber,
+    selectPairingTab,
+    handleChangeNumber,
+    handleGeneratePairingCode,
+    handleShowQR,
+    handleCloseQRModal,
+    applyQrPush,
+    dismissQrForSession,
+  } =
+    useSessionPairing({
+      sessions,
+      sessionsRef,
+      reloadSessions,
+    });
+
+  const handleShowQRRef =
+    useRef(
+      handleShowQR,
+    );
+
+  useEffect(() => {
+    handleShowQRRef.current =
+      handleShowQR;
+  }, [
+    handleShowQR,
+  ]);
 
   /* ================================================================
      STABLE STATE HELPERS
@@ -682,6 +775,103 @@ export function Agent() {
       selectedSessionId;
   }, [
     selectedSessionId,
+  ]);
+
+  useEffect(() => {
+    sessionsRef.current =
+      sessions;
+  }, [
+    sessions,
+  ]);
+
+  /**
+   * A Team Leader may reassign this Agent while the page is open.
+   * Tear down pairing state from the previous assignment immediately so
+   * the Agent never keeps polling or displaying a QR for a session that
+   * is no longer assigned.
+   */
+  useEffect(() => {
+    if (
+      previousAssignedSessionIdRef.current !==
+      selectedSessionId
+    ) {
+      handleCloseQRModal();
+      qrAutoOpenKeyRef.current =
+        null;
+
+      previousAssignedSessionIdRef.current =
+        selectedSessionId;
+    }
+  }, [
+    handleCloseQRModal,
+    selectedSessionId,
+  ]);
+
+  /**
+   * Prime the inline QR panel whenever the assigned session enters a
+   * state where pairing can be completed. `useSessionPairing` then owns
+   * the 5-second refresh loop and the latest QR value.
+   *
+   * The stable ref avoids re-running this effect simply because the
+   * hook's public handler function gets a new identity on render.
+   */
+  useEffect(() => {
+    if (
+      !assignedSession
+    ) {
+      qrAutoOpenKeyRef.current =
+        null;
+      return;
+    }
+
+    const shouldPrimeQr =
+      assignedSession.status ===
+        'initializing' ||
+      assignedSession.status ===
+        'qr_ready';
+
+    if (
+      !shouldPrimeQr
+    ) {
+      qrAutoOpenKeyRef.current =
+        null;
+
+      /**
+       * Keep the existing QR/pairing state through the short
+       * `authenticating` handshake only. Every other state means the QR
+       * is no longer actionable and must disappear from the card.
+       */
+      if (
+        assignedSession.status !==
+        'authenticating'
+      ) {
+        dismissQrForSession(
+          assignedSession.id,
+        );
+      }
+
+      return;
+    }
+
+    const key =
+      `${assignedSession.id}:${assignedSession.status}`;
+
+    if (
+      qrAutoOpenKeyRef.current ===
+      key
+    ) {
+      return;
+    }
+
+    qrAutoOpenKeyRef.current =
+      key;
+
+    void handleShowQRRef.current(
+      assignedSession.id,
+    );
+  }, [
+    assignedSession,
+    dismissQrForSession,
   ]);
 
   useEffect(() => {
@@ -931,187 +1121,84 @@ export function Agent() {
       ],
     );
 
-  const applyUpdatedSession =
+  /* ================================================================
+     ASSIGNED SESSION MANAGEMENT
+     ================================================================ */
+
+  const handleStartAssignedSession =
     useCallback(
-      (
-        updated:
-          Session,
-      ) => {
-        queryClient.setQueryData<
-          Session[]
-        >(
-          queryKeys.sessions,
-          previous =>
-            previous
-              ? previous.map(
-                  session =>
-                    session.id ===
-                    updated.id
-                      ? updated
-                      : session,
-                )
-              : [
-                  updated,
-                ],
-        );
-      },
-      [
-        queryClient,
-      ],
-    );
-
-  const runSessionAction =
-    useCallback(
-      async (
-        action:
-          AgentSessionAction,
-      ) => {
-        const session =
-          assignedSession;
-
+      async () => {
         if (
-          !session ||
-          sessionAction
-        ) {
-          return;
-        }
-
-        if (
-          action ===
-            'start' &&
+          !assignedSession ||
           !canStartSessions
         ) {
           return;
         }
 
         if (
-          action !==
-            'start' &&
-          !canShutdownSessions
-        ) {
-          return;
-        }
-
-        if (
-          action ===
-            'logout' &&
-          typeof window !==
-            'undefined' &&
-          !window.confirm(
-            t(
-              'agent.logoutConfirm',
-              'Unlink this WhatsApp session? A fresh QR scan or pairing code will be required before it can connect again.',
-            ),
+          isSessionStarted(
+            assignedSession,
           )
         ) {
-          return;
-        }
+          if (
+            assignedSession.status ===
+              'initializing' ||
+            assignedSession.status ===
+              'qr_ready' ||
+            assignedSession.status ===
+              'authenticating'
+          ) {
+            void handleShowQRRef.current(
+              assignedSession.id,
+            );
+          }
 
-        if (
-          action ===
-            'force-kill' &&
-          typeof window !==
-            'undefined' &&
-          !window.confirm(
-            t(
-              'agent.forceKillConfirm',
-              'Force-kill the assigned session engine? Use this only when the normal stop action cannot recover a stuck engine.',
-            ),
-          )
-        ) {
           return;
         }
 
         setSessionAction(
-          action,
+          'start',
         );
 
         try {
-          const updated =
-            action ===
-            'start'
-              ? await sessionApi.start(
-                  session.id,
-                )
-              : action ===
-                  'stop'
-                ? await sessionApi.stop(
-                    session.id,
-                  )
-                : action ===
-                    'logout'
-                  ? await sessionApi.logout(
-                      session.id,
-                    )
-                  : await sessionApi.forceKill(
-                      session.id,
-                    );
-
-          applyUpdatedSession(
-            updated,
+          await sessionApi.start(
+            assignedSession.id,
           );
 
-          toast.success(
-            action ===
-              'start'
-              ? t(
-                  'agent.sessionStarted',
-                  'Session start requested',
-                )
-              : action ===
-                  'stop'
-                ? t(
-                    'agent.sessionStopped',
-                    'Session stopped',
-                  )
-                : action ===
-                    'logout'
-                  ? t(
-                      'agent.sessionUnlinked',
-                      'Session unlinked',
-                    )
-                  : t(
-                      'agent.sessionForceKilled',
-                      'Session force-killed',
-                    ),
-          );
+          const refreshed =
+            await reloadSessions();
+
+          const current =
+            refreshed.find(
+              session =>
+                session.id ===
+                assignedSession.id,
+            );
+
+          if (
+            current &&
+            current.status !==
+              'ready'
+          ) {
+            void handleShowQRRef.current(
+              current.id,
+            );
+          }
         } catch (
           error
         ) {
-          if (
-            action ===
-              'logout' &&
-            classifyUnlinkError(
-              error,
-            ) ===
-              'incomplete'
-          ) {
-            await sessionsQuery.refetch();
-
-            toast.warning(
-              t(
-                'agent.logoutIncompleteTitle',
-                'Unlink did not complete',
-              ),
-              t(
-                'agent.logoutIncompleteDescription',
-                'The session was stopped locally, but unlinking remained incomplete. Start the session again and retry the unlink.',
-              ),
-            );
-
-            return;
-          }
-
           toast.error(
             t(
-              'agent.sessionActionFailed',
-              'Session action failed',
+              'agent.sessionStartFailed',
+              'Failed to start session',
             ),
             error instanceof
               Error
               ? error.message
               : undefined,
           );
+
+          await reloadSessions();
         } finally {
           setSessionAction(
             null,
@@ -1119,54 +1206,261 @@ export function Agent() {
         }
       },
       [
-        applyUpdatedSession,
         assignedSession,
-        canShutdownSessions,
         canStartSessions,
-        sessionAction,
-        sessionsQuery,
+        reloadSessions,
         t,
         toast,
       ],
     );
 
-  const assignedSessionStarted =
-    assignedSession
-      ? isSessionStarted(
-          assignedSession,
-        )
-      : false;
+  const handleStopAssignedSession =
+    useCallback(
+      async () => {
+        if (
+          !assignedSession ||
+          !canShutdownSessions
+        ) {
+          return;
+        }
 
-  const canStartAssignedSession =
-    Boolean(
-      assignedSession &&
-        canStartSessions &&
-        !assignedSessionStarted,
+        setSessionAction(
+          'stop',
+        );
+
+        try {
+          await sessionApi.stop(
+            assignedSession.id,
+          );
+
+          dismissQrForSession(
+            assignedSession.id,
+          );
+
+          await reloadSessions();
+
+          toast.success(
+            t(
+              'agent.sessionStopped',
+              'Session stopped',
+            ),
+          );
+        } catch (
+          error
+        ) {
+          toast.error(
+            t(
+              'agent.sessionStopFailed',
+              'Failed to stop session',
+            ),
+            error instanceof
+              Error
+              ? error.message
+              : undefined,
+          );
+
+          await reloadSessions();
+        } finally {
+          setSessionAction(
+            null,
+          );
+        }
+      },
+      [
+        assignedSession,
+        canShutdownSessions,
+        dismissQrForSession,
+        reloadSessions,
+        t,
+        toast,
+      ],
     );
 
-  const canStopAssignedSession =
-    Boolean(
-      assignedSession &&
-        canShutdownSessions &&
-        assignedSessionStarted,
+  const handleUnlinkAssignedSession =
+    useCallback(
+      async () => {
+        if (
+          !assignedSession ||
+          !canShutdownSessions ||
+          !canUnlinkSession(
+            assignedSession,
+            canShutdownSessions,
+          )
+        ) {
+          return;
+        }
+
+        if (
+          typeof window !==
+            'undefined' &&
+          !window.confirm(
+            t(
+              'agent.unlinkConfirm',
+              'Unlink WhatsApp from your assigned session? You will need to pair the session again before using WhatsApp.',
+            ),
+          )
+        ) {
+          return;
+        }
+
+        setSessionAction(
+          'unlink',
+        );
+
+        try {
+          await sessionApi.logout(
+            assignedSession.id,
+          );
+
+          dismissQrForSession(
+            assignedSession.id,
+          );
+
+          await reloadSessions();
+
+          toast.success(
+            t(
+              'sessions.unlink.successTitle',
+              'Session unlinked',
+            ),
+            t(
+              'sessions.unlink.success',
+              'WhatsApp was unlinked from the session.',
+            ),
+          );
+        } catch (
+          error
+        ) {
+          await reloadSessions();
+
+          if (
+            classifyUnlinkError(
+              error,
+            ) ===
+            'incomplete'
+          ) {
+            toast.warning(
+              t(
+                'sessions.unlink.incompleteTitle',
+                'Unlink incomplete',
+              ),
+              error instanceof
+                Error
+                ? error.message
+                : t(
+                    'sessions.unlink.incomplete',
+                    'The local session stopped, but WhatsApp unlinking did not complete.',
+                  ),
+            );
+          } else {
+            toast.error(
+              t(
+                'sessions.unlink.failedTitle',
+                'Failed to unlink session',
+              ),
+              error instanceof
+                Error
+                ? error.message
+                : undefined,
+            );
+          }
+        } finally {
+          setSessionAction(
+            null,
+          );
+        }
+      },
+      [
+        assignedSession,
+        canShutdownSessions,
+        dismissQrForSession,
+        reloadSessions,
+        t,
+        toast,
+      ],
     );
 
-  const canUnlinkAssignedSession =
-    Boolean(
-      assignedSession &&
-        canUnlinkSession(
-          assignedSession,
-          canShutdownSessions,
-        ),
-    );
+  const handleKillAssignedSession =
+    useCallback(
+      async () => {
+        if (
+          !assignedSession ||
+          !canShutdownSessions ||
+          !canForceKillSession(
+            assignedSession,
+            canShutdownSessions,
+          )
+        ) {
+          return;
+        }
 
-  const canForceKillAssignedSession =
-    Boolean(
-      assignedSession &&
-        canForceKillSession(
-          assignedSession,
-          canShutdownSessions,
-        ),
+        if (
+          typeof window !==
+            'undefined' &&
+          !window.confirm(
+            t(
+              'agent.forceKillConfirm',
+              'Force-kill the engine for your assigned session? Use this only when the session is stuck.',
+            ),
+          )
+        ) {
+          return;
+        }
+
+        setSessionAction(
+          'kill',
+        );
+
+        try {
+          await sessionApi.forceKill(
+            assignedSession.id,
+          );
+
+          dismissQrForSession(
+            assignedSession.id,
+          );
+
+          await reloadSessions();
+
+          toast.success(
+            t(
+              'sessions.forceKill.successTitle',
+              'Session engine stopped',
+            ),
+            t(
+              'sessions.forceKill.success',
+              'The stuck session engine was force-killed.',
+            ),
+          );
+        } catch (
+          error
+        ) {
+          toast.error(
+            t(
+              'sessions.forceKill.failedTitle',
+              'Failed to force-kill session',
+            ),
+            error instanceof
+              Error
+              ? error.message
+              : undefined,
+          );
+
+          await reloadSessions();
+        } finally {
+          setSessionAction(
+            null,
+          );
+        }
+      },
+      [
+        assignedSession,
+        canShutdownSessions,
+        dismissQrForSession,
+        reloadSessions,
+        t,
+        toast,
+      ],
     );
 
   /* ================================================================
@@ -2212,9 +2506,101 @@ export function Agent() {
       ],
     );
 
+  const handleIncomingSessionStatus =
+    useCallback(
+      (
+        event: {
+          sessionId:
+            string;
+          status:
+            string;
+        },
+      ) => {
+        if (
+          event.sessionId !==
+          selectedSessionIdRef.current
+        ) {
+          return;
+        }
+
+        if (
+          event.status !==
+            'initializing' &&
+          event.status !==
+            'qr_ready' &&
+          event.status !==
+            'authenticating'
+        ) {
+          dismissQrForSession(
+            event.sessionId,
+          );
+        }
+
+        void reloadSessions();
+      },
+      [
+        dismissQrForSession,
+        reloadSessions,
+      ],
+    );
+
+  const handleIncomingQRCode =
+    useCallback(
+      (
+        event: {
+          sessionId:
+            string;
+          qrCode:
+            string;
+        },
+      ) => {
+        if (
+          event.sessionId !==
+          selectedSessionIdRef.current
+        ) {
+          return;
+        }
+
+        applyQrPush(
+          event,
+        );
+      },
+      [
+        applyQrPush,
+      ],
+    );
+
+  const handleIncomingSessionRestriction =
+    useCallback(
+      (
+        event: {
+          sessionId:
+            string;
+        },
+      ) => {
+        if (
+          event.sessionId !==
+          selectedSessionIdRef.current
+        ) {
+          return;
+        }
+
+        void reloadSessions();
+      },
+      [
+        reloadSessions,
+      ],
+    );
+
   const wsEvents =
     useMemo(
       () => ({
+        onSessionStatus:
+          handleIncomingSessionStatus,
+        onQRCode:
+          handleIncomingQRCode,
+        onSessionRestriction:
+          handleIncomingSessionRestriction,
         onMessage:
           handleIncomingMessage,
         onMessageAck:
@@ -2232,6 +2618,9 @@ export function Agent() {
         handleIncomingMessageEdited,
         handleIncomingMessageReaction,
         handleIncomingMessageRevoked,
+        handleIncomingQRCode,
+        handleIncomingSessionRestriction,
+        handleIncomingSessionStatus,
       ],
     );
 
@@ -2466,6 +2855,38 @@ export function Agent() {
   const refreshing =
     agentQuery.isFetching ||
     sessionsQuery.isFetching;
+
+  const assignedSessionStarted =
+    assignedSession
+      ? isSessionStarted(
+          assignedSession,
+        )
+      : false;
+
+  const assignedQrData =
+    assignedSession &&
+    qrData?.sessionId ===
+      assignedSession.id
+      ? qrData
+      : null;
+
+  const showPairingPanel =
+    Boolean(
+      assignedSession &&
+        (
+          assignedSession.status ===
+            'initializing' ||
+          assignedSession.status ===
+            'qr_ready' ||
+          assignedSession.status ===
+            'authenticating' ||
+          assignedQrData
+        ),
+    );
+
+  const sessionActionPending =
+    sessionAction !==
+    null;
 
   if (
     loadingIdentity
@@ -2727,142 +3148,6 @@ export function Agent() {
         </div>
 
         <div className="agent-session-actions">
-          {canStartAssignedSession && (
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() =>
-                void runSessionAction(
-                  'start',
-                )
-              }
-              disabled={
-                Boolean(
-                  sessionAction,
-                )
-              }
-            >
-              {sessionAction ===
-              'start' ? (
-                <Loader2
-                  size={17}
-                  className="animate-spin"
-                />
-              ) : (
-                <Play
-                  size={17}
-                />
-              )}
-
-              {t(
-                'sessions.actions.start',
-                'Start',
-              )}
-            </button>
-          )}
-
-          {canStopAssignedSession && (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() =>
-                void runSessionAction(
-                  'stop',
-                )
-              }
-              disabled={
-                Boolean(
-                  sessionAction,
-                )
-              }
-            >
-              {sessionAction ===
-              'stop' ? (
-                <Loader2
-                  size={17}
-                  className="animate-spin"
-                />
-              ) : (
-                <Square
-                  size={17}
-                />
-              )}
-
-              {t(
-                'sessions.actions.stop',
-                'Stop',
-              )}
-            </button>
-          )}
-
-          {canUnlinkAssignedSession && (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() =>
-                void runSessionAction(
-                  'logout',
-                )
-              }
-              disabled={
-                Boolean(
-                  sessionAction,
-                )
-              }
-            >
-              {sessionAction ===
-              'logout' ? (
-                <Loader2
-                  size={17}
-                  className="animate-spin"
-                />
-              ) : (
-                <Unlink
-                  size={17}
-                />
-              )}
-
-              {t(
-                'sessions.actions.unlink',
-                'Unlink',
-              )}
-            </button>
-          )}
-
-          {canForceKillAssignedSession && (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() =>
-                void runSessionAction(
-                  'force-kill',
-                )
-              }
-              disabled={
-                Boolean(
-                  sessionAction,
-                )
-              }
-            >
-              {sessionAction ===
-              'force-kill' ? (
-                <Loader2
-                  size={17}
-                  className="animate-spin"
-                />
-              ) : (
-                <Skull
-                  size={17}
-                />
-              )}
-
-              {t(
-                'sessions.actions.killStuck',
-                'Force kill',
-              )}
-            </button>
-          )}
-
           <button
             type="button"
             className="btn-secondary"
@@ -2870,10 +3155,7 @@ export function Agent() {
               void refreshWorkspace()
             }
             disabled={
-              refreshing ||
-              Boolean(
-                sessionAction,
-              )
+              refreshing
             }
           >
             <RefreshCw
@@ -2894,7 +3176,538 @@ export function Agent() {
       </header>
 
       <section
-        className="agent-identity-grid"
+        className="agent-session-management-card"
+        aria-label={t(
+          'agent.sessionManagement',
+          'Assigned session management',
+        )}
+      >
+        <div className="agent-session-management-header">
+          <div>
+            <div className="agent-session-management-title">
+              <Smartphone
+                size={20}
+              />
+
+              <div>
+                <h2>
+                  {t(
+                    'agent.sessionManagement',
+                    'Assigned session management',
+                  )}
+                </h2>
+
+                <p>
+                  {t(
+                    'agent.sessionManagementDescription',
+                    'Operate only the WhatsApp session assigned to this Agent.',
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <span
+            className={`agent-status agent-status--${assignedSession.status}`}
+          >
+            {statusLabel(
+              assignedSession.status,
+            )}
+          </span>
+        </div>
+
+        <div className="agent-session-management-body">
+          <div className="agent-session-management-summary">
+            <div>
+              <span className="agent-info-label">
+                {t(
+                  'agent.sessionLabel',
+                  'Session',
+                )}
+              </span>
+
+              <strong>
+                {
+                  assignedSession.name
+                }
+              </strong>
+            </div>
+
+            <div>
+              <span className="agent-info-label">
+                {t(
+                  'agent.connectedPhone',
+                  'Connected phone',
+                )}
+              </span>
+
+              <strong className="agent-mono">
+                {assignedSession.phone ??
+                  '—'}
+              </strong>
+            </div>
+
+            <div>
+              <span className="agent-info-label">
+                {t(
+                  'agent.configuredPhone',
+                  'Configured phone',
+                )}
+              </span>
+
+              <strong className="agent-mono">
+                {assignedSession.targetPhone ??
+                  '—'}
+              </strong>
+            </div>
+          </div>
+
+          {assignedSession.lastError && (
+            <div
+              className="agent-session-warning"
+              role="status"
+            >
+              <AlertCircle
+                size={16}
+              />
+
+              <span>
+                {
+                  assignedSession.lastError
+                }
+              </span>
+            </div>
+          )}
+
+          <div className="agent-session-control-row">
+            {assignedSessionStarted ? (
+              canShutdownSessions && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() =>
+                    void handleStopAssignedSession()
+                  }
+                  disabled={
+                    sessionActionPending
+                  }
+                >
+                  {sessionAction ===
+                  'stop' ? (
+                    <Loader2
+                      size={17}
+                      className="animate-spin"
+                    />
+                  ) : (
+                    <Square
+                      size={17}
+                    />
+                  )}
+
+                  {t(
+                    'sessions.actions.stop',
+                    'Stop',
+                  )}
+                </button>
+              )
+            ) : (
+              canStartSessions && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() =>
+                    void handleStartAssignedSession()
+                  }
+                  disabled={
+                    sessionActionPending
+                  }
+                >
+                  {sessionAction ===
+                  'start' ? (
+                    <Loader2
+                      size={17}
+                      className="animate-spin"
+                    />
+                  ) : assignedSession.status ===
+                      'created' ||
+                    assignedSession.status ===
+                      'disconnected' ? (
+                    <Play
+                      size={17}
+                    />
+                  ) : (
+                    <RefreshCw
+                      size={17}
+                    />
+                  )}
+
+                  {assignedSession.status ===
+                    'created' ||
+                  assignedSession.status ===
+                    'disconnected'
+                    ? t(
+                        'sessions.actions.start',
+                        'Start',
+                      )
+                    : t(
+                        'sessions.actions.reconnect',
+                        'Reconnect',
+                      )}
+                </button>
+              )
+            )}
+
+            {canUnlinkSession(
+              assignedSession,
+              canShutdownSessions,
+            ) && (
+              <button
+                type="button"
+                className="btn-secondary danger"
+                onClick={() =>
+                  void handleUnlinkAssignedSession()
+                }
+                disabled={
+                  sessionActionPending
+                }
+              >
+                {sessionAction ===
+                'unlink' ? (
+                  <Loader2
+                    size={17}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <Unlink
+                    size={17}
+                  />
+                )}
+
+                {t(
+                  'sessions.actions.unlink',
+                  'Unlink',
+                )}
+              </button>
+            )}
+
+            {canForceKillSession(
+              assignedSession,
+              canShutdownSessions,
+            ) && (
+              <button
+                type="button"
+                className="btn-secondary danger"
+                onClick={() =>
+                  void handleKillAssignedSession()
+                }
+                disabled={
+                  sessionActionPending
+                }
+              >
+                {sessionAction ===
+                'kill' ? (
+                  <Loader2
+                    size={17}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <Skull
+                    size={17}
+                  />
+                )}
+
+                {t(
+                  'sessions.actions.killStuck',
+                  'Kill Stuck',
+                )}
+              </button>
+            )}
+
+            {canReadTemplates && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() =>
+                  navigate(
+                    `/templates?session=${encodeURIComponent(
+                      assignedSession.id,
+                    )}`,
+                  )
+                }
+              >
+                <ClipboardList
+                  size={17}
+                />
+
+                {t(
+                  'templates.title',
+                  'Templates',
+                )}
+              </button>
+            )}
+          </div>
+
+          {showPairingPanel && (
+            <div className="agent-pairing-panel">
+              <div
+                className="agent-pairing-tabs"
+                role="tablist"
+                aria-label={t(
+                  'agent.pairingMethod',
+                  'Pairing method',
+                )}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={
+                    !pairingMode
+                  }
+                  className={`agent-pairing-tab ${
+                    !pairingMode
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() =>
+                    selectPairingTab(
+                      false,
+                    )
+                  }
+                >
+                  <QrCode
+                    size={16}
+                  />
+
+                  {t(
+                    'sessions.pairing.tabQr',
+                    'QR code',
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={
+                    pairingMode
+                  }
+                  className={`agent-pairing-tab ${
+                    pairingMode
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() =>
+                    selectPairingTab(
+                      true,
+                    )
+                  }
+                >
+                  <Smartphone
+                    size={16}
+                  />
+
+                  {t(
+                    'sessions.pairing.tabPhone',
+                    'Phone code',
+                  )}
+                </button>
+              </div>
+
+              {!pairingMode ? (
+                <div
+                  className="agent-qr-panel"
+                  role="tabpanel"
+                >
+                  {assignedQrData?.qrCode ? (
+                    <>
+                      <img
+                        src={
+                          assignedQrData.qrCode
+                        }
+                        alt={t(
+                          'sessions.qr.title',
+                          'WhatsApp QR code',
+                        )}
+                        className="agent-qr-image"
+                      />
+
+                      <div className="agent-qr-copy">
+                        <strong>
+                          {t(
+                            'sessions.qr.scanToConnect',
+                            'Scan to connect',
+                          )}
+                        </strong>
+
+                        <span>
+                          {t(
+                            'agent.qrLiveHint',
+                            'This QR updates automatically when WhatsApp issues a new code.',
+                          )}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="agent-qr-loading">
+                      <Loader2
+                        size={32}
+                        className="animate-spin"
+                      />
+
+                      <span>
+                        {t(
+                          'sessions.qr.generating',
+                          'Generating QR code…',
+                        )}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className="agent-phone-pairing-panel"
+                  role="tabpanel"
+                >
+                  {pairingError && (
+                    <div
+                      className="agent-session-warning agent-session-warning--error"
+                      role="alert"
+                    >
+                      <AlertCircle
+                        size={16}
+                      />
+
+                      <span>
+                        {
+                          pairingError
+                        }
+                      </span>
+                    </div>
+                  )}
+
+                  {!pairingCode ? (
+                    <>
+                      <label
+                        htmlFor="agent-pairing-phone"
+                        className="agent-info-label"
+                      >
+                        {t(
+                          'sessions.pairing.phoneLabel',
+                          'Phone number',
+                        )}
+                      </label>
+
+                      <input
+                        id="agent-pairing-phone"
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={15}
+                        className="agent-pairing-input"
+                        placeholder={t(
+                          'sessions.pairing.phonePlaceholder',
+                          'International phone number',
+                        )}
+                        value={
+                          phoneNumber
+                        }
+                        onChange={
+                          event =>
+                            setPhoneNumber(
+                              event.target.value.replace(
+                                /\D/g,
+                                '',
+                              ),
+                            )
+                        }
+                        onKeyDown={
+                          event => {
+                            if (
+                              event.key ===
+                              'Enter' &&
+                              assignedQrData &&
+                              isValidPairingPhone(
+                                phoneNumber,
+                              )
+                            ) {
+                              void handleGeneratePairingCode();
+                            }
+                          }
+                        }
+                      />
+
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() =>
+                          void handleGeneratePairingCode()
+                        }
+                        disabled={
+                          requestingPairing ||
+                          !assignedQrData ||
+                          !isValidPairingPhone(
+                            phoneNumber,
+                          )
+                        }
+                      >
+                        {requestingPairing ? (
+                          <Loader2
+                            size={17}
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <Smartphone
+                            size={17}
+                          />
+                        )}
+
+                        {t(
+                          'sessions.pairing.generateButton',
+                          'Generate pairing code',
+                        )}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="agent-info-label">
+                        {t(
+                          'sessions.pairing.codeLabel',
+                          'Pairing code',
+                        )}
+                      </span>
+
+                      <strong className="agent-pairing-code">
+                        {pairingCode.substring(
+                          0,
+                          4,
+                        )}
+                        {' - '}
+                        {pairingCode.substring(
+                          4,
+                        )}
+                      </strong>
+
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={
+                          handleChangeNumber
+                        }
+                      >
+                        {t(
+                          'sessions.pairing.changeNumber',
+                          'Change number',
+                        )}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section
+        className="agent-identity-grid\"
         aria-label={t(
           'agent.assignmentSummary',
           'Agent assignment summary',
@@ -3043,7 +3856,7 @@ export function Agent() {
           <p>
             {t(
               'agent.sessionNotReadyDescription',
-              'The assigned WhatsApp session is currently unavailable for chat. You can start or stop the assigned engine when permitted; QR/pairing and session configuration remain Team Leader responsibilities.',
+              'The assigned WhatsApp session is currently unavailable for chat. Use the session management card above to start, stop, unlink, recover, or complete QR/pairing authentication for your assigned session.',
             )}
           </p>
 
@@ -3341,6 +4154,9 @@ export function Agent() {
     </div>
   );
 }
+
+
+
 
 
 

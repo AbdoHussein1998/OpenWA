@@ -1,6 +1,8 @@
 
 
 
+
+
 import {
   Suspense,
   useCallback,
@@ -150,26 +152,6 @@ const queryClient = new QueryClient({
   },
 });
 
-/**
- * Audit logs are currently Admin-only on the backend.
- *
- * Keep this explicit until /logs is represented directly in the
- * centralized roleAccess.ts route matrix.
- */
-function canAccessAppRoute(
-  role: UserRole,
-  path: string,
-): boolean {
-  if (path === '/logs') {
-    return role === 'admin';
-  }
-
-  return canAccessRoute(
-    role,
-    path,
-  );
-}
-
 function RoleRoute({
   role,
   path,
@@ -180,7 +162,7 @@ function RoleRoute({
   children: ReactNode;
 }) {
   if (
-    !canAccessAppRoute(
+    !canAccessRoute(
       role,
       path,
     )
@@ -608,6 +590,9 @@ function App() {
 }
 
 export default App;
+
+
+
 
 
 

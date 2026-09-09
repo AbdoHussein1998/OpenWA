@@ -300,6 +300,20 @@ export function useCreateTeamLeaderAgentMutation() {
   });
 }
 
+export function useReissueTeamLeaderAgentApiKeyMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (agentId: string) =>
+      teamLeaderApi.reissueAgentApiKey(agentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.teamLeaderAgents,
+      });
+    },
+  });
+}
+
 export function useDeleteTeamLeaderAgentMutation() {
   const queryClient = useQueryClient();
 

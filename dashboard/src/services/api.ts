@@ -155,7 +155,7 @@ export interface Agent {
 
 export interface CreateTeamLeaderInput {
   name: string;
-  email: string;
+  email?: string;
 }
 
 export interface CreateAgentInput {
@@ -182,6 +182,17 @@ export interface CreateAgentResult {
    * Plaintext AGENT API key.
    * Returned only once by the backend.
    */
+  apiKey: string;
+}
+
+/**
+ * Result returned when a Team Leader reissues an Agent API key.
+ *
+ * The previous Agent key is expected to be revoked by the backend.
+ * The replacement plaintext key is returned only in this response.
+ */
+export interface ReissueAgentApiKeyResult {
+  agent: Agent;
   apiKey: string;
 }
 
@@ -1176,6 +1187,20 @@ export const teamLeaderApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  /**
+   * Replace the authenticated Team Leader's Agent credential.
+   *
+   * The backend must revoke the old AGENT key and return the new
+   * plaintext key exactly once.
+   */
+  reissueAgentApiKey: (agentId: string) =>
+    request<ReissueAgentApiKeyResult>(
+      `/team-leader/agents/${encodeURIComponent(agentId)}/api-key/rotate`,
+      {
+        method: 'POST',
+      },
+    ),
 
   deleteAgent: (agentId: string) =>
     request<void>(

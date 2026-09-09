@@ -1,6 +1,9 @@
 
 
 
+
+
+
 import {
   useEffect,
   useMemo,
@@ -22,8 +25,6 @@ import {
 import {
   AlertCircle,
   AlertTriangle,
-  Check,
-  Copy,
   Eye,
   EyeOff,
   KeyRound,
@@ -61,12 +62,13 @@ import {
 } from '../components/Modal';
 
 import {
+  GeneratedKeyField,
+} from '../components/GeneratedKeyField';
+
+import {
   useToast,
 } from '../hooks/useToast';
 
-import {
-  copyToClipboard,
-} from '../utils/clipboard';
 
 import './ApiKeys.css';
 
@@ -268,15 +270,6 @@ export function ApiKeys() {
       null,
     );
 
-  const [
-    copied,
-    setCopied,
-  ] =
-    useState<
-      string | null
-    >(
-      null,
-    );
 
   const [
     createError,
@@ -414,9 +407,7 @@ export function ApiKeys() {
         'team_leader'
       ) {
         return (
-          Boolean(
-            email,
-          ) &&
+          !email ||
           isValidEmail(
             email,
           )
@@ -454,9 +445,6 @@ export function ApiKeys() {
         null,
       );
 
-      setCopied(
-        null,
-      );
     };
 
   const openCreateModal =
@@ -473,9 +461,6 @@ export function ApiKeys() {
         null,
       );
 
-      setCopied(
-        null,
-      );
 
       setShowModal(
         true,
@@ -535,7 +520,11 @@ export function ApiKeys() {
             await createTeamLeaderMutation.mutateAsync(
               {
                 name,
-                email,
+                ...(email
+                  ? {
+                      email,
+                    }
+                  : {}),
               },
             );
 
@@ -720,32 +709,6 @@ export function ApiKeys() {
           return next;
         },
       );
-    };
-
-  const handleCopy =
-    async (
-      text:
-        string,
-      id:
-        string,
-    ) => {
-      if (
-        await copyToClipboard(
-          text,
-        )
-      ) {
-        setCopied(
-          id,
-        );
-
-        window.setTimeout(
-          () =>
-            setCopied(
-              null,
-            ),
-          2000,
-        );
-      }
     };
 
   const columns =
@@ -1191,56 +1154,15 @@ export function ApiKeys() {
                 )}
               </p>
 
-              <div
-                style={{
-                  display:
-                    'flex',
-                  gap:
-                    '0.5rem',
-                  alignItems:
-                    'center',
-                }}
-              >
-                <code
-                  style={{
-                    flex:
-                      1,
-                    padding:
-                      '0.75rem',
-                    background:
-                      'var(--bg-secondary)',
-                    borderRadius:
-                      '6px',
-                    wordBreak:
-                      'break-all',
-                  }}
-                >
-                  {
-                    createdCredential.apiKey
-                  }
-                </code>
-
-                <button
-                  className="btn-primary"
-                  onClick={() =>
-                    void handleCopy(
-                      createdCredential.apiKey,
-                      'modal',
-                    )
-                  }
-                >
-                  {copied ===
-                  'modal' ? (
-                    <Check
-                      size={16}
-                    />
-                  ) : (
-                    <Copy
-                      size={16}
-                    />
-                  )}
-                </button>
-              </div>
+              <GeneratedKeyField
+                value={
+                  createdCredential.apiKey
+                }
+                label={`${roleLabel(
+                  createdCredential.role,
+                )} API key`}
+                description="This plaintext key is returned only once. It is hidden by default; Copy always copies the complete key."
+              />
             </div>
           ) : (
             <>
@@ -1378,6 +1300,19 @@ export function ApiKeys() {
                         )
                     }
                   />
+
+                  <small
+                    style={{
+                      display:
+                        'block',
+                      marginTop:
+                        '-0.25rem',
+                      color:
+                        'var(--text-muted)',
+                    }}
+                  >
+                    Optional
+                  </small>
                 </>
               )}
 
@@ -1429,9 +1364,8 @@ export function ApiKeys() {
                             teamLeader.name
                           }{' '}
                           ·{' '}
-                          {
-                            teamLeader.email
-                          }
+                          {teamLeader.email ||
+                            'No email'}
                         </option>
                       ),
                     )}
@@ -1782,5 +1716,8 @@ export function ApiKeys() {
     </div>
   );
 }
+
+
+
 
 

@@ -1,9 +1,14 @@
+
+
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
 import {
   Plus,
   QrCode,
+  ClipboardList,
   RefreshCw,
   Trash2,
   Eye,
@@ -55,7 +60,13 @@ export function Sessions() {
   const { t } = useTranslation();
   useDocumentTitle(t('sessions.title'));
   const toast = useToast();
-  const { canWrite } = useRole();
+  const navigate = useNavigate();
+  const {
+    canManageSessions,
+    canReadTemplates,
+    canStartSessions,
+    canShutdownSessions,
+  } = useRole();
   const queryClient = useQueryClient();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -214,6 +225,8 @@ export function Sessions() {
   }, []);
 
   const handleDelete = async (id: string) => {
+    if (!canManageSessions) return;
+
     const session = sessions.find(s => s.id === id);
     try {
       await sessionApi.delete(id);
@@ -236,6 +249,8 @@ export function Sessions() {
   };
 
   const handleStart = async (id: string) => {
+    if (!canStartSessions) return;
+
     const session = sessions.find(s => s.id === id);
     if (session && ['initializing', 'qr_ready'].includes(session.status)) {
       handleShowQR(id);
@@ -275,7 +290,7 @@ export function Sessions() {
   const selectedSessionId = selectedSession?.id ?? null;
   useEffect(() => {
     setSessionConfig(null);
-    if (!selectedSessionId) return;
+    if (!selectedSessionId || !canManageSessions) return;
     let cancelled = false;
     sessionApi
       .getConfig(selectedSessionId)
@@ -289,10 +304,10 @@ export function Sessions() {
     return () => {
       cancelled = true;
     };
-  }, [selectedSessionId]);
+  }, [selectedSessionId, canManageSessions]);
 
   const handleAutoRejectToggle = async (next: boolean) => {
-    if (!selectedSessionId || !sessionConfig) return;
+    if (!canManageSessions || !selectedSessionId || !sessionConfig) return;
     const previous = sessionConfig;
     setSessionConfig({ ...sessionConfig, autoRejectCalls: next });
     setSavingConfig(true);
@@ -309,6 +324,8 @@ export function Sessions() {
   };
 
   const handleStop = async (id: string) => {
+    if (!canShutdownSessions) return;
+
     try {
       const updated = await sessionApi.stop(id);
       await applySessionResponse(updated);
@@ -321,6 +338,8 @@ export function Sessions() {
   };
 
   const handleForceKill = async (id: string) => {
+    if (!canShutdownSessions) return;
+
     try {
       const updated = await sessionApi.forceKill(id);
       await applySessionResponse(updated);
@@ -335,6 +354,8 @@ export function Sessions() {
   };
 
   const handleUnlink = async (id: string) => {
+    if (!canShutdownSessions) return;
+
     // Guard against a second concurrent request: the button is disabled while in flight, but a
     // rapid double-click would otherwise fire overlapping logouts and race the teardown tracking.
     if (unlinkingId) return;
@@ -396,7 +417,7 @@ export function Sessions() {
         title={t('sessions.title')}
         subtitle={t('sessions.subtitle')}
         actions={
-          canWrite && (
+          canManageSessions && (
             <button className="btn-primary" onClick={() => setShowCreateModal(true)}>
               <Plus size={18} />
               {t('sessions.newSession')}
@@ -445,7 +466,7 @@ export function Sessions() {
         </div>
       )}
 
-      {showCreateModal && (
+      {canManageSessions && showCreateModal && (
         <Modal
           open
           onClose={() => setShowCreateModal(false)}
@@ -682,7 +703,7 @@ export function Sessions() {
                       type="checkbox"
                       aria-labelledby="auto-reject-calls-label"
                       checked={sessionConfig.autoRejectCalls}
-                      disabled={!canWrite || savingConfig}
+                      disabled={!canManageSessions || savingConfig}
                       onChange={e => void handleAutoRejectToggle(e.target.checked)}
                     />
                     <span className="toggle-slider"></span>
@@ -695,7 +716,7 @@ export function Sessions() {
         </Modal>
       )}
 
-      {deleteConfirmId && (
+      {canManageSessions && deleteConfirmId && (
         <Modal
           open
           onClose={() => setDeleteConfirmId(null)}
@@ -724,7 +745,7 @@ export function Sessions() {
         </Modal>
       )}
 
-      {killConfirmId && (
+      {canShutdownSessions && killConfirmId && (
         <Modal
           open
           onClose={() => setKillConfirmId(null)}
@@ -753,7 +774,7 @@ export function Sessions() {
         </Modal>
       )}
 
-      {unlinkConfirmId && (
+      {canShutdownSessions && unlinkConfirmId && (
         <Modal
           open
           onClose={() => setUnlinkConfirmId(null)}
@@ -854,35 +875,57 @@ export function Sessions() {
                   <Eye size={16} />
                   {t('sessions.actions.view')}
                 </button>
-                {canWrite && isSessionStarted(session) ? (
-                  <button className="btn-action" onClick={() => handleStop(session.id)}>
-                    <Square size={16} />
-                    {t('sessions.actions.stop')}
+
+                {canReadTemplates && (
+                  <button
+                    className="btn-action"
+                    onClick={() =>
+                      navigate(`/templates?session=${encodeURIComponent(session.id)}`)
+                    }
+                  >
+                    <ClipboardList size={16} />
+                    {t('templates.title')}
                   </button>
-                ) : canWrite && (session.status === 'created' || session.status === 'disconnected') ? (
-                  <button className="btn-action" onClick={() => handleStart(session.id)}>
-                    <Play size={16} />
-                    {t('sessions.actions.start')}
-                  </button>
-                ) : canWrite ? (
-                  <button className="btn-action" onClick={() => handleStart(session.id)}>
-                    <RefreshCw size={16} />
-                    {t('sessions.actions.reconnect')}
+                )}
+
+                {isSessionStarted(session) ? (
+                  canShutdownSessions ? (
+                    <button className="btn-action" onClick={() => void handleStop(session.id)}>
+                      <Square size={16} />
+                      {t('sessions.actions.stop')}
+                    </button>
+                  ) : null
+                ) : canStartSessions ? (
+                  <button className="btn-action" onClick={() => void handleStart(session.id)}>
+                    {session.status === 'created' || session.status === 'disconnected' ? (
+                      <>
+                        <Play size={16} />
+                        {t('sessions.actions.start')}
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={16} />
+                        {t('sessions.actions.reconnect')}
+                      </>
+                    )}
                   </button>
                 ) : null}
-                {canUnlinkSession(session, canWrite) && (
+
+                {canUnlinkSession(session, canShutdownSessions) && (
                   <button className="btn-action danger" onClick={() => setUnlinkConfirmId(session.id)}>
                     <Unlink size={16} />
                     {t('sessions.actions.unlink')}
                   </button>
                 )}
-                {canWrite && (
+
+                {canManageSessions && (
                   <button className="btn-action danger" onClick={() => setDeleteConfirmId(session.id)}>
                     <Trash2 size={16} />
                     {t('sessions.actions.delete')}
                   </button>
                 )}
-                {canForceKillSession(session, canWrite) && (
+
+                {canForceKillSession(session, canShutdownSessions) && (
                   <button className="btn-action danger" onClick={() => setKillConfirmId(session.id)}>
                     <Skull size={16} />
                     {t('sessions.actions.killStuck')}
@@ -896,3 +939,6 @@ export function Sessions() {
     </div>
   );
 }
+
+
+

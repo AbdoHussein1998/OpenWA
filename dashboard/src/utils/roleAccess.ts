@@ -1,6 +1,3 @@
-
-
-
 import type {
   RoleCapabilities,
   UserRole,
@@ -18,10 +15,10 @@ import type {
  * The specific flags below intentionally mirror the backend distinctions
  * needed by the current dashboard work:
  *
- * - Agents may start/shutdown their assigned session, but may not manage
- *   session configuration/lifecycle broadly.
- * - Agents may read stored templates, but may not manage them.
- * - Team Leaders may manage stored templates.
+ * - Agents may read/start/shutdown only their backend-assigned session.
+ * - Agents may not create/delete/configure sessions broadly.
+ * - Agents may fully manage stored templates for their authorized session.
+ * - Team Leaders may manage sessions and stored templates.
  * - Team Leaders and Agents may not manage webhooks.
  */
 export const ROLE_CAPABILITIES: Readonly<
@@ -103,10 +100,14 @@ export const ROLE_CAPABILITIES: Readonly<
     /**
      * Agents are assignment-scoped operators.
      *
-     * They may read/start/shutdown only the session authorized by the
-     * backend assignment fence, operate chats, send messages, and read
-     * stored templates. They may not create/delete/configure sessions,
-     * manage templates, or manage webhooks.
+     * `canManageSessions` remains false intentionally because that flag
+     * represents broad session management such as create/delete/configure.
+     * Agents instead receive only the explicit operational capabilities
+     * below. The backend assignment fence remains responsible for ensuring
+     * they can act only on their own assigned session.
+     *
+     * Agents may also manage templates, but only for the session(s) the
+     * backend authorizes for that Agent.
      */
     canWrite: false,
     canManageSessions: false,
@@ -116,7 +117,7 @@ export const ROLE_CAPABILITIES: Readonly<
     canOperateChats: true,
     canSendMessages: true,
     canReadTemplates: true,
-    canManageTemplates: false,
+    canManageTemplates: true,
     canManageWebhooks: false,
     canManageTeam: false,
     canManageApiKeys: false,
@@ -215,7 +216,7 @@ function matchesRoute(
  *
  * This is a navigation/UX guard only. It must never be treated as the
  * security boundary for session ownership, Team Leader tenancy, Agent
- * assignment, messages, or WebSocket subscriptions.
+ * assignment, messages, templates, or WebSocket subscriptions.
  *
  * Unknown routes return false so an authenticated actor is not allowed
  * into a newly-added page merely because the route has not yet been
@@ -264,9 +265,12 @@ export function canAccessRoute(
   }
 
   /**
-   * Generic Sessions remains unavailable to Agents because their
-   * workspace is assignment-driven and must not expose a free session
-   * selector.
+   * Generic Sessions stays unavailable to Agents.
+   *
+   * Agents still have canReadSessions/canStartSessions/canShutdownSessions
+   * because Agent.tsx uses those capabilities for the single backend-
+   * assigned session. The Agent does not receive the generic Sessions
+   * page or its free session list in the dashboard navigation.
    */
   if (matchesRoute(pathname, '/sessions')) {
     return (
@@ -276,8 +280,8 @@ export function canAccessRoute(
   }
 
   /**
-   * Generic Chats follows the same rule: Agents use /agent so the
-   * selected session always comes from their backend assignment.
+   * Generic Chats remains unavailable to Agents because their current
+   * chat workflow is assignment-driven through /agent.
    */
   if (matchesRoute(pathname, '/chats')) {
     return (
@@ -295,8 +299,8 @@ export function canAccessRoute(
   }
 
   /**
-   * Stored templates are readable by Admin, Operator, Team Leader and
-   * Agent. The Templates page uses canManageTemplates separately to
+   * Stored templates are readable by every role with template read
+   * access. The Templates page uses canManageTemplates separately to
    * decide whether create/edit/delete controls are enabled.
    */
   if (matchesRoute(pathname, '/templates')) {
@@ -329,6 +333,13 @@ export function canAccessRoute(
   }
 
   /**
+   * Audit logs are currently Admin-only on the backend.
+   */
+  if (matchesRoute(pathname, '/logs')) {
+    return role === 'admin';
+  }
+
+  /**
    * Infrastructure and plugin management remain administrative.
    */
   if (
@@ -340,6 +351,3 @@ export function canAccessRoute(
 
   return false;
 }
-
-
-

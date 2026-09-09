@@ -512,6 +512,155 @@ export class TeamLeaderService {
   }
 
   /**
+   * Replace an Agent's AGENT API key.
+   *
+   * Security / lifecycle guarantees:
+   *
+   * - Agent ownership is re-checked inside the main DB transaction.
+   * - Every previous AGENT credential for that Agent is removed.
+   * - The replacement credential is created in the same transaction.
+   * - The replacement plaintext key is returned exactly once.
+   * - Previous live WebSocket connections are evicted only after the
+   *   transaction commits successfully.
+   *
+   * Keeping deletion + creation in one transaction prevents a failed
+   * replacement from intentionally leaving the Agent without a committed
+   * credential.
+   */
+  async rotateAgentApiKey(
+    teamLeaderId: string,
+    agentId: string,
+  ): Promise<CreateAgentResult> {
+    let previousKeyIds: string[] = [];
+
+    const result =
+      await this.mainDataSource.transaction(
+        async manager => {
+          const agentRepository =
+            manager.getRepository(
+              Agent,
+            );
+
+          const apiKeyRepository =
+            manager.getRepository(
+              ApiKey,
+            );
+
+          /**
+           * Re-check ownership inside the transaction.
+           *
+           * A foreign Agent intentionally looks nonexistent to the
+           * authenticated Team Leader.
+           */
+          const agent =
+            await agentRepository.findOne({
+              where: {
+                id:
+                  agentId,
+
+                teamLeaderId,
+              },
+            });
+
+          if (!agent) {
+            throw new NotFoundException(
+              'Agent not found',
+            );
+          }
+
+          const previousKeys =
+            await apiKeyRepository.find({
+              where: {
+                agentId:
+                  agent.id,
+
+                role:
+                  ApiKeyRole.AGENT,
+              },
+            });
+
+          previousKeyIds =
+            previousKeys.map(
+              key => key.id,
+            );
+
+          if (
+            previousKeys.length >
+            0
+          ) {
+            await apiKeyRepository.remove(
+              previousKeys,
+            );
+          }
+
+          const {
+            rawKey,
+          } =
+            await this.authService.createApiKeyInTransaction(
+              manager,
+              {
+                name:
+                  `Agent: ${agent.name}`,
+
+                role:
+                  ApiKeyRole.AGENT,
+
+                agentId:
+                  agent.id,
+
+                teamLeaderId:
+                  null,
+
+                /**
+                 * Session authorization is derived from
+                 * Agent.assignedSessionId, not copied into the API key.
+                 */
+                allowedSessions:
+                  null,
+              },
+            );
+
+          return {
+            agent,
+            apiKey:
+              rawKey,
+          };
+        },
+      );
+
+    /**
+     * The transaction has committed at this point.
+     *
+     * Disconnect sockets authenticated with any previous key so a
+     * connection established before rotation cannot keep operating.
+     * This is best-effort; the database credential state is authoritative.
+     */
+    this.evictApiKeys(
+      previousKeyIds,
+      'revoked',
+    );
+
+    this.logger.log(
+      `Agent API key rotated: ${result.agent.name}`,
+      {
+        agentId:
+          result.agent.id,
+
+        teamLeaderId:
+          result.agent.teamLeaderId,
+
+        revokedKeyCount:
+          previousKeyIds.length,
+
+        action:
+          'agent_api_key_rotated',
+      },
+    );
+
+    return result;
+  }
+
+  /**
    * List only Agents owned by the specified Team Leader.
    */
   async listAgents(
