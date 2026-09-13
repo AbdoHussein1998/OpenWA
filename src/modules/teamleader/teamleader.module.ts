@@ -1,6 +1,3 @@
-
-
-
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
@@ -9,16 +6,14 @@ import { ApiKey } from '../auth/entities/api-key.entity';
 
 import { Session } from '../session/entities/session.entity';
 
-import { TeamLeader } from './entities/team-leader.entity';
-import { Agent } from './entities/agent.entity';
-import { AgentTemplateSendUsage } from './entities/agent-template-send-usage.entity';
-
-import { TeamLeaderService } from './teamleader.service';
-import { AgentTemplateQuotaService } from './agent-template-quota.service';
-
 import { AdminTeamLeaderController } from './admin-teamleader.controller';
-import { TeamLeaderController } from './teamleader.controller';
 import { AgentController } from './agent.controller';
+import { AgentTemplateQuotaService } from './agent-template-quota.service';
+import { AgentTemplateSendUsage } from './entities/agent-template-send-usage.entity';
+import { Agent } from './entities/agent.entity';
+import { TeamLeader } from './entities/team-leader.entity';
+import { TeamLeaderController } from './teamleader.controller';
+import { TeamLeaderService } from './teamleader.service';
 
 @Module({
   imports: [
@@ -39,10 +34,14 @@ import { AgentController } from './agent.controller';
     /**
      * WhatsApp sessions live in the separate `data` database.
      *
-     * TeamLeaderService needs the Session repository for:
+     * TeamLeaderService currently injects Repository<Session> directly for:
      *
      * - verifying session ownership before Agent assignment
-     * - preventing deletion of a Team Leader that still owns sessions
+     * - preventing legacy Team Leader deletion while sessions are still owned
+     *
+     * Do not import SessionModule merely for these repository reads. The
+     * SessionModule dependency should be introduced when TeamLeaderService
+     * actually injects SessionService for the retirement delete-all lifecycle.
      */
     TypeOrmModule.forFeature(
       [
@@ -54,9 +53,9 @@ import { AgentController } from './agent.controller';
     /**
      * AuthModule exports AuthService.
      *
-     * TeamLeaderService uses AuthService.createApiKeyInTransaction()
-     * to provision TEAM_LEADER / AGENT credentials atomically with
-     * their principal rows.
+     * TeamLeaderService uses AuthService.createApiKeyInTransaction() to
+     * provision TEAM_LEADER / AGENT credentials atomically with their
+     * principal rows.
      */
     AuthModule,
   ],
@@ -73,9 +72,12 @@ import { AgentController } from './agent.controller';
   ],
 
   /**
-   * AgentTemplateQuotaService is exported so MessageModule can apply the quota
-   * only around the dedicated stored-template send endpoint without duplicating
-   * Agent repository/quota logic.
+   * TeamLeaderService is exported for principal/session access checks and
+   * management integrations.
+   *
+   * AgentTemplateQuotaService is exported so MessageModule can apply the
+   * quota only around the dedicated stored-template send endpoint without
+   * duplicating Agent repository/quota logic.
    */
   exports: [
     TeamLeaderService,
@@ -83,6 +85,3 @@ import { AgentController } from './agent.controller';
   ],
 })
 export class TeamLeaderModule {}
-
-
-

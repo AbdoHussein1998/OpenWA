@@ -37,14 +37,18 @@ import {
 } from './dto/create-team-leader.dto';
 
 import {
-  TeamLeaderService,
-  type CreateAgentResult,
-  type CreateTeamLeaderResult,
-} from './teamleader.service';
+  Agent,
+} from './entities/agent.entity';
 
 import {
   TeamLeader,
 } from './entities/team-leader.entity';
+
+import {
+  TeamLeaderService,
+  type CreateAgentResult,
+  type CreateTeamLeaderResult,
+} from './teamleader.service';
 
 /**
  * Administrative Team Leader management.
@@ -73,6 +77,8 @@ export class AdminTeamLeaderController {
    * Principal + credential creation is transactional inside
    * TeamLeaderService.
    *
+   * Team Leader email is optional.
+   *
    * The plaintext API key is returned only once.
    */
   @Post()
@@ -80,21 +86,29 @@ export class AdminTeamLeaderController {
     summary:
       'Create a Team Leader',
     description:
-      'Creates a Team Leader and its TEAM_LEADER API key atomically. The plaintext API key is returned only once.',
+      'Creates a Team Leader and its TEAM_LEADER API key atomically. Email is optional. The plaintext API key is returned only once.',
   })
   @ApiResponse({
-    status: HttpStatus.CREATED,
+    status:
+      HttpStatus.CREATED,
+
     description:
       'Team Leader created successfully.',
+
     schema: {
-      type: 'object',
+      type:
+        'object',
+
       required: [
         'teamLeader',
         'apiKey',
       ],
+
       properties: {
         teamLeader: {
-          type: 'object',
+          type:
+            'object',
+
           required: [
             'id',
             'name',
@@ -102,36 +116,66 @@ export class AdminTeamLeaderController {
             'createdAt',
             'updatedAt',
           ],
+
           properties: {
             id: {
-              type: 'string',
-              format: 'uuid',
+              type:
+                'string',
+
+              format:
+                'uuid',
             },
+
             name: {
-              type: 'string',
-              example: 'Ahmed Hassan',
+              type:
+                'string',
+
+              example:
+                'Ahmed Hassan',
             },
+
             email: {
-              type: 'string',
-              format: 'email',
+              type:
+                'string',
+
+              format:
+                'email',
+
+              nullable:
+                true,
+
               example:
                 'ahmed.hassan@example.com',
+
+              description:
+                'Optional Team Leader email. Null when no email was supplied.',
             },
+
             createdAt: {
-              type: 'string',
-              format: 'date-time',
+              type:
+                'string',
+
+              format:
+                'date-time',
             },
+
             updatedAt: {
-              type: 'string',
-              format: 'date-time',
+              type:
+                'string',
+
+              format:
+                'date-time',
             },
           },
         },
 
         apiKey: {
-          type: 'string',
+          type:
+            'string',
+
           example:
             'owa_k1_0123456789abcdef...',
+
           description:
             'Plaintext API key. Returned only once and never persisted in plaintext.',
         },
@@ -139,19 +183,25 @@ export class AdminTeamLeaderController {
     },
   })
   @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
+    status:
+      HttpStatus.BAD_REQUEST,
+
     description:
       'Invalid request body.',
   })
   @ApiResponse({
-    status: HttpStatus.FORBIDDEN,
+    status:
+      HttpStatus.FORBIDDEN,
+
     description:
       'Caller is not an unscoped ADMIN.',
   })
   @ApiResponse({
-    status: HttpStatus.CONFLICT,
+    status:
+      HttpStatus.CONFLICT,
+
     description:
-      'A Team Leader with the supplied email already exists.',
+      'A Team Leader with the supplied non-null email already exists.',
   })
   async create(
     @Body()
@@ -175,70 +225,116 @@ export class AdminTeamLeaderController {
   @ApiOperation({
     summary:
       'Create an Agent for a Team Leader',
+
     description:
       'Creates an Agent under the selected Team Leader and provisions its AGENT API key atomically. The plaintext API key is returned only once.',
   })
   @ApiResponse({
-    status: HttpStatus.CREATED,
+    status:
+      HttpStatus.CREATED,
+
     description:
       'Agent created successfully.',
+
     schema: {
-      type: 'object',
+      type:
+        'object',
+
       required: [
         'agent',
         'apiKey',
       ],
+
       properties: {
         agent: {
-          type: 'object',
+          type:
+            'object',
+
           required: [
             'id',
             'name',
+            'email',
             'teamLeaderId',
             'assignedSessionId',
             'createdAt',
             'updatedAt',
           ],
+
           properties: {
             id: {
-              type: 'string',
-              format: 'uuid',
+              type:
+                'string',
+
+              format:
+                'uuid',
             },
+
             name: {
-              type: 'string',
-              example: 'Mohamed Ali',
+              type:
+                'string',
+
+              example:
+                'Mohamed Ali',
             },
+
             email: {
-              type: 'string',
-              format: 'email',
-              nullable: true,
+              type:
+                'string',
+
+              format:
+                'email',
+
+              nullable:
+                true,
+
               example:
                 'mohamed.ali@example.com',
             },
+
             teamLeaderId: {
-              type: 'string',
-              format: 'uuid',
+              type:
+                'string',
+
+              format:
+                'uuid',
             },
+
             assignedSessionId: {
-              type: 'string',
-              format: 'uuid',
-              nullable: true,
+              type:
+                'string',
+
+              format:
+                'uuid',
+
+              nullable:
+                true,
             },
+
             createdAt: {
-              type: 'string',
-              format: 'date-time',
+              type:
+                'string',
+
+              format:
+                'date-time',
             },
+
             updatedAt: {
-              type: 'string',
-              format: 'date-time',
+              type:
+                'string',
+
+              format:
+                'date-time',
             },
           },
         },
 
         apiKey: {
-          type: 'string',
+          type:
+            'string',
+
           example:
             'owa_k1_0123456789abcdef...',
+
           description:
             'Plaintext API key. Returned only once and never persisted in plaintext.',
         },
@@ -246,17 +342,23 @@ export class AdminTeamLeaderController {
     },
   })
   @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
+    status:
+      HttpStatus.BAD_REQUEST,
+
     description:
       'Invalid Team Leader UUID or request body.',
   })
   @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
+    status:
+      HttpStatus.NOT_FOUND,
+
     description:
       'Team Leader not found.',
   })
   @ApiResponse({
-    status: HttpStatus.FORBIDDEN,
+    status:
+      HttpStatus.FORBIDDEN,
+
     description:
       'Caller is not an unscoped ADMIN.',
   })
@@ -266,6 +368,7 @@ export class AdminTeamLeaderController {
       new ParseUUIDPipe(),
     )
     teamLeaderId: string,
+
     @Body()
     dto: CreateAgentDto,
   ): Promise<CreateAgentResult> {
@@ -286,13 +389,20 @@ export class AdminTeamLeaderController {
       'List Team Leaders',
   })
   @ApiResponse({
-    status: HttpStatus.OK,
+    status:
+      HttpStatus.OK,
+
     description:
       'All Team Leader principals.',
+
     schema: {
-      type: 'array',
+      type:
+        'array',
+
       items: {
-        type: 'object',
+        type:
+          'object',
+
         required: [
           'id',
           'name',
@@ -300,32 +410,58 @@ export class AdminTeamLeaderController {
           'createdAt',
           'updatedAt',
         ],
+
         properties: {
           id: {
-            type: 'string',
-            format: 'uuid',
+            type:
+              'string',
+
+            format:
+              'uuid',
           },
+
           name: {
-            type: 'string',
+            type:
+              'string',
           },
+
           email: {
-            type: 'string',
-            format: 'email',
+            type:
+              'string',
+
+            format:
+              'email',
+
+            nullable:
+              true,
+
+            description:
+              'Optional Team Leader email.',
           },
+
           createdAt: {
-            type: 'string',
-            format: 'date-time',
+            type:
+              'string',
+
+            format:
+              'date-time',
           },
+
           updatedAt: {
-            type: 'string',
-            format: 'date-time',
+            type:
+              'string',
+
+            format:
+              'date-time',
           },
         },
       },
     },
   })
   @ApiResponse({
-    status: HttpStatus.FORBIDDEN,
+    status:
+      HttpStatus.FORBIDDEN,
+
     description:
       'Caller is not an unscoped ADMIN.',
   })
@@ -342,11 +478,16 @@ export class AdminTeamLeaderController {
       'Get a Team Leader',
   })
   @ApiResponse({
-    status: HttpStatus.OK,
+    status:
+      HttpStatus.OK,
+
     description:
       'Team Leader details.',
+
     schema: {
-      type: 'object',
+      type:
+        'object',
+
       required: [
         'id',
         'name',
@@ -354,36 +495,64 @@ export class AdminTeamLeaderController {
         'createdAt',
         'updatedAt',
       ],
+
       properties: {
         id: {
-          type: 'string',
-          format: 'uuid',
+          type:
+            'string',
+
+          format:
+            'uuid',
         },
+
         name: {
-          type: 'string',
+          type:
+            'string',
         },
+
         email: {
-          type: 'string',
-          format: 'email',
+          type:
+            'string',
+
+          format:
+            'email',
+
+          nullable:
+            true,
+
+          description:
+            'Optional Team Leader email.',
         },
+
         createdAt: {
-          type: 'string',
-          format: 'date-time',
+          type:
+            'string',
+
+          format:
+            'date-time',
         },
+
         updatedAt: {
-          type: 'string',
-          format: 'date-time',
+          type:
+            'string',
+
+          format:
+            'date-time',
         },
       },
     },
   })
   @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
+    status:
+      HttpStatus.NOT_FOUND,
+
     description:
       'Team Leader not found.',
   })
   @ApiResponse({
-    status: HttpStatus.FORBIDDEN,
+    status:
+      HttpStatus.FORBIDDEN,
+
     description:
       'Caller is not an unscoped ADMIN.',
   })
@@ -402,11 +571,12 @@ export class AdminTeamLeaderController {
   /**
    * Delete a Team Leader.
    *
-   * Deletion is refused while the Team Leader owns one or more
-   * WhatsApp sessions.
+   * This legacy deletion endpoint is refused while the Team Leader
+   * owns one or more WhatsApp sessions.
    *
-   * We intentionally do NOT silently detach those sessions because
-   * doing so would erase tenant ownership information.
+   * The explicit retirement flow will later provide reassignment and
+   * delete-all behavior. Until then, this existing endpoint preserves
+   * its current safety behavior.
    */
   @Delete(':id')
   @HttpCode(
@@ -417,22 +587,30 @@ export class AdminTeamLeaderController {
       'Delete a Team Leader',
   })
   @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
+    status:
+      HttpStatus.NO_CONTENT,
+
     description:
       'Team Leader deleted successfully.',
   })
   @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
+    status:
+      HttpStatus.NOT_FOUND,
+
     description:
       'Team Leader not found.',
   })
   @ApiResponse({
-    status: HttpStatus.CONFLICT,
+    status:
+      HttpStatus.CONFLICT,
+
     description:
       'Team Leader still owns one or more sessions.',
   })
   @ApiResponse({
-    status: HttpStatus.FORBIDDEN,
+    status:
+      HttpStatus.FORBIDDEN,
+
     description:
       'Caller is not an unscoped ADMIN.',
   })
@@ -448,6 +626,5 @@ export class AdminTeamLeaderController {
     );
   }
 }
-
 
 

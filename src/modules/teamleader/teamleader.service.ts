@@ -128,7 +128,7 @@ export class TeamLeaderService {
     dto: CreateTeamLeaderDto,
   ): Promise<CreateTeamLeaderResult> {
     const name = dto.name.trim();
-    const email = this.normalizeEmail(dto.email);
+    const email = this.normalizeOptionalEmail(dto.email);
 
     try {
       return await this.mainDataSource.transaction(
@@ -142,17 +142,19 @@ export class TeamLeaderService {
            *
            * The unique constraint still remains authoritative for races.
            */
-          const existing =
-            await teamLeaderRepository.findOne({
-              where: {
-                email,
-              },
-            });
+          if (email !== null) {
+            const existing =
+              await teamLeaderRepository.findOne({
+                where: {
+                  email,
+                },
+              });
 
-          if (existing) {
-            throw new ConflictException(
-              'A Team Leader with this email already exists',
-            );
+            if (existing) {
+              throw new ConflictException(
+                'A Team Leader with this email already exists',
+              );
+            }
           }
 
           const teamLeader =
@@ -1143,6 +1145,21 @@ export class TeamLeaderService {
         },
       );
     }
+  }
+
+  private normalizeOptionalEmail(
+    email: string | null | undefined,
+  ): string | null {
+    if (email == null) {
+      return null;
+    }
+
+    const normalized =
+      this.normalizeEmail(email);
+
+    return normalized.length > 0
+      ? normalized
+      : null;
   }
 
   private normalizeEmail(

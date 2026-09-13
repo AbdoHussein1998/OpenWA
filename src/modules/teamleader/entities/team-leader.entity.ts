@@ -1,4 +1,6 @@
 
+
+
 import {
   Column,
   CreateDateColumn,
@@ -28,12 +30,23 @@ export class TeamLeader {
   })
   name!: string;
 
+  /**
+   * Email is optional.
+   *
+   * Non-null values remain unique, while multiple Team Leaders may have
+   * NULL email values.
+   *
+   * The database migration that accompanies this entity change must alter
+   * the existing email column from NOT NULL to nullable without removing
+   * the unique index.
+   */
   @Index({ unique: true })
   @Column({
     type: 'varchar',
     length: 255,
+    nullable: true,
   })
-  email!: string;
+  email!: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;

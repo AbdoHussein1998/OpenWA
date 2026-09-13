@@ -146,8 +146,40 @@ describe('AuthService', () => {
   function setupKeys(seed: ApiKey[]): void {
     keys = new Map(seed.map(k => [k.id, k]));
     committedWrites = [];
-    (repository.findOne as jest.Mock).mockImplementation((options: { where: { id: string } }) =>
-      Promise.resolve(keys.get(options.where.id) ?? null),
+    (repository.findOne as jest.Mock).mockImplementation(
+      (options: {
+        where: {
+          id?: string;
+          keyHash?: string;
+          keyPrefix?: string;
+        };
+      }) => {
+        const { id, keyHash, keyPrefix } = options.where;
+
+        if (id !== undefined) {
+          return Promise.resolve(
+            keys.get(id) ?? null,
+          );
+        }
+
+        if (keyHash !== undefined) {
+          return Promise.resolve(
+            [...keys.values()].find(
+              key => key.keyHash === keyHash,
+            ) ?? null,
+          );
+        }
+
+        if (keyPrefix !== undefined) {
+          return Promise.resolve(
+            [...keys.values()].find(
+              key => key.keyPrefix === keyPrefix,
+            ) ?? null,
+          );
+        }
+
+        return Promise.resolve(null);
+      },
     );
     (repository.remove as jest.Mock).mockImplementation((key: ApiKey) => {
       keys.delete(key.id);
@@ -301,6 +333,242 @@ describe('AuthService', () => {
       (repository.findOne as jest.Mock).mockResolvedValue(null);
 
       await expect(service.findOne('nonexistent')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── reissueApiKey ─────────────────────────────────────────────────
+
+  describe('reissueApiKey', () => {
+    it('replaces only keyHash/keyPrefix, preserves the row and returns the new plaintext once', async () => {
+      const original = createMockApiKey({
+        id: 'key-1',
+        name: 'Production Key',
+        role: ApiKeyRole.OPERATOR,
+        allowedIps: ['10.0.0.1'],
+        allowedSessions: ['session-1'],
+        isActive: true,
+        expiresAt: new Date('2027-01-01T00:00:00Z'),
+        lastUsedAt: new Date('2026-01-01T00:00:00Z'),
+        usageCount: 42,
+      });
+
+      setupKeys([original]);
+
+      const before = {
+        id: original.id,
+        name: original.name,
+        role: original.role,
+        teamLeaderId: original.teamLeaderId,
+        agentId: original.agentId,
+        allowedIps: [...(original.allowedIps ?? [])],
+        allowedSessions: [...(original.allowedSessions ?? [])],
+        isActive: original.isActive,
+        expiresAt: original.expiresAt?.getTime() ?? null,
+        lastUsedAt: original.lastUsedAt?.getTime() ?? null,
+        usageCount: original.usageCount,
+        keyHash: original.keyHash,
+        keyPrefix: original.keyPrefix,
+      };
+
+      const result = await service.reissueApiKey('key-1');
+
+      expect(result.rawKey).toMatch(/^owa_k1_[a-f0-9]{64}$/);
+      expect(result.apiKey.id).toBe(before.id);
+
+      expect(result.apiKey.keyHash).toBe(hashKey(result.rawKey));
+      expect(result.apiKey.keyPrefix).toBe(result.rawKey.substring(0, 12));
+      expect(result.apiKey.keyHash).not.toBe(before.keyHash);
+      expect(result.apiKey.keyPrefix).not.toBe(before.keyPrefix);
+
+      expect(result.apiKey).toMatchObject({
+        id: before.id,
+        name: before.name,
+        role: before.role,
+        teamLeaderId: before.teamLeaderId,
+        agentId: before.agentId,
+        allowedIps: before.allowedIps,
+        allowedSessions: before.allowedSessions,
+        isActive: before.isActive,
+        usageCount: before.usageCount,
+      });
+
+      expect(result.apiKey.expiresAt?.getTime()).toBe(before.expiresAt);
+      expect(result.apiKey.lastUsedAt?.getTime()).toBe(before.lastUsedAt);
+
+      const write = committedWrites.at(-1);
+      expect(write).toBeDefined();
+      expect(write?.mode).toBe('update');
+      expect(write?.guarded).toBe(false);
+      expect(Object.keys(write?.patch ?? {}).sort()).toEqual(['keyHash', 'keyPrefix']);
+    });
+
+    it.each([
+      {
+        label: 'Team Leader',
+        role: ApiKeyRole.TEAM_LEADER,
+        teamLeaderId: 'tl-1',
+        agentId: null,
+      },
+      {
+        label: 'Agent',
+        role: ApiKeyRole.AGENT,
+        teamLeaderId: null,
+        agentId: 'agent-1',
+      },
+    ])('preserves $label principal binding during reissue', async binding => {
+      setupKeys([
+        createMockApiKey({
+          id: 'managed-key',
+          role: binding.role,
+          teamLeaderId: binding.teamLeaderId,
+          agentId: binding.agentId,
+        }),
+      ]);
+
+      const result = await service.reissueApiKey('managed-key');
+
+      expect(result.apiKey.id).toBe('managed-key');
+      expect(result.apiKey.role).toBe(binding.role);
+      expect(result.apiKey.teamLeaderId).toBe(binding.teamLeaderId);
+      expect(result.apiKey.agentId).toBe(binding.agentId);
+    });
+
+    it('invalidates the old plaintext and authenticates the replacement plaintext', async () => {
+      const oldRawKey = 'owa_k1_old_plaintext_key';
+
+      setupKeys([
+        createMockApiKey({
+          id: 'key-1',
+          keyHash: hashKey(oldRawKey),
+          keyPrefix: oldRawKey.substring(0, 12),
+        }),
+      ]);
+
+      const result = await service.reissueApiKey('key-1');
+
+      await expect(
+        service.validateApiKey(oldRawKey),
+      ).rejects.toThrow(UnauthorizedException);
+
+      await expect(
+        service.validateApiKey(result.rawKey),
+      ).resolves.toMatchObject({
+        id: 'key-1',
+      });
+    });
+
+    it('evicts sockets authenticated with the old credential after a successful reissue', async () => {
+      const evictApiKey = jest.fn();
+
+      jest
+        .spyOn(
+          (
+            service as unknown as {
+              moduleRef: {
+                get: (...args: unknown[]) => unknown;
+              };
+            }
+          ).moduleRef,
+          'get',
+        )
+        .mockReturnValue({
+          evictApiKey,
+        });
+
+      setupKeys([
+        createMockApiKey({
+          id: 'key-1',
+        }),
+      ]);
+
+      await service.reissueApiKey('key-1');
+
+      expect(evictApiKey).toHaveBeenCalledWith(
+        'key-1',
+        'revoked',
+      );
+    });
+
+    it('returns NotFoundException when the target key does not exist', async () => {
+      setupKeys([]);
+
+      await expect(
+        service.reissueApiKey('missing-key'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(committedWrites).toHaveLength(0);
+    });
+
+    it('does not evict sockets or change the stored credential when the update fails', async () => {
+      const original = createMockApiKey({
+        id: 'key-1',
+        keyHash: hashKey('old-secret'),
+        keyPrefix: 'old-secret'.substring(0, 12),
+      });
+
+      setupKeys([original]);
+
+      const evictApiKey = jest.fn();
+
+      jest
+        .spyOn(
+          (
+            service as unknown as {
+              moduleRef: {
+                get: (...args: unknown[]) => unknown;
+              };
+            }
+          ).moduleRef,
+          'get',
+        )
+        .mockReturnValue({
+          evictApiKey,
+        });
+
+      (repository.createQueryBuilder as jest.Mock).mockImplementationOnce(() => {
+        const qb = {
+          update() {
+            return this;
+          },
+          set() {
+            return this;
+          },
+          where() {
+            return this;
+          },
+          execute: jest.fn().mockRejectedValue(
+            new Error('database write failed'),
+          ),
+        };
+
+        return qb;
+      });
+
+      await expect(
+        service.reissueApiKey('key-1'),
+      ).rejects.toThrow('database write failed');
+
+      expect((await service.findOne('key-1')).keyHash).toBe(
+        hashKey('old-secret'),
+      );
+      expect(evictApiKey).not.toHaveBeenCalled();
+    });
+
+    it('preserves revoked state rather than silently reactivating a credential', async () => {
+      setupKeys([
+        createMockApiKey({
+          id: 'key-1',
+          isActive: false,
+        }),
+      ]);
+
+      const result = await service.reissueApiKey('key-1');
+
+      expect(result.apiKey.isActive).toBe(false);
+
+      await expect(
+        service.validateApiKey(result.rawKey),
+      ).rejects.toThrow('API key is revoked');
     });
   });
 

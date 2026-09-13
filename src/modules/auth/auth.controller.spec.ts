@@ -1,116 +1,699 @@
+
+
+
 import 'reflect-metadata';
+
 import type { Request } from 'express';
-import { AuthController } from './auth.controller';
-import { UNSCOPED_KEY } from './decorators/auth.decorators';
-import { AuditAction } from '../audit/entities/audit-log.entity';
-import type { ApiKey } from './entities/api-key.entity';
-import type { AuthService } from './auth.service';
-import type { AuditService } from '../audit/audit.service';
 
-// Key-lifecycle routes carry no session dimension, so the guard's allowedSessions fence can never
-// bite on them — the class-level @RequireUnscopedKey marker is what keeps a session-scoped ADMIN
-// key from minting or widening credentials here. Lock that the marker stays on the controller.
-describe('AuthController — scoped-key confinement marker', () => {
-  it('requires unscoped keys at the class level', () => {
-    expect(Reflect.getMetadata(UNSCOPED_KEY, AuthController)).toBe(true);
-  });
-});
+import {
+  AuditAction,
+} from '../audit/entities/audit-log.entity';
+import type {
+  AuditService,
+} from '../audit/audit.service';
 
-// API-key lifecycle operations (create / delete / revoke) must leave an audit trail — they were
-// previously unrecorded. These assert the controller emits the matching audit action with the acting
-// admin key, the resolved client IP, and the target key in metadata.
-describe('AuthController — API-key lifecycle audit logging', () => {
-  const actor = { id: 'admin-key', name: 'admin' } as unknown as ApiKey;
-  const makeReq = (): Request =>
-    ({ method: 'POST', path: '/auth/api-keys', clientIp: '203.0.113.7' }) as unknown as Request;
+import {
+  AuthController,
+} from './auth.controller';
+import type {
+  AuthService,
+} from './auth.service';
+import {
+  UNSCOPED_KEY,
+} from './decorators/auth.decorators';
+import {
+  ApiKeyRole,
+  type ApiKey,
+} from './entities/api-key.entity';
 
-  let authService: {
-    createApiKey: jest.Mock;
-    findOne: jest.Mock;
-    update: jest.Mock;
-    delete: jest.Mock;
-    revoke: jest.Mock;
+function createApiKey(
+  overrides: Partial<ApiKey> = {},
+): ApiKey {
+  return {
+    id: 'k1',
+
+    name:
+      'target-key',
+
+    keyHash:
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+
+    keyPrefix:
+      'owa_k1_targe',
+
+    role:
+      ApiKeyRole.VIEWER,
+
+    teamLeaderId:
+      null,
+
+    teamLeader:
+      null,
+
+    agentId:
+      null,
+
+    agent:
+      null,
+
+    allowedIps:
+      null,
+
+    allowedSessions:
+      null,
+
+    isActive:
+      true,
+
+    expiresAt:
+      null,
+
+    lastUsedAt:
+      null,
+
+    usageCount:
+      0,
+
+    createdAt:
+      new Date(
+        '2026-01-01T00:00:00Z',
+      ),
+
+    updatedAt:
+      new Date(
+        '2026-01-01T00:00:00Z',
+      ),
+
+    ...overrides,
   };
-  let auditService: { logInfo: jest.Mock };
-  let controller: AuthController;
+}
 
-  beforeEach(() => {
-    const createdKey = {
-      id: 'k1',
-      name: 'new-key',
-      role: 'user',
-      keyPrefix: 'ow_',
-      isActive: true,
-      usageCount: 0,
-      createdAt: new Date(),
+/**
+ * Key-lifecycle routes carry no session dimension, so the guard's
+ * allowedSessions fence cannot constrain them.
+ *
+ * The class-level @RequireUnscopedKey marker prevents a session-scoped
+ * ADMIN key from minting or widening credentials through this controller.
+ */
+describe(
+  'AuthController — scoped-key confinement marker',
+  () => {
+    it(
+      'requires unscoped keys at the class level',
+      () => {
+        expect(
+          Reflect.getMetadata(
+            UNSCOPED_KEY,
+            AuthController,
+          ),
+        ).toBe(true);
+      },
+    );
+  },
+);
+
+describe(
+  'AuthController — API-key lifecycle',
+  () => {
+    const actor =
+      createApiKey({
+        id:
+          'admin-key',
+
+        name:
+          'admin',
+
+        role:
+          ApiKeyRole.ADMIN,
+      });
+
+    const makeReq =
+      (): Request =>
+        ({
+          method:
+            'POST',
+
+          path:
+            '/auth/api-keys',
+
+          clientIp:
+            '203.0.113.7',
+        }) as unknown as Request;
+
+    let authService: {
+      createApiKey:
+        jest.Mock;
+
+      findAll:
+        jest.Mock;
+
+      findOne:
+        jest.Mock;
+
+      update:
+        jest.Mock;
+
+      delete:
+        jest.Mock;
+
+      revoke:
+        jest.Mock;
     };
-    authService = {
-      createApiKey: jest.fn().mockResolvedValue({ apiKey: createdKey, rawKey: 'raw-secret' }),
-      findOne: jest.fn().mockResolvedValue({
-        id: 'k1',
-        name: 'target-key',
-        role: 'viewer',
-        allowedIps: null,
-        allowedSessions: null,
-        expiresAt: null,
-      }),
-      update: jest.fn().mockResolvedValue({ ...createdKey, role: 'admin' }),
-      delete: jest.fn().mockResolvedValue(undefined),
-      revoke: jest.fn().mockResolvedValue({ ...createdKey, isActive: false }),
+
+    let auditService: {
+      logInfo:
+        jest.Mock;
     };
-    auditService = { logInfo: jest.fn().mockResolvedValue(null) };
-    controller = new AuthController(authService as unknown as AuthService, auditService as unknown as AuditService);
-  });
 
-  const lastContextFor = (
-    action: AuditAction,
-  ):
-    | {
-        apiKey?: ApiKey;
-        ipAddress?: string;
-        metadata?: { targetKeyId?: string; before?: { role?: string }; after?: { role?: string } };
-      }
-    | undefined => {
-    const calls = auditService.logInfo.mock.calls as Array<
-      [
-        AuditAction,
-        {
-          apiKey?: ApiKey;
-          ipAddress?: string;
-          metadata?: { targetKeyId?: string; before?: { role?: string }; after?: { role?: string } };
-        },
-      ]
-    >;
-    return calls.find(c => c[0] === action)?.[1];
-  };
+    let controller:
+      AuthController;
 
-  it('logs API_KEY_CREATED on create, with the acting key, IP, and target id', async () => {
-    await controller.create({ name: 'new-key' }, makeReq(), actor);
-    const ctx = lastContextFor(AuditAction.API_KEY_CREATED);
-    expect(ctx).toBeDefined();
-    expect(ctx?.apiKey).toBe(actor);
-    expect(ctx?.ipAddress).toBe('203.0.113.7');
-    expect(ctx?.metadata?.targetKeyId).toBe('k1');
-    expect(JSON.stringify(auditService.logInfo.mock.calls)).not.toContain('raw-secret');
-  });
+    beforeEach(() => {
+      const createdKey =
+        createApiKey({
+          id:
+            'k1',
 
-  it('logs API_KEY_DELETED on delete', async () => {
-    await controller.delete('k1', makeReq(), actor);
-    expect(authService.delete).toHaveBeenCalledWith('k1');
-    expect(lastContextFor(AuditAction.API_KEY_DELETED)?.metadata?.targetKeyId).toBe('k1');
-  });
+          name:
+            'new-key',
 
-  it('logs API_KEY_UPDATED with before/after authorization state', async () => {
-    await controller.update('k1', { role: 'admin' } as never, makeReq(), actor);
-    const ctx = lastContextFor(AuditAction.API_KEY_UPDATED);
-    expect(ctx?.apiKey).toBe(actor);
-    expect(ctx?.metadata?.targetKeyId).toBe('k1');
-    expect(ctx?.metadata?.before?.role).toBe('viewer');
-    expect(ctx?.metadata?.after?.role).toBe('admin');
-  });
+          role:
+            ApiKeyRole.OPERATOR,
+        });
 
-  it('logs API_KEY_REVOKED on revoke', async () => {
-    await controller.revoke('k1', makeReq(), actor);
-    expect(lastContextFor(AuditAction.API_KEY_REVOKED)?.metadata?.targetKeyId).toBe('k1');
-  });
-});
+      authService = {
+        createApiKey:
+          jest
+            .fn()
+            .mockResolvedValue({
+              apiKey:
+                createdKey,
+
+              rawKey:
+                'raw-secret',
+            }),
+
+        findAll:
+          jest
+            .fn()
+            .mockResolvedValue([
+              createdKey,
+            ]),
+
+        findOne:
+          jest
+            .fn()
+            .mockResolvedValue(
+              createApiKey({
+                id:
+                  'k1',
+
+                name:
+                  'target-key',
+
+                role:
+                  ApiKeyRole.VIEWER,
+              }),
+            ),
+
+        update:
+          jest
+            .fn()
+            .mockResolvedValue(
+              createApiKey({
+                id:
+                  'k1',
+
+                name:
+                  'target-key',
+
+                role:
+                  ApiKeyRole.ADMIN,
+              }),
+            ),
+
+        delete:
+          jest
+            .fn()
+            .mockResolvedValue(
+              undefined,
+            ),
+
+        revoke:
+          jest
+            .fn()
+            .mockResolvedValue(
+              createApiKey({
+                id:
+                  'k1',
+
+                name:
+                  'target-key',
+
+                role:
+                  ApiKeyRole.VIEWER,
+
+                isActive:
+                  false,
+              }),
+            ),
+      };
+
+      auditService = {
+        logInfo:
+          jest
+            .fn()
+            .mockResolvedValue(
+              null,
+            ),
+      };
+
+      controller =
+        new AuthController(
+          authService as unknown as AuthService,
+          auditService as unknown as AuditService,
+        );
+    });
+
+    const lastContextFor = (
+      action: AuditAction,
+    ):
+      | {
+          apiKey?:
+            ApiKey;
+
+          ipAddress?:
+            string;
+
+          metadata?: {
+            targetKeyId?:
+              string;
+
+            before?: {
+              role?:
+                ApiKeyRole;
+            };
+
+            after?: {
+              role?:
+                ApiKeyRole;
+            };
+          };
+        }
+      | undefined => {
+      const calls =
+        auditService
+          .logInfo
+          .mock
+          .calls as Array<
+          [
+            AuditAction,
+            {
+              apiKey?:
+                ApiKey;
+
+              ipAddress?:
+                string;
+
+              metadata?: {
+                targetKeyId?:
+                  string;
+
+                before?: {
+                  role?:
+                    ApiKeyRole;
+                };
+
+                after?: {
+                  role?:
+                    ApiKeyRole;
+                };
+              };
+            },
+          ]
+        >;
+
+      return calls.find(
+        call =>
+          call[0] ===
+          action,
+      )?.[1];
+    };
+
+    it(
+      'logs API_KEY_CREATED on create with the acting key, IP, and target id without auditing plaintext',
+      async () => {
+        const result =
+          await controller.create(
+            {
+              name:
+                'new-key',
+            },
+
+            makeReq(),
+
+            actor,
+          );
+
+        const context =
+          lastContextFor(
+            AuditAction.API_KEY_CREATED,
+          );
+
+        expect(
+          context,
+        ).toBeDefined();
+
+        expect(
+          context?.apiKey,
+        ).toBe(
+          actor,
+        );
+
+        expect(
+          context?.ipAddress,
+        ).toBe(
+          '203.0.113.7',
+        );
+
+        expect(
+          context
+            ?.metadata
+            ?.targetKeyId,
+        ).toBe(
+          'k1',
+        );
+
+        expect(
+          result.apiKey,
+        ).toBe(
+          'raw-secret',
+        );
+
+        expect(
+          result.teamLeaderId,
+        ).toBeNull();
+
+        expect(
+          result.agentId,
+        ).toBeNull();
+
+        /**
+         * The raw credential may be returned to the caller once, but must
+         * never be copied into the audit log.
+         */
+        expect(
+          JSON.stringify(
+            auditService
+              .logInfo
+              .mock
+              .calls,
+          ),
+        ).not.toContain(
+          'raw-secret',
+        );
+      },
+    );
+
+    it(
+      'includes Team Leader and Agent principal binding ids in list responses',
+      async () => {
+        authService
+          .findAll
+          .mockResolvedValue([
+            createApiKey({
+              id:
+                'tl-key',
+
+              role:
+                ApiKeyRole.TEAM_LEADER,
+
+              teamLeaderId:
+                'tl-1',
+            }),
+
+            createApiKey({
+              id:
+                'agent-key',
+
+              role:
+                ApiKeyRole.AGENT,
+
+              agentId:
+                'agent-1',
+            }),
+          ]);
+
+        const result =
+          await controller.findAll();
+
+        expect(
+          result,
+        ).toEqual([
+          expect.objectContaining({
+            id:
+              'tl-key',
+
+            teamLeaderId:
+              'tl-1',
+
+            agentId:
+              null,
+          }),
+
+          expect.objectContaining({
+            id:
+              'agent-key',
+
+            teamLeaderId:
+              null,
+
+            agentId:
+              'agent-1',
+          }),
+        ]);
+      },
+    );
+
+    it(
+      'includes principal binding ids in a single-key response',
+      async () => {
+        authService
+          .findOne
+          .mockResolvedValue(
+            createApiKey({
+              id:
+                'agent-key',
+
+              role:
+                ApiKeyRole.AGENT,
+
+              agentId:
+                'agent-1',
+            }),
+          );
+
+        await expect(
+          controller.findOne(
+            'agent-key',
+          ),
+        ).resolves.toEqual(
+          expect.objectContaining({
+            id:
+              'agent-key',
+
+            teamLeaderId:
+              null,
+
+            agentId:
+              'agent-1',
+          }),
+        );
+      },
+    );
+
+    it(
+      'logs API_KEY_DELETED on delete',
+      async () => {
+        await controller.delete(
+          'k1',
+          makeReq(),
+          actor,
+        );
+
+        expect(
+          authService.delete,
+        ).toHaveBeenCalledWith(
+          'k1',
+        );
+
+        expect(
+          lastContextFor(
+            AuditAction.API_KEY_DELETED,
+          )
+            ?.metadata
+            ?.targetKeyId,
+        ).toBe(
+          'k1',
+        );
+      },
+    );
+
+    it(
+      'logs API_KEY_UPDATED with before/after authorization state',
+      async () => {
+        await controller.update(
+          'k1',
+
+          {
+            role:
+              ApiKeyRole.ADMIN,
+          },
+
+          makeReq(),
+
+          actor,
+        );
+
+        const context =
+          lastContextFor(
+            AuditAction.API_KEY_UPDATED,
+          );
+
+        expect(
+          context?.apiKey,
+        ).toBe(
+          actor,
+        );
+
+        expect(
+          context
+            ?.metadata
+            ?.targetKeyId,
+        ).toBe(
+          'k1',
+        );
+
+        expect(
+          context
+            ?.metadata
+            ?.before
+            ?.role,
+        ).toBe(
+          ApiKeyRole.VIEWER,
+        );
+
+        expect(
+          context
+            ?.metadata
+            ?.after
+            ?.role,
+        ).toBe(
+          ApiKeyRole.ADMIN,
+        );
+      },
+    );
+
+    it(
+      'returns principal binding ids after update',
+      async () => {
+        authService
+          .update
+          .mockResolvedValue(
+            createApiKey({
+              id:
+                'tl-key',
+
+              role:
+                ApiKeyRole.TEAM_LEADER,
+
+              teamLeaderId:
+                'tl-1',
+            }),
+          );
+
+        const result =
+          await controller.update(
+            'tl-key',
+
+            {
+              name:
+                'renamed',
+            },
+
+            makeReq(),
+
+            actor,
+          );
+
+        expect(
+          result.teamLeaderId,
+        ).toBe(
+          'tl-1',
+        );
+
+        expect(
+          result.agentId,
+        ).toBeNull();
+      },
+    );
+
+    it(
+      'logs API_KEY_REVOKED on revoke and returns principal binding ids',
+      async () => {
+        authService
+          .revoke
+          .mockResolvedValue(
+            createApiKey({
+              id:
+                'agent-key',
+
+              role:
+                ApiKeyRole.AGENT,
+
+              agentId:
+                'agent-1',
+
+              isActive:
+                false,
+            }),
+          );
+
+        const result =
+          await controller.revoke(
+            'agent-key',
+            makeReq(),
+            actor,
+          );
+
+        expect(
+          lastContextFor(
+            AuditAction.API_KEY_REVOKED,
+          )
+            ?.metadata
+            ?.targetKeyId,
+        ).toBe(
+          'agent-key',
+        );
+
+        expect(
+          result.agentId,
+        ).toBe(
+          'agent-1',
+        );
+
+        expect(
+          result.teamLeaderId,
+        ).toBeNull();
+
+        expect(
+          result.isActive,
+        ).toBe(
+          false,
+        );
+      },
+    );
+  },
+);
+
+

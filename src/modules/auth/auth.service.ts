@@ -417,25 +417,38 @@ export class AuthService
   }
 
   /**
-   * Remove the bootstrap key file if it contains the API key that
-   * has just been revoked or deleted.
+   * Remove the bootstrap key file when it contains a credential that has
+   * just been invalidated.
+   *
+   * Reissue needs the previous hash rather than the mutable entity object:
+   * the database row keeps the same id while keyHash/keyPrefix are replaced.
    */
-  private removeBootstrapKeyFileIfMatching(
-    apiKey: ApiKey,
+  private removeBootstrapKeyFileIfHashMatches(
+    keyHash: string,
+    reason: string,
   ): void {
     const fileKey =
       readBootstrapKey(this.logger);
 
     if (
       !fileKey ||
-      this.hashKey(fileKey) !== apiKey.keyHash
+      this.hashKey(fileKey) !== keyHash
     ) {
       return;
     }
 
     removeBootstrapKey(
-      'its key was revoked or deleted',
+      reason,
       this.logger,
+    );
+  }
+
+  private removeBootstrapKeyFileIfMatching(
+    apiKey: ApiKey,
+  ): void {
+    this.removeBootstrapKeyFileIfHashMatches(
+      apiKey.keyHash,
+      'its key was revoked or deleted',
     );
   }
 
@@ -730,6 +743,114 @@ export class AuthService
     }
 
     return apiKey;
+  }
+
+  /**
+   * Reissue an existing API key in place.
+   *
+   * The database row itself is preserved so every authorization and
+   * principal-binding field remains unchanged:
+   *
+   * - id
+   * - name
+   * - role
+   * - teamLeaderId / agentId
+   * - allowedIps / allowedSessions
+   * - isActive
+   * - expiresAt
+   * - usage metadata
+   *
+   * Only keyHash and keyPrefix are replaced. The new plaintext key is
+   * returned exactly once and is never persisted.
+   *
+   * This operation intentionally supports principal-bound TEAM_LEADER and
+   * AGENT credentials: rotating the credential must not destroy or recreate
+   * the principal relationship.
+   */
+  async reissueApiKey(
+    id: string,
+  ): Promise<{
+    apiKey: ApiKey;
+    rawKey: string;
+  }> {
+    const current =
+      await this.findOne(id);
+
+    /**
+     * Keep the old hash independently from the loaded entity. A partial
+     * UPDATE keeps the row id stable, and some test/in-memory repository
+     * implementations may mutate the same object instance after the write.
+     */
+    const previousKeyHash =
+      current.keyHash;
+
+    const rawKey =
+      `owa_k1_${randomBytes(
+        32,
+      ).toString('hex')}`;
+
+    const keyHash =
+      this.hashKey(rawKey);
+
+    const keyPrefix =
+      rawKey.substring(0, 12);
+
+    /**
+     * Write only the credential material.
+     *
+     * Using a partial UPDATE instead of save(current) prevents a stale
+     * pre-read from overwriting concurrent authorization/metadata changes.
+     */
+    await this.applyUnguardedUpdate(
+      {
+        keyHash,
+        keyPrefix,
+      },
+      id,
+    );
+
+    const saved =
+      await this.findOne(id);
+
+    /**
+     * The old bootstrap plaintext, if this was the seeded key, no longer
+     * authenticates after a successful rotation and must not remain on disk.
+     */
+    this.removeBootstrapKeyFileIfHashMatches(
+      previousKeyHash,
+      'its key was reissued',
+    );
+
+    /**
+     * Connections authenticated with the old plaintext credential must be
+     * disconnected. The row id is unchanged, so key-id based socket tracking
+     * still identifies exactly the affected connections.
+     */
+    this.evictActiveSockets(
+      id,
+      'revoked',
+    );
+
+    this.logger.log(
+      `API key reissued: ${saved.name}`,
+      {
+        keyId:
+          saved.id,
+
+        role:
+          saved.role,
+
+        action:
+          'api_key_reissued',
+      },
+    );
+
+    return {
+      apiKey:
+        saved,
+
+      rawKey,
+    };
   }
 
   async update(

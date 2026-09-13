@@ -1,12 +1,15 @@
 
 
+
 import {
   ApiProperty,
+  ApiPropertyOptional,
 } from '@nestjs/swagger';
 
 import {
   IsEmail,
   IsNotEmpty,
+  IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator';
@@ -40,16 +43,17 @@ export class CreateTeamLeaderDto {
   @MaxLength(100)
   name!: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description:
-      'Email address of the Team Leader',
+      'Optional email address of the Team Leader',
     example: 'ahmed.hassan@example.com',
     maxLength: 255,
   })
+  @IsOptional()
+  @IsString()
   @IsEmail()
-  @IsNotEmpty()
   @MaxLength(255)
-  email!: string;
+  email?: string;
 }
 
 

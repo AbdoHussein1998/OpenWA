@@ -529,6 +529,196 @@ describe(
         );
 
         it(
+          'creates a Team Leader without an email and stores email as null',
+          async () => {
+            const savedTeamLeader =
+              createTeamLeader({
+                email: null,
+              });
+
+            teamLeaderRepository.create
+              .mockImplementation(
+                (
+                  input: Partial<TeamLeader>,
+                ) =>
+                  createTeamLeader({
+                    ...input,
+                  }),
+              );
+
+            teamLeaderRepository.save
+              .mockResolvedValue(
+                savedTeamLeader,
+              );
+
+            authService
+              .createApiKeyInTransaction
+              .mockResolvedValue({
+                apiKey:
+                  createApiKey({
+                    id:
+                      'team-leader-key-no-email',
+
+                    role:
+                      ApiKeyRole.TEAM_LEADER,
+
+                    teamLeaderId:
+                      savedTeamLeader.id,
+                  }),
+
+                rawKey:
+                  'owa_k1_plaintext_team_leader_no_email',
+              });
+
+            const result =
+              await service.createTeamLeader(
+                {
+                  name:
+                    '  Ahmed Hassan  ',
+                },
+              );
+
+            expect(
+              teamLeaderRepository.findOne,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              teamLeaderRepository.create,
+            ).toHaveBeenCalledWith({
+              name:
+                'Ahmed Hassan',
+
+              email: null,
+            });
+
+            expect(
+              authService
+                .createApiKeyInTransaction,
+            ).toHaveBeenCalledWith(
+              transactionManager,
+              {
+                name:
+                  'Team Leader: Ahmed Hassan',
+
+                role:
+                  ApiKeyRole.TEAM_LEADER,
+
+                teamLeaderId:
+                  savedTeamLeader.id,
+
+                agentId: null,
+
+                allowedSessions:
+                  null,
+              },
+            );
+
+            expect(
+              result,
+            ).toEqual({
+              teamLeader:
+                savedTeamLeader,
+
+              apiKey:
+                'owa_k1_plaintext_team_leader_no_email',
+            });
+          },
+        );
+
+        it(
+          'does not run duplicate-email lookup for Team Leaders without email',
+          async () => {
+            const firstTeamLeader =
+              createTeamLeader({
+                id: 'team-leader-1',
+                email: null,
+              });
+
+            const secondTeamLeader =
+              createTeamLeader({
+                id: 'team-leader-2',
+                name: 'Mahmoud Ali',
+                email: null,
+              });
+
+            teamLeaderRepository.create
+              .mockImplementation(
+                (
+                  input: Partial<TeamLeader>,
+                ) =>
+                  createTeamLeader({
+                    ...input,
+                  }),
+              );
+
+            teamLeaderRepository.save
+              .mockResolvedValueOnce(
+                firstTeamLeader,
+              )
+              .mockResolvedValueOnce(
+                secondTeamLeader,
+              );
+
+            authService
+              .createApiKeyInTransaction
+              .mockResolvedValueOnce({
+                apiKey:
+                  createApiKey({
+                    id: 'tl-key-1',
+                    role:
+                      ApiKeyRole.TEAM_LEADER,
+                    teamLeaderId:
+                      firstTeamLeader.id,
+                  }),
+                rawKey: 'owa_k1_tl_1',
+              })
+              .mockResolvedValueOnce({
+                apiKey:
+                  createApiKey({
+                    id: 'tl-key-2',
+                    role:
+                      ApiKeyRole.TEAM_LEADER,
+                    teamLeaderId:
+                      secondTeamLeader.id,
+                  }),
+                rawKey: 'owa_k1_tl_2',
+              });
+
+            await service.createTeamLeader({
+              name: 'Ahmed Hassan',
+            });
+
+            await service.createTeamLeader({
+              name: 'Mahmoud Ali',
+            });
+
+            expect(
+              teamLeaderRepository.findOne,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              teamLeaderRepository.create,
+            ).toHaveBeenNthCalledWith(
+              1,
+              {
+                name: 'Ahmed Hassan',
+                email: null,
+              },
+            );
+
+            expect(
+              teamLeaderRepository.create,
+            ).toHaveBeenNthCalledWith(
+              2,
+              {
+                name: 'Mahmoud Ali',
+                email: null,
+              },
+            );
+          },
+        );
+
+        it(
           'returns 409 when a Team Leader with the normalized email already exists',
           async () => {
             teamLeaderRepository.findOne

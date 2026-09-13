@@ -1,11 +1,13 @@
+
+
 import {
-  IsString,
-  IsOptional,
   IsArray,
   IsDateString,
   IsIn,
-  MinLength,
+  IsOptional,
+  IsString,
   MaxLength,
+  MinLength,
   Validate,
 } from 'class-validator';
 import {
@@ -13,8 +15,12 @@ import {
   ApiPropertyOptional,
 } from '@nestjs/swagger';
 
-import { ApiKeyRole } from '../entities/api-key.entity';
-import { IsIpOrCidrConstraint } from './is-ip-or-cidr.validator';
+import {
+  ApiKeyRole,
+} from '../entities/api-key.entity';
+import {
+  IsIpOrCidrConstraint,
+} from './is-ip-or-cidr.validator';
 
 /**
  * Roles that may be created or assigned through the generic
@@ -51,7 +57,7 @@ export class CreateApiKeyDto {
   role?: ApiKeyRole;
 
   @ApiPropertyOptional({
-    description: 'Allowed IP addresses (whitelist)',
+    description: 'Allowed IP addresses or CIDR ranges (whitelist)',
     example: [
       '192.168.1.1',
       '10.0.0.0/8',
@@ -70,9 +76,9 @@ export class CreateApiKeyDto {
 
   @ApiPropertyOptional({
     description:
-      'Session **ids** this key may act on — the server-generated UUIDs, not session names. Matched by ' +
-      'exact equality against the id in the request path, so a name never matches and would silently ' +
-      'scope the key to nothing. Omit or leave empty to let the key reach every session.',
+      'Session ids this key may act on — the server-generated UUIDs, not session names. ' +
+      'They are matched by exact equality against the id in the request path. ' +
+      'Omit or leave empty to allow access to every session permitted by the key role.',
     example: [
       '0a941dac-a965-45e7-b318-74ae8be134f0',
       '8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a',
@@ -84,7 +90,7 @@ export class CreateApiKeyDto {
   allowedSessions?: string[];
 
   @ApiPropertyOptional({
-    description: 'Expiration date (ISO 8601)',
+    description: 'Expiration date in ISO 8601 format',
     example: '2027-12-31T23:59:59Z',
   })
   @IsOptional()
@@ -101,7 +107,8 @@ export class ApiKeyResponseDto {
 
   @ApiProperty({
     description:
-      'First 8 characters of the key (for identification)',
+      'First 12 characters of the API key, used only as a non-secret identifier',
+    example: 'owa_k1_abc12',
   })
   keyPrefix!: string;
 
@@ -115,19 +122,71 @@ export class ApiKeyResponseDto {
   })
   role!: ApiKeyRole;
 
-  @ApiPropertyOptional()
+  /**
+   * Principal binding for TEAM_LEADER credentials.
+   *
+   * This is intentionally nullable because ordinary ADMIN / OPERATOR /
+   * VIEWER keys and AGENT credentials are not bound to a Team Leader
+   * principal through this column.
+   *
+   * It is optional in this DTO while the controller migration is being
+   * completed, because existing controller response mappings do not yet
+   * include this property.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Team Leader principal id when this credential belongs to a Team Leader',
+    type: String,
+    nullable: true,
+    example: '6f9ff30c-f2be-45dd-84b1-24682dd22076',
+  })
+  teamLeaderId?: string | null;
+
+  /**
+   * Principal binding for AGENT credentials.
+   *
+   * It is nullable because all non-Agent credentials have no Agent
+   * principal binding.
+   *
+   * It remains optional in this DTO until all controller response
+   * mappings explicitly include it.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Agent principal id when this credential belongs to an Agent',
+    type: String,
+    nullable: true,
+    example: 'd8027649-af83-4eba-9815-c44896916cb8',
+  })
+  agentId?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'IP addresses or CIDR ranges allowed to use this credential',
+    type: [String],
+  })
   allowedIps?: string[];
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Session ids this credential is explicitly scoped to',
+    type: [String],
+  })
   allowedSessions?: string[];
 
   @ApiProperty()
   isActive!: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Credential expiration date, when configured',
+  })
   expiresAt?: Date;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Most recent time this credential was used',
+  })
   lastUsedAt?: Date;
 
   @ApiProperty()
@@ -140,8 +199,9 @@ export class ApiKeyResponseDto {
 export class ApiKeyCreatedResponseDto extends ApiKeyResponseDto {
   @ApiProperty({
     description:
-      'Full API key (only shown once at creation)',
-    example: 'owa_k1_abc123...',
+      'Full plaintext API key. Returned only when the credential has just been created or reissued and must not be persisted by the server.',
+    example:
+      'owa_k1_abc123def456789012345678901234567890123456789012345678901234',
   })
   apiKey!: string;
 }
@@ -183,7 +243,11 @@ export class UpdateApiKeyDto {
   @IsIn(GENERIC_API_KEY_ROLES)
   role?: ApiKeyRole;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Allowed IP addresses or CIDR ranges (whitelist)',
+    type: [String],
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -195,14 +259,22 @@ export class UpdateApiKeyDto {
   )
   allowedIps?: string[];
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Session ids this credential may act on',
+    type: [String],
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   allowedSessions?: string[];
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description: 'Expiration date in ISO 8601 format',
+    example: '2027-12-31T23:59:59Z',
+  })
   @IsOptional()
   @IsDateString()
   expiresAt?: string;
 }
+
