@@ -1,21 +1,20 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RefObject } from 'react';
 import type { Session } from '../services/api';
-import { useWebSocket } from './useWebSocket';
+import { useWebSocket, type SessionConnectionStageEvent } from './useWebSocket';
 import { createSessionFeedState, noteSessionFeedError, subscribeSessionFeed } from '../utils/sessionFeedSubscription';
 
 export interface SessionFeed {
   isConnected: boolean;
 }
-
 export interface UseSessionFeedArgs {
   sessions: Session[];
   sessionsRef: RefObject<Session[]>;
   onQRCode: (event: { sessionId: string; qrCode: string }) => void;
   onSessionStatus: (event: { sessionId: string; status: string }) => void;
   onSessionRestriction?: (event: { sessionId: string }) => void;
+  onSessionConnectionStage?: (event: SessionConnectionStageEvent) => void;
 }
-
 /**
  * Owns the ONE `useWebSocket` call for the Sessions page plus the live session-feed subscription
  * (wildcard first, per-session fallback for scoped keys): `feedStateRef`, the transient
@@ -33,17 +32,16 @@ export function useSessionFeed({
   onQRCode,
   onSessionStatus,
   onSessionRestriction,
+  onSessionConnectionStage,
 }: UseSessionFeedArgs): SessionFeed {
   // Live session-feed subscription state: wildcard first, per-session fallback for scoped keys.
   const feedStateRef = useRef(createSessionFeedState());
   // Most recent server error frame; folded into feedStateRef by the effect below (kept as state
   // so the fallback runs after `subscribe` exists — the handler can't reference it directly).
   const [feedErrorFrame, setFeedErrorFrame] = useState<{ code: string } | null>(null);
-
   const handleServerError = useCallback((frame: { code: string }) => {
     setFeedErrorFrame(frame);
   }, []);
-
   // The events object must be referentially stable: useWebSocket re-registers its socket handler
   // on every identity change, so an inline literal would tear down and re-attach per render.
   const wsEvents = useMemo(
@@ -51,12 +49,12 @@ export function useSessionFeed({
       onQRCode,
       onSessionStatus,
       onSessionRestriction,
+      onSessionConnectionStage,
       onServerError: handleServerError,
     }),
-    [onQRCode, onSessionStatus, onSessionRestriction, handleServerError],
+    [onQRCode, onSessionStatus, onSessionRestriction, onSessionConnectionStage, handleServerError],
   );
   const { isConnected, subscribe } = useWebSocket(wsEvents);
-
   // Fold a server error frame into the feed state: a session-scoped key may not join the '*'
   // room — silently fall back to one subscription per listed session (the list endpoint is
   // already scope-filtered server-side), otherwise no status/QR push ever arrives and the QR
@@ -71,7 +69,6 @@ export function useSessionFeed({
       );
     }
   }, [feedErrorFrame, subscribe, sessionsRef]);
-
   // Join the live session feed (wildcard attempt, or per-session rooms after a scope fallback).
   useEffect(() => {
     if (isConnected) {
@@ -82,14 +79,12 @@ export function useSessionFeed({
       );
     }
   }, [isConnected, subscribe, sessionsRef]);
-
   // Rooms are per-socket on the backend: a reconnect lands on a fresh socket with no
   // subscriptions, so the per-session dedup set must be forgotten or the join effect
   // above would skip every already-listed id and no feed frame would arrive again.
   useEffect(() => {
     if (!isConnected) feedStateRef.current.subscribedIds.clear();
   }, [isConnected]);
-
   // In per-session mode, sessions loaded/created after the fallback still need their rooms.
   useEffect(() => {
     if (isConnected && feedStateRef.current.scope === 'per-session') {

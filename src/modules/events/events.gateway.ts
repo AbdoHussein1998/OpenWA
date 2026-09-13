@@ -1,5 +1,7 @@
 
 
+
+
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -49,6 +51,7 @@ function readTrustedProxies(): string[] {
     .map(s => s.trim())
     .filter(Boolean);
 }
+
 import type {
   WSClientMessage,
   WSSubscribeRequest,
@@ -60,7 +63,11 @@ import type {
   WSPongResponse,
 } from './dto/ws-messages.dto';
 import { SUBSCRIBABLE_EVENTS, buildRoomName } from './dto/ws-messages.dto';
-import type { DeliveryStatus } from '../../engine/interfaces/whatsapp-engine.interface';
+import type {
+  ConnectionStage,
+  ConnectionStageSource,
+  DeliveryStatus,
+} from '../../engine/interfaces/whatsapp-engine.interface';
 
 /** Why an API key's live WebSocket sockets are being torn down — drives the client-facing message. */
 export type ApiKeyEvictionReason = 'revoked' | 'deleted' | 'authorization_changed' | 'expired';
@@ -83,7 +90,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   server!: Server;
 
   private logger = new Logger('EventsGateway');
-
   /**
    * Active sockets keyed by their validating API-key id, so a key revoked/disabled
    * mid-connection can have its live subscriptions torn down immediately (otherwise
@@ -91,7 +97,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
    */
   private readonly socketsByKeyId = new Map<string, Set<Socket>>();
   private expirySweepTimer?: ReturnType<typeof setInterval>;
-
   /**
    * Rate limiting for the WS surface (see ws-rate-limit.ts). Frames never pass through the
    * Nest guard pipeline, so these run in the gateway itself:
@@ -104,7 +109,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   private readonly rateLimits: WsRateLimitConfig;
   private readonly frameLimiter: TokenBucketLimiter;
   private readonly handshakeLimiter: SlidingWindowLimiter;
-
   /**
    * Rate-limit violation sampler: at most one audit row per kind+subject per minute. An abuser
    * held at a limit would otherwise generate an audit write per blocked frame/handshake — the
@@ -214,7 +218,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     // Resolve the client IP once here so the handshake throttle, the validation, and the
     // audit trail all use the same trusted-proxy-aware value (parity with the REST guard / MCP mount).
     const clientIp = this.resolveClientIp(client);
-
     // Pre-auth, per-IP handshake throttle. This must run BEFORE any credential handling: an
     // unauthenticated handshake flood otherwise reaches the DB validateApiKey below on every
     // attempt (same gap the MCP pre-auth IP throttle covers for the /mcp mount).
@@ -225,12 +228,10 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       client.disconnect();
       return;
     }
-
     // Accept the key only via Socket.IO's `auth` field or the header — never the query string, which
     // leaks the credential into proxy/access logs. (The deprecated `?apiKey=` fallback was removed.)
     const handshakeAuth = client.handshake.auth as { apiKey?: string } | undefined;
     const apiKey = handshakeAuth?.apiKey || (client.handshake.headers['x-api-key'] as string);
-
     if (!apiKey) {
       this.logger.warn(`Client ${client.id} rejected: No API key provided`);
       void this.auditService.logWarn(AuditAction.API_KEY_AUTH_FAILED, {
@@ -242,14 +243,12 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       client.disconnect();
       return;
     }
-
     try {
       // validateApiKey THROWS on any failure (it never resolves to a falsy value), so the rejection
       // path is the catch below — a separate `if (!validKey)` branch here was dead code. The clientIp
       // is passed so an IP-restricted key (allowedIps set) is ENFORCED rather than blanket-rejected
       // for "Client IP could not be determined".
       const validKey = await this.authService.validateApiKey(apiKey, clientIp);
-
       // Cap simultaneous sockets per key: each socket holds rooms, engine fan-out, and memory,
       // so one key must not open connections without bound. Enough for multi-tab dashboards;
       // excess connections get a clear error, not a silent drop.
@@ -269,7 +268,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         client.disconnect();
         return;
       }
-
       // Store the validated key AND the raw key — the raw key lets handleSubscribe
       // RE-validate on each subscription so a key revoked mid-connection is caught.
       (client.data as { apiKey: unknown; rawApiKey: string }).apiKey = validKey;
@@ -321,7 +319,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       client.emit('message', error);
       return error;
     }
-
     switch (message.type) {
       case 'subscribe':
         return this.handleSubscribe(client, message);
@@ -348,7 +345,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     if (!sessionId || typeof sessionId !== 'string') {
       return this.createError('INVALID_SESSION', 'sessionId is required', requestId);
     }
-
     // Re-validate the API key on every subscribe: a long-lived socket whose key was
     // revoked/expired after connect must not be able to keep opening new subscriptions.
     // The clientIp is re-resolved (trusted-proxy-aware) so an IP-restricted key is enforced
@@ -366,12 +362,10 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       client.disconnect();
       return this.createError('UNAUTHORIZED', 'API key is no longer valid', requestId);
     }
-
     // Keep the socket's cached credential snapshot fresh after successful re-validation. The DB
     // remains authoritative; assignment/authorization changes still evict existing sockets via
     // evictApiKey(..., 'authorization_changed').
     (client.data as { apiKey: ApiKey }).apiKey = subscriberKey;
-
     // Phase I — WebSocket tenancy.
     //
     // Do not duplicate Team Leader / Agent / allowedSessions comparison logic in this gateway.
@@ -397,12 +391,10 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       // subscription surface does not reveal whether another tenant's session exists.
       return this.createError('FORBIDDEN_SESSION', 'API key is not authorized for this session', requestId);
     }
-
     // Validate events
     if (!events || !Array.isArray(events) || events.length === 0) {
       return this.createError('INVALID_EVENTS', 'events array is required', requestId);
     }
-
     // Validate each event type
     const validEvents = events.filter(
       e => e === '*' || SUBSCRIBABLE_EVENTS.includes(e as (typeof SUBSCRIBABLE_EVENTS)[number]),
@@ -414,7 +406,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         requestId,
       );
     }
-
     // Join rooms for each session/event combination
     const rooms: string[] = [];
     for (const event of validEvents) {
@@ -446,7 +437,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         void client.leave(room);
       }
     }
-
     this.logger.debug(`Client ${client.id} unsubscribed from session: ${sessionId}`);
 
     return {
@@ -521,7 +511,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       payload: { event, sessionId, data },
       timestamp: new Date().toISOString(),
     };
-
     // Emit once to the specific room + the three wildcard rooms. Chaining .to()
     // unions the rooms into a single broadcast, so a socket joined to several of
     // them receives the event exactly once (Socket.IO dedups recipients per
@@ -539,6 +528,21 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
    */
   emitSessionStatus(sessionId: string, status: string, data?: Record<string, unknown>) {
     this.emitToRooms(sessionId, 'session.status', { status, ...data });
+  }
+
+  /**
+   * Emit transient, non-persisted connection progress for one engine generation.
+   */
+  emitSessionConnectionStage(
+    sessionId: string,
+    data: {
+      attemptId: string;
+      stage: ConnectionStage;
+      source: ConnectionStageSource;
+      elapsedMs: number;
+    },
+  ) {
+    this.emitToRooms(sessionId, 'session.connection_stage', data);
   }
 
   /**
@@ -575,7 +579,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   emitCallAccepted(sessionId: string, data: Record<string, unknown>) {
     this.emitToRooms(sessionId, 'call.accepted', data);
   }
-
   emitCallRejected(sessionId: string, data: Record<string, unknown>) {
     this.emitToRooms(sessionId, 'call.rejected', data);
   }
@@ -710,6 +713,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     this.emitToRooms(sessionId, 'status.received', data);
   }
 }
+
 
 
 

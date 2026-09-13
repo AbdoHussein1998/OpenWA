@@ -1,9 +1,11 @@
+
+
+
 // src/modules/events/dto/ws-messages.dto.ts
 
 /**
  * WebSocket message types for subscription protocol
  */
-
 // Valid event types that can be subscribed to over the socket. Every entry here MUST have a
 // matching EventsGateway.emit* producer — the drift guard in events.gateway.spec asserts this.
 export const SUBSCRIBABLE_EVENTS = [
@@ -15,6 +17,7 @@ export const SUBSCRIBABLE_EVENTS = [
   'message.edited',
   'session.status',
   'session.qr',
+  'session.connection_stage',
   'session.authenticated',
   'session.disconnected',
   'session.restriction',
@@ -102,3 +105,7 @@ export interface WSPongResponse {
 export function buildRoomName(sessionId: string, event: string): string {
   return `session:${sessionId}:${event}`;
 }
+
+
+
+

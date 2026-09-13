@@ -1,3 +1,6 @@
+
+
+
 // WhatsApp Engine Interface - Abstract layer for WA engines
 //
 // Identity contract (the engine boundary is an anti-corruption layer for WhatsApp's id dialects):
@@ -24,6 +27,35 @@ export enum EngineStatus {
   READY = 'ready',
   ACTION_REQUIRED = 'action_required',
   FAILED = 'failed',
+}
+
+/**
+ * Fine-grained, transient connection progress emitted by an engine while one connection attempt
+ * advances from a link prompt to a fully usable runtime. These stages are observability only: they
+ * do NOT replace {@link EngineStatus}, are not persisted as session status, and must not be used to
+ * weaken the READY contract.
+ */
+export type ConnectionStage =
+  | 'qr_ready'
+  | 'qr_scanned'
+  | 'authenticated'
+  | 'authenticating'
+  | 'runtime_connected'
+  | 'identity_ready'
+  | 'event_bridge_ready'
+  | 'ready';
+
+/** Where a connection-stage observation came from. */
+export type ConnectionStageSource = 'native' | 'reconcile';
+
+/**
+ * Engine-level connection progress. Session/application code adds the attempt id and elapsed time
+ * because one callback table corresponds to one concrete engine generation. Keeping correlation at
+ * that boundary avoids coupling individual engine delegates to session lifecycle bookkeeping.
+ */
+export interface EngineConnectionStageEvent {
+  stage: ConnectionStage;
+  source: ConnectionStageSource;
 }
 
 export interface MessageResult {
@@ -706,6 +738,12 @@ export interface CallOutcomeEvent {
 
 export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
+  /**
+   * Transient connection progress for live monitoring. Consumers should treat this as best-effort
+   * telemetry, not as a persisted state machine; EngineStatus remains the authoritative lifecycle
+   * contract.
+   */
+  onConnectionStage?: (event: EngineConnectionStageEvent) => void;
   onReady?: (phone: string, pushName: string) => void;
   onMessage?: (message: IncomingMessage) => void;
   /**
@@ -1421,3 +1459,5 @@ export interface IWhatsAppEngine
     CatalogCapability,
     ChatCapability,
     PresenceCapability {}
+
+

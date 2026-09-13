@@ -3,12 +3,10 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
 import {
   Plus,
   QrCode,
-  ClipboardList,
   RefreshCw,
   Trash2,
   Eye,
@@ -37,11 +35,17 @@ import { useRole } from '../hooks/useRole';
 import { useSessionPairing } from '../hooks/useSessionPairing';
 import type { TFunction } from 'i18next';
 import { useSessionFeed } from '../hooks/useSessionFeed';
+import type { ConnectionStage, SessionConnectionStageEvent } from '../hooks/useWebSocket';
 import { useSessionCreateForm } from '../hooks/useSessionCreateForm';
 import { PageHeader } from '../components/PageHeader';
 import { CustomSelect } from '../components/CustomSelect';
 import { Modal } from '../components/Modal';
 import './Sessions.css';
+
+interface ConnectionProgress {
+  attemptId: string;
+  events: SessionConnectionStageEvent[];
+}
 
 /**
  * The hover title for a restriction: the engine's own cause token, plus when enforcement ends if
@@ -60,13 +64,7 @@ export function Sessions() {
   const { t } = useTranslation();
   useDocumentTitle(t('sessions.title'));
   const toast = useToast();
-  const navigate = useNavigate();
-  const {
-    canManageSessions,
-    canReadTemplates,
-    canStartSessions,
-    canShutdownSessions,
-  } = useRole();
+  const { canWrite } = useRole();
   const queryClient = useQueryClient();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +82,9 @@ export function Sessions() {
   // fetched per session when the detail modal opens rather than N times to render the list.
   const [sessionConfig, setSessionConfig] = useState<SessionConfig | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
+  // Transient connection telemetry only. It is keyed by session and replaced atomically when a new
+  // attemptId arrives, so QR rotations stay in one attempt while reconnects start fresh histories.
+  const [connectionProgress, setConnectionProgress] = useState<Record<string, ConnectionProgress>>({});
 
   const fetchSessions = useCallback(async (): Promise<Session[]> => {
     try {
@@ -175,6 +176,20 @@ export function Sessions() {
     onSessionRestriction: useCallback(() => {
       void fetchSessions();
     }, [fetchSessions]),
+    onSessionConnectionStage: useCallback((event: SessionConnectionStageEvent) => {
+      setConnectionProgress(current => {
+        const existing = current[event.sessionId];
+        const previousEvents = existing?.attemptId === event.attemptId ? existing.events : [];
+        if (previousEvents.some(previous => previous.stage === event.stage)) return current;
+        return {
+          ...current,
+          [event.sessionId]: {
+            attemptId: event.attemptId,
+            events: [...previousEvents, event],
+          },
+        };
+      });
+    }, []),
     onSessionStatus: useCallback(
       (event: { sessionId: string; status: string }) => {
         const prev = sessionsRef.current.find(s => s.id === event.sessionId);
@@ -225,8 +240,6 @@ export function Sessions() {
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (!canManageSessions) return;
-
     const session = sessions.find(s => s.id === id);
     try {
       await sessionApi.delete(id);
@@ -249,14 +262,11 @@ export function Sessions() {
   };
 
   const handleStart = async (id: string) => {
-    if (!canStartSessions) return;
-
     const session = sessions.find(s => s.id === id);
     if (session && ['initializing', 'qr_ready'].includes(session.status)) {
       handleShowQR(id);
       return;
     }
-
     try {
       // Use the authoritative response instead of fabricating a status. The old code wrote a local
       // `status: 'connecting'` — a value the gateway never emits — while keeping every other field
@@ -290,7 +300,7 @@ export function Sessions() {
   const selectedSessionId = selectedSession?.id ?? null;
   useEffect(() => {
     setSessionConfig(null);
-    if (!selectedSessionId || !canManageSessions) return;
+    if (!selectedSessionId) return;
     let cancelled = false;
     sessionApi
       .getConfig(selectedSessionId)
@@ -304,10 +314,10 @@ export function Sessions() {
     return () => {
       cancelled = true;
     };
-  }, [selectedSessionId, canManageSessions]);
+  }, [selectedSessionId]);
 
   const handleAutoRejectToggle = async (next: boolean) => {
-    if (!canManageSessions || !selectedSessionId || !sessionConfig) return;
+    if (!selectedSessionId || !sessionConfig) return;
     const previous = sessionConfig;
     setSessionConfig({ ...sessionConfig, autoRejectCalls: next });
     setSavingConfig(true);
@@ -324,8 +334,6 @@ export function Sessions() {
   };
 
   const handleStop = async (id: string) => {
-    if (!canShutdownSessions) return;
-
     try {
       const updated = await sessionApi.stop(id);
       await applySessionResponse(updated);
@@ -338,8 +346,6 @@ export function Sessions() {
   };
 
   const handleForceKill = async (id: string) => {
-    if (!canShutdownSessions) return;
-
     try {
       const updated = await sessionApi.forceKill(id);
       await applySessionResponse(updated);
@@ -354,8 +360,6 @@ export function Sessions() {
   };
 
   const handleUnlink = async (id: string) => {
-    if (!canShutdownSessions) return;
-
     // Guard against a second concurrent request: the button is disabled while in flight, but a
     // rapid double-click would otherwise fire overlapping logouts and race the teardown tracking.
     if (unlinkingId) return;
@@ -394,11 +398,63 @@ export function Sessions() {
   };
 
   const formatStatus = (status: string) => t(`sessionStatus.${status}`, { defaultValue: status });
+  const formatConnectionStage = (stage: ConnectionStage): string => {
+    switch (stage) {
+      case 'qr_ready':
+        return t('sessions.connectionStage.qrReady', { defaultValue: 'QR ready' });
+      case 'qr_scanned':
+        return t('sessions.connectionStage.qrScanned', { defaultValue: 'QR scanned' });
+      case 'authenticated':
+        return t('sessions.connectionStage.authenticated', { defaultValue: 'WhatsApp accepted authentication' });
+      case 'authenticating':
+        return t('sessions.connectionStage.authenticating', { defaultValue: 'Preparing WhatsApp Web' });
+      case 'runtime_connected':
+        return t('sessions.connectionStage.runtimeConnected', { defaultValue: 'WhatsApp runtime connected' });
+      case 'identity_ready':
+        return t('sessions.connectionStage.identityReady', { defaultValue: 'Account identity loaded' });
+      case 'event_bridge_ready':
+        return t('sessions.connectionStage.eventBridgeReady', { defaultValue: 'Message event bridge attached' });
+      case 'ready':
+        return t('sessions.connectionStage.ready', { defaultValue: 'Session ready' });
+    }
+  };
 
   const filteredSessions = filterSessions(sessions, searchQuery, statusFilter);
   const existingSessionNames = sessions.map(s => s.name);
   // Empty is a disabled button, not a message: the form stays quiet until the user types something.
   const nameIssues = newSessionName ? sessionNameIssues(newSessionName, existingSessionNames) : [];
+
+  const activeConnectionProgress = qrData ? connectionProgress[qrData.sessionId] : undefined;
+  const activeConnectionEvents = activeConnectionProgress?.events ?? [];
+  const latestConnectionEvent = activeConnectionEvents.at(-1);
+  const hasPostLinkProgress = activeConnectionEvents.some(event => event.stage !== 'qr_ready');
+  const connectionProgressPanel = activeConnectionProgress && hasPostLinkProgress ? (
+    <div className="qr-instructions" role="status" aria-live="polite">
+      <p className="pairing-instructions-title">
+        {t('sessions.connectionStage.connecting', { defaultValue: 'Connecting WhatsApp' })}
+      </p>
+      {activeConnectionEvents
+        .filter(event => event.stage !== 'qr_ready')
+        .map(event => (
+          <p className="qr-step" key={`${event.attemptId}:${event.stage}`}>
+            <strong>✓</strong> {formatConnectionStage(event.stage)}
+          </p>
+        ))}
+      {latestConnectionEvent?.stage !== 'ready' && (
+        <p className="qr-auto-refresh">
+          <Loader2 size={14} className="animate-spin" />{' '}
+          {t('sessions.connectionStage.waiting', { defaultValue: 'Waiting for the next connection stage…' })}
+        </p>
+      )}
+      <p className="input-hint">
+        {t('sessions.connectionStage.attempt', {
+          defaultValue: 'Attempt {{attemptId}} · {{seconds}}s',
+          attemptId: activeConnectionProgress.attemptId.slice(0, 8),
+          seconds: ((latestConnectionEvent?.elapsedMs ?? 0) / 1000).toFixed(1),
+        })}
+      </p>
+    </div>
+  ) : null;
 
   if (loading) {
     return (
@@ -417,7 +473,7 @@ export function Sessions() {
         title={t('sessions.title')}
         subtitle={t('sessions.subtitle')}
         actions={
-          canManageSessions && (
+          canWrite && (
             <button className="btn-primary" onClick={() => setShowCreateModal(true)}>
               <Plus size={18} />
               {t('sessions.newSession')}
@@ -425,7 +481,6 @@ export function Sessions() {
           )
         }
       />
-
       <div className="filters-bar">
         <div className="search-input">
           <Search size={18} />
@@ -436,7 +491,6 @@ export function Sessions() {
             onChange={e => setSearchQuery(e.target.value)}
           />
         </div>
-
         <div className="filter-group">
           <Filter size={16} />
           <CustomSelect
@@ -451,7 +505,6 @@ export function Sessions() {
           />
         </div>
       </div>
-
       {error && (
         <div
           style={{
@@ -465,8 +518,7 @@ export function Sessions() {
           {error}
         </div>
       )}
-
-      {canManageSessions && showCreateModal && (
+      {showCreateModal && (
         <Modal
           open
           onClose={() => setShowCreateModal(false)}
@@ -509,7 +561,6 @@ export function Sessions() {
           {nameIssues.includes('duplicate') && <p className="input-error">{t('sessions.create.duplicate')}</p>}
         </Modal>
       )}
-
       {qrData && (
         <Modal
           open
@@ -524,7 +575,7 @@ export function Sessions() {
           }
         >
           <div style={{ textAlign: 'center' }}>
-            {!pairingCode && (
+            {!pairingCode && !hasPostLinkProgress && (
               <div className="pairing-tabs" role="tablist">
                 <button
                   role="tab"
@@ -544,115 +595,110 @@ export function Sessions() {
                 </button>
               </div>
             )}
-
-            {!pairingMode ? (
-              // QR Code Content
-              qrData.qrCode ? (
-                <>
-                  <img src={qrData.qrCode} alt="QR" style={{ maxWidth: '280px', borderRadius: '12px' }} />
-                  <div className="qr-instructions">
-                    <p className="qr-step">
-                      <Trans i18nKey="sessions.qr.step1" components={{ strong: <strong /> }} />
-                    </p>
-                    <p className="qr-step">
-                      <Trans i18nKey="sessions.qr.step2" components={{ strong: <strong /> }} />
-                    </p>
-                    <p className="qr-step">
-                      <Trans i18nKey="sessions.qr.step3" components={{ strong: <strong /> }} />
-                    </p>
-                  </div>
-                  <p className="qr-auto-refresh">
-                    <RefreshCw size={14} className="spin-slow" /> {t('sessions.qr.autoRefresh')}
-                  </p>
-                </>
-              ) : (
-                <div style={{ padding: '2rem' }}>
-                  <Loader2 className="animate-spin" size={48} />
-                  <p>{t('sessions.qr.generating')}</p>
-                </div>
-              )
-            ) : (
-              // Pairing Code Content
-              <div className="pairing-container" role="tabpanel">
-                {pairingError && <div className="pairing-error">{pairingError}</div>}
-
-                {!pairingCode ? (
-                  <div className="pairing-form">
-                    <label htmlFor="pairing-phone" className="pairing-label">
-                      {t('sessions.pairing.phoneLabel')}
-                    </label>
-                    <input
-                      id="pairing-phone"
-                      className="pairing-input"
-                      type="tel"
-                      inputMode="numeric"
-                      maxLength={15}
-                      placeholder={t('sessions.pairing.phonePlaceholder')}
-                      value={phoneNumber}
-                      onChange={e => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
-                      onKeyDown={e => e.key === 'Enter' && handleGeneratePairingCode()}
-                    />
-                    <p className="input-hint" style={{ marginBottom: '1.5rem' }}>
-                      {t('sessions.pairing.phoneHint')}
-                    </p>
-                    <button
-                      className="btn-primary"
-                      onClick={handleGeneratePairingCode}
-                      disabled={requestingPairing || !isValidPairingPhone(phoneNumber)}
-                      style={{ width: '100%', justifyContent: 'center' }}
-                    >
-                      {requestingPairing ? (
-                        <>
-                          <Loader2 className="animate-spin" size={16} />
-                          <span style={{ marginLeft: '0.5rem' }}>{t('sessions.pairing.generating')}</span>
-                        </>
-                      ) : (
-                        t('sessions.pairing.generateButton')
-                      )}
-                    </button>
-                  </div>
-                ) : (
+            {connectionProgressPanel ??
+              (!pairingMode ? (
+                // QR Code Content
+                qrData.qrCode ? (
                   <>
-                    <label style={{ display: 'block', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                      {t('sessions.pairing.codeLabel')}
-                    </label>
-                    <div className="pairing-code-display">
-                      {pairingCode.substring(0, 4)} - {pairingCode.substring(4)}
-                    </div>
-
+                    <img src={qrData.qrCode} alt="QR" style={{ maxWidth: '280px', borderRadius: '12px' }} />
                     <div className="qr-instructions">
-                      <p className="pairing-instructions-title">{t('sessions.pairing.instructions')}</p>
                       <p className="qr-step">
-                        <Trans i18nKey="sessions.pairing.step1" components={{ strong: <strong /> }} />
+                        <Trans i18nKey="sessions.qr.step1" components={{ strong: <strong /> }} />
                       </p>
                       <p className="qr-step">
-                        <Trans i18nKey="sessions.pairing.step2" components={{ strong: <strong /> }} />
+                        <Trans i18nKey="sessions.qr.step2" components={{ strong: <strong /> }} />
                       </p>
                       <p className="qr-step">
-                        <Trans i18nKey="sessions.pairing.step3" components={{ strong: <strong /> }} />
-                      </p>
-                      <p className="qr-step">
-                        <Trans i18nKey="sessions.pairing.step4" components={{ strong: <strong /> }} />
+                        <Trans i18nKey="sessions.qr.step3" components={{ strong: <strong /> }} />
                       </p>
                     </div>
-
-                    <div style={{ marginTop: '1.5rem' }}>
-                      <button className="btn-secondary" onClick={handleChangeNumber} style={{ width: '100%' }}>
-                        {t('sessions.pairing.changeNumber')}
-                      </button>
-                    </div>
-
                     <p className="qr-auto-refresh">
-                      <RefreshCw size={14} className="spin-slow" /> {t('sessions.pairing.waitingConnection')}
+                      <RefreshCw size={14} className="spin-slow" /> {t('sessions.qr.autoRefresh')}
                     </p>
                   </>
-                )}
-              </div>
-            )}
+                ) : (
+                  <div style={{ padding: '2rem' }}>
+                    <Loader2 className="animate-spin" size={48} />
+                    <p>{t('sessions.qr.generating')}</p>
+                  </div>
+                )
+              ) : (
+                // Pairing Code Content
+                <div className="pairing-container" role="tabpanel">
+                  {pairingError && <div className="pairing-error">{pairingError}</div>}
+                  {!pairingCode ? (
+                    <div className="pairing-form">
+                      <label htmlFor="pairing-phone" className="pairing-label">
+                        {t('sessions.pairing.phoneLabel')}
+                      </label>
+                      <input
+                        id="pairing-phone"
+                        className="pairing-input"
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={15}
+                        placeholder={t('sessions.pairing.phonePlaceholder')}
+                        value={phoneNumber}
+                        onChange={e => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
+                        onKeyDown={e => e.key === 'Enter' && handleGeneratePairingCode()}
+                      />
+                      <p className="input-hint" style={{ marginBottom: '1.5rem' }}>
+                        {t('sessions.pairing.phoneHint')}
+                      </p>
+                      <button
+                        className="btn-primary"
+                        onClick={handleGeneratePairingCode}
+                        disabled={requestingPairing || !isValidPairingPhone(phoneNumber)}
+                        style={{ width: '100%', justifyContent: 'center' }}
+                      >
+                        {requestingPairing ? (
+                          <>
+                            <Loader2 className="animate-spin" size={16} />
+                            <span style={{ marginLeft: '0.5rem' }}>{t('sessions.pairing.generating')}</span>
+                          </>
+                        ) : (
+                          t('sessions.pairing.generateButton')
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <label style={{ display: 'block', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        {t('sessions.pairing.codeLabel')}
+                      </label>
+                      <div className="pairing-code-display">
+                        {pairingCode.substring(0, 4)} - {pairingCode.substring(4)}
+                      </div>
+                      <div className="qr-instructions">
+                        <p className="pairing-instructions-title">{t('sessions.pairing.instructions')}</p>
+                        <p className="qr-step">
+                          <Trans i18nKey="sessions.pairing.step1" components={{ strong: <strong /> }} />
+                        </p>
+                        <p className="qr-step">
+                          <Trans i18nKey="sessions.pairing.step2" components={{ strong: <strong /> }} />
+                        </p>
+                        <p className="qr-step">
+                          <Trans i18nKey="sessions.pairing.step3" components={{ strong: <strong /> }} />
+                        </p>
+                        <p className="qr-step">
+                          <Trans i18nKey="sessions.pairing.step4" components={{ strong: <strong /> }} />
+                        </p>
+                      </div>
+                      <div style={{ marginTop: '1.5rem' }}>
+                        <button className="btn-secondary" onClick={handleChangeNumber} style={{ width: '100%' }}>
+                          {t('sessions.pairing.changeNumber')}
+                        </button>
+                      </div>
+                      <p className="qr-auto-refresh">
+                        <RefreshCw size={14} className="spin-slow" /> {t('sessions.pairing.waitingConnection')}
+                      </p>
+                    </>
+                  )}
+                </div>
+              ))}
           </div>
         </Modal>
       )}
-
       {selectedSession && (
         <Modal
           open
@@ -703,7 +749,7 @@ export function Sessions() {
                       type="checkbox"
                       aria-labelledby="auto-reject-calls-label"
                       checked={sessionConfig.autoRejectCalls}
-                      disabled={!canManageSessions || savingConfig}
+                      disabled={!canWrite || savingConfig}
                       onChange={e => void handleAutoRejectToggle(e.target.checked)}
                     />
                     <span className="toggle-slider"></span>
@@ -715,8 +761,7 @@ export function Sessions() {
           </div>
         </Modal>
       )}
-
-      {canManageSessions && deleteConfirmId && (
+      {deleteConfirmId && (
         <Modal
           open
           onClose={() => setDeleteConfirmId(null)}
@@ -744,8 +789,7 @@ export function Sessions() {
           <p className="text-muted">{t('sessions.delete.warning')}</p>
         </Modal>
       )}
-
-      {canShutdownSessions && killConfirmId && (
+      {killConfirmId && (
         <Modal
           open
           onClose={() => setKillConfirmId(null)}
@@ -773,8 +817,7 @@ export function Sessions() {
           <p className="text-muted">{t('sessions.forceKill.warning')}</p>
         </Modal>
       )}
-
-      {canShutdownSessions && unlinkConfirmId && (
+      {unlinkConfirmId && (
         <Modal
           open
           onClose={() => setUnlinkConfirmId(null)}
@@ -806,7 +849,6 @@ export function Sessions() {
           <p className="text-muted">{t('sessions.unlink.warning')}</p>
         </Modal>
       )}
-
       <div className="sessions-grid">
         {filteredSessions.length === 0 ? (
           <div className="empty-state">
@@ -821,7 +863,6 @@ export function Sessions() {
                 <h3 title={session.name}>{session.name}</h3>
                 <span className={`status-pill ${session.status}`}>{formatStatus(session.status)}</span>
               </div>
-
               {session.status === 'initializing' || session.status === 'qr_ready' ? (
                 <div className="qr-placeholder">
                   <QrCode size={80} className="qr-icon" />
@@ -869,63 +910,40 @@ export function Sessions() {
                   ) : null}
                 </div>
               )}
-
               <div className="card-actions">
                 <button className="btn-action" onClick={() => setSelectedSession(session)}>
                   <Eye size={16} />
                   {t('sessions.actions.view')}
                 </button>
-
-                {canReadTemplates && (
-                  <button
-                    className="btn-action"
-                    onClick={() =>
-                      navigate(`/templates?session=${encodeURIComponent(session.id)}`)
-                    }
-                  >
-                    <ClipboardList size={16} />
-                    {t('templates.title')}
+                {canWrite && isSessionStarted(session) ? (
+                  <button className="btn-action" onClick={() => handleStop(session.id)}>
+                    <Square size={16} />
+                    {t('sessions.actions.stop')}
                   </button>
-                )}
-
-                {isSessionStarted(session) ? (
-                  canShutdownSessions ? (
-                    <button className="btn-action" onClick={() => void handleStop(session.id)}>
-                      <Square size={16} />
-                      {t('sessions.actions.stop')}
-                    </button>
-                  ) : null
-                ) : canStartSessions ? (
-                  <button className="btn-action" onClick={() => void handleStart(session.id)}>
-                    {session.status === 'created' || session.status === 'disconnected' ? (
-                      <>
-                        <Play size={16} />
-                        {t('sessions.actions.start')}
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw size={16} />
-                        {t('sessions.actions.reconnect')}
-                      </>
-                    )}
+                ) : canWrite && (session.status === 'created' || session.status === 'disconnected') ? (
+                  <button className="btn-action" onClick={() => handleStart(session.id)}>
+                    <Play size={16} />
+                    {t('sessions.actions.start')}
+                  </button>
+                ) : canWrite ? (
+                  <button className="btn-action" onClick={() => handleStart(session.id)}>
+                    <RefreshCw size={16} />
+                    {t('sessions.actions.reconnect')}
                   </button>
                 ) : null}
-
-                {canUnlinkSession(session, canShutdownSessions) && (
+                {canUnlinkSession(session, canWrite) && (
                   <button className="btn-action danger" onClick={() => setUnlinkConfirmId(session.id)}>
                     <Unlink size={16} />
                     {t('sessions.actions.unlink')}
                   </button>
                 )}
-
-                {canManageSessions && (
+                {canWrite && (
                   <button className="btn-action danger" onClick={() => setDeleteConfirmId(session.id)}>
                     <Trash2 size={16} />
                     {t('sessions.actions.delete')}
                   </button>
                 )}
-
-                {canForceKillSession(session, canShutdownSessions) && (
+                {canForceKillSession(session, canWrite) && (
                   <button className="btn-action danger" onClick={() => setKillConfirmId(session.id)}>
                     <Skull size={16} />
                     {t('sessions.actions.killStuck')}

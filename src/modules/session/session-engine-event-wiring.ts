@@ -1,3 +1,8 @@
+
+
+
+
+import { randomUUID } from 'node:crypto';
 import { SessionStatus } from './entities/session.entity';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
@@ -9,13 +14,14 @@ import { EventsGateway } from '../events/events.gateway';
 import { WebhookService } from '../webhook/webhook.service';
 import { HookManager } from '../../core/hooks';
 import {
-  EngineEventCallbacks,
+  type AccountRestriction,
+  type CallOutcomeEvent,
+  type ConnectionStage,
+  type EngineEventCallbacks,
   EngineStatus,
-  IWhatsAppEngine,
-  IncomingCallEvent,
-  AccountRestriction,
-  PresenceUpdateEvent,
-  CallOutcomeEvent,
+  type IWhatsAppEngine,
+  type IncomingCallEvent,
+  type PresenceUpdateEvent,
 } from '../../engine/interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { SessionEngineLeafEvents } from './session-engine-leaf-events';
@@ -67,16 +73,13 @@ export interface SessionEngineWiringHost {
 }
 
 /**
- * The engine-callback wiring table extracted from SessionEngineLifecycle.initializeEngine: the 17
+ * The engine-callback wiring table extracted from SessionEngineLifecycle.initializeEngine: the
  * callbacks passed to engine.initialize(). Plain class (NOT a NestJS provider — the lifecycle's
  * constructor signature is frozen by specs), built inside the lifecycle's constructor. Stateless:
  * buildCallbacks closes over (id, engine, sessionName) and reaches the lifecycle exclusively
  * through `host`, so the emitted table is behaviorally identical to the inline original — the
  * per-callback liveness gating (onMessage/onMessageCreate/onMessageAck/onMessageRevoked/
  * onCredentialTeardownStarted are deliberately UNGATED) and every nested call's order preserved.
- * The callback bodies moved verbatim, which is why they read `this.logger` against the same-named
- * field assigned here; every other former `this.x` read goes through `host`. Specs capture the
- * table from `mockEngine.initialize.mock.calls[0][0]` and invoke callbacks directly.
  */
 export class SessionEngineEventWiring {
   private readonly logger: ReturnType<typeof createLogger>;
@@ -100,6 +103,14 @@ export class SessionEngineEventWiring {
     previouslyLinked = false,
   ): EngineEventCallbacks {
     let relinkWarned = false;
+
+    // One callback table is one concrete engine generation, so this is the narrowest reliable place
+    // to create a connection-attempt correlation id. A reconnect builds a fresh table and therefore
+    // gets a fresh attempt id automatically, while QR rotation within the same engine keeps the id.
+    const connectionAttemptId = randomUUID();
+    const connectionAttemptStartedAt = Date.now();
+    const emittedConnectionStages = new Set<ConnectionStage>();
+
     /**
      * Persist an engine-driven status, but only while this node still owns the session.
      *
@@ -144,13 +155,11 @@ export class SessionEngineEventWiring {
             { sessionId: id, action: 'relink_required' },
           );
         }
-
         void host.webhookService.dispatch(id, 'session.qr', { sessionId: id, qr });
 
         // Push the QR to subscribed dashboard clients over the WebSocket (the `session.qr` event is
         // advertised + consumed there, so clients can render it live instead of polling GET /qr).
         host.eventsGateway.emitQRCode(id, qr);
-
         // Execute hook for QR event
         void host.hookManager.execute(
           'session:qr',
@@ -160,25 +169,45 @@ export class SessionEngineEventWiring {
             source: 'Engine',
           },
         );
-
         persistStatus(SessionStatus.QR_READY);
+      },
+      onConnectionStage: event => {
+        if (!host.isLiveEngine(id, engine)) return;
+        // Reconciliation and native client events can observe the same level. Publish each semantic
+        // stage only once per engine generation so the dashboard gets a monotonic progress history.
+        if (emittedConnectionStages.has(event.stage)) return;
+        emittedConnectionStages.add(event.stage);
+
+        const payload = {
+          attemptId: connectionAttemptId,
+          stage: event.stage,
+          source: event.source,
+          elapsedMs: Math.max(0, Date.now() - connectionAttemptStartedAt),
+        };
+
+        this.logger.debug(`Connection stage: ${event.stage}`, {
+          sessionId: id,
+          ...payload,
+          action: 'connection_stage',
+        });
+        host.eventsGateway.emitSessionConnectionStage(id, payload);
       },
       onReady: (phone, pushName): void => {
         if (!host.isLiveEngine(id, engine)) return;
         host.handleEngineReady(id, engine, phone, pushName);
       },
-      onMessage: (message): void => host.messages.handleInboundMessage(id, engine, message),
-      onHistoryMessages: (messages): void => {
+      onMessage: message => host.messages.handleInboundMessage(id, engine, message),
+      onHistoryMessages: messages => {
         if (!host.isLiveEngine(id, engine)) return;
         // Persist for the chat view only; no dispatch (these predate the live session).
         void host.messages
           .persistHistoryMessages(id, messages)
           .catch(err => this.logger.error(`Failed to persist history messages for ${id}`, String(err)));
       },
-      onMessageCreate: (message): void => host.messages.handleOwnSendEcho(id, engine, message),
+      onMessageCreate: message => host.messages.handleOwnSendEcho(id, engine, message),
       onMessageAck: (messageId, status): void => host.messages.handleMessageAck(id, engine, messageId, status),
-      onMessageRevoked: (message): void => host.messages.handleMessageRevoked(id, engine, message),
-      onMessageReaction: (event): void => {
+      onMessageRevoked: message => host.messages.handleMessageRevoked(id, engine, message),
+      onMessageReaction: event => {
         if (!host.isLiveEngine(id, engine)) return;
         if (!event.messageId) {
           this.logger.warn('Ignoring message reaction without a target message id', {
@@ -192,10 +221,9 @@ export class SessionEngineEventWiring {
           messageId: event.messageId,
           action: 'message_reaction_received',
         });
-
         host.messages.applyReactionQueued(id, event);
       },
-      onMessageEdited: (message): void => {
+      onMessageEdited: message => {
         if (!host.isLiveEngine(id, engine)) return;
         if (!message.messageId) {
           this.logger.warn('Ignoring message edit without a target message id', {
@@ -209,10 +237,9 @@ export class SessionEngineEventWiring {
           messageId: message.messageId,
           action: 'message_edited',
         });
-
         host.messages.applyMessageEditQueued(id, message);
       },
-      onGroupEvent: (event): void => {
+      onGroupEvent: event => {
         if (!host.isLiveEngine(id, engine)) return;
         this.logger.debug(`Group event: ${event.kind} in ${event.groupId}`, {
           sessionId: id,
@@ -311,7 +338,6 @@ export class SessionEngineEventWiring {
       },
       onAccountRestriction: (restriction: AccountRestriction | null): void => {
         if (!host.isLiveEngine(id, engine)) return;
-
         // A lift is only news if we were holding a restriction; an engine that reports "no
         // restriction" on every connect (the Baileys probe does exactly that) must stay quiet.
         if (!restriction) {
@@ -319,11 +345,9 @@ export class SessionEngineEventWiring {
           if (lifted) host.reportRestrictionLifted(id, lifted);
           return;
         }
-
         // Both engines repeat an unchanged restriction — whatsapp-web.js on every reconnect attempt,
         // Baileys on every connect probe — so only a change reaches an operator.
         if (!host.sessionRestrictions.set(id, restriction)) return;
-
         this.logger.warn(`WhatsApp restricted this session's account: ${restriction.kind}`, {
           sessionId: id,
           kind: restriction.kind,
@@ -359,12 +383,10 @@ export class SessionEngineEventWiring {
           reason,
           action: 'engine_error',
         });
-
         // Remember the reason so findOne/findAll can surface it to the dashboard,
         // then persist the FAILED status. This is terminal — no reconnect is
         // scheduled (unlike onDisconnected), since re-scanning is required.
         host.sessionErrors.set(id, reason);
-
         // A prior onDisconnected may have scheduled a reconnect. This failure is terminal
         // (re-scan required), so cancel it — otherwise the pending timer would resurrect a
         // session the operator must manually restart.
@@ -380,7 +402,6 @@ export class SessionEngineEventWiring {
         );
 
         persistStatus(SessionStatus.FAILED);
-
         // onError is terminal (no reconnect is scheduled — re-scan is required). Evict the dead engine
         // and SIGKILL its process: leaving it in the map would hold a concurrency slot indefinitely and
         // make the next start() reject the session as "already started" instead of re-initializing it.
@@ -400,3 +421,7 @@ export class SessionEngineEventWiring {
     };
   }
 }
+
+
+
+

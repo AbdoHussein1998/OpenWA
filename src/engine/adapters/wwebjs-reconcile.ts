@@ -1,8 +1,16 @@
 
 
 
+
+
+
+
 import { type Client, WAState } from 'whatsapp-web.js';
-import { type EngineEventCallbacks, EngineStatus } from '../interfaces/whatsapp-engine.interface';
+import {
+  type ConnectionStage,
+  type EngineEventCallbacks,
+  EngineStatus,
+} from '../interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
 import {
@@ -115,6 +123,10 @@ export class WwebjsReadyReconcile {
   private runtimeReloadAttempted = false;
 
   constructor(private readonly host: WwebjsReadyReconcileHost) {}
+
+  private emitConnectionStage(stage: ConnectionStage): void {
+    this.host.getCallbacks().onConnectionStage?.({ stage, source: 'reconcile' });
+  }
 
   /**
    * Watch the QR_READY phase for a missed `authenticated` edge.
@@ -255,8 +267,15 @@ export class WwebjsReadyReconcile {
        * page-side connected proof immediately afterwards. The deadline may then preserve credentials
        * even if client.getState() is the exact call that remains wedged.
        */
+      // This fallback proves that linking/authentication succeeded, but it cannot distinguish QR
+      // scanning from phone-number pairing. Emit the generic authentication stage only; the native
+      // lifecycle emits `qr_scanned` when it can prove the attempt was QR-based.
+      this.emitConnectionStage('authenticated');
       this.clearAuthReconcile();
       this.host.setStatus(EngineStatus.AUTHENTICATING);
+      this.emitConnectionStage('authenticating');
+      this.emitConnectionStage('runtime_connected');
+      this.emitConnectionStage('identity_ready');
       this.scheduleReadyReconcile();
       this.hasObservedConnected = true;
       this.qrConnectedObservedAt = observedAt;
@@ -308,8 +327,10 @@ export class WwebjsReadyReconcile {
           action: 'qr_auth_runtime_reconciled',
         },
       );
+      this.emitConnectionStage('authenticated');
       this.clearAuthReconcile();
       this.host.setStatus(EngineStatus.AUTHENTICATING);
+      this.emitConnectionStage('authenticating');
       this.host.markReadyFromClientInfo();
       return;
     }
@@ -601,6 +622,9 @@ export class WwebjsReadyReconcile {
     this.lastProbeStateConnected = connected;
     if (connected) {
       this.hasObservedConnected = true;
+      if (this.host.getStatus() === EngineStatus.AUTHENTICATING) {
+        this.emitConnectionStage('runtime_connected');
+      }
     }
 
     if (!connected || this.client() !== client) {
@@ -611,6 +635,9 @@ export class WwebjsReadyReconcile {
     if (!client.info?.wid?.user) {
       this.resetBridgeRecoveryObservation();
       return false;
+    }
+    if (this.host.getStatus() === EngineStatus.AUTHENTICATING) {
+      this.emitConnectionStage('identity_ready');
     }
 
     // The patched whatsapp-web.js client (scripts/patch-wwebjs-ready-sync.js) reports whether
@@ -637,6 +664,13 @@ export class WwebjsReadyReconcile {
     // The bridge recovered/attached on its own. Forget any earlier slow-attach observation so a
     // later independent navigation or auth generation receives a fresh grace/reload budget.
     this.resetBridgeRecoveryObservation();
+
+    if (
+      this.host.getStatus() === EngineStatus.AUTHENTICATING &&
+      (client as Client & { eventsAttached?: boolean }).eventsAttached === true
+    ) {
+      this.emitConnectionStage('event_bridge_ready');
+    }
 
     const page = (client as unknown as { pupPage?: { evaluate: <T>(fn: () => T) => Promise<T> } }).pupPage;
     if (!page) return false;
@@ -770,6 +804,10 @@ export class WwebjsReadyReconcile {
     );
   }
 }
+
+
+
+
 
 
 

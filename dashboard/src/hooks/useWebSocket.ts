@@ -1,3 +1,5 @@
+
+
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { warnIfInsecureHttpUrl } from '../utils/urlSecurity';
@@ -14,12 +16,34 @@ interface QRCodeEvent {
   timestamp: string;
 }
 
+export const CONNECTION_STAGES = [
+  'qr_ready',
+  'qr_scanned',
+  'authenticated',
+  'authenticating',
+  'runtime_connected',
+  'identity_ready',
+  'event_bridge_ready',
+  'ready',
+] as const;
+
+export type ConnectionStage = (typeof CONNECTION_STAGES)[number];
+export type ConnectionStageSource = 'native' | 'reconcile';
+
+export interface SessionConnectionStageEvent {
+  sessionId: string;
+  attemptId: string;
+  stage: ConnectionStage;
+  source: ConnectionStageSource;
+  elapsedMs: number;
+  timestamp: string;
+}
+
 interface MessageEvent {
   sessionId: string;
   message: Record<string, unknown>;
   timestamp: string;
 }
-
 interface MessageAckEvent {
   sessionId: string;
   id: string;
@@ -30,7 +54,6 @@ interface MessageAckEvent {
   ack?: number;
   timestamp?: string;
 }
-
 interface MessageReactionEvent {
   sessionId: string;
   messageId: string;
@@ -46,7 +69,6 @@ interface MessageReactionEvent {
   reactions?: Record<string, string>;
   timestamp: string;
 }
-
 interface MessageEditedEvent {
   sessionId: string;
   messageId: string;
@@ -54,7 +76,6 @@ interface MessageEditedEvent {
   body: string;
   timestamp: number;
 }
-
 interface MessageRevokedEvent {
   sessionId: string;
   id: string;
@@ -70,7 +91,6 @@ interface MessageRevokedEvent {
   type: string;
   timestamp: number;
 }
-
 /** A freshly ingested contact status (story) — the dashboard uses it purely as a refetch signal. */
 interface StatusReceivedEvent {
   sessionId: string;
@@ -82,7 +102,6 @@ interface SessionRestrictionEvent {
   sessionId: string;
   timestamp: string;
 }
-
 /** Ack frame answering a client `subscribe` request (`{type: 'subscribed'}`). */
 interface SubscribedEvent {
   sessionId: string;
@@ -94,10 +113,10 @@ interface ServerErrorEvent {
   code: string;
   message: string;
 }
-
 interface WebSocketEvents {
   onSessionStatus?: (event: SessionStatusEvent) => void;
   onQRCode?: (event: QRCodeEvent) => void;
+  onSessionConnectionStage?: (event: SessionConnectionStageEvent) => void;
   onMessage?: (event: MessageEvent) => void;
   onMessageAck?: (event: MessageAckEvent) => void;
   onMessageReaction?: (event: MessageReactionEvent) => void;
@@ -108,7 +127,6 @@ interface WebSocketEvents {
   onSubscribed?: (event: SubscribedEvent) => void;
   onServerError?: (event: ServerErrorEvent) => void;
 }
-
 // Shape of the server -> client event envelope produced by the NestJS gateway.
 // `type` is the 'event' literal so the frame union below narrows on it.
 interface ServerEventEnvelope {
@@ -120,7 +138,6 @@ interface ServerEventEnvelope {
     data: Record<string, unknown>;
   };
 }
-
 // The gateway also answers client requests (subscribe/unsubscribe/ping) with ack frames
 // (`subscribed` / `unsubscribed` / `pong`) and error frames (`error`) on the same 'message'
 // channel. Routing them to the UI matters: a scoped key's rejected wildcard subscribe must be
@@ -130,11 +147,18 @@ interface ServerAckFrame {
   sessionId?: string;
   events?: string[];
 }
-
 interface ServerErrorFrame {
   type: 'error';
   code?: string;
   message?: string;
+}
+
+function isConnectionStage(value: unknown): value is ConnectionStage {
+  return typeof value === 'string' && (CONNECTION_STAGES as readonly string[]).includes(value);
+}
+
+function isConnectionStageSource(value: unknown): value is ConnectionStageSource {
+  return value === 'native' || value === 'reconcile';
 }
 
 // Use current origin for WebSocket (goes through nginx proxy in Docker)
@@ -142,7 +166,6 @@ interface ServerErrorFrame {
 const SOCKET_URL = import.meta.env.VITE_WS_URL || window.location.origin;
 // Warn when the WebSocket origin is an insecure http:// URL on a non-localhost host.
 warnIfInsecureHttpUrl(SOCKET_URL, 'VITE_WS_URL');
-
 export function useWebSocket(events: WebSocketEvents = {}) {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -157,7 +180,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
   // (which swaps in a fresh socket) leaves the new socket with NO 'message' listener while
   // isConnected still reports true - realtime events stop arriving with no signal anywhere.
   const [socketEpoch, setSocketEpoch] = useState(0);
-
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return;
 
@@ -168,7 +190,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       console.warn('[WebSocket] No API key found, skipping connection');
       return;
     }
-
     setSocketEpoch(epoch => epoch + 1);
     socketRef.current = io(`${SOCKET_URL}/events`, {
       autoConnect: true,
@@ -184,12 +205,10 @@ export function useWebSocket(events: WebSocketEvents = {}) {
         'X-API-Key': apiKey,
       },
     });
-
     socketRef.current.on('connect', () => {
       setIsConnected(true);
       setConnectionFailed(false);
     });
-
     socketRef.current.on('disconnect', reason => {
       setIsConnected(false);
       // A server-initiated close (handshake rate limit, auth rejection, key eviction) sets
@@ -201,7 +220,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
         setConnectionFailed(true);
       }
     });
-
     socketRef.current.on('connect_error', error => {
       console.warn('[WebSocket] Connection error:', error.message);
     });
@@ -212,7 +230,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       setConnectionFailed(true);
     });
   }, []);
-
   // Manual retry after the socket permanently gave up: tear down the dead socket and reconnect.
   const reconnect = useCallback(() => {
     setConnectionFailed(false);
@@ -222,7 +239,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     }
     connect();
   }, [connect]);
-
   const subscribe = useCallback((sessionId: string, eventsList: string[]) => {
     if (socketRef.current?.connected) {
       socketRef.current.emit('message', {
@@ -241,7 +257,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       });
     }
   }, []);
-
   useEffect(() => {
     connect();
 
@@ -258,10 +273,8 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     if (!socketRef.current) return;
 
     const socket = socketRef.current;
-
     const handleIncomingMessage = (msg: ServerEventEnvelope | ServerAckFrame | ServerErrorFrame) => {
       if (!msg || typeof msg.type !== 'string') return;
-
       if (msg.type === 'error') {
         events.onServerError?.({ code: String(msg.code ?? ''), message: String(msg.message ?? '') });
         return;
@@ -276,7 +289,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       if (msg.type !== 'event' || !msg.payload) return;
 
       const { event, sessionId, data } = msg.payload;
-
       switch (event) {
         case 'session.status':
           events.onSessionStatus?.({ sessionId, status: String(data.status), timestamp: msg.timestamp });
@@ -284,6 +296,32 @@ export function useWebSocket(events: WebSocketEvents = {}) {
         case 'session.qr':
           events.onQRCode?.({ sessionId, qrCode: String(data.qrCode), timestamp: msg.timestamp });
           break;
+        case 'session.connection_stage': {
+          const attemptId = data.attemptId;
+          const stage = data.stage;
+          const source = data.source;
+          const elapsedMs = data.elapsedMs;
+          if (
+            typeof attemptId !== 'string' ||
+            !attemptId ||
+            !isConnectionStage(stage) ||
+            !isConnectionStageSource(source) ||
+            typeof elapsedMs !== 'number' ||
+            !Number.isFinite(elapsedMs) ||
+            elapsedMs < 0
+          ) {
+            break;
+          }
+          events.onSessionConnectionStage?.({
+            sessionId,
+            attemptId,
+            stage,
+            source,
+            elapsedMs,
+            timestamp: msg.timestamp,
+          });
+          break;
+        }
         case 'message.received':
         case 'message.sent':
           events.onMessage?.({ sessionId, message: data, timestamp: msg.timestamp });
@@ -355,7 +393,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
           break;
       }
     };
-
     socket.on('message', handleIncomingMessage);
 
     return () => {

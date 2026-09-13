@@ -1,12 +1,20 @@
-// Live session-feed (session.status / session.qr) subscription with scoped-key fallback.
+
+
+
+
+// Live session-feed (session.status / session.qr / session.connection_stage) subscription with scoped-key fallback.
 //
 // The dashboard first tries the '*' wildcard room — one round trip covering every session.
 // A session-scoped API key is NOT allowed to join '*' (the gateway answers with a
 // FORBIDDEN_SESSION error frame instead of an ack), so the client silently falls back to
 // one subscription per visible session. The sessions list endpoint is already scope-filtered
 // server-side, so every listed session is joinable.
-
-export const SESSION_FEED_EVENTS = ['session.status', 'session.qr', 'session.restriction'] as const;
+export const SESSION_FEED_EVENTS = [
+  'session.status',
+  'session.qr',
+  'session.restriction',
+  'session.connection_stage',
+] as const;
 
 export interface SessionFeedSink {
   subscribe(sessionId: string, events: string[]): void;
@@ -44,3 +52,7 @@ export function noteSessionFeedError(state: SessionFeedState, code: string): boo
   state.scope = 'per-session';
   return true;
 }
+
+
+
+

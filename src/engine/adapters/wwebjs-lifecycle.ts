@@ -6,12 +6,17 @@
 
 
 
+
+
+
+
 import * as qrcode from 'qrcode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { Client, NoAuth, WAState } from 'whatsapp-web.js';
 import {
   type AccountRestriction,
+  type ConnectionStage,
   type EngineEventCallbacks,
   EngineStatus,
 } from '../interfaces/whatsapp-engine.interface';
@@ -153,10 +158,6 @@ export class WwebjsLifecycle {
    *  registering one for a WhatsApp-initiated logout, including one that lands after another teardown
    *  path has already latched the flags below. Aliased by the adapter's `logoutInitiated` accessor. */
   logoutInitiated = false;
-  /** Set once a WhatsApp-initiated LOGOUT has started this session's credential removal, so a repeat of
-   *  the same unlink cannot start a second one (#1072). Never reset — an adapter is single-use, and the
-   *  profile is gone after the first removal either way. */
-  private credentialTeardownStarted = false;
   /** Set once the adapter ACTIVELY transitions to DISCONNECTED (engine disconnect, puppeteer death,
    *  stuck-auth recovery, teardown). Same single-use contract as `tearingDown`, but it latches earlier:
    *  on LOGOUT whatsapp-web.js keeps the browser and re-runs inject(), while the lifecycle only replaces
@@ -168,19 +169,29 @@ export class WwebjsLifecycle {
   // library's re-emitted 'ready' and by teardown. Timestamps, never timers — several suites pin
   // exact jest timer counts, and a timer would also outlive the single-use adapter.
   /**
- * Consecutive per-command protocol timeouts observed while the session is READY.
- * A single timeout is treated as a transient browser/renderer fault and does not
- * immediately destroy the session. Repeated timeouts after failed health probes
- * trigger the existing forceDestroy() recovery path.
- */
-  private consecutiveProtocolTimeouts = 0; 
+   * Consecutive per-command protocol timeouts observed while the session is READY. A single timeout
+   * is treated as a transient browser/renderer fault; repeated timeouts after failed health probes
+   * trigger the existing forceDestroy() recovery path.
+   */
+  private consecutiveProtocolTimeouts = 0;
   private lastMainFrameNavigationAt = 0;
   private navigationEpisodeStartedAt = 0;
+  /** True after at least one QR was produced by this client generation. */
+  private qrPresentedThisAttempt = false;
+  /**
+   * True after requestPairingCode() succeeds. Authentication after that point must not be labelled
+   * as a QR scan merely because the page also happened to have produced a QR earlier.
+   */
+  private pairingCodeRequestedThisAttempt = false;
 
-
-  constructor(private readonly host: WwebjsLifecycleHost,
-              private readonly braveProfileManager: BraveProfileManager,  // <-- ADD THIS
+  constructor(
+    private readonly host: WwebjsLifecycleHost,
+    private readonly braveProfileManager: BraveProfileManager,
   ) {}
+
+  private emitConnectionStage(stage: ConnectionStage): void {
+    this.host.getCallbacks().onConnectionStage?.({ stage, source: 'native' });
+  }
 
   async initialize(): Promise<void> {
     this.setStatus(EngineStatus.INITIALIZING);
@@ -337,13 +348,6 @@ export class WwebjsLifecycle {
    * without the pre-launch sweeps it would trip over attempt 1's stale Singleton files. A LIVE
    * attempt-1 browser never reaches attempt 2: resetForInitRetry() abandons the retry instead.
    */
-  /**
- * One construction+launch attempt: everything from `new Client(...)` through the puppeteer death
- * listeners. Extracted so the navigation retry (#1081) repeats the FULL sequence — a second
- * attempt without setupEventHandlers() would have no qr/authenticated/ready handlers at all, and
- * without the pre-launch sweeps it would trip over attempt 1's stale Singleton files. A LIVE
- * attempt-1 browser never reaches attempt 2: resetForInitRetry() abandons the retry instead.
- */
   private async runInitAttempt(
     puppeteerArgs: string[],
     authTimeoutMs: number | undefined,
@@ -788,7 +792,9 @@ export class WwebjsLifecycle {
         }
 
         this.qrCode = encodedQr;
+        this.qrPresentedThisAttempt = true;
         this.setStatus(EngineStatus.QR_READY);
+        this.emitConnectionStage('qr_ready');
         this.host.getCallbacks().onQRCode?.(this.qrCode);
         // Do not rely exclusively on whatsapp-web.js's `authenticated` edge. With a persistent
         // Brave profile the page can already be synced before that edge listener is attached; the
@@ -817,7 +823,12 @@ export class WwebjsLifecycle {
         return;
       }
       this.host.clearAuthReconcile();
+      if (this.qrPresentedThisAttempt && !this.pairingCodeRequestedThisAttempt) {
+        this.emitConnectionStage('qr_scanned');
+      }
+      this.emitConnectionStage('authenticated');
       this.setStatus(EngineStatus.AUTHENTICATING);
+      this.emitConnectionStage('authenticating');
       this.qrCode = null;
       this.host.scheduleReadyReconcile();
     });
@@ -1142,9 +1153,19 @@ export class WwebjsLifecycle {
       this.phoneNumber = phone;
       this.pushName = pushName;
 
+      // A native whatsapp-web.js `ready` means the page socket and own identity are usable. The
+      // patched eventsAttached flag is the stronger bridge signal when available; `undefined` keeps
+      // the existing compatibility behaviour for an unpatched dependency tree.
+      this.emitConnectionStage('runtime_connected');
+      this.emitConnectionStage('identity_ready');
+      if ((this.client as Client & { eventsAttached?: boolean } | null)?.eventsAttached === true) {
+        this.emitConnectionStage('event_bridge_ready');
+      }
+
       this.host.clearAuthReconcile();
       this.host.clearReadyReconcile();
       this.setStatus(EngineStatus.READY);
+      this.emitConnectionStage('ready');
       this.host.getCallbacks().onReady?.(phone, pushName || '');
 
       // A freshly-linked account may show a "What's new" onboarding modal that, left
@@ -1218,7 +1239,7 @@ export class WwebjsLifecycle {
     this.clearNavigationReinjectWindow();
   }
 
- async disconnect(): Promise<void> {
+  async disconnect(): Promise<void> {
   const client = this.beginClientTeardown();
   if (!client) return;
 
@@ -1395,7 +1416,9 @@ export class WwebjsLifecycle {
     if (!this.client || this.status !== EngineStatus.QR_READY) {
       throw new EngineNotReadyError('Session is not waiting to be linked. Start it and wait for the QR stage.');
     }
-    return this.client.requestPairingCode(phoneNumber);
+    const pairingCode = await this.client.requestPairingCode(phoneNumber);
+    this.pairingCodeRequestedThisAttempt = true;
+    return pairingCode;
   }
 
   
@@ -1523,6 +1546,9 @@ export class WwebjsLifecycle {
 
 
   
+
+
+
 
 
 
