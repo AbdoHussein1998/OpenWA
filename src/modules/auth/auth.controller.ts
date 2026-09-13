@@ -1,5 +1,6 @@
 
 
+
 import {
   Body,
   Controller,
@@ -324,6 +325,107 @@ export class AuthController {
     return this.toResponse(
       apiKey,
     );
+  }
+
+  /**
+   * Reissue an API key in place.
+   *
+   * AuthService preserves the row id, role, principal bindings,
+   * restrictions, active state, expiration, and usage metadata while
+   * rotating only keyHash/keyPrefix.
+   *
+   * The replacement plaintext credential is returned exactly once.
+   */
+  @Post(':id/reissue')
+  @RequireRole(ApiKeyRole.ADMIN)
+  @HttpCode(
+    HttpStatus.OK,
+  )
+  @ApiOperation({
+    summary:
+      'Reissue API key (admin only)',
+    description:
+      'Rotates the credential material for an existing API-key row while preserving its id, role, principal bindings, restrictions, active state, and expiration. The replacement plaintext API key is returned only once.',
+  })
+  @ApiResponse({
+    status:
+      HttpStatus.OK,
+
+    description:
+      'API key reissued successfully. The plaintext replacement credential is returned only once.',
+
+    type:
+      ApiKeyCreatedResponseDto,
+  })
+  @ApiResponse({
+    status:
+      HttpStatus.NOT_FOUND,
+
+    description:
+      'API key not found.',
+  })
+  async reissue(
+    @Param('id')
+    id: string,
+
+    @Req()
+    req: Request,
+
+    @CurrentApiKey()
+    actor?: ApiKey,
+  ): Promise<ApiKeyCreatedResponseDto> {
+    const {
+      apiKey,
+      rawKey,
+    } =
+      await this.authService.reissueApiKey(
+        id,
+      );
+
+    /**
+     * There is no dedicated API_KEY_REISSUED enum value yet.
+     *
+     * Record the operation as an API_KEY_UPDATED event and distinguish the
+     * credential rotation explicitly in metadata. Never include rawKey.
+     */
+    await this.auditService.logInfo(
+      AuditAction.API_KEY_UPDATED,
+      {
+        ...this.auditContext(
+          req,
+          actor,
+        ),
+
+        metadata: {
+          action:
+            'reissue',
+
+          targetKeyId:
+            apiKey.id,
+
+          targetKeyName:
+            apiKey.name,
+
+          role:
+            apiKey.role,
+
+          teamLeaderId:
+            apiKey.teamLeaderId,
+
+          agentId:
+            apiKey.agentId,
+        },
+      },
+    );
+
+    return {
+      ...this.toResponse(
+        apiKey,
+      ),
+
+      apiKey:
+        rawKey,
+    };
   }
 
   @Delete(':id')

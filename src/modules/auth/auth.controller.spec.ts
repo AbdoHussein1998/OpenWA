@@ -1,6 +1,9 @@
 
 
 
+
+
+
 import 'reflect-metadata';
 
 import type { Request } from 'express';
@@ -144,6 +147,9 @@ describe(
       createApiKey:
         jest.Mock;
 
+      reissueApiKey:
+        jest.Mock;
+
       findAll:
         jest.Mock;
 
@@ -191,6 +197,26 @@ describe(
 
               rawKey:
                 'raw-secret',
+            }),
+
+        reissueApiKey:
+          jest
+            .fn()
+            .mockResolvedValue({
+              apiKey:
+                createApiKey({
+                  id:
+                    'k1',
+
+                  name:
+                    'target-key',
+
+                  role:
+                    ApiKeyRole.VIEWER,
+                }),
+
+              rawKey:
+                'reissued-raw-secret',
             }),
 
         findAll:
@@ -289,6 +315,18 @@ describe(
             targetKeyId?:
               string;
 
+            action?:
+              string;
+
+            role?:
+              ApiKeyRole;
+
+            teamLeaderId?:
+              string | null;
+
+            agentId?:
+              string | null;
+
             before?: {
               role?:
                 ApiKeyRole;
@@ -318,6 +356,18 @@ describe(
               metadata?: {
                 targetKeyId?:
                   string;
+
+                action?:
+                  string;
+
+                role?:
+                  ApiKeyRole;
+
+                teamLeaderId?:
+                  string | null;
+
+                agentId?:
+                  string | null;
 
                 before?: {
                   role?:
@@ -513,6 +563,143 @@ describe(
     );
 
     it(
+      'reissues an API key, returns the replacement plaintext once, and audits without the secret',
+      async () => {
+        const result =
+          await controller.reissue(
+            'k1',
+            makeReq(),
+            actor,
+          );
+
+        expect(
+          authService.reissueApiKey,
+        ).toHaveBeenCalledTimes(
+          1,
+        );
+
+        expect(
+          authService.reissueApiKey,
+        ).toHaveBeenCalledWith(
+          'k1',
+        );
+
+        expect(
+          result,
+        ).toEqual(
+          expect.objectContaining({
+            id:
+              'k1',
+
+            apiKey:
+              'reissued-raw-secret',
+          }),
+        );
+
+        const context =
+          lastContextFor(
+            AuditAction.API_KEY_UPDATED,
+          );
+
+        expect(
+          context?.apiKey,
+        ).toBe(
+          actor,
+        );
+
+        expect(
+          context
+            ?.metadata
+            ?.targetKeyId,
+        ).toBe(
+          'k1',
+        );
+
+        expect(
+          context
+            ?.metadata
+            ?.action,
+        ).toBe(
+          'reissue',
+        );
+
+        expect(
+          JSON.stringify(
+            auditService
+              .logInfo
+              .mock
+              .calls,
+          ),
+        ).not.toContain(
+          'reissued-raw-secret',
+        );
+      },
+    );
+
+    it(
+      'preserves principal binding ids in the reissue response and audit metadata',
+      async () => {
+        authService
+          .reissueApiKey
+          .mockResolvedValue({
+            apiKey:
+              createApiKey({
+                id:
+                  'agent-key',
+
+                name:
+                  'Agent key',
+
+                role:
+                  ApiKeyRole.AGENT,
+
+                agentId:
+                  'agent-1',
+              }),
+
+            rawKey:
+              'replacement-agent-secret',
+          });
+
+        const result =
+          await controller.reissue(
+            'agent-key',
+            makeReq(),
+            actor,
+          );
+
+        expect(
+          result.agentId,
+        ).toBe(
+          'agent-1',
+        );
+
+        expect(
+          result.teamLeaderId,
+        ).toBeNull();
+
+        const context =
+          lastContextFor(
+            AuditAction.API_KEY_UPDATED,
+          );
+
+        expect(
+          context
+            ?.metadata
+            ?.agentId,
+        ).toBe(
+          'agent-1',
+        );
+
+        expect(
+          context
+            ?.metadata
+            ?.teamLeaderId,
+        ).toBeNull();
+      },
+    );
+
+    it(
       'logs API_KEY_DELETED on delete',
       async () => {
         await controller.delete(
@@ -695,5 +882,8 @@ describe(
     );
   },
 );
+
+
+
 
 

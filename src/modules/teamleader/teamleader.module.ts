@@ -1,3 +1,7 @@
+
+
+
+
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
@@ -6,6 +10,7 @@ import { ApiKey } from '../auth/entities/api-key.entity';
 
 import { Session } from '../session/entities/session.entity';
 
+import { AdminAgentController } from './admin-agent.controller';
 import { AdminTeamLeaderController } from './admin-teamleader.controller';
 import { AgentController } from './agent.controller';
 import { AgentTemplateQuotaService } from './agent-template-quota.service';
@@ -34,14 +39,15 @@ import { TeamLeaderService } from './teamleader.service';
     /**
      * WhatsApp sessions live in the separate `data` database.
      *
-     * TeamLeaderService currently injects Repository<Session> directly for:
+     * TeamLeaderService injects Repository<Session> directly for:
      *
      * - verifying session ownership before Agent assignment
      * - preventing legacy Team Leader deletion while sessions are still owned
+     * - resolving assigned Session metadata for the ADMIN Agent overview
      *
-     * Do not import SessionModule merely for these repository reads. The
-     * SessionModule dependency should be introduced when TeamLeaderService
-     * actually injects SessionService for the retirement delete-all lifecycle.
+     * Do not import SessionModule merely for these repository operations.
+     * SessionModule should be introduced when TeamLeaderService actually
+     * injects SessionService for the retirement delete-all lifecycle.
      */
     TypeOrmModule.forFeature(
       [
@@ -62,6 +68,7 @@ import { TeamLeaderService } from './teamleader.service';
 
   controllers: [
     AdminTeamLeaderController,
+    AdminAgentController,
     TeamLeaderController,
     AgentController,
   ],
@@ -85,3 +92,6 @@ import { TeamLeaderService } from './teamleader.service';
   ],
 })
 export class TeamLeaderModule {}
+
+
+

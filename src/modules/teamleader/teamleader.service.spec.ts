@@ -223,6 +223,7 @@ describe(
 
     let sessionRepository: {
       count: jest.Mock;
+      find: jest.Mock;
       findOne: jest.Mock;
     };
 
@@ -290,6 +291,9 @@ describe(
 
       sessionRepository = {
         count:
+          jest.fn(),
+
+        find:
           jest.fn(),
 
         findOne:
@@ -1836,6 +1840,345 @@ describe(
 
             expect(
               eventsGateway.evictApiKey,
+            ).not.toHaveBeenCalled();
+          },
+        );
+      },
+    );
+
+    // -------------------------------------------------------------------------
+    // getAdminAgents()
+    // -------------------------------------------------------------------------
+
+    describe(
+      'getAdminAgents',
+      () => {
+        it(
+          'returns all Agents with Team Leader and assigned Session metadata merged across databases',
+          async () => {
+            const teamLeaderA =
+              createTeamLeader({
+                id:
+                  'team-leader-a',
+
+                name:
+                  'Ahmed Hassan',
+
+                email:
+                  'ahmed@example.com',
+              });
+
+            const teamLeaderB =
+              createTeamLeader({
+                id:
+                  'team-leader-b',
+
+                name:
+                  'Sara Leader',
+
+                email:
+                  null,
+              });
+
+            const assignedAgent =
+              createAgent({
+                id:
+                  'agent-a',
+
+                name:
+                  'Assigned Agent',
+
+                email:
+                  'assigned@example.com',
+
+                teamLeaderId:
+                  teamLeaderA.id,
+
+                teamLeader:
+                  teamLeaderA,
+
+                assignedSessionId:
+                  'session-a',
+
+                templateSendLimit24h:
+                  25,
+              });
+
+            const unassignedAgent =
+              createAgent({
+                id:
+                  'agent-b',
+
+                name:
+                  'Unassigned Agent',
+
+                email:
+                  null,
+
+                teamLeaderId:
+                  teamLeaderB.id,
+
+                teamLeader:
+                  teamLeaderB,
+
+                assignedSessionId:
+                  null,
+
+                templateSendLimit24h:
+                  null,
+              });
+
+            agentRepository.find
+              .mockResolvedValue([
+                assignedAgent,
+                unassignedAgent,
+              ]);
+
+            sessionRepository.find
+              .mockResolvedValue([
+                createSession({
+                  id:
+                    'session-a',
+
+                  name:
+                    'support-session',
+
+                  status:
+                    'ready' as Session['status'],
+
+                  phone:
+                    '201001234567',
+
+                  targetPhone:
+                    '201001234567',
+                }),
+              ]);
+
+            const result =
+              await service.getAdminAgents();
+
+            expect(
+              agentRepository.find,
+            ).toHaveBeenCalledWith({
+              relations: {
+                teamLeader:
+                  true,
+              },
+
+              order: {
+                createdAt:
+                  'DESC',
+              },
+            });
+
+            expect(
+              sessionRepository.find,
+            ).toHaveBeenCalledWith({
+              where: {
+                id:
+                  expect.anything(),
+              },
+            });
+
+            expect(
+              result,
+            ).toEqual([
+              {
+                id:
+                  'agent-a',
+
+                name:
+                  'Assigned Agent',
+
+                email:
+                  'assigned@example.com',
+
+                teamLeaderId:
+                  'team-leader-a',
+
+                teamLeader: {
+                  id:
+                    'team-leader-a',
+
+                  name:
+                    'Ahmed Hassan',
+
+                  email:
+                    'ahmed@example.com',
+                },
+
+                assignedSessionId:
+                  'session-a',
+
+                assignedSession: {
+                  id:
+                    'session-a',
+
+                  name:
+                    'support-session',
+
+                  status:
+                    'ready',
+
+                  phone:
+                    '201001234567',
+
+                  targetPhone:
+                    '201001234567',
+                },
+
+                templateSendLimit24h:
+                  25,
+
+                createdAt:
+                  assignedAgent.createdAt,
+
+                updatedAt:
+                  assignedAgent.updatedAt,
+              },
+
+              {
+                id:
+                  'agent-b',
+
+                name:
+                  'Unassigned Agent',
+
+                email:
+                  null,
+
+                teamLeaderId:
+                  'team-leader-b',
+
+                teamLeader: {
+                  id:
+                    'team-leader-b',
+
+                  name:
+                    'Sara Leader',
+
+                  email:
+                    null,
+                },
+
+                assignedSessionId:
+                  null,
+
+                assignedSession:
+                  null,
+
+                templateSendLimit24h:
+                  null,
+
+                createdAt:
+                  unassignedAgent.createdAt,
+
+                updatedAt:
+                  unassignedAgent.updatedAt,
+              },
+            ]);
+          },
+        );
+
+        it(
+          'preserves a stale assignedSessionId while returning assignedSession as null',
+          async () => {
+            const agent =
+              createAgent({
+                assignedSessionId:
+                  'missing-session',
+              });
+
+            agentRepository.find
+              .mockResolvedValue([
+                agent,
+              ]);
+
+            sessionRepository.find
+              .mockResolvedValue([]);
+
+            const result =
+              await service.getAdminAgents();
+
+            expect(
+              result,
+            ).toHaveLength(
+              1,
+            );
+
+            expect(
+              result[0].assignedSessionId,
+            ).toBe(
+              'missing-session',
+            );
+
+            expect(
+              result[0].assignedSession,
+            ).toBeNull();
+          },
+        );
+
+        it(
+          'does not query the data database when no Agent has a session assignment',
+          async () => {
+            agentRepository.find
+              .mockResolvedValue([
+                createAgent({
+                  id:
+                    'agent-a',
+
+                  assignedSessionId:
+                    null,
+                }),
+
+                createAgent({
+                  id:
+                    'agent-b',
+
+                  assignedSessionId:
+                    null,
+                }),
+              ]);
+
+            const result =
+              await service.getAdminAgents();
+
+            expect(
+              result,
+            ).toHaveLength(
+              2,
+            );
+
+            expect(
+              sessionRepository.find,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              result.every(
+                item =>
+                  item.assignedSession ===
+                  null,
+              ),
+            ).toBe(
+              true,
+            );
+          },
+        );
+
+        it(
+          'returns an empty array without querying Sessions when no Agents exist',
+          async () => {
+            agentRepository.find
+              .mockResolvedValue([]);
+
+            await expect(
+              service.getAdminAgents(),
+            ).resolves.toEqual(
+              [],
+            );
+
+            expect(
+              sessionRepository.find,
             ).not.toHaveBeenCalled();
           },
         );

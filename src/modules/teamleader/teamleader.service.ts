@@ -4,6 +4,9 @@
 
 
 
+
+
+
 import {
   ConflictException,
   Injectable,
@@ -63,6 +66,44 @@ export interface CreateAgentResult {
    * Returned exactly once at creation time.
    */
   apiKey: string;
+}
+
+
+/**
+ * Flattened ADMIN overview of an Agent, its owning Team Leader, and its
+ * currently assigned Session (when one exists).
+ *
+ * Agent / Team Leader rows live in the `main` database while Session rows
+ * live in the separate `data` database, so TeamLeaderService merges them
+ * in memory rather than attempting a cross-database ORM join.
+ */
+export interface AdminAgentOverview {
+  id: string;
+  name: string;
+  email: string | null;
+
+  teamLeaderId: string;
+
+  teamLeader: {
+    id: string;
+    name: string;
+    email: string | null;
+  };
+
+  assignedSessionId: string | null;
+
+  assignedSession: {
+    id: string;
+    name: string;
+    status: Session['status'];
+    phone: string | null;
+    targetPhone: string | null;
+  } | null;
+
+  templateSendLimit24h: number | null;
+
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 @Injectable()
@@ -663,6 +704,151 @@ export class TeamLeaderService {
   }
 
   /**
+   * ADMIN-only global Agent overview.
+   *
+   * This deliberately performs two database reads instead of a join:
+   *
+   * 1. main DB -> Agents with their Team Leader relation
+   * 2. data DB -> Sessions referenced by assignedSessionId
+   *
+   * The databases are independent TypeORM connections, so a cross-database
+   * ORM relation/join would be incorrect.
+   *
+   * A stale assignedSessionId is preserved in assignedSessionId while
+   * assignedSession becomes null. That exposes data inconsistency to the
+   * administrative UI without fabricating Session data or hiding the stored
+   * assignment.
+   */
+  async getAdminAgents(): Promise<AdminAgentOverview[]> {
+    const agents =
+      await this.agentRepository.find({
+        relations: {
+          teamLeader: true,
+        },
+
+        order: {
+          createdAt:
+            'DESC',
+        },
+      });
+
+    if (agents.length === 0) {
+      return [];
+    }
+
+    const assignedSessionIds = [
+      ...new Set(
+        agents
+          .map(
+            agent =>
+              agent.assignedSessionId,
+          )
+          .filter(
+            (
+              sessionId,
+            ): sessionId is string =>
+              sessionId !== null,
+          ),
+      ),
+    ];
+
+    let sessions: Session[] = [];
+
+    if (
+      assignedSessionIds.length >
+      0
+    ) {
+      sessions =
+        await this.sessionRepository.find({
+          where: {
+            id:
+              In(
+                assignedSessionIds,
+              ),
+          },
+        });
+    }
+
+    const sessionsById =
+      new Map(
+        sessions.map(
+          session => [
+            session.id,
+            session,
+          ],
+        ),
+      );
+
+    return agents.map(
+      agent => {
+        const assignedSession =
+          agent.assignedSessionId
+            ? sessionsById.get(
+                agent.assignedSessionId,
+              ) ?? null
+            : null;
+
+        return {
+          id:
+            agent.id,
+
+          name:
+            agent.name,
+
+          email:
+            agent.email,
+
+          teamLeaderId:
+            agent.teamLeaderId,
+
+          teamLeader: {
+            id:
+              agent.teamLeader.id,
+
+            name:
+              agent.teamLeader.name,
+
+            email:
+              agent.teamLeader.email,
+          },
+
+          assignedSessionId:
+            agent.assignedSessionId,
+
+          assignedSession:
+            assignedSession
+              ? {
+                  id:
+                    assignedSession.id,
+
+                  name:
+                    assignedSession.name,
+
+                  status:
+                    assignedSession.status,
+
+                  phone:
+                    assignedSession.phone,
+
+                  targetPhone:
+                    assignedSession.targetPhone,
+                }
+              : null,
+
+          templateSendLimit24h:
+            agent.templateSendLimit24h,
+
+          createdAt:
+            agent.createdAt,
+
+          updatedAt:
+            agent.updatedAt,
+        };
+      },
+    );
+  }
+
+  /**
    * List only Agents owned by the specified Team Leader.
    */
   async listAgents(
@@ -1224,6 +1410,9 @@ export class TeamLeaderService {
     );
   }
 }
+
+
+
 
 
 
