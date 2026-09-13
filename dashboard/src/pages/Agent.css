@@ -10,9 +10,47 @@
   min-height: calc(100vh - 4rem);
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
   gap: 1.5rem;
+  box-sizing: border-box;
   overflow-x: hidden;
+}
+
+/*
+ * Agent.tsx reuses the Chats components and therefore also carries the
+ * `chats-page` class. Chats.css gives `.chats-page` a fixed viewport
+ * height intended for the standalone Chats page. The Agent page has
+ * extra content above the chat, so that fixed height pushes/clips the
+ * chat below the visible area.
+ *
+ * The Agent page must be allowed to grow vertically and scroll normally.
+ */
+.agent-page.chats-page {
+  height: auto;
+  min-height: calc(100vh - 4rem);
+  overflow: visible;
+}
+
+.agent-page .page-header {
+  margin-bottom: 0.5rem;
+}
+
+/* Keep the top-level Agent sections in a predictable order. */
+.agent-page.chats-page > .agent-header {
+  order: 0;
+}
+
+.agent-page.chats-page > .agent-identity-grid,
+.agent-page.chats-page > [class*='agent-identity-grid'] {
+  order: 1;
+}
+
+.agent-page.chats-page > .agent-session-management-card {
+  order: 2;
+}
+
+.agent-page.chats-page > .agent-workspace,
+.agent-page.chats-page > .agent-state--compact {
+  order: 3;
 }
 
 /* ============================================================
@@ -21,79 +59,132 @@
 
 .agent-header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
   flex-shrink: 0;
+  padding: 1.25rem 1.5rem;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-header > div {
+  min-width: 0;
 }
 
 .agent-header h1 {
   margin: 0;
+  color: var(--text-primary);
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--text-primary, #111827);
 }
 
 .agent-header p {
-  margin: 0.25rem 0 0;
-  color: var(--text-secondary, #6b7280);
-  font-size: 0.9rem;
+  max-width: 720px;
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.agent-session-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 /* ============================================================
-   READ-ONLY ASSIGNMENT SUMMARY
+   COMPACT READ-ONLY ASSIGNMENT SUMMARY
    ============================================================ */
 
-.agent-identity-grid {
+/*
+ * Compact five-card metadata row.
+ *
+ * The attribute selector is intentional: it also catches the temporary
+ * malformed rendered class `agent-identity-grid\`. Agent.tsx should
+ * still be corrected to `className="agent-identity-grid"`.
+ */
+.agent-identity-grid,
+[class*='agent-identity-grid'] {
+  width: 100%;
+  min-width: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .agent-info-card {
   min-width: 0;
+  min-height: 72px;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 1rem 1.125rem;
-  background: var(--bg-white, #ffffff);
-  border: 1px solid var(--border, #e5e7eb);
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  justify-content: center;
+  gap: 0.18rem;
+  padding: 0.7rem 0.8rem;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-info-card:hover {
+  border-color: rgba(37, 211, 102, 0.28);
+  background: rgba(37, 211, 102, 0.025);
 }
 
 .agent-info-label {
-  color: var(--text-secondary, #6b7280);
-  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-size: 0.625rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.055em;
+  line-height: 1.2;
 }
 
 .agent-info-card strong {
   min-width: 0;
   overflow: hidden;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-primary, #111827);
-  font-size: 0.95rem;
 }
 
 .agent-info-secondary {
   min-width: 0;
   overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-muted, #9ca3af);
-  font-size: 0.76rem;
+}
+
+.agent-info-card .agent-status {
+  margin-top: 0.05rem;
+  padding: 0.16rem 0.42rem;
+  font-size: 0.625rem;
 }
 
 .agent-mono {
   direction: ltr;
   unicode-bidi: embed;
   text-align: left;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
 }
 
 /* ============================================================
@@ -105,19 +196,19 @@
   width: fit-content;
   align-items: center;
   padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-light);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--bg-light, #f9fafb);
-  color: var(--text-secondary, #6b7280);
-  font-size: 0.7rem;
-  font-weight: 700;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 600;
   white-space: nowrap;
 }
 
 .agent-status--ready {
   background: rgba(37, 211, 102, 0.1);
   border-color: rgba(37, 211, 102, 0.32);
-  color: var(--success-text, #15803d);
+  color: var(--primary-text);
 }
 
 .agent-status--initializing,
@@ -125,20 +216,308 @@
 .agent-status--qr_ready {
   background: rgba(245, 158, 11, 0.09);
   border-color: rgba(245, 158, 11, 0.3);
-  color: var(--warning-text, #b45309);
+  color: var(--warning-text);
 }
 
 .agent-status--failed,
 .agent-status--action_required {
   background: rgba(239, 68, 68, 0.08);
   border-color: rgba(239, 68, 68, 0.26);
-  color: var(--error-text, #dc2626);
+  color: var(--error-text);
 }
 
 .agent-status--created,
 .agent-status--disconnected {
-  background: var(--bg-light, #f9fafb);
-  color: var(--text-secondary, #6b7280);
+  background: var(--bg-light);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+/* ============================================================
+   ASSIGNED SESSION MANAGEMENT TOOLBAR
+   ============================================================ */
+
+/*
+ * Desktop layout:
+ *
+ *   [ Assigned session management + status ]     [ buttons buttons buttons ]
+ *
+ * This toolbar is intentionally compact and is ordered immediately above
+ * the chat workspace. The full session details already exist in the
+ * identity cards, so the duplicated summary inside the management card
+ * is hidden here.
+ */
+.agent-session-management-card {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  padding: 0.875rem 1rem;
+  box-sizing: border-box;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-session-management-header {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.agent-session-management-header > div {
+  min-width: 0;
+}
+
+.agent-session-management-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.agent-session-management-title > svg {
+  flex: 0 0 auto;
+  color: var(--primary-text);
+}
+
+.agent-session-management-title > div {
+  min-width: 0;
+}
+
+.agent-session-management-title h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.agent-session-management-title p {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+/*
+ * `display: contents` promotes the body's children into the management
+ * card's grid. This lets the existing TSX stay unchanged while placing
+ * the action row beside the title.
+ */
+.agent-session-management-body {
+  display: contents;
+}
+
+/*
+ * The same Session / phone values are already displayed in the
+ * `.agent-identity-grid`, so keeping this second summary visible creates
+ * unnecessary vertical height and pushes the chat down.
+ */
+.agent-session-management-summary {
+  display: none;
+}
+
+.agent-session-control-row {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.agent-session-control-row .btn-primary,
+.agent-session-control-row .btn-secondary {
+  flex: 0 0 auto;
+  min-height: 2.25rem;
+  padding: 0.5rem 0.75rem;
+  white-space: nowrap;
+}
+
+.agent-session-control-row .btn-secondary.danger {
+  color: var(--error-text);
+}
+
+.agent-session-control-row .btn-secondary.danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--error-text);
+}
+
+.agent-session-warning {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 8px;
+  color: var(--warning-text);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.agent-session-warning > svg {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+}
+
+.agent-session-warning--error {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: var(--error-text);
+}
+
+/* ============================================================
+   PAIRING PANEL
+   ============================================================ */
+
+/*
+ * Pairing is the one case where the toolbar intentionally expands.
+ * It occupies the full width below the title/actions row.
+ */
+.agent-pairing-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.agent-pairing-tabs {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.agent-pairing-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.7rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.agent-pairing-tab.active {
+  background: var(--bg-white);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-qr-panel {
+  min-height: 210px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 1rem;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.agent-qr-image {
+  width: 190px;
+  max-width: 100%;
+  height: auto;
+  display: block;
+  padding: 0.5rem;
+  background: #ffffff;
+  border-radius: 8px;
+}
+
+.agent-qr-copy {
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.agent-qr-copy strong {
+  color: var(--text-primary);
+}
+
+.agent-qr-copy span {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.agent-qr-loading {
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: var(--text-muted);
+}
+
+.agent-phone-pairing-panel {
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.agent-pairing-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.7rem 0.8rem;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.agent-pairing-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.12);
+}
+
+.agent-pairing-code {
+  width: fit-content;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
 }
 
 /* ============================================================
@@ -152,13 +531,14 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.9rem;
-  padding: 2.5rem;
+  gap: 0.65rem;
+  padding: 3rem 2rem;
   text-align: center;
-  color: var(--text-muted, #9ca3af);
-  background: var(--bg-white, #ffffff);
-  border: 1px dashed var(--border, #e5e7eb);
+  color: var(--text-muted);
+  background: var(--bg-white);
+  border: 1px solid var(--border);
   border-radius: 12px;
+  box-shadow: var(--shadow-sm);
 }
 
 .agent-state--compact {
@@ -167,27 +547,50 @@
 }
 
 .agent-state--error {
-  color: var(--error-text, #dc2626);
+  background: rgba(239, 68, 68, 0.08);
   border-color: rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.04);
+  color: var(--error-text);
+}
+
+.agent-state > svg {
+  margin-bottom: 0.25rem;
+  color: var(--text-muted);
+}
+
+.agent-state--error > svg {
+  color: var(--error-text);
 }
 
 .agent-state h2 {
   margin: 0;
-  color: var(--text-primary, #111827);
-  font-size: 1.2rem;
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  font-weight: 600;
 }
 
 .agent-state p {
   max-width: 560px;
   margin: 0;
-  color: var(--text-secondary, #6b7280);
-  line-height: 1.55;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 .agent-state code {
   max-width: 100%;
   overflow-wrap: anywhere;
+  padding: 0.25rem 0.5rem;
+  background: var(--bg-light);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  font-size: 0.75rem;
 }
 
 /* ============================================================
@@ -196,29 +599,62 @@
 
 .agent-workspace {
   width: 100%;
-  min-height: 0;
+  min-width: 0;
+  min-height: 560px;
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
 }
 
 .agent-chat-grid-item {
   width: 100%;
   min-width: 0;
-  min-height: 520px;
-  height: calc(100vh - 17rem);
+  min-height: 560px;
+  height: min(720px, calc(100vh - 10rem));
   display: flex;
   flex-direction: column;
 }
 
 /*
- * Reuse the main Chats layout, but fit it into the Agent page instead
- * of the standalone Chats page's own viewport calculation.
+ * Reuse the main Chats layout without inheriting the standalone Chats
+ * page's viewport calculation or top margin.
  */
 .agent-page.chats-page .chats-layout {
+  width: 100%;
   height: 100%;
   min-height: 0;
   margin-top: 0;
-  flex: 1;
+  flex: 1 1 auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.agent-page.chats-page .agent-workspace > .chats-layout {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Make reconnect banners part of the chat card instead of expanding it. */
+.agent-chat-grid-item > .chats-reconnect-banner {
+  flex: 0 0 auto;
+}
+
+/* ============================================================
+   COMMON BUTTON ALIGNMENT
+   ============================================================ */
+
+.agent-page .btn-primary,
+.agent-page .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 /* ============================================================
@@ -230,40 +666,156 @@
   text-align: left;
 }
 
+/*
+ * Keep the requested toolbar visual relationship in RTL too:
+ * descriptive content at the start, operational buttons at the end.
+ */
+[dir='rtl'] .agent-session-control-row {
+  justify-content: flex-start;
+}
+
 /* ============================================================
    RESPONSIVE
    ============================================================ */
 
-@media (max-width: 1200px) {
-  .agent-identity-grid {
+@media (max-width: 1280px) {
+  .agent-identity-grid,
+  [class*='agent-identity-grid'] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .agent-session-management-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agent-session-management-header {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .agent-session-control-row {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 1000px) {
+  .agent-identity-grid,
+  [class*='agent-identity-grid'] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 768px) {
-  .agent-page {
+  .agent-page,
+  .agent-page.chats-page {
     padding: 1rem;
     min-height: calc(100vh - 2rem);
     gap: 1rem;
   }
 
   .agent-header {
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
+    padding: 1rem;
   }
 
+  .agent-header .btn-primary,
   .agent-header .btn-secondary {
     width: 100%;
-    justify-content: center;
   }
 
-  .agent-identity-grid {
+  .agent-session-actions {
+    width: 100%;
+  }
+
+  .agent-session-actions .btn-primary,
+  .agent-session-actions .btn-secondary {
+    flex: 1 1 auto;
+  }
+
+  .agent-identity-grid,
+  [class*='agent-identity-grid'] {
     grid-template-columns: 1fr;
+    gap: 0.6rem;
+  }
+
+  .agent-info-card {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(110px, 0.38fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 0.15rem 0.75rem;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .agent-info-label {
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  .agent-info-card strong,
+  .agent-info-secondary,
+  .agent-info-card .agent-status {
+    grid-column: 2;
+  }
+
+  .agent-info-card .agent-status {
+    margin-top: 0;
+  }
+
+  .agent-session-management-card {
+    padding: 0.875rem;
+  }
+
+  .agent-session-management-header {
+    align-items: flex-start;
+  }
+
+  .agent-session-management-title {
+    align-items: flex-start;
+  }
+
+  .agent-session-management-header > .agent-status {
+    margin-inline-start: auto;
+  }
+
+  .agent-session-control-row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .agent-session-control-row .btn-primary,
+  .agent-session-control-row .btn-secondary {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .agent-pairing-tabs {
+    width: 100%;
+  }
+
+  .agent-pairing-tab {
+    flex: 1 1 0;
+  }
+
+  .agent-qr-panel {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .agent-workspace {
+    min-height: 500px;
+    overflow: hidden;
   }
 
   .agent-chat-grid-item {
-    height: 65vh;
-    min-height: 440px;
+    height: 70vh;
+    min-height: 500px;
   }
 
   .agent-state {
@@ -273,11 +825,46 @@
 }
 
 @media (max-width: 480px) {
+  .agent-page,
+  .agent-page.chats-page {
+    padding: 0.75rem;
+  }
+
+  .agent-session-management-header {
+    flex-wrap: wrap;
+  }
+
+  .agent-session-management-header > .agent-status {
+    margin-inline-start: 0;
+  }
+
+  .agent-session-control-row {
+    grid-template-columns: 1fr;
+  }
+
   .agent-chat-grid-item {
-    min-height: 400px;
+    height: 68vh;
+    min-height: 460px;
   }
 
   .agent-info-card {
-    padding: 0.9rem;
+    grid-template-columns: 92px minmax(0, 1fr);
+    padding: 0.6rem 0.7rem;
+  }
+
+  .agent-info-card strong,
+  .agent-info-secondary {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .agent-qr-image {
+    width: 170px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-pairing-input {
+    transition: none;
   }
 }

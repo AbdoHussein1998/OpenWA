@@ -1,6 +1,3 @@
-
-
-
 import type {
   RoleCapabilities,
   UserRole,
@@ -268,12 +265,14 @@ export function canAccessRoute(
   }
 
   /**
-   * Global Agent inventory is an Admin-only management surface.
-   *
-   * This is intentionally distinct from `/agent`, which is the
-   * assignment-scoped Agent self-service workspace.
+   * Global Team Leader and Agent inventories are Admin-only management
+   * surfaces. These are intentionally distinct from `/team-leader` and
+   * `/agent`, which are self-service workspaces for those principal roles.
    */
-  if (matchesRoute(pathname, '/admin/agents')) {
+  if (
+    matchesRoute(pathname, '/admin/team-leaders') ||
+    matchesRoute(pathname, '/admin/agents')
+  ) {
     return role === 'admin';
   }
 
@@ -364,7 +363,3 @@ export function canAccessRoute(
 
   return false;
 }
-
-
-
-

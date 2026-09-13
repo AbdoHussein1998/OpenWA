@@ -5,6 +5,10 @@ import { type Client, WAState } from 'whatsapp-web.js';
 import { type EngineEventCallbacks, EngineStatus } from '../interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
+import {
+  DEFAULT_WWEBJS_READY_TIMEOUT_MS,
+  resolveReadyTimeoutMs,
+} from '../engine-init-timeout';
 
 /**
  * Readiness reconciliation extracted from WhatsAppWebJsAdapter: the post-authentication window that
@@ -41,7 +45,13 @@ const AUTH_RECONCILE_REPLAY_FALLBACK_THRESHOLD = 2;
  */
 const RECONCILE_PROBE_TIMEOUT_MS = 5_000;
 const READY_RECONCILE_INTERVAL_MS = 2000;
-export const READY_RECONCILE_TIMEOUT_MS = 90_000;
+/**
+ * Backward-compatible export for code/tests that referenced the old fixed constant.
+ *
+ * This is now the DEFAULT only. Each readiness-reconciliation run resolves the live
+ * WWEBJS_READY_TIMEOUT_MS value through resolveReadyTimeoutMs().
+ */
+export const READY_RECONCILE_TIMEOUT_MS = DEFAULT_WWEBJS_READY_TIMEOUT_MS;
 
 // How long after `authenticated` the event bridge is allowed to still be attaching before a reload is
 // considered. whatsapp-web.js clears `eventsAttached` in its constructor (Client.js:109) and sets it
@@ -54,6 +64,22 @@ export const READY_RECONCILE_TIMEOUT_MS = 90_000;
 // warranted still has time to reinject before the deadline.
 export const READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS = 45_000;
 
+/**
+ * A QR scan can succeed while whatsapp-web.js misses its `authenticated` / `hasSynced` handoff.
+ * Once the page itself proves CONNECTED + identity, keep the saved pairing and allow the normal
+ * post-auth pipeline time to settle before doing one page reload/reinjection. This is deliberately
+ * longer than the bridge-only grace because slow phones/accounts can spend a while syncing after
+ * they first become linked.
+ */
+export const QR_CONNECTED_REINJECT_GRACE_MS = 90_000;
+
+interface QrPageAuthenticationProbe {
+  connected: boolean;
+  hasSynced: boolean;
+  hasIdentity: boolean;
+  replayed: boolean;
+}
+
 export class WwebjsReadyReconcile {
   // Pre-authentication backstop. The normal path is whatsapp-web.js emitting `authenticated`.
   // A warm/persistent profile can already have Socket.hasSynced=true before its edge listener is
@@ -65,16 +91,28 @@ export class WwebjsReadyReconcile {
 
   private readyReconcileTimer: ReturnType<typeof setTimeout> | null = null;
   private readyReconcileStartedAt = 0;
+  private readyReconcileTimeoutMs = READY_RECONCILE_TIMEOUT_MS;
   private readyReconcileProbeInFlight = false;
-  // What the last reconcile probe observed, driving the bridge-dead self-heal and the deadline
-  // decision (a CONNECTED session must never have its credentials wiped).
+
+  // Current Node-side getState() observation. This remains separate from hasObservedConnected because
+  // maybeReloadDeadBridge() should only operate on a page that is connected NOW, while the timeout
+  // decision must remember that pairing succeeded at least once during this auth generation.
   private lastProbeStateConnected = false;
+  private hasObservedConnected = false;
+
+  // When QR_READY page probing proves CONNECTED + identity even though whatsapp-web.js missed its
+  // authenticated handoff. That evidence moves OpenWA to AUTHENTICATING and starts a bounded one-shot
+  // reinjection grace rather than leaving a successfully linked phone staring at a QR forever.
+  private qrConnectedObservedAt = 0;
 
   // Bridge-dead observation is phase-local but timestamped from the FIRST confirmed
-  // CONNECTED + identity + eventsAttached=false probe. Using readyReconcileStartedAt here is unsafe
-  // in QR_READY because that clock is zero until authenticated has been accepted.
+  // CONNECTED + identity + eventsAttached=false probe.
   private bridgeDeadObservedAt = 0;
-  private bridgeReloadAttempted = false;
+
+  // Shared one-reload budget for this reconciliation generation. Both the dead-bridge path and the
+  // QR-connected-but-runtime-incomplete path reinject the same browser page, so they must not each
+  // get an independent reload.
+  private runtimeReloadAttempted = false;
 
   constructor(private readonly host: WwebjsReadyReconcileHost) {}
 
@@ -136,6 +174,10 @@ export class WwebjsReadyReconcile {
     this.authReconcileProbeInFlight = false;
     this.lastAuthReplayAt = 0;
     this.authReplayCount = 0;
+    this.lastProbeStateConnected = false;
+    this.hasObservedConnected = false;
+    this.qrConnectedObservedAt = 0;
+    this.runtimeReloadAttempted = false;
     this.resetBridgeRecoveryObservation();
   }
 
@@ -144,62 +186,104 @@ export class WwebjsReadyReconcile {
     if (!sourceClient || this.host.getStatus() !== EngineStatus.QR_READY) return;
 
     /*
-     * IMPORTANT ORDERING:
+     * Do not rely only on whatsapp-web.js's `change:hasSynced` edge here.
      *
-     * Probe the page-side Socket.hasSynced LEVEL before calling client.getState().
+     * Some phones/accounts successfully finish the QR link while that edge/handoff is missed. In
+     * that state the phone says "linked", the Brave profile contains valid credentials, but OpenWA
+     * remains QR_READY until the browser is manually restarted. Probe the same live page modules
+     * whatsapp-web.js itself uses so CONNECTED + an own identity can prove pairing independently of
+     * the missed Node-side event.
      *
-     * In the failure this reconciler is designed for, the phone has already linked but OpenWA is
-     * still QR_READY because whatsapp-web.js missed the `change:hasSynced` edge. During that
-     * half-transition client.getState() can reject or hang. If getState() runs first, the recovery
-     * binding below is never reached and one hung promise can keep the session stuck forever.
-     *
-     * The replay attempt is backoff-limited. Stamp the attempt BEFORE awaiting it so a timed-out CDP
-     * call cannot cause a new evaluate every two seconds while its original Puppeteer promise is
-     * still unresolved in the background.
+     * We still replay onAppStateHasSyncedEvent when hasSynced=true, preserving the normal upstream
+     * path whenever possible. The replay is backoff-limited; the read-only state probe runs every
+     * reconciliation tick so a slow first pairing can leave QR_READY as soon as the page is truly
+     * linked.
      */
     const now = Date.now();
-    if (now - this.lastAuthReplayAt >= AUTH_RECONCILE_REPLAY_BACKOFF_MS) {
-      this.lastAuthReplayAt = now;
+    const shouldReplaySyncedEdge =
+      now - this.lastAuthReplayAt >= AUTH_RECONCILE_REPLAY_BACKOFF_MS;
 
-      const replayed = await this.withProbeTimeout(
-        this.replayHasSyncedHandler(sourceClient),
-        'QR hasSynced replay probe',
+    if (shouldReplaySyncedEdge) {
+      // Stamp BEFORE awaiting the Puppeteer call. A timed-out CDP request may continue underneath
+      // Promise.race, and this prevents replacement replays every two seconds.
+      this.lastAuthReplayAt = now;
+    }
+
+    const pageProbe = await this.withProbeTimeout(
+      this.probeQrPageAuthentication(sourceClient, shouldReplaySyncedEdge),
+      'QR authentication page-state probe',
+    );
+
+    if (this.host.getClient() !== sourceClient || this.host.getStatus() !== EngineStatus.QR_READY) {
+      return;
+    }
+
+    if (pageProbe.replayed) {
+      this.authReplayCount += 1;
+      this.host.logger.warn(
+        this.authReplayCount === 1
+          ? 'WhatsApp Web has already synced while OpenWA is QR_READY; replaying the missed authentication edge'
+          : 'WhatsApp Web is still QR_READY after a synced-edge replay; retrying the authentication handoff',
+        {
+          sessionId: this.host.config.sessionId,
+          action: 'qr_auth_synced_edge_replayed',
+          replayCount: this.authReplayCount,
+        },
+      );
+    }
+
+    if (pageProbe.connected && pageProbe.hasIdentity) {
+      const observedAt = Date.now();
+
+      this.host.logger.warn(
+        'WhatsApp Web page is CONNECTED with an identity while OpenWA is still QR_READY; ' +
+          'treating the QR as consumed and continuing readiness reconciliation without clearing credentials',
+        {
+          sessionId: this.host.config.sessionId,
+          action: 'qr_auth_page_connected_reconciled',
+          hasSynced: pageProbe.hasSynced,
+          replayed: pageProbe.replayed,
+        },
       );
 
-      if (this.host.getClient() !== sourceClient || this.host.getStatus() !== EngineStatus.QR_READY) {
-        return;
-      }
+      /*
+       * Do NOT mark READY here. CONNECTED proves the phone/account pairing succeeded, but the
+       * whatsapp-web.js message bridge may still be attaching. Move only to AUTHENTICATING and let
+       * the existing readiness reconciler enforce identity/bridge/WWebJS readiness.
+       *
+       * scheduleReadyReconcile() intentionally resets phase-local evidence, so restore the strong
+       * page-side connected proof immediately afterwards. The deadline may then preserve credentials
+       * even if client.getState() is the exact call that remains wedged.
+       */
+      this.clearAuthReconcile();
+      this.host.setStatus(EngineStatus.AUTHENTICATING);
+      this.scheduleReadyReconcile();
+      this.hasObservedConnected = true;
+      this.qrConnectedObservedAt = observedAt;
+      return;
+    }
 
-      if (replayed) {
-        this.authReplayCount += 1;
-        this.host.logger.warn(
-          this.authReplayCount === 1
-            ? 'WhatsApp Web has already synced while OpenWA is QR_READY; replaying the missed authentication edge'
-            : 'WhatsApp Web is still QR_READY after a synced-edge replay; retrying the authentication handoff',
-          {
-            sessionId: this.host.config.sessionId,
-            action: 'qr_auth_synced_edge_replayed',
-            replayCount: this.authReplayCount,
-          },
-        );
+    if (
+      pageProbe.replayed &&
+      this.authReplayCount < AUTH_RECONCILE_REPLAY_FALLBACK_THRESHOLD
+    ) {
+      // Give the normal exposed binding one replay-only turn when page-level CONNECTED+identity has
+      // not independently proven the link yet.
+      return;
+    }
 
-        // Give the normal exposed binding one replay-only turn. If the same condition survives a
-        // second replay, do not keep trusting the missed edge: fall through to the direct runtime
-        // probe below in this same tick. (The intervening 2s ticks also probe during the 10s replay
-        // backoff, so this is an extra guarantee rather than the only fallback.)
-        if (this.authReplayCount < AUTH_RECONCILE_REPLAY_FALLBACK_THRESHOLD) {
-          return;
-        }
-
-        this.host.logger.warn(
-          'Synced-edge replay still did not advance QR_READY; falling through to direct runtime reconciliation',
-          {
-            sessionId: this.host.config.sessionId,
-            action: 'qr_auth_replay_runtime_fallback',
-            replayCount: this.authReplayCount,
-          },
-        );
-      }
+    if (
+      pageProbe.replayed &&
+      this.authReplayCount >= AUTH_RECONCILE_REPLAY_FALLBACK_THRESHOLD
+    ) {
+      this.host.logger.warn(
+        'Synced-edge replay still did not advance QR_READY; falling through to direct runtime reconciliation',
+        {
+          sessionId: this.host.config.sessionId,
+          action: 'qr_auth_replay_runtime_fallback',
+          replayCount: this.authReplayCount,
+        },
+      );
     }
 
     if (this.host.getClient() !== sourceClient || this.host.getStatus() !== EngineStatus.QR_READY) {
@@ -207,9 +291,9 @@ export class WwebjsReadyReconcile {
     }
 
     /*
-     * Fallback for the even rarer case where the entire runtime is already usable but the exposed
-     * hasSynced binding is unavailable/missed. This probe is ALSO bounded, so a stuck getState()
-     * cannot hold authReconcileProbeInFlight forever.
+     * Final fallback for an already-usable Node-side runtime. This remains useful for patched or
+     * older WhatsApp Web builds where the page-level identity module differs but client.info and the
+     * event bridge are already complete.
      */
     const runtimeReady = await this.isClientRuntimeReady();
     if (
@@ -230,11 +314,6 @@ export class WwebjsReadyReconcile {
       return;
     }
 
-    // A persistent Brave profile can be fully CONNECTED with an identity while the patched
-    // whatsapp-web.js event bridge is still false. QR_READY used to have no self-heal for that
-    // condition, so it could stay on the scan screen forever. Use the same one-shot reinjection
-    // strategy as AUTHENTICATING, but with a grace clock that starts from the first dead-bridge
-    // observation rather than readyReconcileStartedAt.
     if (
       this.host.getClient() === sourceClient &&
       this.host.getStatus() === EngineStatus.QR_READY
@@ -244,47 +323,113 @@ export class WwebjsReadyReconcile {
   }
 
   /**
-   * Replay whatsapp-web.js's page->Node hasSynced handoff only when the page level proves it is
-   * already synced. The binding is invoked fire-and-forget inside the page: waiting for its returned
-   * promise here would let the long post-auth pipeline pin this probe and defeat later retries.
+   * Probe the live page for the authentication LEVEL, not only the edge.
+   *
+   * These are the same modules current whatsapp-web.js uses in Client.initialize():
+   *   - WAWebSocketModel.Socket for state / hasSynced
+   *   - WAWebUserPrefsMeUser for the current PN/LID identity
+   *
+   * When requested and safe, also replay the exposed onAppStateHasSyncedEvent binding. The replay is
+   * fire-and-forget inside the page so this probe never waits for the whole post-auth pipeline.
    */
-  private async replayHasSyncedHandler(sourceClient: Client): Promise<boolean> {
+  private async probeQrPageAuthentication(
+    sourceClient: Client,
+    replaySyncedEdge: boolean,
+  ): Promise<QrPageAuthenticationProbe> {
     const page = (
       sourceClient as unknown as {
-        pupPage?: { evaluate: <T>(fn: () => T) => Promise<T> };
+        pupPage?: {
+          evaluate: <T>(
+            fn: (shouldReplay: boolean) => T,
+            shouldReplay: boolean,
+          ) => Promise<T>;
+        };
       }
     ).pupPage;
-    if (!page) return false;
 
-    return page.evaluate(() => {
+    if (!page) {
+      return {
+        connected: false,
+        hasSynced: false,
+        hasIdentity: false,
+        replayed: false,
+      };
+    }
+
+    return page.evaluate((shouldReplay: boolean) => {
       const browserWindow = window as unknown as {
-        require?: (moduleName: string) => {
-          Socket?: { hasSynced?: boolean };
-        };
+        require?: (moduleName: string) => unknown;
         onAppStateHasSyncedEvent?: () => unknown;
       };
 
-      if (typeof browserWindow.require !== 'function') return false;
+      if (typeof browserWindow.require !== 'function') {
+        return {
+          connected: false,
+          hasSynced: false,
+          hasIdentity: false,
+          replayed: false,
+        };
+      }
 
-      let socket: { hasSynced?: boolean } | undefined;
+      let socket:
+        | {
+            state?: string;
+            hasSynced?: boolean;
+          }
+        | undefined;
+
+      let hasIdentity = false;
+
       try {
-        socket = browserWindow.require('WAWebSocketModel')?.Socket;
+        const socketModule = browserWindow.require('WAWebSocketModel') as {
+          Socket?: {
+            state?: string;
+            hasSynced?: boolean;
+          };
+        };
+        socket = socketModule?.Socket;
       } catch {
-        return false;
-      }
-
-      if (socket?.hasSynced !== true || typeof browserWindow.onAppStateHasSyncedEvent !== 'function') {
-        return false;
+        // A module rename during a WhatsApp Web rollout must not break the reconciliation loop.
       }
 
       try {
-        const result = browserWindow.onAppStateHasSyncedEvent();
-        void Promise.resolve(result).catch(() => undefined);
-        return true;
+        const meModule = browserWindow.require('WAWebUserPrefsMeUser') as {
+          getMaybeMePnUser?: () => unknown;
+          getMaybeMeLidUser?: () => unknown;
+        };
+        hasIdentity = Boolean(
+          meModule?.getMaybeMePnUser?.() ??
+            meModule?.getMaybeMeLidUser?.(),
+        );
       } catch {
-        return false;
+        // Keep probing other readiness signals if this module is temporarily unavailable.
       }
-    });
+
+      const connected = socket?.state === 'CONNECTED';
+      const hasSynced = socket?.hasSynced === true;
+      let replayed = false;
+
+      if (
+        shouldReplay &&
+        hasSynced &&
+        typeof browserWindow.onAppStateHasSyncedEvent === 'function'
+      ) {
+        try {
+          const result = browserWindow.onAppStateHasSyncedEvent();
+          void Promise.resolve(result).catch(() => undefined);
+          replayed = true;
+        } catch {
+          replayed = false;
+        }
+      }
+
+      return {
+        connected,
+        hasSynced,
+        hasIdentity,
+        replayed,
+      };
+    }, replaySyncedEdge);
   }
 
   /**
@@ -316,6 +461,7 @@ export class WwebjsReadyReconcile {
   scheduleReadyReconcile(): void {
     this.clearAuthReconcile();
     this.clearReadyReconcile();
+    this.readyReconcileTimeoutMs = resolveReadyTimeoutMs();
     this.readyReconcileStartedAt = Date.now();
 
     const tick = (): void => {
@@ -325,45 +471,67 @@ export class WwebjsReadyReconcile {
       }
 
       // Deadline checked at the TOP of every tick (not after the probe) so a slow/hung getState() — a
-      // wedged page can make it never resolve, the very #251/#273 condition — can't defeat the 90s ceiling.
-      if (Date.now() - this.readyReconcileStartedAt >= READY_RECONCILE_TIMEOUT_MS) {
-        // A CONNECTED page whose event bridge never attached (even after the one-shot reload) is a
-        // different animal from a stuck-after-QR session: the link and the credentials are fine,
-        // only this browser instance is broken. Wiping the only copy of the credentials would trade
-        // a restart-fixable fault for a forced re-pair — fail loudly and keep the auth instead.
-        const bridgeDead =
-          this.lastProbeStateConnected &&
-          (this.host.getClient() as Client & { eventsAttached?: boolean })?.eventsAttached === false;
-        if (bridgeDead) {
+      // wedged page can make it never resolve, the very #251/#273 condition — cannot defeat the
+      // configured readiness ceiling.
+      if (Date.now() - this.readyReconcileStartedAt >= this.readyReconcileTimeoutMs) {
+        const liveClient = this.host.getClient();
+        const eventsAttached = (liveClient as Client & { eventsAttached?: boolean } | null)?.eventsAttached;
+
+        // A CONNECTED page is proof that the phone/account pairing itself succeeded. Never wipe
+        // credentials merely because the browser-side runtime or event bridge is still incomplete:
+        // slow phones and large accounts can legitimately spend minutes in this post-scan phase.
+        if (this.hasObservedConnected) {
+          const bridgeDead = eventsAttached === false;
+
           this.host.logger.error(
-            'WhatsApp Web stayed connected but its event bridge never attached within the readiness ' +
-              'deadline — inbound messages would be silently lost, so the session is marked failed. ' +
-              'The saved credentials were kept; restart the session to relaunch the browser.',
+            bridgeDead
+              ? 'WhatsApp Web stayed connected but its event bridge never attached within the readiness ' +
+                  'deadline — inbound messages would be silently lost, so the session is marked failed. ' +
+                  'The saved credentials were kept; restart the session to relaunch the browser.'
+              : 'WhatsApp Web reached CONNECTED but the browser runtime did not become fully ready within ' +
+                  'the readiness deadline. The saved credentials were kept because pairing succeeded; ' +
+                  'restart the session to relaunch the browser instead of forcing a new phone pairing.',
             undefined,
-            { sessionId: this.host.config.sessionId, action: 'ready_reconcile_bridge_dead' },
+            {
+              sessionId: this.host.config.sessionId,
+              action: bridgeDead
+                ? 'ready_reconcile_bridge_dead'
+                : 'ready_reconcile_connected_incomplete',
+              timeoutMs: this.readyReconcileTimeoutMs,
+            },
           );
+
           this.clearReadyReconcile();
           this.host.setStatus(EngineStatus.FAILED);
           this.host
             .getCallbacks()
             .onError?.(
-              'WhatsApp Web is connected but its event bridge never attached, so inbound messages would be ' +
-                'lost. The saved session was kept — restart the session to relaunch the browser.',
+              bridgeDead
+                ? 'WhatsApp Web is connected but its event bridge never attached, so inbound messages ' +
+                    'would be lost. The saved session was kept — restart the session to relaunch the browser.'
+                : 'WhatsApp Web connected, but browser readiness did not finish in time. The saved session ' +
+                    'was kept — restart the session to continue without pairing the phone again.',
             );
           return;
         }
+
         this.host.logger.warn(
-          'Timed out waiting for WhatsApp Web runtime readiness after authentication — the saved session ' +
-            'is stuck after the QR scan (usually the auto-selected WhatsApp Web build is incompatible). ' +
-            'Clearing it to re-pair; pin a known-good version via WWEBJS_WEB_VERSION (see ' +
-            'docs/12-troubleshooting-faq.md) if it keeps recurring.',
-          // Name the session: on a multi-session host this warning is the only way to tell whether one
-          // session timed out or every one of them did, and the two have very different causes.
-          { sessionId: this.host.config.sessionId, action: 'ready_reconcile_timeout' },
+          'Timed out waiting for WhatsApp Web runtime readiness after authentication before the page ever ' +
+            'reached CONNECTED. Clearing the stuck authentication so the lifecycle can offer a fresh QR. ' +
+            'If this is a consistently slow phone/account, increase WWEBJS_READY_TIMEOUT_MS; if it keeps ' +
+            'recurring at generous timeouts, pin a known-good WWEBJS_WEB_VERSION.',
+          {
+            sessionId: this.host.config.sessionId,
+            action: 'ready_reconcile_timeout',
+            timeoutMs: this.readyReconcileTimeoutMs,
+          },
         );
+
         this.clearReadyReconcile();
-        // Self-heal: don't leave the session stuck at "authenticating" forever — clear the broken auth
-        // and disconnect so the lifecycle re-pairs (a fresh QR) instead of hanging.
+
+        // Only the never-CONNECTED branch is allowed to clear auth. Once CONNECTED has been observed,
+        // pairing is known-good and destroying credentials would turn a restart-fixable browser fault
+        // into an unnecessary re-pair.
         void this.host.recoverFromStuckAuth();
         return;
       }
@@ -383,9 +551,15 @@ export class WwebjsReadyReconcile {
             this.host.markReadyFromClientInfo();
           } else if (this.host.getStatus() === EngineStatus.AUTHENTICATING) {
             this.maybeReloadDeadBridge();
+            this.maybeReloadQrConnectedRuntime();
           }
         })
-        .catch(error => this.host.logger.debug('Ready reconciliation probe failed', { error: String(error) }))
+        .catch(error => {
+          this.host.logger.debug('Ready reconciliation probe failed', { error: String(error) });
+          if (this.host.getStatus() === EngineStatus.AUTHENTICATING) {
+            this.maybeReloadQrConnectedRuntime();
+          }
+        })
         .finally(() => {
           this.readyReconcileProbeInFlight = false;
         });
@@ -401,8 +575,12 @@ export class WwebjsReadyReconcile {
       this.readyReconcileTimer = null;
     }
     this.readyReconcileStartedAt = 0;
+    this.readyReconcileTimeoutMs = READY_RECONCILE_TIMEOUT_MS;
     this.readyReconcileProbeInFlight = false;
     this.lastProbeStateConnected = false;
+    this.hasObservedConnected = false;
+    this.qrConnectedObservedAt = 0;
+    this.runtimeReloadAttempted = false;
     this.resetBridgeRecoveryObservation();
   }
 
@@ -421,6 +599,9 @@ export class WwebjsReadyReconcile {
     const state = await this.withProbeTimeout(client.getState(), 'WhatsApp runtime state probe');
     const connected = state === WAState.CONNECTED;
     this.lastProbeStateConnected = connected;
+    if (connected) {
+      this.hasObservedConnected = true;
+    }
 
     if (!connected || this.client() !== client) {
       this.resetBridgeRecoveryObservation();
@@ -441,7 +622,6 @@ export class WwebjsReadyReconcile {
     if ((client as Client & { eventsAttached?: boolean }).eventsAttached === false) {
       if (this.bridgeDeadObservedAt === 0) {
         this.bridgeDeadObservedAt = Date.now();
-        this.bridgeReloadAttempted = false;
         this.host.logger.warn(
           'WhatsApp Web is connected with an identity but its event bridge is not attached yet; starting bridge grace window',
           {
@@ -471,7 +651,69 @@ export class WwebjsReadyReconcile {
 
   private resetBridgeRecoveryObservation(): void {
     this.bridgeDeadObservedAt = 0;
-    this.bridgeReloadAttempted = false;
+  }
+
+  /**
+   * One-shot reinjection for the exact first-pairing failure observed in production:
+   *
+   * the phone is already linked and the page proved CONNECTED + identity, but whatsapp-web.js never
+   * completed its Node-side authenticated/ready pipeline. A manual stop/start fixes that because the
+   * persisted profile reopens authenticated. Reloading the existing page after a generous grace
+   * gives us the same reinjection effect without killing the browser or clearing credentials.
+   */
+  private maybeReloadQrConnectedRuntime(): void {
+    if (
+      this.runtimeReloadAttempted ||
+      this.qrConnectedObservedAt === 0 ||
+      this.host.getStatus() !== EngineStatus.AUTHENTICATING
+    ) {
+      return;
+    }
+
+    if (Date.now() - this.qrConnectedObservedAt < QR_CONNECTED_REINJECT_GRACE_MS) {
+      return;
+    }
+
+    const client = this.host.getClient();
+    if (!client) return;
+
+    const page = (
+      client as unknown as {
+        pupPage?: { reload?: () => Promise<unknown> };
+      }
+    ).pupPage;
+
+    if (!page?.reload) {
+      this.runtimeReloadAttempted = true;
+      this.host.logger.warn(
+        'QR pairing was confirmed by the page but the runtime is still incomplete and the Puppeteer page cannot be reloaded',
+        {
+          sessionId: this.host.config.sessionId,
+          status: this.host.getStatus(),
+          action: 'qr_connected_reinject_unavailable',
+        },
+      );
+      return;
+    }
+
+    this.runtimeReloadAttempted = true;
+    this.host.logger.warn(
+      'QR pairing succeeded but whatsapp-web.js did not finish its authenticated runtime; ' +
+        'reloading the page once to reinject while preserving the saved pairing',
+      {
+        sessionId: this.host.config.sessionId,
+        observedForMs: Date.now() - this.qrConnectedObservedAt,
+        action: 'qr_connected_runtime_reinject',
+      },
+    );
+
+    void page.reload().catch((error: unknown) =>
+      this.host.logger.warn('QR-connected runtime reinjection failed', {
+        sessionId: this.host.config.sessionId,
+        error: String(error),
+        action: 'qr_connected_runtime_reinject_failed',
+      }),
+    );
   }
 
   /**
@@ -481,7 +723,7 @@ export class WwebjsReadyReconcile {
    * race), so a reload is the cheapest full reinjection that keeps the saved session intact.
    */
   private maybeReloadDeadBridge(): void {
-    if (this.bridgeReloadAttempted || this.bridgeDeadObservedAt === 0) return;
+    if (this.runtimeReloadAttempted || this.bridgeDeadObservedAt === 0) return;
 
     const client = this.host.getClient();
     const status = this.host.getStatus();
@@ -507,7 +749,7 @@ export class WwebjsReadyReconcile {
       return;
     }
 
-    this.bridgeReloadAttempted = true;
+    this.runtimeReloadAttempted = true;
     this.host.logger.warn(
       'WhatsApp Web is connected but its event bridge never attached; reloading the page once to reinject',
       {
@@ -528,3 +770,6 @@ export class WwebjsReadyReconcile {
     );
   }
 }
+
+
+

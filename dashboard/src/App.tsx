@@ -114,6 +114,12 @@ const ApiKeys = lazy(() =>
   })),
 );
 
+const AdminTeamLeaders = lazy(() =>
+  import('./pages/AdminTeamLeaders').then(m => ({
+    default: m.AdminTeamLeaders,
+  })),
+);
+
 const AdminAgents = lazy(() =>
   import('./pages/AdminAgents').then(m => ({
     default: m.AdminAgents,
@@ -451,6 +457,20 @@ function AppContent() {
                     path="/api-keys"
                   >
                     <ApiKeys />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="admin/team-leaders"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/admin/team-leaders"
+                  >
+                    <AdminTeamLeaders />
                   </RoleRoute>
                 }
               />

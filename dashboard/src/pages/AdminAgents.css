@@ -1,0 +1,673 @@
+.admin-agents-page {
+  padding: 2rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.admin-agents-page .page-header {
+  margin-bottom: 2rem;
+}
+
+/* ============================================================
+   LOADING / ALERTS
+   ============================================================ */
+
+.admin-agents-loading {
+  min-height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: var(--text-muted);
+}
+
+.admin-agents-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding: 0.9rem 1rem;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-agents-alert > div {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.admin-agents-alert strong {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.admin-agents-alert span {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-agents-alert--error {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.admin-agents-alert--error > svg {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+  color: var(--error-text);
+}
+
+/* ============================================================
+   SUMMARY CARDS
+   ============================================================ */
+
+.admin-agents-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.admin-agents-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 1rem;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-agents-summary-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  background: rgba(37, 211, 102, 0.1);
+  border-radius: 10px;
+  color: var(--primary-text);
+}
+
+.admin-agents-summary-card > div:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.admin-agents-summary-label {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-agents-summary-value {
+  color: var(--text-primary);
+  font-size: 1.65rem;
+  line-height: 1.1;
+}
+
+.admin-agents-summary-hint {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+/* ============================================================
+   INVENTORY SECTION / TOOLBAR
+   ============================================================ */
+
+.admin-agents-section {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-agents-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-agents-toolbar > div {
+  min-width: 0;
+}
+
+.admin-agents-toolbar h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.admin-agents-toolbar p {
+  max-width: 760px;
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.admin-agents-search {
+  width: min(390px, 100%);
+  flex: 0 1 390px;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.admin-agents-search:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.12);
+}
+
+.admin-agents-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.admin-agents-search input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   TABLE
+   ============================================================ */
+
+.admin-agents-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.admin-agents-table {
+  width: 100%;
+  min-width: 1320px;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.admin-agents-table thead th {
+  padding: 1.125rem 1.5rem;
+  background: var(--bg-light);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.admin-agents-table tbody td {
+  padding: 1.125rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.admin-agents-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-agents-table tbody tr:hover {
+  background: rgba(37, 211, 102, 0.05);
+}
+
+.admin-agents-table tbody tr:nth-child(even) {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.admin-agents-table tbody tr:nth-child(even):hover {
+  background: rgba(37, 211, 102, 0.05);
+}
+
+/* ============================================================
+   TABLE CELLS
+   ============================================================ */
+
+.admin-agents-identity-cell,
+.admin-agents-session-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-agents-identity-cell strong,
+.admin-agents-session-cell strong {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.admin-agents-identity-cell span,
+.admin-agents-session-cell span {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.admin-agents-identity-cell code,
+.admin-agents-session-cell code {
+  display: inline-block;
+  width: fit-content;
+  max-width: 230px;
+  overflow: hidden;
+  padding: 0.25rem 0.45rem;
+  background: var(--bg-light);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-agents-phone,
+.admin-agents-date {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.admin-agents-muted {
+  color: var(--text-muted) !important;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+/* ============================================================
+   STATUS / QUOTA PILLS
+   ============================================================ */
+
+.admin-agents-status-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.25rem 0.55rem;
+  background: var(--bg-light);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.admin-agents-status-pill--ready {
+  background: rgba(37, 211, 102, 0.1);
+  color: var(--primary-text);
+}
+
+.admin-agents-status-pill--created {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-secondary);
+}
+
+.admin-agents-status-pill--initializing,
+.admin-agents-status-pill--authenticating,
+.admin-agents-status-pill--qr_ready {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--info);
+}
+
+.admin-agents-status-pill--disconnected {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-secondary);
+}
+
+.admin-agents-status-pill--action_required,
+.admin-agents-status-pill--warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--warning-text);
+}
+
+.admin-agents-status-pill--failed {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--error-text);
+}
+
+.admin-agents-status-pill--unassigned,
+.admin-agents-status-pill--quota {
+  background: var(--bg-light);
+  color: var(--text-secondary);
+}
+
+/* ============================================================
+   ACTIONS
+   ============================================================ */
+
+.admin-agents-actions-column {
+  text-align: right !important;
+}
+
+.admin-agents-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.admin-agents-action-btn {
+  min-height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.6rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.admin-agents-action-btn:hover:not(:disabled) {
+  background: var(--bg-light);
+  border-color: var(--primary);
+  color: var(--text-primary);
+}
+
+.admin-agents-action-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.admin-agents-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   EMPTY STATES
+   ============================================================ */
+
+.admin-agents-empty-state {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  padding: 3rem 2rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.admin-agents-empty-state--compact {
+  min-height: 240px;
+}
+
+.admin-agents-empty-icon {
+  width: 3.5rem;
+  height: 3.5rem;
+  display: grid;
+  place-items: center;
+  background: var(--bg-light);
+  border-radius: 1rem;
+  color: var(--text-muted);
+}
+
+.admin-agents-empty-state h3 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.admin-agents-empty-state p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 1100px) {
+  .admin-agents-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-agents-page {
+    padding: 1rem;
+  }
+
+  .admin-agents-page .page-header .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .admin-agents-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-agents-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 1rem;
+  }
+
+  .admin-agents-search {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .admin-agents-alert {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .admin-agents-alert .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .admin-agents-section {
+    overflow: visible;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+
+  .admin-agents-toolbar {
+    margin-bottom: 1rem;
+    background: var(--bg-white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .admin-agents-table-wrap {
+    overflow-x: visible;
+  }
+
+  .admin-agents-table {
+    min-width: 0;
+    display: block;
+  }
+
+  .admin-agents-table thead {
+    display: none;
+  }
+
+  .admin-agents-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .admin-agents-table tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: var(--bg-white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .admin-agents-table tbody tr:hover,
+  .admin-agents-table tbody tr:nth-child(even),
+  .admin-agents-table tbody tr:nth-child(even):hover {
+    background: var(--bg-white);
+  }
+
+  .admin-agents-table tbody td {
+    display: grid;
+    grid-template-columns: minmax(115px, 0.35fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 0.75rem;
+    padding: 0;
+    border: none;
+  }
+
+  .admin-agents-table tbody td::before {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .admin-agents-table tbody td:nth-child(1)::before {
+    content: 'Agent';
+  }
+
+  .admin-agents-table tbody td:nth-child(2)::before {
+    content: 'Team Leader';
+  }
+
+  .admin-agents-table tbody td:nth-child(3)::before {
+    content: 'Session';
+  }
+
+  .admin-agents-table tbody td:nth-child(4)::before {
+    content: 'Configured phone';
+  }
+
+  .admin-agents-table tbody td:nth-child(5)::before {
+    content: 'Connected phone';
+  }
+
+  .admin-agents-table tbody td:nth-child(6)::before {
+    content: 'Status';
+  }
+
+  .admin-agents-table tbody td:nth-child(7)::before {
+    content: 'Template quota';
+  }
+
+  .admin-agents-table tbody td:nth-child(8)::before {
+    content: 'Created';
+  }
+
+  .admin-agents-table tbody td:nth-child(9)::before {
+    content: 'Actions';
+  }
+
+  .admin-agents-table tbody td:first-child {
+    display: block;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .admin-agents-table tbody td:first-child::before {
+    display: none;
+  }
+
+  .admin-agents-identity-cell strong,
+  .admin-agents-session-cell strong {
+    white-space: normal;
+  }
+
+  .admin-agents-identity-cell code,
+  .admin-agents-session-cell code {
+    max-width: 100%;
+    word-break: break-all;
+    white-space: normal;
+  }
+
+  .admin-agents-phone,
+  .admin-agents-date {
+    white-space: normal;
+  }
+
+  .admin-agents-row-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-agents-page {
+    padding: 0.75rem;
+  }
+
+  .admin-agents-table tbody td {
+    grid-template-columns: 1fr;
+    gap: 0.3rem;
+  }
+
+  .admin-agents-row-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-agents-action-btn {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-agents-search,
+  .admin-agents-action-btn {
+    transition: none;
+  }
+}
