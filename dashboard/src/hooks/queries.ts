@@ -3,6 +3,9 @@
 
 
 
+
+
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   sessionApi,
@@ -15,6 +18,7 @@ import {
   pluginInstancesApi,
   statsApi,
   adminTeamLeaderApi,
+  adminAgentApi,
   teamLeaderApi,
   agentApi,
   type Webhook,
@@ -35,6 +39,7 @@ export const queryKeys = {
   sessions: ['sessions'] as const,
   sessionStats: ['sessions', 'stats'] as const,
   adminTeamLeaders: ['admin', 'team-leaders'] as const,
+  adminAgents: ['admin', 'agents'] as const,
   teamLeaderMe: ['team-leader', 'me'] as const,
   teamLeaderAgents: ['team-leader', 'agents'] as const,
   agentMe: ['agent', 'me'] as const,
@@ -213,6 +218,15 @@ export function useAdminTeamLeadersQuery(enabled = true) {
   });
 }
 
+export function useAdminAgentsQuery(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.adminAgents,
+    queryFn: adminAgentApi.list,
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
 export function useCreateAdminTeamLeaderMutation() {
   const queryClient = useQueryClient();
 
@@ -241,6 +255,9 @@ export function useDeleteAdminTeamLeaderMutation() {
         queryKey: queryKeys.adminTeamLeaders,
       });
       void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      void queryClient.invalidateQueries({
         queryKey: queryKeys.apiKeys,
       });
     },
@@ -263,6 +280,9 @@ export function useCreateAdminAgentMutation() {
         data,
       ),
     onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.apiKeys,
       });
@@ -379,6 +399,25 @@ export function useCreateApiKeyMutation() {
       allowedSessions?: string[];
       expiresAt?: string;
     }) => apiKeyApi.create(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys });
+    },
+  });
+}
+
+/**
+ * Reissue an existing API key in place.
+ *
+ * The mutation result contains the one-time plaintext replacement key. Do not
+ * write it into TanStack query data, sessionStorage, localStorage, or any other
+ * persistent browser storage; UI components should keep it only in transient
+ * React/mutation state long enough to display or copy it.
+ */
+export function useReissueApiKeyMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => apiKeyApi.reissue(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys });
     },
@@ -536,6 +575,9 @@ export function useStatsMessagesQuery(period: StatsPeriod) {
     retry: false,
   });
 }
+
+
+
 
 
 

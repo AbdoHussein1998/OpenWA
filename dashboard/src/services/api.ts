@@ -4,6 +4,10 @@
 
 
 
+
+
+
+
 // API Service Layer for OpenWA Dashboard
 // Centralized API client with TypeScript types
 
@@ -130,7 +134,7 @@ export interface CreateSessionInput {
 export interface TeamLeader {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -148,6 +152,37 @@ export interface Agent {
    * 0    -> stored-template sending disabled
    * N    -> at most N successful stored-template sends in the rolling window
    */
+  templateSendLimit24h: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * ADMIN-only cross-database Agent overview returned by GET /admin/agents.
+ *
+ * Agent / Team Leader identity comes from the main database while the assigned
+ * Session summary comes from the data database. A stale assignedSessionId is
+ * preserved even when the corresponding Session row no longer exists, in
+ * which case assignedSession is null.
+ */
+export interface AdminAgentOverview {
+  id: string;
+  name: string;
+  email: string | null;
+  teamLeaderId: string;
+  teamLeader: {
+    id: string;
+    name: string;
+    email: string | null;
+  };
+  assignedSessionId: string | null;
+  assignedSession: {
+    id: string;
+    name: string;
+    status: Session['status'];
+    phone: string | null;
+    targetPhone: string | null;
+  } | null;
   templateSendLimit24h: number | null;
   createdAt: string;
   updatedAt: string;
@@ -261,6 +296,10 @@ export interface ApiKey {
    * Agent credentials. Generic creation is narrower; see GenericApiKeyRole.
    */
   role: UserRole;
+  /** Bound management principal, or null for legacy ADMIN/OPERATOR/VIEWER keys. */
+  teamLeaderId: string | null;
+  /** Bound Agent principal, or null for non-Agent credentials. */
+  agentId: string | null;
   allowedIps?: string[];
   allowedSessions?: string[];
   isActive: boolean;
@@ -1170,6 +1209,17 @@ export const adminTeamLeaderApi = {
 };
 
 /**
+ * Global ADMIN Agent overview.
+ *
+ * The backend performs the main/data database merge; the dashboard receives
+ * one already-normalized row per Agent.
+ */
+export const adminAgentApi = {
+  list: () =>
+    request<AdminAgentOverview[]>('/admin/agents'),
+};
+
+/**
  * Self-service surface for the authenticated Team Leader.
  *
  * The Team Leader id is deliberately NOT supplied by the browser.
@@ -1254,6 +1304,17 @@ export const apiKeyApi = {
     request<CreatedApiKey>('/auth/api-keys', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  /**
+   * Rotate an existing API-key row in place.
+   *
+   * The backend preserves the key id, role, principal bindings, restrictions,
+   * active state, and expiration. The replacement plaintext key exists only in
+   * this response and must remain ephemeral in React memory.
+   */
+  reissue: (id: string) =>
+    request<CreatedApiKey>(`/auth/api-keys/${encodeURIComponent(id)}/reissue`, {
+      method: 'POST',
     }),
   delete: (id: string) => request<void>(`/auth/api-keys/${id}`, { method: 'DELETE' }),
   revoke: (id: string) => request<ApiKey>(`/auth/api-keys/${id}/revoke`, { method: 'POST' }),
@@ -1673,6 +1734,10 @@ export const statsApi = {
   getOverview: () => request<OverviewStats>('/stats/overview'),
   getMessages: (period: StatsPeriod) => request<MessageStats>(`/stats/messages?period=${period}`),
 };
+
+
+
+
 
 
 

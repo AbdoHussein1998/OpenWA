@@ -114,6 +114,12 @@ const ApiKeys = lazy(() =>
   })),
 );
 
+const AdminAgents = lazy(() =>
+  import('./pages/AdminAgents').then(m => ({
+    default: m.AdminAgents,
+  })),
+);
+
 const MessageTester = lazy(() =>
   import('./pages/MessageTester').then(m => ({
     default: m.MessageTester,
@@ -445,6 +451,20 @@ function AppContent() {
                     path="/api-keys"
                   >
                     <ApiKeys />
+                  </RoleRoute>
+                }
+              />
+
+              <Route
+                path="admin/agents"
+                element={
+                  <RoleRoute
+                    role={
+                      effectiveRole
+                    }
+                    path="/admin/agents"
+                  >
+                    <AdminAgents />
                   </RoleRoute>
                 }
               />

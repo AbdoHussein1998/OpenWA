@@ -1,3 +1,6 @@
+
+
+
 import type {
   RoleCapabilities,
   UserRole,
@@ -265,6 +268,16 @@ export function canAccessRoute(
   }
 
   /**
+   * Global Agent inventory is an Admin-only management surface.
+   *
+   * This is intentionally distinct from `/agent`, which is the
+   * assignment-scoped Agent self-service workspace.
+   */
+  if (matchesRoute(pathname, '/admin/agents')) {
+    return role === 'admin';
+  }
+
+  /**
    * Generic Sessions stays unavailable to Agents.
    *
    * Agents still have canReadSessions/canStartSessions/canShutdownSessions
@@ -351,3 +364,7 @@ export function canAccessRoute(
 
   return false;
 }
+
+
+
+

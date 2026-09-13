@@ -80,6 +80,7 @@ interface NavItem {
     | 'chats'
     | 'teamLeader'
     | 'agent'
+    | 'adminAgents'
     | 'webhooks'
     | 'templates'
     | 'apiKeys'
@@ -125,6 +126,16 @@ const allNavItems: readonly NavItem[] = [
       'agent',
     fallbackLabel:
       'Agent',
+  },
+  {
+    to:
+      '/admin/agents',
+    icon:
+      Users,
+    key:
+      'adminAgents',
+    fallbackLabel:
+      'Agents',
   },
   {
     to:

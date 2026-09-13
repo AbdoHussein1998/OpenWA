@@ -877,8 +877,7 @@ export function TeamLeader() {
                 size={14}
               />
 
-              {meQuery.data.email ||
-                meQuery.data.name}
+              {meQuery.data.name}
             </span>
           ) : undefined
         }
@@ -1154,19 +1153,21 @@ export function TeamLeader() {
                         </td>
 
                         <td>
-                          {knownApiKey ? (
-                            <div
-                              style={{
-                                display:
-                                  'flex',
-                                alignItems:
-                                  'center',
-                                gap:
-                                  '0.4rem',
-                                minWidth:
-                                  0,
-                              }}
-                            >
+                          <div
+                            style={{
+                              display:
+                                'flex',
+                              alignItems:
+                                'center',
+                              gap:
+                                '0.5rem',
+                              flexWrap:
+                                'wrap',
+                              minWidth:
+                                0,
+                            }}
+                          >
+                            {knownApiKey ? (
                               <code
                                 title={
                                   knownApiKey
@@ -1188,79 +1189,71 @@ export function TeamLeader() {
                                   knownApiKey
                                 }
                               </code>
-
-                              <button
-                                type="button"
-                                className="team-leader-action-btn"
-                                onClick={() =>
-                                  void copyAgentApiKey(
-                                    agent.id,
-                                  )
-                                }
-                                title="Copy Agent API key"
-                                aria-label={`Copy API key for ${agent.name}`}
-                                style={{
-                                  padding:
-                                    '0.35rem',
-                                }}
-                              >
-                                {copiedAgentId ===
-                                agent.id ? (
-                                  <Check
-                                    size={15}
-                                  />
-                                ) : (
-                                  <Copy
-                                    size={15}
-                                  />
-                                )}
-                              </button>
-                            </div>
-                          ) : (
-                            <div
-                              style={{
-                                display:
-                                  'flex',
-                                alignItems:
-                                  'center',
-                                gap:
-                                  '0.5rem',
-                                flexWrap:
-                                  'wrap',
-                              }}
-                            >
+                            ) : (
                               <span className="team-leader-muted">
                                 Not recoverable
                               </span>
+                            )}
 
-                              <button
-                                type="button"
-                                className="team-leader-action-btn"
-                                onClick={() =>
-                                  void reissueAgentApiKey(
-                                    agent,
-                                  )
-                                }
-                                disabled={
-                                  reissueAgentKeyMutation.isPending
-                                }
-                                title="Reissue Agent API key"
-                              >
-                                {reissuingThisAgent ? (
-                                  <Loader2
-                                    size={15}
-                                    className="animate-spin"
-                                  />
-                                ) : (
-                                  <KeyRound
-                                    size={15}
-                                  />
-                                )}
+                            <button
+                              type="button"
+                              className="team-leader-action-btn"
+                              onClick={() =>
+                                void copyAgentApiKey(
+                                  agent.id,
+                                )
+                              }
+                              disabled={
+                                !knownApiKey
+                              }
+                              title={
+                                knownApiKey
+                                  ? 'Copy Agent API key'
+                                  : 'Plaintext unavailable — reissue first'
+                              }
+                              aria-label={`Copy API key for ${agent.name}`}
+                            >
+                              {copiedAgentId ===
+                              agent.id ? (
+                                <Check
+                                  size={15}
+                                />
+                              ) : (
+                                <Copy
+                                  size={15}
+                                />
+                              )}
 
-                                Reissue
-                              </button>
-                            </div>
-                          )}
+                              Copy
+                            </button>
+
+                            <button
+                              type="button"
+                              className="team-leader-action-btn"
+                              onClick={() =>
+                                void reissueAgentApiKey(
+                                  agent,
+                                )
+                              }
+                              disabled={
+                                reissueAgentKeyMutation.isPending
+                              }
+                              title="Reissue Agent API key"
+                            >
+                              {reissuingThisAgent ? (
+                                <Loader2
+                                  size={15}
+                                  className="animate-spin"
+                                />
+                              ) : (
+                                <KeyRound
+                                  size={15}
+                                />
+                              )}
+
+                              Reissue
+                            </button>
+                          </div>
                         </td>
 
                         <td>

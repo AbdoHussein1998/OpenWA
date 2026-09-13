@@ -25,6 +25,8 @@ import {
 import {
   AlertCircle,
   AlertTriangle,
+  Check,
+  Copy,
   Eye,
   EyeOff,
   KeyRound,
@@ -46,6 +48,7 @@ import {
   useCreateAdminTeamLeaderMutation,
   useCreateApiKeyMutation,
   useDeleteApiKeyMutation,
+  useReissueApiKeyMutation,
   useRevokeApiKeyMutation,
 } from '../hooks/queries';
 
@@ -69,6 +72,9 @@ import {
   useToast,
 } from '../hooks/useToast';
 
+import {
+  copyToClipboard,
+} from '../utils/clipboard';
 
 import './ApiKeys.css';
 
@@ -118,6 +124,7 @@ interface CreatedCredential {
   apiKey: string;
   name: string;
   role: ApiKey['role'];
+  reason: 'created' | 'reissued';
 }
 
 const EMPTY_CREDENTIAL_FORM:
@@ -238,6 +245,32 @@ export function ApiKeys() {
   const revokeMutation =
     useRevokeApiKeyMutation();
 
+  const reissueMutation =
+    useReissueApiKeyMutation();
+
+  /**
+   * Plaintext API keys are intentionally kept only in React memory.
+   *
+   * The backend stores only a hash/prefix, so an existing plaintext key
+   * cannot be recovered after a page reload. This map is populated only
+   * by create/reissue responses received while this page is mounted.
+   */
+  const [
+    knownApiKeys,
+    setKnownApiKeys,
+  ] =
+    useState<Record<string, string>>(
+      {},
+    );
+
+  const [
+    copiedKeyId,
+    setCopiedKeyId,
+  ] =
+    useState<string | null>(
+      null,
+    );
+
   const [
     visibleKeys,
     setVisibleKeys,
@@ -288,7 +321,8 @@ export function ApiKeys() {
     useState<{
       type:
         | 'delete'
-        | 'revoke';
+        | 'revoke'
+        | 'reissue';
       id:
         string;
       name:
@@ -498,6 +532,14 @@ export function ApiKeys() {
               },
             );
 
+          setKnownApiKeys(
+            current => ({
+              ...current,
+              [created.id]:
+                created.apiKey,
+            }),
+          );
+
           setCreatedCredential(
             {
               apiKey:
@@ -506,6 +548,8 @@ export function ApiKeys() {
                 created.name,
               role:
                 created.role,
+              reason:
+                'created',
             },
           );
 
@@ -536,6 +580,8 @@ export function ApiKeys() {
                 created.teamLeader.name,
               role:
                 'team_leader',
+              reason:
+                'created',
             },
           );
 
@@ -566,6 +612,8 @@ export function ApiKeys() {
               created.agent.name,
             role:
               'agent',
+            reason:
+              'created',
           },
         );
       } catch (
@@ -588,6 +636,148 @@ export function ApiKeys() {
             'apiKeys.createBtn',
           ),
           message,
+        );
+      }
+    };
+
+  const copyKnownApiKey =
+    async (
+      apiKey: ApiKey,
+    ) => {
+      const rawKey =
+        knownApiKeys[apiKey.id];
+
+      if (!rawKey) {
+        toast.warning(
+          t(
+            'apiKeys.copyUnavailableTitle',
+            {
+              defaultValue:
+                'Plaintext key unavailable',
+            },
+          ),
+          t(
+            'apiKeys.copyUnavailableDescription',
+            {
+              defaultValue:
+                'This key was not created or reissued during the current page session. Reissue it to receive a new plaintext key.',
+            },
+          ),
+        );
+
+        return;
+      }
+
+      const copied =
+        await copyToClipboard(
+          rawKey,
+        );
+
+      if (!copied) {
+        toast.error(
+          t(
+            'apiKeys.copyFailedTitle',
+            {
+              defaultValue:
+                'Copy failed',
+            },
+          ),
+          t(
+            'apiKeys.copyFailedDescription',
+            {
+              defaultValue:
+                'The API key could not be copied to the clipboard.',
+            },
+          ),
+        );
+
+        return;
+      }
+
+      setCopiedKeyId(
+        apiKey.id,
+      );
+
+      window.setTimeout(
+        () => {
+          setCopiedKeyId(
+            current =>
+              current === apiKey.id
+                ? null
+                : current,
+          );
+        },
+        1600,
+      );
+    };
+
+  const handleReissue =
+    async (
+      id: string,
+    ) => {
+      try {
+        const reissued =
+          await reissueMutation.mutateAsync(
+            id,
+          );
+
+        setKnownApiKeys(
+          current => ({
+            ...current,
+            [reissued.id]:
+              reissued.apiKey,
+          }),
+        );
+
+        setCreatedCredential(
+          {
+            apiKey:
+              reissued.apiKey,
+            name:
+              reissued.name,
+            role:
+              reissued.role,
+            reason:
+              'reissued',
+          },
+        );
+
+        setShowModal(
+          true,
+        );
+
+        toast.success(
+          t(
+            'apiKeys.reissueSuccessTitle',
+            {
+              defaultValue:
+                'API key reissued',
+            },
+          ),
+          t(
+            'apiKeys.reissueSuccessDescription',
+            {
+              defaultValue:
+                'The replacement plaintext key is available only in this page session. The previous key no longer authenticates.',
+            },
+          ),
+        );
+      } catch (
+        error
+      ) {
+        toast.error(
+          t(
+            'apiKeys.actions.reissue',
+            {
+              defaultValue:
+                'Reissue',
+            },
+          ),
+          error instanceof Error
+            ? error.message
+            : t(
+                'common.unknownError',
+              ),
         );
       }
     };
@@ -669,8 +859,15 @@ export function ApiKeys() {
         void handleDelete(
           confirmAction.id,
         );
-      } else {
+      } else if (
+        confirmAction.type ===
+        'revoke'
+      ) {
         void handleRevoke(
+          confirmAction.id,
+        );
+      } else {
+        void handleReissue(
           confirmAction.id,
         );
       }
@@ -893,61 +1090,70 @@ export function ApiKeys() {
                     const apiKey =
                       info.row.original;
 
-                    /**
-                     * Principal-bound credentials must not be deleted or
-                     * revoked through the generic API-key UI. Doing so
-                     * would strand the Team Leader/Agent principal without
-                     * using its lifecycle API.
-                     */
-                    if (
-                      isManagementRole(
-                        apiKey.role,
-                      )
-                    ) {
-                      return (
-                        <span
-                          className="last-used"
-                          title="Managed through Team Leader / Agent principal lifecycle."
-                        >
-                          Principal managed
-                        </span>
-                      );
-                    }
+                    const rawKey =
+                      knownApiKeys[
+                        apiKey.id
+                      ];
+
+                    const isReissuing =
+                      reissueMutation.isPending &&
+                      reissueMutation.variables ===
+                        apiKey.id;
 
                     return (
                       <span className="actions-cell">
-                        {apiKey.isActive && (
-                          <button
-                            className="icon-btn"
-                            onClick={() =>
-                              setConfirmAction(
-                                {
-                                  type:
-                                    'revoke',
-                                  id:
-                                    apiKey.id,
-                                  name:
-                                    apiKey.name,
-                                },
-                              )
-                            }
-                            title={t(
-                              'apiKeys.actions.revoke',
-                            )}
-                          >
-                            <RefreshCw
+                        <button
+                          className="icon-btn"
+                          onClick={() =>
+                            void copyKnownApiKey(
+                              apiKey,
+                            )
+                          }
+                          disabled={
+                            !rawKey
+                          }
+                          title={
+                            rawKey
+                              ? t(
+                                  'apiKeys.actions.copy',
+                                  {
+                                    defaultValue:
+                                      'Copy',
+                                  },
+                                )
+                              : t(
+                                  'apiKeys.copyUnavailableShort',
+                                  {
+                                    defaultValue:
+                                      'Plaintext unavailable — reissue first',
+                                  },
+                                )
+                          }
+                          aria-label={
+                            rawKey
+                              ? `Copy API key for ${apiKey.name}`
+                              : `Plaintext API key for ${apiKey.name} is unavailable`
+                          }
+                        >
+                          {copiedKeyId ===
+                          apiKey.id ? (
+                            <Check
                               size={16}
                             />
-                          </button>
-                        )}
+                          ) : (
+                            <Copy
+                              size={16}
+                            />
+                          )}
+                        </button>
 
                         <button
-                          className="icon-btn danger"
+                          className="icon-btn"
                           onClick={() =>
                             setConfirmAction(
                               {
                                 type:
-                                  'delete',
+                                  'reissue',
                                 id:
                                   apiKey.id,
                                 name:
@@ -955,14 +1161,90 @@ export function ApiKeys() {
                               },
                             )
                           }
+                          disabled={
+                            reissueMutation.isPending
+                          }
                           title={t(
-                            'apiKeys.actions.delete',
+                            'apiKeys.actions.reissue',
+                            {
+                              defaultValue:
+                                'Reissue',
+                            },
                           )}
+                          aria-label={`Reissue API key for ${apiKey.name}`}
                         >
-                          <Trash2
-                            size={16}
-                          />
+                          {isReissuing ? (
+                            <Loader2
+                              size={16}
+                              className="animate-spin"
+                            />
+                          ) : (
+                            <RefreshCw
+                              size={16}
+                            />
+                          )}
                         </button>
+
+                        {isManagementRole(
+                          apiKey.role,
+                        ) ? (
+                          <span
+                            className="last-used"
+                            title="Delete/revoke is managed through Team Leader / Agent principal lifecycle."
+                          >
+                            Principal managed
+                          </span>
+                        ) : (
+                          <>
+                            {apiKey.isActive && (
+                              <button
+                                className="icon-btn"
+                                onClick={() =>
+                                  setConfirmAction(
+                                    {
+                                      type:
+                                        'revoke',
+                                      id:
+                                        apiKey.id,
+                                      name:
+                                        apiKey.name,
+                                    },
+                                  )
+                                }
+                                title={t(
+                                  'apiKeys.actions.revoke',
+                                )}
+                              >
+                                <KeyRound
+                                  size={16}
+                                />
+                              </button>
+                            )}
+
+                            <button
+                              className="icon-btn danger"
+                              onClick={() =>
+                                setConfirmAction(
+                                  {
+                                    type:
+                                      'delete',
+                                    id:
+                                      apiKey.id,
+                                    name:
+                                      apiKey.name,
+                                  },
+                                )
+                              }
+                              title={t(
+                                'apiKeys.actions.delete',
+                              )}
+                            >
+                              <Trash2
+                                size={16}
+                              />
+                            </button>
+                          </>
+                        )}
                       </span>
                     );
                   },
@@ -971,6 +1253,10 @@ export function ApiKeys() {
           ],
         ),
       [
+        copiedKeyId,
+        knownApiKeys,
+        reissueMutation.isPending,
+        reissueMutation.variables,
         roleLabel,
         t,
         visibleKeys,
@@ -1065,9 +1351,18 @@ export function ApiKeys() {
           }
           title={
             createdCredential
-              ? t(
-                  'apiKeys.createdTitle',
-                )
+              ? createdCredential.reason ===
+                'reissued'
+                ? t(
+                    'apiKeys.reissuedTitle',
+                    {
+                      defaultValue:
+                        'API Key Reissued',
+                    },
+                  )
+                : t(
+                    'apiKeys.createdTitle',
+                  )
               : t(
                   'apiKeys.modalTitle',
                 )
@@ -1130,9 +1425,18 @@ export function ApiKeys() {
                     'var(--text-muted)',
                 }}
               >
-                {t(
-                  'apiKeys.createdHint',
-                )}
+                {createdCredential.reason ===
+                'reissued'
+                  ? t(
+                      'apiKeys.reissuedHint',
+                      {
+                        defaultValue:
+                          'The previous key is no longer valid. Copy the replacement key now; the plaintext will not be recoverable after this page session.',
+                      },
+                    )
+                  : t(
+                      'apiKeys.createdHint',
+                    )}
               </p>
 
               <p
@@ -1161,7 +1465,12 @@ export function ApiKeys() {
                 label={`${roleLabel(
                   createdCredential.role,
                 )} API key`}
-                description="This plaintext key is returned only once. It is hidden by default; Copy always copies the complete key."
+                description={
+                  createdCredential.reason ===
+                  'reissued'
+                    ? 'This replacement plaintext key is returned only once. The previous key is invalid; copy and store this key now.'
+                    : 'This plaintext key is returned only once. It is hidden by default; Copy always copies the complete key.'
+                }
               />
             </div>
           ) : (
@@ -1645,9 +1954,18 @@ export function ApiKeys() {
               ? t(
                   'apiKeys.confirm.deleteTitle',
                 )
-              : t(
-                  'apiKeys.confirm.revokeTitle',
-                )
+              : confirmAction.type ===
+                  'revoke'
+                ? t(
+                    'apiKeys.confirm.revokeTitle',
+                  )
+                : t(
+                    'apiKeys.confirm.reissueTitle',
+                    {
+                      defaultValue:
+                        'Reissue API key',
+                    },
+                  )
           }
           className="confirm-modal"
           closeLabel={t(
@@ -1669,9 +1987,17 @@ export function ApiKeys() {
               </button>
 
               <button
-                className="btn-danger"
+                className={
+                  confirmAction.type ===
+                  'reissue'
+                    ? 'btn-primary'
+                    : 'btn-danger'
+                }
                 onClick={
                   confirmAndExecute
+                }
+                disabled={
+                  reissueMutation.isPending
                 }
               >
                 {confirmAction.type ===
@@ -1679,9 +2005,18 @@ export function ApiKeys() {
                   ? t(
                       'apiKeys.confirm.delete',
                     )
-                  : t(
-                      'apiKeys.confirm.revoke',
-                    )}
+                  : confirmAction.type ===
+                      'revoke'
+                    ? t(
+                        'apiKeys.confirm.revoke',
+                      )
+                    : t(
+                        'apiKeys.actions.reissue',
+                        {
+                          defaultValue:
+                            'Reissue',
+                        },
+                      )}
               </button>
             </>
           }
@@ -1694,22 +2029,35 @@ export function ApiKeys() {
           </div>
 
           <p className="confirm-message">
-            <Trans
-              i18nKey={
-                confirmAction.type ===
-                'delete'
-                  ? 'apiKeys.confirm.deleteMessage'
-                  : 'apiKeys.confirm.revokeMessage'
-              }
-              values={{
-                name:
-                  confirmAction.name,
-              }}
-              components={{
-                strong:
-                  <strong />,
-              }}
-            />
+            {confirmAction.type ===
+            'reissue' ? (
+              <>
+                Reissue the API key for{' '}
+                <strong>
+                  {
+                    confirmAction.name
+                  }
+                </strong>
+                ? The previous plaintext key will stop authenticating immediately.
+              </>
+            ) : (
+              <Trans
+                i18nKey={
+                  confirmAction.type ===
+                  'delete'
+                    ? 'apiKeys.confirm.deleteMessage'
+                    : 'apiKeys.confirm.revokeMessage'
+                }
+                values={{
+                  name:
+                    confirmAction.name,
+                }}
+                components={{
+                  strong:
+                    <strong />,
+                }}
+              />
+            )}
           </p>
         </Modal>
       )}
