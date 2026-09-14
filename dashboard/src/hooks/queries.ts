@@ -30,6 +30,10 @@ import {
   type CreateSessionInput,
   type CreateTeamLeaderInput,
   type CreateAgentInput,
+  type BulkReassignAdminAgentsInput,
+  type BulkReassignAdminSessionsInput,
+  type ReassignAdminAgentInput,
+  type ReassignAdminSessionInput,
   type GenericApiKeyRole,
 } from '../services/api';
 
@@ -39,6 +43,8 @@ export const queryKeys = {
   sessions: ['sessions'] as const,
   sessionStats: ['sessions', 'stats'] as const,
   adminTeamLeaders: ['admin', 'team-leaders'] as const,
+  adminTeamLeaderResources: (teamLeaderId: string) =>
+    ['admin', 'team-leaders', teamLeaderId, 'resources'] as const,
   adminAgents: ['admin', 'agents'] as const,
   teamLeaderMe: ['team-leader', 'me'] as const,
   teamLeaderAgents: ['team-leader', 'agents'] as const,
@@ -227,6 +233,18 @@ export function useAdminAgentsQuery(enabled = true) {
   });
 }
 
+export function useAdminTeamLeaderResourcesQuery(
+  teamLeaderId: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.adminTeamLeaderResources(teamLeaderId),
+    queryFn: () => adminTeamLeaderApi.getResources(teamLeaderId),
+    enabled: enabled && Boolean(teamLeaderId),
+    staleTime: 15_000,
+  });
+}
+
 export function useCreateAdminTeamLeaderMutation() {
   const queryClient = useQueryClient();
 
@@ -282,6 +300,130 @@ export function useCreateAdminAgentMutation() {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.adminAgents,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.apiKeys,
+      });
+    },
+  });
+}
+
+export function useReassignAdminSessionMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      teamLeaderId,
+      sessionId,
+      data,
+    }: {
+      teamLeaderId: string;
+      sessionId: string;
+      data: ReassignAdminSessionInput;
+    }) =>
+      adminTeamLeaderApi.reassignSession(
+        teamLeaderId,
+        sessionId,
+        data,
+      ),
+    onSuccess: (_session, params) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaderResources(params.teamLeaderId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaderResources(params.data.targetTeamLeaderId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions,
+      });
+    },
+  });
+}
+
+export function useBulkReassignAdminSessionsMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      teamLeaderId,
+      data,
+    }: {
+      teamLeaderId: string;
+      data: BulkReassignAdminSessionsInput;
+    }) =>
+      adminTeamLeaderApi.bulkReassignSessions(teamLeaderId, data),
+    onSuccess: (_sessions, params) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaderResources(params.teamLeaderId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaderResources(params.data.targetTeamLeaderId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions,
+      });
+    },
+  });
+}
+
+export function useReassignAdminAgentMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      agentId,
+      data,
+    }: {
+      agentId: string;
+      data: ReassignAdminAgentInput;
+    }) => adminAgentApi.reassign(agentId, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      // Prefix invalidation refreshes both the Team Leader list and every
+      // currently cached resource graph, including source and target owners.
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaders,
+      });
+    },
+  });
+}
+
+export function useBulkReassignAdminAgentsMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: BulkReassignAdminAgentsInput) =>
+      adminAgentApi.bulkReassign(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaders,
+      });
+    },
+  });
+}
+
+export function useDeleteAdminAgentMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (agentId: string) => adminAgentApi.delete(agentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaders,
       });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.apiKeys,

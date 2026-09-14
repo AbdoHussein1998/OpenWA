@@ -188,6 +188,50 @@ export interface AdminAgentOverview {
   updatedAt: string;
 }
 
+
+export interface AdminSessionOverview {
+  id: string;
+  name: string;
+  ownerTeamLeaderId: string | null;
+  status: Session['status'];
+  phone: string | null;
+  targetPhone: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminTeamLeaderResources {
+  teamLeader: TeamLeader;
+  sessions: AdminSessionOverview[];
+  agents: Array<{
+    id: string;
+    name: string;
+    email: string | null;
+    assignedSessionId: string | null;
+    templateSendLimit24h: number | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  canDelete: boolean;
+}
+
+export interface ReassignAdminSessionInput {
+  targetTeamLeaderId: string;
+}
+
+export interface BulkReassignAdminSessionsInput extends ReassignAdminSessionInput {
+  sessionIds: string[];
+}
+
+export interface ReassignAdminAgentInput {
+  targetTeamLeaderId: string;
+  unassignSession?: boolean;
+}
+
+export interface BulkReassignAdminAgentsInput extends ReassignAdminAgentInput {
+  agentIds: string[];
+}
+
 export interface CreateTeamLeaderInput {
   name: string;
   email?: string;
@@ -903,11 +947,14 @@ async function handleErrorResponse<T>(response: Response): Promise<T> {
   if (typeof error.used24h === 'number') {
     err.used24h = error.used24h;
   }
-  if (typeof error.remaining24h === 'number' || error.remaining24h === null) {
-    err.remaining24h = error.remaining24h;
+  const remaining24h = error.remaining24h;
+  if (typeof remaining24h === 'number' || remaining24h === null) {
+    err.remaining24h = remaining24h;
   }
-  if (typeof error.retryAfterSeconds === 'number' || error.retryAfterSeconds === null) {
-    err.retryAfterSeconds = error.retryAfterSeconds;
+
+  const retryAfterSeconds = error.retryAfterSeconds;
+  if (typeof retryAfterSeconds === 'number' || retryAfterSeconds === null) {
+    err.retryAfterSeconds = retryAfterSeconds;
   }
 
   throw err;
@@ -982,21 +1029,15 @@ export const sessionApi = {
   list: () => request<Session[]>('/sessions'),
   get: (id: string) => request<Session>(`/sessions/${id}`),
   /**
-   * Create a session.
+   * Create a session using the complete backend CreateSessionDto shape.
    *
-   * New code should pass CreateSessionInput so Team Leaders can include
-   * targetPhone/config/proxy settings. Accepting a string temporarily
-   * preserves existing dashboard call sites that still call create(name)
-   * until those pages are migrated.
+   * Session ownership is derived by the backend from the authenticated
+   * principal; callers must never attempt to send an owner id here.
    */
-  create: (input: CreateSessionInput | string) =>
+  create: (input: CreateSessionInput) =>
     request<Session>('/sessions', {
       method: 'POST',
-      body: JSON.stringify(
-        typeof input === 'string'
-          ? { name: input }
-          : input,
-      ),
+      body: JSON.stringify(input),
     }),
   delete: (id: string) => request<void>(`/sessions/${id}`, { method: 'DELETE' }),
   getConfig: (id: string) => request<SessionConfig>(`/sessions/${id}/config`),
@@ -1181,6 +1222,11 @@ export const adminTeamLeaderApi = {
       `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}`,
     ),
 
+  getResources: (teamLeaderId: string) =>
+    request<AdminTeamLeaderResources>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/resources`,
+    ),
+
   create: (data: CreateTeamLeaderInput) =>
     request<CreateTeamLeaderResult>('/admin/team-leaders', {
       method: 'POST',
@@ -1193,6 +1239,31 @@ export const adminTeamLeaderApi = {
   ) =>
     request<CreateAgentResult>(
       `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/agents`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  reassignSession: (
+    teamLeaderId: string,
+    sessionId: string,
+    data: ReassignAdminSessionInput,
+  ) =>
+    request<AdminSessionOverview>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/sessions/${encodeURIComponent(sessionId)}/owner`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  bulkReassignSessions: (
+    teamLeaderId: string,
+    data: BulkReassignAdminSessionsInput,
+  ) =>
+    request<AdminSessionOverview[]>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/sessions/bulk-reassign`,
       {
         method: 'POST',
         body: JSON.stringify(data),
@@ -1217,6 +1288,37 @@ export const adminTeamLeaderApi = {
 export const adminAgentApi = {
   list: () =>
     request<AdminAgentOverview[]>('/admin/agents'),
+
+  get: (agentId: string) =>
+    request<AdminAgentOverview>(
+      `/admin/agents/${encodeURIComponent(agentId)}`,
+    ),
+
+  reassign: (
+    agentId: string,
+    data: ReassignAdminAgentInput,
+  ) =>
+    request<AdminAgentOverview>(
+      `/admin/agents/${encodeURIComponent(agentId)}/team-leader`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  bulkReassign: (data: BulkReassignAdminAgentsInput) =>
+    request<AdminAgentOverview[]>('/admin/agents/bulk-reassign', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (agentId: string) =>
+    request<void>(
+      `/admin/agents/${encodeURIComponent(agentId)}`,
+      {
+        method: 'DELETE',
+      },
+    ),
 };
 
 /**

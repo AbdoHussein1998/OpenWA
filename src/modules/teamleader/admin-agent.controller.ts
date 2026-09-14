@@ -1,75 +1,99 @@
 import {
+  Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
 } from '@nestjs/common';
-
 import {
   ApiOperation,
+  ApiParam,
+  ApiProperty,
+  ApiPropertyOptional,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import {
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  IsUUID,
+} from 'class-validator';
 
 import {
   RequireRole,
   RequireUnscopedKey,
 } from '../auth/decorators/auth.decorators';
-
-import {
-  ApiKeyRole,
-} from '../auth/entities/api-key.entity';
-
+import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import {
   TeamLeaderService,
+  type AdminAgentOverview,
 } from './teamleader.service';
 
-/**
- * Public response shape for the ADMIN Agent overview.
- *
- * Agent / Team Leader identity data lives in the `main` database while
- * Session data lives in the separate `data` database. TeamLeaderService
- * owns that cross-database merge; this controller only exposes the result.
- */
-export interface AdminAgentOverview {
-  id: string;
-  name: string;
-  email: string | null;
+// Preserve the existing public type export used by controller specs/consumers
+// while keeping the service as the single source of truth for the shape.
+export type { AdminAgentOverview } from './teamleader.service';
 
-  teamLeaderId: string;
+export class ReassignAdminAgentDto {
+  @ApiProperty({
+    description: 'Team Leader UUID that will own the Agent after the move.',
+    format: 'uuid',
+  })
+  @IsUUID()
+  targetTeamLeaderId!: string;
 
-  teamLeader: {
-    id: string;
-    name: string;
-    email: string | null;
-  };
+  @ApiPropertyOptional({
+    description:
+      'When true, explicitly clear the Agent Session assignment while moving the Agent. Required when the current Session is not owned by the target Team Leader.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  unassignSession = false;
+}
 
-  assignedSessionId: string | null;
+export class BulkReassignAdminAgentsDto {
+  @ApiProperty({
+    description: 'Agent UUIDs to move.',
+    type: [String],
+    format: 'uuid',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  agentIds!: string[];
 
-  assignedSession: {
-    id: string;
-    name: string;
-    status: string;
-    phone: string | null;
-    targetPhone: string | null;
-  } | null;
+  @ApiProperty({
+    description: 'Team Leader UUID that will own all selected Agents.',
+    format: 'uuid',
+  })
+  @IsUUID()
+  targetTeamLeaderId!: string;
 
-  templateSendLimit24h: number | null;
-
-  createdAt: Date;
-  updatedAt: Date;
+  @ApiPropertyOptional({
+    description:
+      'When true, clear the selected Agents\' Session assignments as part of the main-database transaction.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  unassignSession = false;
 }
 
 /**
- * Global Agent overview for administrators.
+ * Global Agent administration.
  *
- * This endpoint is intentionally:
- *
- * - ADMIN only
- * - unavailable to session-scoped API keys
- *
- * The endpoint has no single session dimension, so a session-scoped ADMIN
- * credential must not be able to use it to inspect principals outside its
- * allowedSessions ceiling.
+ * Every endpoint is ADMIN-only and unavailable to session-scoped API keys
+ * because these operations have no single Session dimension to which an
+ * allowedSessions ceiling can safely be applied.
  */
 @ApiTags('admin/agents')
 @Controller('admin/agents')
@@ -80,219 +104,152 @@ export class AdminAgentController {
     private readonly teamLeaderService: TeamLeaderService,
   ) {}
 
-  /**
-   * List every Agent together with its owning Team Leader and currently
-   * assigned Session, when one exists.
-   *
-   * TeamLeaderService performs the cross-database lookup:
-   *
-   * main DB:
-   *   Agent + TeamLeader
-   *
-   * data DB:
-   *   Session
-   *
-   * No plaintext API key is returned by this endpoint.
-   */
+  /** List every Agent with Team Leader and assigned Session metadata. */
   @Get()
   @ApiOperation({
-    summary:
-      'List all Agents for administration',
+    summary: 'List all Agents for administration',
     description:
       'Returns every Agent with its Team Leader and assigned Session overview. Plaintext API keys are never returned.',
   })
   @ApiResponse({
-    status:
-      HttpStatus.OK,
-
+    status: HttpStatus.OK,
     description:
       'All Agent principals with Team Leader and assigned Session information.',
-
-    schema: {
-      type:
-        'array',
-
-      items: {
-        type:
-          'object',
-
-        required: [
-          'id',
-          'name',
-          'email',
-          'teamLeaderId',
-          'teamLeader',
-          'assignedSessionId',
-          'assignedSession',
-          'templateSendLimit24h',
-          'createdAt',
-          'updatedAt',
-        ],
-
-        properties: {
-          id: {
-            type:
-              'string',
-            format:
-              'uuid',
-          },
-
-          name: {
-            type:
-              'string',
-            example:
-              'Mohamed Ali',
-          },
-
-          email: {
-            type:
-              'string',
-            format:
-              'email',
-            nullable:
-              true,
-            example:
-              'mohamed.ali@example.com',
-          },
-
-          teamLeaderId: {
-            type:
-              'string',
-            format:
-              'uuid',
-          },
-
-          teamLeader: {
-            type:
-              'object',
-
-            required: [
-              'id',
-              'name',
-              'email',
-            ],
-
-            properties: {
-              id: {
-                type:
-                  'string',
-                format:
-                  'uuid',
-              },
-
-              name: {
-                type:
-                  'string',
-                example:
-                  'Ahmed Hassan',
-              },
-
-              email: {
-                type:
-                  'string',
-                format:
-                  'email',
-                nullable:
-                  true,
-                example:
-                  'ahmed.hassan@example.com',
-              },
-            },
-          },
-
-          assignedSessionId: {
-            type:
-              'string',
-            format:
-              'uuid',
-            nullable:
-              true,
-          },
-
-          assignedSession: {
-            type:
-              'object',
-            nullable:
-              true,
-
-            required: [
-              'id',
-              'name',
-              'status',
-              'phone',
-              'targetPhone',
-            ],
-
-            properties: {
-              id: {
-                type:
-                  'string',
-                format:
-                  'uuid',
-              },
-
-              name: {
-                type:
-                  'string',
-              },
-
-              status: {
-                type:
-                  'string',
-              },
-
-              phone: {
-                type:
-                  'string',
-                nullable:
-                  true,
-              },
-
-              targetPhone: {
-                type:
-                  'string',
-                nullable:
-                  true,
-              },
-            },
-          },
-
-          templateSendLimit24h: {
-            type:
-              'integer',
-            nullable:
-              true,
-            minimum:
-              0,
-            description:
-              'Rolling 24-hour stored-template send limit. Null means unlimited.',
-          },
-
-          createdAt: {
-            type:
-              'string',
-            format:
-              'date-time',
-          },
-
-          updatedAt: {
-            type:
-              'string',
-            format:
-              'date-time',
-          },
-        },
-      },
-    },
   })
   @ApiResponse({
-    status:
-      HttpStatus.FORBIDDEN,
-
-    description:
-      'Caller is not an unscoped ADMIN.',
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
   })
   async findAll(): Promise<AdminAgentOverview[]> {
     return this.teamLeaderService.getAdminAgents();
+  }
+
+  /**
+   * Resolve one Agent before reassignment/deletion so the Admin UI can show
+   * exactly which Team Leader and Session relationship will be affected.
+   */
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Get an Agent for administration',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Agent UUID',
+    format: 'uuid',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Agent, Team Leader, and assigned Session overview.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Agent not found.',
+  })
+  async findOne(
+    @Param('id', ParseUUIDPipe)
+    id: string,
+  ): Promise<AdminAgentOverview> {
+    return this.teamLeaderService.getAdminAgent(id);
+  }
+
+  /** Move one Agent to another Team Leader. */
+  @Patch(':id/team-leader')
+  @ApiOperation({
+    summary: 'Reassign an Agent to another Team Leader',
+    description:
+      'Moves the Agent in the main database. If the existing assigned Session is not owned by the target Team Leader, send unassignSession=true so the move cannot create an invalid cross-tenant assignment.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Agent UUID',
+    format: 'uuid',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Updated Agent overview.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Agent or target Team Leader not found.',
+  })
+  @ApiResponse({
+    status: HttpStatus.CONFLICT,
+    description:
+      'The Agent has a Session assignment that cannot remain valid under the target Team Leader.',
+  })
+  async reassign(
+    @Param('id', ParseUUIDPipe)
+    id: string,
+    @Body()
+    dto: ReassignAdminAgentDto,
+  ): Promise<AdminAgentOverview> {
+    return this.teamLeaderService.reassignAdminAgent(
+      id,
+      dto.targetTeamLeaderId,
+      dto.unassignSession,
+    );
+  }
+
+  /** Bulk-move Agents to one Team Leader. */
+  @Post('bulk-reassign')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk reassign Agents to another Team Leader',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Updated Agent overviews in the same order as agentIds.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'One or more Agents or the target Team Leader were not found.',
+  })
+  @ApiResponse({
+    status: HttpStatus.CONFLICT,
+    description:
+      'One or more Session assignments cannot remain valid under the target Team Leader.',
+  })
+  async bulkReassign(
+    @Body()
+    dto: BulkReassignAdminAgentsDto,
+  ): Promise<AdminAgentOverview[]> {
+    return this.teamLeaderService.reassignAdminAgents(
+      dto.agentIds,
+      dto.targetTeamLeaderId,
+      dto.unassignSession,
+    );
+  }
+
+  /**
+   * Delete an Agent as ADMIN.
+   *
+   * The Agent's assigned Session is not deleted because the Session is owned
+   * by its Team Leader, not by the Agent.
+   */
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete an Agent',
+    description:
+      'Deletes the Agent principal and its AGENT credentials. Any assigned Session remains intact.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Agent UUID',
+    format: 'uuid',
+  })
+  @ApiResponse({
+    status: HttpStatus.NO_CONTENT,
+    description: 'Agent deleted successfully.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Agent not found.',
+  })
+  async delete(
+    @Param('id', ParseUUIDPipe)
+    id: string,
+  ): Promise<void> {
+    await this.teamLeaderService.deleteAdminAgent(id);
   }
 }

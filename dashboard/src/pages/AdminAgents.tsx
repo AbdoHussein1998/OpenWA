@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useState,
   type ChangeEvent,
@@ -8,15 +9,21 @@ import {
 } from 'react-router-dom';
 import {
   AlertCircle,
+  ArrowRightLeft,
   ExternalLink,
   Loader2,
   RefreshCw,
   Search,
   Smartphone,
+  Trash2,
   UserRound,
   Users,
   Wifi,
 } from 'lucide-react';
+
+import {
+  Modal,
+} from '../components/Modal';
 
 import {
   PageHeader,
@@ -24,11 +31,19 @@ import {
 
 import {
   useAdminAgentsQuery,
+  useAdminTeamLeadersQuery,
+  useBulkReassignAdminAgentsMutation,
+  useDeleteAdminAgentMutation,
+  useReassignAdminAgentMutation,
 } from '../hooks/queries';
 
 import {
   useDocumentTitle,
 } from '../hooks/useDocumentTitle';
+
+import {
+  useToast,
+} from '../hooks/useToast';
 
 import type {
   AdminAgentOverview,
@@ -48,9 +63,7 @@ function formatDate(
   value: string,
 ): string {
   const parsed =
-    new Date(
-      value,
-    );
+    new Date(value);
 
   if (
     Number.isNaN(
@@ -61,6 +74,23 @@ function formatDate(
   }
 
   return parsed.toLocaleString();
+}
+
+function formatShortDate(
+  value: string,
+): string {
+  const parsed =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      parsed.getTime(),
+    )
+  ) {
+    return value;
+  }
+
+  return parsed.toLocaleDateString();
 }
 
 function statusLabel(
@@ -151,18 +181,108 @@ export function AdminAgents() {
   const navigate =
     useNavigate();
 
+  const toast =
+    useToast();
+
   const agentsQuery =
     useAdminAgentsQuery();
+
+  const teamLeadersQuery =
+    useAdminTeamLeadersQuery();
+
+  const reassignAgentMutation =
+    useReassignAdminAgentMutation();
+
+  const bulkReassignAgentsMutation =
+    useBulkReassignAdminAgentsMutation();
+
+  const deleteAgentMutation =
+    useDeleteAdminAgentMutation();
 
   const [
     search,
     setSearch,
-  ] =
-    useState('');
+  ] = useState('');
+
+  const [
+    selectedAgentIds,
+    setSelectedAgentIds,
+  ] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const [
+    bulkTargetTeamLeaderId,
+    setBulkTargetTeamLeaderId,
+  ] = useState('');
+
+  const [
+    bulkUnassignSession,
+    setBulkUnassignSession,
+  ] = useState(true);
+
+  const [
+    managedAgentId,
+    setManagedAgentId,
+  ] = useState('');
+
+  const [
+    individualTargetTeamLeaderId,
+    setIndividualTargetTeamLeaderId,
+  ] = useState('');
+
+  const [
+    individualUnassignSession,
+    setIndividualUnassignSession,
+  ] = useState(true);
 
   const agents =
     agentsQuery.data ??
     [];
+
+  const teamLeaders =
+    teamLeadersQuery.data ??
+    [];
+
+  const managedAgent =
+    useMemo(
+      () =>
+        agents.find(
+          agent =>
+            agent.id ===
+            managedAgentId,
+        ) ?? null,
+      [
+        agents,
+        managedAgentId,
+      ],
+    );
+
+  useEffect(() => {
+    if (!managedAgent) {
+      setIndividualTargetTeamLeaderId('');
+      return;
+    }
+
+    const defaultTarget =
+      teamLeaders.find(
+        teamLeader =>
+          teamLeader.id !==
+          managedAgent.teamLeaderId,
+      )?.id ?? '';
+
+    setIndividualTargetTeamLeaderId(
+      defaultTarget,
+    );
+    setIndividualUnassignSession(
+      Boolean(
+        managedAgent.assignedSessionId,
+      ),
+    );
+  }, [
+    managedAgent,
+    teamLeaders,
+  ]);
 
   const normalizedSearch =
     search
@@ -213,9 +333,49 @@ export function AdminAgents() {
         !agent.assignedSession,
     ).length;
 
+  const allFilteredSelected =
+    filteredAgents.length > 0 &&
+    filteredAgents.every(
+      agent =>
+        selectedAgentIds.has(
+          agent.id,
+        ),
+    );
+
+  const bulkMoveCandidateIds =
+    useMemo(
+      () =>
+        agents
+          .filter(
+            agent =>
+              selectedAgentIds.has(
+                agent.id,
+              ) &&
+              agent.teamLeaderId !==
+                bulkTargetTeamLeaderId,
+          )
+          .map(
+            agent =>
+              agent.id,
+          ),
+      [
+        agents,
+        selectedAgentIds,
+        bulkTargetTeamLeaderId,
+      ],
+    );
+
+  const isMutating =
+    reassignAgentMutation.isPending ||
+    bulkReassignAgentsMutation.isPending ||
+    deleteAgentMutation.isPending;
+
   const refresh =
     () => {
-      void agentsQuery.refetch();
+      void Promise.all([
+        agentsQuery.refetch(),
+        teamLeadersQuery.refetch(),
+      ]);
     };
 
   const openSession =
@@ -232,6 +392,176 @@ export function AdminAgents() {
           sessionId,
         )}`,
       );
+    };
+
+  const toggleAgentSelection =
+    (
+      agentId: string,
+      checked: boolean,
+    ) => {
+      setSelectedAgentIds(
+        previous => {
+          const next =
+            new Set(previous);
+
+          if (checked) {
+            next.add(agentId);
+          } else {
+            next.delete(agentId);
+          }
+
+          return next;
+        },
+      );
+    };
+
+  const toggleAllFiltered =
+    (
+      checked: boolean,
+    ) => {
+      setSelectedAgentIds(
+        previous => {
+          const next =
+            new Set(previous);
+
+          for (
+            const agent of
+            filteredAgents
+          ) {
+            if (checked) {
+              next.add(agent.id);
+            } else {
+              next.delete(agent.id);
+            }
+          }
+
+          return next;
+        },
+      );
+    };
+
+  const bulkMoveAgents =
+    async () => {
+      if (
+        selectedAgentIds.size === 0 ||
+        !bulkTargetTeamLeaderId
+      ) {
+        return;
+      }
+
+      if (bulkMoveCandidateIds.length === 0) {
+        toast.info(
+          'No Agents to move',
+          'Every selected Agent already belongs to the destination Team Leader.',
+        );
+        return;
+      }
+
+      try {
+        await bulkReassignAgentsMutation.mutateAsync({
+          agentIds:
+            bulkMoveCandidateIds,
+          targetTeamLeaderId:
+            bulkTargetTeamLeaderId,
+          unassignSession:
+            bulkUnassignSession,
+        });
+
+        setSelectedAgentIds(
+          new Set(),
+        );
+
+        toast.success(
+          'Agents moved',
+          'The selected Agents were reassigned successfully.',
+        );
+      } catch (error) {
+        toast.error(
+          'Bulk Agent reassignment failed',
+          errorMessage(error),
+        );
+      }
+    };
+
+  const moveManagedAgent =
+    async () => {
+      if (
+        !managedAgent ||
+        !individualTargetTeamLeaderId
+      ) {
+        return;
+      }
+
+      try {
+        await reassignAgentMutation.mutateAsync({
+          agentId:
+            managedAgent.id,
+          data: {
+            targetTeamLeaderId:
+              individualTargetTeamLeaderId,
+            unassignSession:
+              individualUnassignSession,
+          },
+        });
+
+        toast.success(
+          'Agent moved',
+          `${managedAgent.name} was reassigned successfully.`,
+        );
+
+        setManagedAgentId('');
+      } catch (error) {
+        toast.error(
+          'Agent reassignment failed',
+          errorMessage(error),
+        );
+      }
+    };
+
+  const deleteAgent =
+    async (
+      agent: AdminAgentOverview,
+    ) => {
+      const confirmed =
+        window.confirm(
+          `Delete Agent "${agent.name}"? The Agent credential will be removed. The WhatsApp Session itself will not be deleted.`,
+        );
+
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        await deleteAgentMutation.mutateAsync(
+          agent.id,
+        );
+
+        setSelectedAgentIds(
+          previous => {
+            const next =
+              new Set(previous);
+            next.delete(agent.id);
+            return next;
+          },
+        );
+
+        if (
+          managedAgentId ===
+          agent.id
+        ) {
+          setManagedAgentId('');
+        }
+
+        toast.success(
+          'Agent deleted',
+          `${agent.name} was deleted successfully.`,
+        );
+      } catch (error) {
+        toast.error(
+          'Agent deletion failed',
+          errorMessage(error),
+        );
+      }
     };
 
   if (
@@ -257,22 +587,23 @@ export function AdminAgents() {
     <div className="admin-agents-page">
       <PageHeader
         title="Agents"
-        subtitle="View every Agent across Team Leaders together with its current WhatsApp session assignment and status."
+        subtitle="Move Agents between Team Leaders, resolve Session assignment conflicts, and delete Agent principals safely."
         actions={
           <button
             type="button"
             className="btn-secondary"
-            onClick={
-              refresh
-            }
+            onClick={refresh}
             disabled={
-              agentsQuery.isFetching
+              agentsQuery.isFetching ||
+              teamLeadersQuery.isFetching ||
+              isMutating
             }
           >
             <RefreshCw
               size={17}
               className={
-                agentsQuery.isFetching
+                agentsQuery.isFetching ||
+                teamLeadersQuery.isFetching
                   ? 'animate-spin'
                   : undefined
               }
@@ -283,23 +614,23 @@ export function AdminAgents() {
         }
       />
 
-      {agentsQuery.isError && (
+      {(agentsQuery.isError ||
+        teamLeadersQuery.isError) && (
         <div
           className="admin-agents-alert admin-agents-alert--error"
           role="alert"
         >
-          <AlertCircle
-            size={20}
-          />
+          <AlertCircle size={20} />
 
           <div>
             <strong>
-              Agents could not be loaded.
+              Administration data could not be loaded.
             </strong>
 
             <span>
               {errorMessage(
-                agentsQuery.error,
+                agentsQuery.error ??
+                  teamLeadersQuery.error,
               )}
             </span>
           </div>
@@ -307,11 +638,10 @@ export function AdminAgents() {
           <button
             type="button"
             className="btn-secondary"
-            onClick={
-              refresh
-            }
+            onClick={refresh}
             disabled={
-              agentsQuery.isFetching
+              agentsQuery.isFetching ||
+              teamLeadersQuery.isFetching
             }
           >
             Retry
@@ -325,9 +655,7 @@ export function AdminAgents() {
       >
         <article className="admin-agents-summary-card">
           <div className="admin-agents-summary-icon">
-            <Users
-              size={20}
-            />
+            <Users size={20} />
           </div>
 
           <div>
@@ -347,9 +675,7 @@ export function AdminAgents() {
 
         <article className="admin-agents-summary-card">
           <div className="admin-agents-summary-icon">
-            <Smartphone
-              size={20}
-            />
+            <Smartphone size={20} />
           </div>
 
           <div>
@@ -369,9 +695,7 @@ export function AdminAgents() {
 
         <article className="admin-agents-summary-card">
           <div className="admin-agents-summary-icon">
-            <UserRound
-              size={20}
-            />
+            <UserRound size={20} />
           </div>
 
           <div>
@@ -391,9 +715,7 @@ export function AdminAgents() {
 
         <article className="admin-agents-summary-card">
           <div className="admin-agents-summary-icon">
-            <Wifi
-              size={20}
-            />
+            <Wifi size={20} />
           </div>
 
           <div>
@@ -422,7 +744,7 @@ export function AdminAgents() {
             </h2>
 
             <p>
-              Session assignment remains owned by the Team Leader workflow; this Admin page provides a global operational view.
+              Select Agents for a bulk Team Leader move, or use the row actions for an individual reassignment or deletion.
             </p>
           </div>
 
@@ -438,11 +760,12 @@ export function AdminAgents() {
 
             <input
               type="search"
-              value={
-                search
-              }
+              value={search}
               onChange={
-                (event: ChangeEvent<HTMLInputElement>) =>
+                (
+                  event:
+                    ChangeEvent<HTMLInputElement>,
+                ) =>
                   setSearch(
                     event.target.value,
                   )
@@ -453,12 +776,105 @@ export function AdminAgents() {
           </label>
         </div>
 
+        {agents.length > 0 && (
+          <div className="admin-agents-bulk-bar">
+            <div className="admin-agents-bulk-selection">
+              <strong>
+                {selectedAgentIds.size} selected
+              </strong>
+              <button
+                type="button"
+                className="admin-agents-text-button"
+                onClick={() =>
+                  setSelectedAgentIds(
+                    new Set(),
+                  )
+                }
+                disabled={
+                  selectedAgentIds.size === 0 ||
+                  isMutating
+                }
+              >
+                Clear
+              </button>
+            </div>
+
+            <label className="admin-agents-bulk-field">
+              <span>
+                Move to Team Leader
+              </span>
+              <select
+                value={bulkTargetTeamLeaderId}
+                onChange={event =>
+                  setBulkTargetTeamLeaderId(
+                    event.target.value,
+                  )
+                }
+                disabled={
+                  teamLeaders.length === 0 ||
+                  isMutating
+                }
+              >
+                <option value="">
+                  Select Team Leader
+                </option>
+                {teamLeaders.map(
+                  teamLeader => (
+                    <option
+                      key={teamLeader.id}
+                      value={teamLeader.id}
+                    >
+                      {teamLeader.name}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+
+            <label className="admin-agents-bulk-checkbox">
+              <input
+                type="checkbox"
+                checked={bulkUnassignSession}
+                onChange={event =>
+                  setBulkUnassignSession(
+                    event.target.checked,
+                  )
+                }
+                disabled={isMutating}
+              />
+              Clear Session assignments when moving
+            </label>
+
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() =>
+                void bulkMoveAgents()
+              }
+              disabled={
+                selectedAgentIds.size === 0 ||
+                !bulkTargetTeamLeaderId ||
+                bulkMoveCandidateIds.length === 0 ||
+                isMutating
+              }
+            >
+              {bulkReassignAgentsMutation.isPending ? (
+                <Loader2
+                  size={16}
+                  className="animate-spin"
+                />
+              ) : (
+                <ArrowRightLeft size={16} />
+              )}
+              Move selected
+            </button>
+          </div>
+        )}
+
         {agents.length === 0 ? (
           <div className="admin-agents-empty-state">
             <div className="admin-agents-empty-icon">
-              <Users
-                size={30}
-              />
+              <Users size={30} />
             </div>
 
             <h3>
@@ -471,9 +887,7 @@ export function AdminAgents() {
           </div>
         ) : filteredAgents.length === 0 ? (
           <div className="admin-agents-empty-state admin-agents-empty-state--compact">
-            <Search
-              size={28}
-            />
+            <Search size={28} />
 
             <h3>
               No matching Agents
@@ -487,9 +901,7 @@ export function AdminAgents() {
               type="button"
               className="btn-secondary"
               onClick={() =>
-                setSearch(
-                  '',
-                )
+                setSearch('')
               }
             >
               Clear search
@@ -500,38 +912,27 @@ export function AdminAgents() {
             <table className="admin-agents-table">
               <thead>
                 <tr>
-                  <th>
-                    Agent
+                  <th className="admin-agents-select-column">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={event =>
+                        toggleAllFiltered(
+                          event.target.checked,
+                        )
+                      }
+                      aria-label="Select all visible Agents"
+                      disabled={isMutating}
+                    />
                   </th>
-
-                  <th>
-                    Team Leader
-                  </th>
-
-                  <th>
-                    Session
-                  </th>
-
-                  <th>
-                    Configured phone
-                  </th>
-
-                  <th>
-                    Connected phone
-                  </th>
-
-                  <th>
-                    Status
-                  </th>
-
-                  <th>
-                    Template quota
-                  </th>
-
-                  <th>
-                    Created
-                  </th>
-
+                  <th>Agent</th>
+                  <th>Team Leader</th>
+                  <th>Session</th>
+                  <th>Configured phone</th>
+                  <th>Connected phone</th>
+                  <th>Status</th>
+                  <th>Template quota</th>
+                  <th>Created</th>
                   <th className="admin-agents-actions-column">
                     Actions
                   </th>
@@ -545,11 +946,26 @@ export function AdminAgents() {
                       agent.assignedSession;
 
                     return (
-                      <tr
-                        key={
-                          agent.id
-                        }
-                      >
+                      <tr key={agent.id}>
+                        <td className="admin-agents-select-cell">
+                          <input
+                            type="checkbox"
+                            checked={
+                              selectedAgentIds.has(
+                                agent.id,
+                              )
+                            }
+                            onChange={event =>
+                              toggleAgentSelection(
+                                agent.id,
+                                event.target.checked,
+                              )
+                            }
+                            aria-label={`Select ${agent.name}`}
+                            disabled={isMutating}
+                          />
+                        </td>
+
                         <td>
                           <div className="admin-agents-identity-cell">
                             <strong>
@@ -657,28 +1073,37 @@ export function AdminAgents() {
                               )
                             }
                           >
-                            {new Date(
+                            {formatShortDate(
                               agent.createdAt,
-                            ).toLocaleDateString()}
+                            )}
                           </span>
                         </td>
 
                         <td>
                           <div className="admin-agents-row-actions">
+                            <button
+                              type="button"
+                              className="admin-agents-action-btn"
+                              onClick={() =>
+                                setManagedAgentId(
+                                  agent.id,
+                                )
+                              }
+                              disabled={isMutating}
+                            >
+                              <ArrowRightLeft size={16} />
+                              Move
+                            </button>
+
                             {session ? (
                               <>
                                 <button
                                   type="button"
                                   className="admin-agents-action-btn"
-                                  onClick={
-                                    openSession
-                                  }
+                                  onClick={openSession}
                                   title="Open Sessions"
                                 >
-                                  <Smartphone
-                                    size={16}
-                                  />
-
+                                  <Smartphone size={16} />
                                   Session
                                 </button>
 
@@ -692,10 +1117,7 @@ export function AdminAgents() {
                                   }
                                   title={`Open chats for ${session.name}`}
                                 >
-                                  <ExternalLink
-                                    size={16}
-                                  />
-
+                                  <ExternalLink size={16} />
                                   Chats
                                 </button>
                               </>
@@ -703,17 +1125,26 @@ export function AdminAgents() {
                               <button
                                 type="button"
                                 className="admin-agents-action-btn"
-                                onClick={
-                                  openSession
-                                }
+                                onClick={openSession}
                               >
-                                <Smartphone
-                                  size={16}
-                                />
-
+                                <Smartphone size={16} />
                                 Sessions
                               </button>
                             )}
+
+                            <button
+                              type="button"
+                              className="admin-agents-action-btn admin-agents-action-btn--danger"
+                              onClick={() =>
+                                void deleteAgent(
+                                  agent,
+                                )
+                              }
+                              disabled={isMutating}
+                            >
+                              <Trash2 size={16} />
+                              Delete
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -725,6 +1156,134 @@ export function AdminAgents() {
           </div>
         )}
       </section>
+
+      <Modal
+        open={Boolean(managedAgent)}
+        onClose={() => {
+          if (!isMutating) {
+            setManagedAgentId('');
+          }
+        }}
+        title={
+          managedAgent
+            ? `Move ${managedAgent.name}`
+            : 'Move Agent'
+        }
+        className="admin-agents-move-modal"
+        hideCloseButton={isMutating}
+        footer={
+          managedAgent ? (
+            <div className="admin-agents-modal-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() =>
+                  setManagedAgentId('')
+                }
+                disabled={isMutating}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() =>
+                  void moveManagedAgent()
+                }
+                disabled={
+                  !individualTargetTeamLeaderId ||
+                  isMutating
+                }
+              >
+                {reassignAgentMutation.isPending ? (
+                  <Loader2
+                    size={16}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <ArrowRightLeft size={16} />
+                )}
+                Move Agent
+              </button>
+            </div>
+          ) : undefined
+        }
+      >
+        {managedAgent && (
+          <div className="admin-agents-move-form">
+            <div className="admin-agents-current-owner">
+              <span>
+                Current Team Leader
+              </span>
+              <strong>
+                {managedAgent.teamLeader.name}
+              </strong>
+              <code>
+                {managedAgent.teamLeaderId}
+              </code>
+            </div>
+
+            <label className="admin-agents-form-field">
+              <span>
+                New Team Leader
+              </span>
+              <select
+                value={individualTargetTeamLeaderId}
+                onChange={event =>
+                  setIndividualTargetTeamLeaderId(
+                    event.target.value,
+                  )
+                }
+                disabled={isMutating}
+              >
+                <option value="">
+                  Select Team Leader
+                </option>
+                {teamLeaders
+                  .filter(
+                    teamLeader =>
+                      teamLeader.id !==
+                      managedAgent.teamLeaderId,
+                  )
+                  .map(
+                    teamLeader => (
+                      <option
+                        key={teamLeader.id}
+                        value={teamLeader.id}
+                      >
+                        {teamLeader.name}
+                      </option>
+                    ),
+                  )}
+              </select>
+            </label>
+
+            <label className="admin-agents-move-checkbox">
+              <input
+                type="checkbox"
+                checked={individualUnassignSession}
+                onChange={event =>
+                  setIndividualUnassignSession(
+                    event.target.checked,
+                  )
+                }
+                disabled={isMutating}
+              />
+              <span>
+                <strong>
+                  Clear current Session assignment
+                </strong>
+                <small>
+                  {managedAgent.assignedSessionId
+                    ? `Currently assigned to ${managedAgent.assignedSessionId}. Keep this enabled unless that Session is already owned by the destination Team Leader.`
+                    : 'This Agent currently has no Session assignment.'}
+                </small>
+              </span>
+            </label>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

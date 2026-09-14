@@ -1,24 +1,37 @@
-
-
-
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { Trans, useTranslation } from 'react-i18next';
 import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  Trans,
+  useTranslation,
+} from 'react-i18next';
+import {
+  Eye,
+  Filter,
+  Loader2,
+  Play,
   Plus,
   QrCode,
   RefreshCw,
-  Trash2,
-  Eye,
-  Loader2,
-  Play,
-  Square,
   Search,
-  Filter,
   Skull,
+  Square,
+  Trash2,
   Unlink,
 } from 'lucide-react';
-import { sessionApi, type Session, type SessionConfig, type AccountRestriction } from '../services/api';
+import type { TFunction } from 'i18next';
+
+import {
+  sessionApi,
+  type AccountRestriction,
+  type CreateSessionInput,
+  type Session,
+  type SessionConfig,
+} from '../services/api';
 import { queryKeys } from '../hooks/queries';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import {
@@ -28,14 +41,24 @@ import {
   isSessionStarted,
   replaceSession,
 } from '../utils/sessionActions';
-import { invalidateSessionQueries, reconcileSessionCache } from '../utils/sessionMutation';
-import { canCreateSession, filterSessions, isValidPairingPhone, sessionNameIssues } from '../utils/sessionForm';
+import {
+  invalidateSessionQueries,
+  reconcileSessionCache,
+} from '../utils/sessionMutation';
+import {
+  canCreateSession,
+  filterSessions,
+  isValidPairingPhone,
+  sessionNameIssues,
+} from '../utils/sessionForm';
 import { useToast } from '../hooks/useToast';
 import { useRole } from '../hooks/useRole';
 import { useSessionPairing } from '../hooks/useSessionPairing';
-import type { TFunction } from 'i18next';
 import { useSessionFeed } from '../hooks/useSessionFeed';
-import type { ConnectionStage, SessionConnectionStageEvent } from '../hooks/useWebSocket';
+import type {
+  ConnectionStage,
+  SessionConnectionStageEvent,
+} from '../hooks/useWebSocket';
 import { useSessionCreateForm } from '../hooks/useSessionCreateForm';
 import { PageHeader } from '../components/PageHeader';
 import { CustomSelect } from '../components/CustomSelect';
@@ -47,75 +70,151 @@ interface ConnectionProgress {
   events: SessionConnectionStageEvent[];
 }
 
-/**
- * The hover title for a restriction: the engine's own cause token, plus when enforcement ends if
- * WhatsApp said. The visible label stays the translated kind — `code` is a raw upstream token
- * (`TOS_BLOCK`, `BIZ_QUALITY`) that is searchable but not readable, so it belongs in the tooltip.
- */
-function restrictionTitle(restriction: AccountRestriction, t: TFunction): string {
-  const parts = [t(`sessions.restriction.${restriction.kind}`), restriction.code];
+const TARGET_PHONE_PATTERN = /^\+?[1-9]\d{6,14}$/;
+const ALLOWED_PROXY_PROTOCOLS = new Set([
+  'http:',
+  'https:',
+  'socks4:',
+  'socks5:',
+]);
+
+function restrictionTitle(
+  restriction: AccountRestriction,
+  t: TFunction,
+): string {
+  const parts = [
+    t(`sessions.restriction.${restriction.kind}`),
+    restriction.code,
+  ];
+
   if (restriction.expiresAt) {
-    parts.push(t('sessions.restriction.until', { date: new Date(restriction.expiresAt).toLocaleString() }));
+    parts.push(
+      t('sessions.restriction.until', {
+        date: new Date(
+          restriction.expiresAt,
+        ).toLocaleString(),
+      }),
+    );
   }
+
   return parts.join(' · ');
+}
+
+function isValidProxyUrl(value: string): boolean {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return true;
+  }
+
+  if (trimmed.length > 255) {
+    return false;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    return (
+      ALLOWED_PROXY_PROTOCOLS.has(
+        url.protocol,
+      ) &&
+      url.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getNumericConfigValue(
+  config: Record<string, unknown> | undefined,
+  key: string,
+): number | '' {
+  const value = config?.[key];
+  return typeof value === 'number'
+    ? value
+    : '';
+}
+
+function getBooleanConfigValue(
+  config: Record<string, unknown> | undefined,
+  key: string,
+): boolean {
+  return config?.[key] === true;
 }
 
 export function Sessions() {
   const { t } = useTranslation();
   useDocumentTitle(t('sessions.title'));
+
   const toast = useToast();
-  const { canWrite } = useRole();
+  const {
+    canManageSessions,
+    canStartSessions,
+    canShutdownSessions,
+  } = useRole();
   const queryClient = useQueryClient();
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
-  // The full-page spinner belongs to the FIRST load only (see fetchSessions).
+
+  const [sessions, setSessions] =
+    useState<Session[]>([]);
+  const [loading, setLoading] =
+    useState(true);
   const initialLoadDone = useRef(false);
-  const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [killConfirmId, setKillConfirmId] = useState<string | null>(null);
-  const [unlinkConfirmId, setUnlinkConfirmId] = useState<string | null>(null);
-  const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
-  // Session config is not on the list payload — the API never returns the config column, so it is
-  // fetched per session when the detail modal opens rather than N times to render the list.
-  const [sessionConfig, setSessionConfig] = useState<SessionConfig | null>(null);
-  const [savingConfig, setSavingConfig] = useState(false);
-  // Transient connection telemetry only. It is keyed by session and replaced atomically when a new
-  // attemptId arrives, so QR rotations stay in one attempt while reconnects start fresh histories.
-  const [connectionProgress, setConnectionProgress] = useState<Record<string, ConnectionProgress>>({});
+  const [error, setError] =
+    useState<string | null>(null);
+  const [searchQuery, setSearchQuery] =
+    useState('');
+  const [statusFilter, setStatusFilter] =
+    useState('all');
+  const [selectedSession, setSelectedSession] =
+    useState<Session | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] =
+    useState<string | null>(null);
+  const [killConfirmId, setKillConfirmId] =
+    useState<string | null>(null);
+  const [unlinkConfirmId, setUnlinkConfirmId] =
+    useState<string | null>(null);
+  const [unlinkingId, setUnlinkingId] =
+    useState<string | null>(null);
+  const [sessionConfig, setSessionConfig] =
+    useState<SessionConfig | null>(null);
+  const [savingConfig, setSavingConfig] =
+    useState(false);
+  const [connectionProgress, setConnectionProgress] =
+    useState<Record<string, ConnectionProgress>>({});
 
-  const fetchSessions = useCallback(async (): Promise<Session[]> => {
-    try {
-      // Background refetches — a websocket push, a mutation reloading the list — would otherwise
-      // replace the whole page with a spinner for the length of a round-trip, so a restriction
-      // arriving on a live page reads as a full reload.
-      if (!initialLoadDone.current) setLoading(true);
-      const data = await sessionApi.list();
-      setSessions(data);
-      // Keep the shared React Query cache (read by the Dashboard via useSessionsQuery /
-      // useSessionStatsQuery) in sync after this page's mutations reload local state — otherwise the
-      // Dashboard shows stale session counts/status. This runs on every reload (mount / WS-failed /
-      // mutation), which is harmless: the Sessions page holds no active observer on a ['sessions', …]
-      // query, so invalidation only marks the shared cache stale (no refetch here, no loop) and the
-      // Dashboard/other views refetch lazily on next mount. Prefix-matches every session-scoped key
-      // (sessions, sessionStats, per-session groups/chats/templates).
-      void invalidateSessionQueries(queryClient, queryKeys.sessions);
-      return data;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('sessions.create.errorDefault'));
-      return [];
-    } finally {
-      initialLoadDone.current = true;
-      setLoading(false);
-    }
-  }, [t, queryClient]);
+  const fetchSessions = useCallback(
+    async (): Promise<Session[]> => {
+      try {
+        if (!initialLoadDone.current) {
+          setLoading(true);
+        }
 
-  // Mirror the latest sessions in a ref so the WS handler can compare against the current status without
-  // depending on `sessions` (which would churn the callback identity and re-subscribe the socket). Kept
-  // in sync with every state update (fetch / create / delete / WS) via the effect below.
+        const data = await sessionApi.list();
+        setSessions(data);
+
+        void invalidateSessionQueries(
+          queryClient,
+          queryKeys.sessions,
+        );
+
+        return data;
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : t('sessions.create.errorDefault'),
+        );
+
+        return [];
+      } finally {
+        initialLoadDone.current = true;
+        setLoading(false);
+      }
+    },
+    [queryClient, t],
+  );
+
   const sessionsRef = useRef<Session[]>([]);
+
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
@@ -135,253 +234,506 @@ export function Sessions() {
     handleCloseQRModal,
     applyQrPush,
     dismissQrForSession,
-  } = useSessionPairing({ sessions, sessionsRef, reloadSessions: fetchSessions });
+  } = useSessionPairing({
+    sessions,
+    sessionsRef,
+    reloadSessions: fetchSessions,
+  });
 
-  const { showCreateModal, setShowCreateModal, newSessionName, setNewSessionName, creating, handleCreate } =
-    useSessionCreateForm({
-      onCreated: newSession => {
-        // Functional append: never capture a stale `sessions` (a WS or fetch between the await and the
-        // setState would otherwise drop a row). Then invalidate the prefix so stats/groups/chats refresh.
-        setSessions(current => [...current, newSession]);
-        void invalidateSessionQueries(queryClient, queryKeys.sessions);
-      },
-      onFailed: msg => setError(msg),
-    });
+  const {
+    showCreateModal,
+    setShowCreateModal,
+    createInput,
+    setCreateInput,
+    creating,
+    handleCreate,
+  } = useSessionCreateForm({
+    onCreated: newSession => {
+      setSessions(current => [
+        ...current,
+        newSession,
+      ]);
 
-  // Reconcile the LOCAL view with an authoritative Session response. The previous handlers discarded
-  // the response and fabricated `{ status: 'disconnected' }`, losing phone:null, timestamps, and other
-  // server-owned fields; this keeps the card and the selected-session modal byte-for-byte with the
-  // server. Functional updates (no captured stale `sessions`) feed both the list and the selected row,
-  // and the shared cache is reconciled + invalidated so sibling views refetch. The QR modal is cleared
-  // (via the pairing hook's dismisser) when the session that owned it stops, so it never hangs on a
-  // disconnected session's stale code.
+      void invalidateSessionQueries(
+        queryClient,
+        queryKeys.sessions,
+      );
+    },
+    onFailed: message =>
+      setError(message),
+  });
+
+  const setCreateConfigValue = useCallback(
+    (
+      key: string,
+      value: unknown,
+    ) => {
+      setCreateInput(current => ({
+        ...current,
+        config: {
+          ...(current.config ?? {}),
+          [key]: value,
+        },
+      }));
+    },
+    [setCreateInput],
+  );
+
   const applySessionResponse = useCallback(
     async (updated: Session) => {
-      sessionsRef.current = replaceSession(sessionsRef.current, updated);
+      sessionsRef.current = replaceSession(
+        sessionsRef.current,
+        updated,
+      );
       setSessions(sessionsRef.current);
-      setSelectedSession(current => (current?.id === updated.id ? updated : current));
+      setSelectedSession(current =>
+        current?.id === updated.id
+          ? updated
+          : current,
+      );
       dismissQrForSession(updated.id);
-      await reconcileSessionCache(queryClient, queryKeys.sessions, updated);
+
+      await reconcileSessionCache(
+        queryClient,
+        queryKeys.sessions,
+        updated,
+      );
     },
-    [queryClient, dismissQrForSession],
+    [dismissQrForSession, queryClient],
   );
 
   useSessionFeed({
     sessions,
     sessionsRef,
     onQRCode: applyQrPush,
-    // The badge renders from the server projection (`session.restriction`), and a restriction can
-    // arrive with no status transition at all (the Baileys reachout timelock rides a connect
-    // probe) — so the push is purely a refetch signal.
     onSessionRestriction: useCallback(() => {
       void fetchSessions();
     }, [fetchSessions]),
-    onSessionConnectionStage: useCallback((event: SessionConnectionStageEvent) => {
-      setConnectionProgress(current => {
-        const existing = current[event.sessionId];
-        const previousEvents = existing?.attemptId === event.attemptId ? existing.events : [];
-        if (previousEvents.some(previous => previous.stage === event.stage)) return current;
-        return {
-          ...current,
-          [event.sessionId]: {
-            attemptId: event.attemptId,
-            events: [...previousEvents, event],
-          },
-        };
-      });
-    }, []),
+    onSessionConnectionStage: useCallback(
+      (
+        event: SessionConnectionStageEvent,
+      ) => {
+        setConnectionProgress(current => {
+          const existing =
+            current[event.sessionId];
+          const previousEvents =
+            existing?.attemptId ===
+            event.attemptId
+              ? existing.events
+              : [];
+
+          if (
+            previousEvents.some(
+              previous =>
+                previous.stage === event.stage,
+            )
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            [event.sessionId]: {
+              attemptId: event.attemptId,
+              events: [
+                ...previousEvents,
+                event,
+              ],
+            },
+          };
+        });
+      },
+      [],
+    ),
     onSessionStatus: useCallback(
-      (event: { sessionId: string; status: string }) => {
-        const prev = sessionsRef.current.find(s => s.id === event.sessionId);
-        // Some engines double-signal one transition; only react to an ACTUAL status change so the toast
-        // and the failed-refresh don't fire on every redundant envelope. Update the ref synchronously so
-        // a duplicate arriving in the same tick (before the sync effect runs) is also caught.
-        if (prev && prev.status === event.status) return;
-        // Drop `engineLoaded` alongside the status patch: it is server-owned live state the status
-        // envelope does not carry, so keeping the previous value would pair a fresh status with a
-        // stale engine answer and the card could offer Start to a running session (or Unlink to one
-        // with no engine). Clearing it makes isSessionStarted fall back to the status set until an
-        // authoritative response arrives — and for `disconnected`, where that fallback is knowingly
-        // wrong, the branch below refetches.
-        sessionsRef.current = sessionsRef.current.map(s =>
-          s.id === event.sessionId ? { ...s, status: event.status as Session['status'], engineLoaded: undefined } : s,
-        );
+      (event: {
+        sessionId: string;
+        status: string;
+      }) => {
+        const previous =
+          sessionsRef.current.find(
+            session =>
+              session.id === event.sessionId,
+          );
+
+        if (
+          previous &&
+          previous.status === event.status
+        ) {
+          return;
+        }
+
+        sessionsRef.current =
+          sessionsRef.current.map(
+            session =>
+              session.id === event.sessionId
+                ? {
+                    ...session,
+                    status:
+                      event.status as Session['status'],
+                    engineLoaded: undefined,
+                  }
+                : session,
+          );
+
         setSessions(sessionsRef.current);
-        // Mark the shared session queries stale so sibling views refetch — but ONLY on a real
-        // transition (the dedup guard above already swallows the redundant double-signals, so this
-        // does not re-invalidate on duplicate envelopes).
-        void invalidateSessionQueries(queryClient, queryKeys.sessions);
+
+        void invalidateSessionQueries(
+          queryClient,
+          queryKeys.sessions,
+        );
+
         if (event.status === 'ready') {
-          toast.success(t('sessions.toasts.readyTitle'), t('sessions.toasts.readyDesc'));
-        } else if (event.status === 'disconnected') {
-          // Refresh so the card picks up `engineLoaded` from the API. `disconnected` is the one status
-          // that means two different things — an engine still registered through its automatic
-          // reconnect backoff, or a session stopped with no engine at all — and only the server can
-          // say which, so the offered actions must not be guessed from the status here.
+          toast.success(
+            t('sessions.toasts.readyTitle'),
+            t('sessions.toasts.readyDesc'),
+          );
+        } else if (
+          event.status === 'disconnected'
+        ) {
           void fetchSessions();
-          toast.warning(t('sessions.toasts.disconnectedTitle'), t('sessions.toasts.disconnectedDesc'));
-        } else if (event.status === 'action_required') {
-          // Refresh so the card picks up the lastError reason (what the operator must do) from the API.
+          toast.warning(
+            t(
+              'sessions.toasts.disconnectedTitle',
+            ),
+            t(
+              'sessions.toasts.disconnectedDesc',
+            ),
+          );
+        } else if (
+          event.status === 'action_required'
+        ) {
           void fetchSessions();
-          toast.warning(t('sessions.toasts.actionRequiredTitle'), t('sessions.toasts.actionRequiredDesc'));
-        } else if (event.status === 'failed') {
-          // Refresh so the card picks up the lastError reason from the API.
+          toast.warning(
+            t(
+              'sessions.toasts.actionRequiredTitle',
+            ),
+            t(
+              'sessions.toasts.actionRequiredDesc',
+            ),
+          );
+        } else if (
+          event.status === 'failed'
+        ) {
           void fetchSessions();
-          toast.error(t('sessions.toasts.failedTitle'), t('sessions.toasts.failedDesc'));
+          toast.error(
+            t('sessions.toasts.failedTitle'),
+            t('sessions.toasts.failedDesc'),
+          );
         }
       },
-      [toast, t, fetchSessions, queryClient],
+      [fetchSessions, queryClient, t, toast],
     ),
   });
 
   useEffect(() => {
-    fetchSessions();
+    void fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleDelete = async (id: string) => {
-    const session = sessions.find(s => s.id === id);
+  const handleDelete = async (
+    id: string,
+  ) => {
+    const session = sessions.find(
+      item => item.id === id,
+    );
+
     try {
       await sessionApi.delete(id);
-      // Functional removal (no stale `sessions` capture), then invalidate the prefix.
-      setSessions(current => current.filter(s => s.id !== id));
-      await invalidateSessionQueries(queryClient, queryKeys.sessions);
+      setSessions(current =>
+        current.filter(
+          item => item.id !== id,
+        ),
+      );
+      await invalidateSessionQueries(
+        queryClient,
+        queryKeys.sessions,
+      );
+
       toast.success(
         t('sessions.delete.successTitle'),
         session
-          ? t('sessions.delete.successDescNamed', { name: session.name })
-          : t('sessions.delete.successDescGeneric'),
+          ? t(
+              'sessions.delete.successDescNamed',
+              {
+                name: session.name,
+              },
+            )
+          : t(
+              'sessions.delete.successDescGeneric',
+            ),
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : t('sessions.delete.errorDefault');
-      console.error('Failed to delete:', err);
-      toast.error(t('sessions.delete.errorTitle'), msg);
+      const message =
+        err instanceof Error
+          ? err.message
+          : t('sessions.delete.errorDefault');
+
+      console.error(
+        'Failed to delete:',
+        err,
+      );
+      toast.error(
+        t('sessions.delete.errorTitle'),
+        message,
+      );
     } finally {
       setDeleteConfirmId(null);
     }
   };
 
-  const handleStart = async (id: string) => {
-    const session = sessions.find(s => s.id === id);
-    if (session && ['initializing', 'qr_ready'].includes(session.status)) {
-      handleShowQR(id);
+  const handleStart = async (
+    id: string,
+  ) => {
+    if (!canStartSessions) {
       return;
     }
+
+    const session = sessions.find(
+      item => item.id === id,
+    );
+
+    if (
+      session &&
+      ['initializing', 'qr_ready'].includes(
+        session.status,
+      )
+    ) {
+      if (canManageSessions) {
+        handleShowQR(id);
+      }
+      return;
+    }
+
     try {
-      // Use the authoritative response instead of fabricating a status. The old code wrote a local
-      // `status: 'connecting'` — a value the gateway never emits — while keeping every other field
-      // from before the start, which now includes `engineLoaded` and would leave the card offering
-      // Start for a session that just acquired an engine.
-      const started = await sessionApi.start(id);
-      setSessions(current => replaceSession(current, started));
+      const started =
+        await sessionApi.start(id);
+
+      setSessions(current =>
+        replaceSession(
+          current,
+          started,
+        ),
+      );
       await fetchSessions();
-      handleShowQR(id);
+
+      if (canManageSessions) {
+        handleShowQR(id);
+      }
     } catch (err) {
-      console.error('Failed to start:', err);
-      // A credential teardown for this name is still settling — the backend fails closed with 409 +
-      // SESSION_NAME_TEARDOWN_PENDING. It is retryable, so warn with the server message and do NOT
-      // open a QR modal (there is no engine to scan yet). Any other start error keeps the existing
-      // authoritative reload + QR fallback behavior.
-      const code = (err as { code?: string } | null | undefined)?.code;
-      if (code === 'SESSION_NAME_TEARDOWN_PENDING') {
-        const msg = err instanceof Error && err.message ? err.message : t('sessions.start.teardownPending');
-        toast.warning(t('sessions.start.teardownPendingTitle'), msg);
+      console.error(
+        'Failed to start:',
+        err,
+      );
+
+      const code = (
+        err as {
+          code?: string;
+        } | null | undefined
+      )?.code;
+
+      if (
+        code ===
+        'SESSION_NAME_TEARDOWN_PENDING'
+      ) {
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : t(
+                'sessions.start.teardownPending',
+              );
+
+        toast.warning(
+          t(
+            'sessions.start.teardownPendingTitle',
+          ),
+          message,
+        );
         await fetchSessions();
         return;
       }
+
       const fresh = await fetchSessions();
-      const current = fresh.find(s => s.id === id);
-      if (current?.status !== 'ready') handleShowQR(id);
+      const current = fresh.find(
+        item => item.id === id,
+      );
+
+      if (
+        canManageSessions &&
+        current?.status !== 'ready'
+      ) {
+        handleShowQR(id);
+      }
     }
   };
 
-  // Load the config when the detail modal opens and drop it when it closes, so a value fetched for
-  // one session can never render against another.
-  const selectedSessionId = selectedSession?.id ?? null;
+  const selectedSessionId =
+    selectedSession?.id ?? null;
+
   useEffect(() => {
     setSessionConfig(null);
-    if (!selectedSessionId) return;
+
+    if (!selectedSessionId) {
+      return;
+    }
+
     let cancelled = false;
+
     sessionApi
       .getConfig(selectedSessionId)
-      .then(cfg => {
-        if (!cancelled) setSessionConfig(cfg);
+      .then(config => {
+        if (!cancelled) {
+          setSessionConfig(config);
+        }
       })
       .catch(() => {
-        // Leave the row absent rather than defaulting the toggle to off: rendering it off would
-        // assert that auto-reject is disabled for a session we failed to ask about.
+        // Keep the config row absent when the read fails.
       });
+
     return () => {
       cancelled = true;
     };
   }, [selectedSessionId]);
 
-  const handleAutoRejectToggle = async (next: boolean) => {
-    if (!selectedSessionId || !sessionConfig) return;
+  const handleAutoRejectToggle = async (
+    next: boolean,
+  ) => {
+    if (
+      !canManageSessions ||
+      !selectedSessionId ||
+      !sessionConfig
+    ) {
+      return;
+    }
+
     const previous = sessionConfig;
-    setSessionConfig({ ...sessionConfig, autoRejectCalls: next });
+    setSessionConfig({
+      ...sessionConfig,
+      autoRejectCalls: next,
+    });
     setSavingConfig(true);
+
     try {
-      setSessionConfig(await sessionApi.updateConfig(selectedSessionId, { autoRejectCalls: next }));
+      setSessionConfig(
+        await sessionApi.updateConfig(
+          selectedSessionId,
+          {
+            autoRejectCalls: next,
+          },
+        ),
+      );
     } catch (err) {
-      // Revert: an optimistic toggle left flipped would tell the operator calls are being rejected
-      // when the gateway never accepted the change.
       setSessionConfig(previous);
-      toast.error(t('sessions.details.autoRejectCalls'), err instanceof Error ? err.message : t('common.unknownError'));
+      toast.error(
+        t('sessions.details.autoRejectCalls'),
+        err instanceof Error
+          ? err.message
+          : t('common.unknownError'),
+      );
     } finally {
       setSavingConfig(false);
     }
   };
 
-  const handleStop = async (id: string) => {
+  const handleStop = async (
+    id: string,
+  ) => {
+    if (!canShutdownSessions) {
+      return;
+    }
+
     try {
-      const updated = await sessionApi.stop(id);
+      const updated =
+        await sessionApi.stop(id);
       await applySessionResponse(updated);
     } catch (err) {
-      console.error('Failed to stop:', err);
-      // The error response carries no Session body, so re-fetch the authoritative state — phone:null
-      // and the real status come from the list endpoint, not the error envelope.
+      console.error(
+        'Failed to stop:',
+        err,
+      );
       await fetchSessions();
     }
   };
 
-  const handleForceKill = async (id: string) => {
+  const handleForceKill = async (
+    id: string,
+  ) => {
+    if (!canShutdownSessions) {
+      return;
+    }
+
     try {
-      const updated = await sessionApi.forceKill(id);
+      const updated =
+        await sessionApi.forceKill(id);
       await applySessionResponse(updated);
-      toast.success(t('sessions.forceKill.successTitle'), t('sessions.forceKill.success'));
+      toast.success(
+        t('sessions.forceKill.successTitle'),
+        t('sessions.forceKill.success'),
+      );
     } catch (err) {
-      console.error('Failed to force-kill:', err);
-      toast.error(t('sessions.forceKill.failedTitle'), t('sessions.forceKill.failed'));
+      console.error(
+        'Failed to force-kill:',
+        err,
+      );
+      toast.error(
+        t('sessions.forceKill.failedTitle'),
+        t('sessions.forceKill.failed'),
+      );
       await fetchSessions();
     } finally {
       setKillConfirmId(null);
     }
   };
 
-  const handleUnlink = async (id: string) => {
-    // Guard against a second concurrent request: the button is disabled while in flight, but a
-    // rapid double-click would otherwise fire overlapping logouts and race the teardown tracking.
-    if (unlinkingId) return;
+  const handleUnlink = async (
+    id: string,
+  ) => {
+    if (
+      !canShutdownSessions ||
+      unlinkingId
+    ) {
+      return;
+    }
+
     setUnlinkingId(id);
+
     try {
-      const updated = await sessionApi.logout(id);
+      const updated =
+        await sessionApi.logout(id);
       await applySessionResponse(updated);
-      toast.success(t('sessions.unlink.successTitle'), t('sessions.unlink.success'));
+      toast.success(
+        t('sessions.unlink.successTitle'),
+        t('sessions.unlink.success'),
+      );
     } catch (err) {
-      console.error('Failed to unlink:', err);
-      // The error response carries no Session body, so re-fetch authoritative state regardless of
-      // how we classify the toast — phone:null/status come from the list endpoint.
+      console.error(
+        'Failed to unlink:',
+        err,
+      );
       await fetchSessions();
-      if (classifyUnlinkError(err) === 'incomplete') {
-        // 502 + SESSION_LOGOUT_INCOMPLETE — the session stopped locally but the unlink operation is
-        // incomplete. Surface the server's specific message/retry guidance as a warning, not an error.
-        const msg = err instanceof Error && err.message ? err.message : t('sessions.unlink.incomplete');
-        toast.warning(t('sessions.unlink.incompleteTitle'), msg);
+
+      if (
+        classifyUnlinkError(err) ===
+        'incomplete'
+      ) {
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : t(
+                'sessions.unlink.incomplete',
+              );
+
+        toast.warning(
+          t(
+            'sessions.unlink.incompleteTitle',
+          ),
+          message,
+        );
       } else {
-        // A reverse-proxy 502 (bare or JSON without the exact code) may never have reached the
-        // gateway, so nothing was stopped — generic failure, not retry guidance.
-        toast.error(t('sessions.unlink.failedTitle'), t('sessions.unlink.failed'));
+        toast.error(
+          t('sessions.unlink.failedTitle'),
+          t('sessions.unlink.failed'),
+        );
       }
     } finally {
       setUnlinkConfirmId(null);
@@ -389,80 +741,283 @@ export function Sessions() {
     }
   };
 
-  const formatLastActive = (date?: string | null) => {
-    if (!date) return t('common.never');
-    const diff = Date.now() - new Date(date).getTime();
-    if (diff < 60000) return t('common.justNow');
-    if (diff < 3600000) return t('common.minAgo', { count: Math.floor(diff / 60000) });
-    return new Date(date).toLocaleDateString();
+  const formatLastActive = (
+    date?: string | null,
+  ) => {
+    if (!date) {
+      return t('common.never');
+    }
+
+    const diff =
+      Date.now() -
+      new Date(date).getTime();
+
+    if (diff < 60_000) {
+      return t('common.justNow');
+    }
+
+    if (diff < 3_600_000) {
+      return t('common.minAgo', {
+        count: Math.floor(
+          diff / 60_000,
+        ),
+      });
+    }
+
+    return new Date(
+      date,
+    ).toLocaleDateString();
   };
 
-  const formatStatus = (status: string) => t(`sessionStatus.${status}`, { defaultValue: status });
-  const formatConnectionStage = (stage: ConnectionStage): string => {
+  const formatStatus = (
+    status: string,
+  ) =>
+    t(`sessionStatus.${status}`, {
+      defaultValue: status,
+    });
+
+  const formatConnectionStage = (
+    stage: ConnectionStage,
+  ): string => {
     switch (stage) {
       case 'qr_ready':
-        return t('sessions.connectionStage.qrReady', { defaultValue: 'QR ready' });
+        return t(
+          'sessions.connectionStage.qrReady',
+          {
+            defaultValue: 'QR ready',
+          },
+        );
       case 'qr_scanned':
-        return t('sessions.connectionStage.qrScanned', { defaultValue: 'QR scanned' });
+        return t(
+          'sessions.connectionStage.qrScanned',
+          {
+            defaultValue: 'QR scanned',
+          },
+        );
       case 'authenticated':
-        return t('sessions.connectionStage.authenticated', { defaultValue: 'WhatsApp accepted authentication' });
+        return t(
+          'sessions.connectionStage.authenticated',
+          {
+            defaultValue:
+              'WhatsApp accepted authentication',
+          },
+        );
       case 'authenticating':
-        return t('sessions.connectionStage.authenticating', { defaultValue: 'Preparing WhatsApp Web' });
+        return t(
+          'sessions.connectionStage.authenticating',
+          {
+            defaultValue:
+              'Preparing WhatsApp Web',
+          },
+        );
       case 'runtime_connected':
-        return t('sessions.connectionStage.runtimeConnected', { defaultValue: 'WhatsApp runtime connected' });
+        return t(
+          'sessions.connectionStage.runtimeConnected',
+          {
+            defaultValue:
+              'WhatsApp runtime connected',
+          },
+        );
       case 'identity_ready':
-        return t('sessions.connectionStage.identityReady', { defaultValue: 'Account identity loaded' });
+        return t(
+          'sessions.connectionStage.identityReady',
+          {
+            defaultValue:
+              'Account identity loaded',
+          },
+        );
       case 'event_bridge_ready':
-        return t('sessions.connectionStage.eventBridgeReady', { defaultValue: 'Message event bridge attached' });
+        return t(
+          'sessions.connectionStage.eventBridgeReady',
+          {
+            defaultValue:
+              'Message event bridge attached',
+          },
+        );
       case 'ready':
-        return t('sessions.connectionStage.ready', { defaultValue: 'Session ready' });
+        return t(
+          'sessions.connectionStage.ready',
+          {
+            defaultValue: 'Session ready',
+          },
+        );
     }
   };
 
-  const filteredSessions = filterSessions(sessions, searchQuery, statusFilter);
-  const existingSessionNames = sessions.map(s => s.name);
-  // Empty is a disabled button, not a message: the form stays quiet until the user types something.
-  const nameIssues = newSessionName ? sessionNameIssues(newSessionName, existingSessionNames) : [];
+  const filteredSessions =
+    filterSessions(
+      sessions,
+      searchQuery,
+      statusFilter,
+    );
+  const existingSessionNames =
+    sessions.map(session => session.name);
+  const nameIssues = createInput.name
+    ? sessionNameIssues(
+        createInput.name,
+        existingSessionNames,
+      )
+    : [];
 
-  const activeConnectionProgress = qrData ? connectionProgress[qrData.sessionId] : undefined;
-  const activeConnectionEvents = activeConnectionProgress?.events ?? [];
-  const latestConnectionEvent = activeConnectionEvents.at(-1);
-  const hasPostLinkProgress = activeConnectionEvents.some(event => event.stage !== 'qr_ready');
-  const connectionProgressPanel = activeConnectionProgress && hasPostLinkProgress ? (
-    <div className="qr-instructions" role="status" aria-live="polite">
-      <p className="pairing-instructions-title">
-        {t('sessions.connectionStage.connecting', { defaultValue: 'Connecting WhatsApp' })}
-      </p>
-      {activeConnectionEvents
-        .filter(event => event.stage !== 'qr_ready')
-        .map(event => (
-          <p className="qr-step" key={`${event.attemptId}:${event.stage}`}>
-            <strong>✓</strong> {formatConnectionStage(event.stage)}
-          </p>
-        ))}
-      {latestConnectionEvent?.stage !== 'ready' && (
-        <p className="qr-auto-refresh">
-          <Loader2 size={14} className="animate-spin" />{' '}
-          {t('sessions.connectionStage.waiting', { defaultValue: 'Waiting for the next connection stage…' })}
+  const targetPhone =
+    createInput.targetPhone ?? '';
+  const proxyUrl =
+    createInput.proxyUrl ?? '';
+  const maxReconnectAttempts =
+    getNumericConfigValue(
+      createInput.config,
+      'maxReconnectAttempts',
+    );
+  const reconnectBaseDelay =
+    getNumericConfigValue(
+      createInput.config,
+      'reconnectBaseDelay',
+    );
+  const autoRejectCalls =
+    getBooleanConfigValue(
+      createInput.config,
+      'autoRejectCalls',
+    );
+
+  const targetPhoneValid =
+    !targetPhone.trim() ||
+    TARGET_PHONE_PATTERN.test(
+      targetPhone.trim(),
+    );
+  const proxyUrlValid =
+    isValidProxyUrl(proxyUrl);
+  const maxReconnectAttemptsValid =
+    maxReconnectAttempts === '' ||
+    (Number.isInteger(
+      maxReconnectAttempts,
+    ) &&
+      maxReconnectAttempts >= 0 &&
+      maxReconnectAttempts <= 20);
+  const reconnectBaseDelayValid =
+    reconnectBaseDelay === '' ||
+    (Number.isInteger(
+      reconnectBaseDelay,
+    ) &&
+      reconnectBaseDelay >= 1_000 &&
+      reconnectBaseDelay <= 300_000);
+
+  const sessionNameMinLengthValid =
+    createInput.name.length >= 3;
+
+  const createFormValid =
+    canCreateSession(
+      createInput.name,
+      existingSessionNames,
+    ) &&
+    sessionNameMinLengthValid &&
+    targetPhoneValid &&
+    proxyUrlValid &&
+    maxReconnectAttemptsValid &&
+    reconnectBaseDelayValid;
+
+  const activeConnectionProgress =
+    qrData
+      ? connectionProgress[
+          qrData.sessionId
+        ]
+      : undefined;
+  const activeConnectionEvents =
+    activeConnectionProgress?.events ?? [];
+  const latestConnectionEvent =
+    activeConnectionEvents.at(-1);
+  const hasPostLinkProgress =
+    activeConnectionEvents.some(
+      event => event.stage !== 'qr_ready',
+    );
+
+  const connectionProgressPanel =
+    activeConnectionProgress &&
+    hasPostLinkProgress ? (
+      <div
+        className="qr-instructions"
+        role="status"
+        aria-live="polite"
+      >
+        <p className="pairing-instructions-title">
+          {t(
+            'sessions.connectionStage.connecting',
+            {
+              defaultValue:
+                'Connecting WhatsApp',
+            },
+          )}
         </p>
-      )}
-      <p className="input-hint">
-        {t('sessions.connectionStage.attempt', {
-          defaultValue: 'Attempt {{attemptId}} · {{seconds}}s',
-          attemptId: activeConnectionProgress.attemptId.slice(0, 8),
-          seconds: ((latestConnectionEvent?.elapsedMs ?? 0) / 1000).toFixed(1),
-        })}
-      </p>
-    </div>
-  ) : null;
+
+        {activeConnectionEvents
+          .filter(
+            event =>
+              event.stage !== 'qr_ready',
+          )
+          .map(event => (
+            <p
+              className="qr-step"
+              key={`${event.attemptId}:${event.stage}`}
+            >
+              <strong>✓</strong>{' '}
+              {formatConnectionStage(
+                event.stage,
+              )}
+            </p>
+          ))}
+
+        {latestConnectionEvent?.stage !==
+          'ready' && (
+          <p className="qr-auto-refresh">
+            <Loader2
+              size={14}
+              className="animate-spin"
+            />{' '}
+            {t(
+              'sessions.connectionStage.waiting',
+              {
+                defaultValue:
+                  'Waiting for the next connection stage…',
+              },
+            )}
+          </p>
+        )}
+
+        <p className="input-hint">
+          {t(
+            'sessions.connectionStage.attempt',
+            {
+              defaultValue:
+                'Attempt {{attemptId}} · {{seconds}}s',
+              attemptId:
+                activeConnectionProgress.attemptId.slice(
+                  0,
+                  8,
+                ),
+              seconds: (
+                (latestConnectionEvent?.elapsedMs ??
+                  0) / 1000
+              ).toFixed(1),
+            },
+          )}
+        </p>
+      </div>
+    ) : null;
 
   if (loading) {
     return (
       <div
         className="sessions-page"
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '400px' }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '400px',
+        }}
       >
-        <Loader2 className="animate-spin" size={32} />
+        <Loader2
+          className="animate-spin"
+          size={32}
+        />
       </div>
     );
   }
@@ -473,42 +1028,77 @@ export function Sessions() {
         title={t('sessions.title')}
         subtitle={t('sessions.subtitle')}
         actions={
-          canWrite && (
-            <button className="btn-primary" onClick={() => setShowCreateModal(true)}>
+          canManageSessions ? (
+            <button
+              className="btn-primary"
+              onClick={() =>
+                setShowCreateModal(true)
+              }
+            >
               <Plus size={18} />
               {t('sessions.newSession')}
             </button>
-          )
+          ) : null
         }
       />
+
       <div className="filters-bar">
         <div className="search-input">
           <Search size={18} />
           <input
             type="text"
-            placeholder={t('sessions.searchPlaceholder')}
+            placeholder={t(
+              'sessions.searchPlaceholder',
+            )}
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={event =>
+              setSearchQuery(
+                event.target.value,
+              )
+            }
           />
         </div>
+
         <div className="filter-group">
           <Filter size={16} />
           <CustomSelect
             value={statusFilter}
             onChange={setStatusFilter}
             options={[
-              { value: 'all', label: t('sessions.filter.all') },
-              { value: 'active', label: t('sessions.filter.active') },
-              { value: 'inactive', label: t('sessions.filter.inactive') },
-              { value: 'connecting', label: t('sessions.filter.connecting') },
+              {
+                value: 'all',
+                label: t(
+                  'sessions.filter.all',
+                ),
+              },
+              {
+                value: 'active',
+                label: t(
+                  'sessions.filter.active',
+                ),
+              },
+              {
+                value: 'inactive',
+                label: t(
+                  'sessions.filter.inactive',
+                ),
+              },
+              {
+                value: 'connecting',
+                label: t(
+                  'sessions.filter.connecting',
+                ),
+              },
             ]}
           />
         </div>
       </div>
+
       {error && (
         <div
           style={{
-            background: 'rgba(239, 68, 68, 0.12)',
+            background:
+              'rgba(239, 68, 68, 0.12)',
             padding: '1rem',
             borderRadius: '8px',
             color: 'var(--error)',
@@ -518,50 +1108,381 @@ export function Sessions() {
           {error}
         </div>
       )}
-      {showCreateModal && (
-        <Modal
-          open
-          onClose={() => setShowCreateModal(false)}
-          title={t('sessions.create.title')}
-          closeLabel={t('common.close')}
-          footer={
-            <>
-              <button className="btn-secondary" onClick={() => setShowCreateModal(false)}>
-                {t('common.cancel')}
-              </button>
-              <button
-                className="btn-primary"
-                onClick={handleCreate}
-                disabled={creating || !canCreateSession(newSessionName, existingSessionNames)}
-              >
-                {creating ? <Loader2 className="animate-spin" size={16} /> : t('common.create')}
-              </button>
-            </>
-          }
-        >
-          <label htmlFor="sess-1">{t('sessions.create.label')}</label>
-          <input
-            id="sess-1"
-            type="text"
-            placeholder={t('sessions.create.placeholder')}
-            value={newSessionName}
-            onChange={e => {
-              const value = e.target.value.toLowerCase().replace(/\s+/g, '-');
-              setNewSessionName(value);
-            }}
-            onKeyDown={e => e.key === 'Enter' && handleCreate()}
-          />
-          <p className="input-hint">
-            <Trans i18nKey="sessions.create.hint" components={{ code: <code /> }} />
-          </p>
-          {nameIssues.includes('format') && <p className="input-error">{t('sessions.create.invalidChars')}</p>}
-          {nameIssues.includes('too-long') && (
-            <p className="input-error">{t('sessions.create.tooLong', { length: newSessionName.length })}</p>
-          )}
-          {nameIssues.includes('duplicate') && <p className="input-error">{t('sessions.create.duplicate')}</p>}
-        </Modal>
-      )}
-      {qrData && (
+
+      {showCreateModal &&
+        canManageSessions && (
+          <Modal
+            open
+            onClose={() =>
+              setShowCreateModal(false)
+            }
+            title={t(
+              'sessions.create.title',
+            )}
+            closeLabel={t('common.close')}
+            footer={
+              <>
+                <button
+                  className="btn-secondary"
+                  onClick={() =>
+                    setShowCreateModal(false)
+                  }
+                  disabled={creating}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  className="btn-primary"
+                  onClick={() =>
+                    void handleCreate()
+                  }
+                  disabled={
+                    creating ||
+                    !createFormValid
+                  }
+                >
+                  {creating ? (
+                    <Loader2
+                      className="animate-spin"
+                      size={16}
+                    />
+                  ) : (
+                    t('common.create')
+                  )}
+                </button>
+              </>
+            }
+          >
+            <div
+              style={{
+                display: 'grid',
+                gap: '1rem',
+              }}
+            >
+              <div>
+                <label htmlFor="sess-name">
+                  {t('sessions.create.label')}
+                </label>
+                <input
+                  id="sess-name"
+                  type="text"
+                  placeholder={t(
+                    'sessions.create.placeholder',
+                  )}
+                  value={createInput.name}
+                  onChange={event => {
+                    const value =
+                      event.target.value
+                        .toLowerCase()
+                        .replace(/\s+/g, '-');
+
+                    setCreateInput(current => ({
+                      ...current,
+                      name: value,
+                    }));
+                  }}
+                  onKeyDown={event => {
+                    if (
+                      event.key === 'Enter' &&
+                      createFormValid &&
+                      !creating
+                    ) {
+                      void handleCreate();
+                    }
+                  }}
+                />
+                <p className="input-hint">
+                  <Trans
+                    i18nKey="sessions.create.hint"
+                    components={{
+                      code: <code />,
+                    }}
+                  />
+                </p>
+                {createInput.name.length > 0 &&
+                  !sessionNameMinLengthValid && (
+                    <p className="input-error">
+                      {t(
+                        'sessions.create.tooShort',
+                        {
+                          defaultValue:
+                            'Session name must be at least 3 characters.',
+                        },
+                      )}
+                    </p>
+                  )}
+                {nameIssues.includes(
+                  'format',
+                ) && (
+                  <p className="input-error">
+                    {t(
+                      'sessions.create.invalidChars',
+                    )}
+                  </p>
+                )}
+                {nameIssues.includes(
+                  'too-long',
+                ) && (
+                  <p className="input-error">
+                    {t(
+                      'sessions.create.tooLong',
+                      {
+                        length:
+                          createInput.name.length,
+                      },
+                    )}
+                  </p>
+                )}
+                {nameIssues.includes(
+                  'duplicate',
+                ) && (
+                  <p className="input-error">
+                    {t(
+                      'sessions.create.duplicate',
+                    )}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="sess-target-phone">
+                  {t(
+                    'sessions.create.targetPhoneLabel',
+                    {
+                      defaultValue:
+                        'Target phone (optional)',
+                    },
+                  )}
+                </label>
+                <input
+                  id="sess-target-phone"
+                  type="tel"
+                  maxLength={20}
+                  placeholder="+201234567890"
+                  value={targetPhone}
+                  onChange={event =>
+                    setCreateInput(current => ({
+                      ...current,
+                      targetPhone:
+                        event.target.value,
+                    }))
+                  }
+                />
+                {!targetPhoneValid && (
+                  <p className="input-error">
+                    {t(
+                      'sessions.create.targetPhoneInvalid',
+                      {
+                        defaultValue:
+                          'Use an international number with 7 to 15 digits, optionally prefixed with +.',
+                      },
+                    )}
+                  </p>
+                )}
+              </div>
+
+              <div className="detail-item detail-item-toggle">
+                <div className="detail-toggle-row">
+                  <span
+                    className="detail-label"
+                    id="create-auto-reject-calls-label"
+                  >
+                    {t(
+                      'sessions.details.autoRejectCalls',
+                    )}
+                  </span>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      aria-labelledby="create-auto-reject-calls-label"
+                      checked={autoRejectCalls}
+                      onChange={event =>
+                        setCreateConfigValue(
+                          'autoRejectCalls',
+                          event.target.checked,
+                        )
+                      }
+                    />
+                    <span className="toggle-slider" />
+                  </label>
+                </div>
+                <small className="detail-hint">
+                  {t(
+                    'sessions.details.autoRejectCallsHint',
+                  )}
+                </small>
+              </div>
+
+              <div>
+                <label htmlFor="sess-max-reconnect-attempts">
+                  {t(
+                    'sessions.create.maxReconnectAttemptsLabel',
+                    {
+                      defaultValue:
+                        'Max reconnect attempts (optional)',
+                    },
+                  )}
+                </label>
+                <input
+                  id="sess-max-reconnect-attempts"
+                  type="number"
+                  min={0}
+                  max={20}
+                  step={1}
+                  value={maxReconnectAttempts}
+                  placeholder={t(
+                    'sessions.create.unlimitedPlaceholder',
+                    {
+                      defaultValue:
+                        'Unlimited',
+                    },
+                  )}
+                  onChange={event =>
+                    setCreateConfigValue(
+                      'maxReconnectAttempts',
+                      event.target.value === ''
+                        ? undefined
+                        : Number(
+                            event.target.value,
+                          ),
+                    )
+                  }
+                />
+                {!maxReconnectAttemptsValid && (
+                  <p className="input-error">
+                    {t(
+                      'sessions.create.maxReconnectAttemptsInvalid',
+                      {
+                        defaultValue:
+                          'Enter an integer from 0 to 20, or leave it blank for unlimited reconnects.',
+                      },
+                    )}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="sess-reconnect-base-delay">
+                  {t(
+                    'sessions.create.reconnectBaseDelayLabel',
+                    {
+                      defaultValue:
+                        'Reconnect base delay in ms (optional)',
+                    },
+                  )}
+                </label>
+                <input
+                  id="sess-reconnect-base-delay"
+                  type="number"
+                  min={1000}
+                  max={300000}
+                  step={1000}
+                  value={reconnectBaseDelay}
+                  placeholder="5000"
+                  onChange={event =>
+                    setCreateConfigValue(
+                      'reconnectBaseDelay',
+                      event.target.value === ''
+                        ? undefined
+                        : Number(
+                            event.target.value,
+                          ),
+                    )
+                  }
+                />
+                {!reconnectBaseDelayValid && (
+                  <p className="input-error">
+                    {t(
+                      'sessions.create.reconnectBaseDelayInvalid',
+                      {
+                        defaultValue:
+                          'Enter an integer from 1000 to 300000 milliseconds.',
+                      },
+                    )}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="sess-proxy-url">
+                  {t(
+                    'sessions.create.proxyUrlLabel',
+                    {
+                      defaultValue:
+                        'Proxy URL (optional)',
+                    },
+                  )}
+                </label>
+                <input
+                  id="sess-proxy-url"
+                  type="text"
+                  maxLength={255}
+                  placeholder="http://proxy-host:8080"
+                  value={proxyUrl}
+                  onChange={event =>
+                    setCreateInput(current => ({
+                      ...current,
+                      proxyUrl:
+                        event.target.value,
+                    }))
+                  }
+                />
+                {!proxyUrlValid && (
+                  <p className="input-error">
+                    {t(
+                      'sessions.create.proxyUrlInvalid',
+                      {
+                        defaultValue:
+                          'Use a valid http, https, socks4, or socks5 proxy URL.',
+                      },
+                    )}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="sess-proxy-type">
+                  {t(
+                    'sessions.create.proxyTypeLabel',
+                    {
+                      defaultValue:
+                        'Proxy type',
+                    },
+                  )}
+                </label>
+                <select
+                  id="sess-proxy-type"
+                  value={
+                    createInput.proxyType ??
+                    'http'
+                  }
+                  onChange={event =>
+                    setCreateInput(current => ({
+                      ...current,
+                      proxyType:
+                        event.target.value as CreateSessionInput['proxyType'],
+                    }))
+                  }
+                >
+                  <option value="http">
+                    http
+                  </option>
+                  <option value="https">
+                    https
+                  </option>
+                  <option value="socks4">
+                    socks4
+                  </option>
+                  <option value="socks5">
+                    socks5
+                  </option>
+                </select>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+      {qrData && canManageSessions && (
         <Modal
           open
           onClose={handleCloseQRModal}
@@ -569,67 +1490,146 @@ export function Sessions() {
           closeLabel={t('common.close')}
           title={
             <span className="modal-title">
-              {pairingMode ? t('sessions.pairing.tabPhone') : t('sessions.qr.title')}
-              <span className="session-name">{qrData.sessionName}</span>
+              {pairingMode
+                ? t(
+                    'sessions.pairing.tabPhone',
+                  )
+                : t(
+                    'sessions.qr.title',
+                  )}
+              <span className="session-name">
+                {qrData.sessionName}
+              </span>
             </span>
           }
         >
           <div style={{ textAlign: 'center' }}>
-            {!pairingCode && !hasPostLinkProgress && (
-              <div className="pairing-tabs" role="tablist">
-                <button
-                  role="tab"
-                  aria-selected={!pairingMode}
-                  className={`pairing-tab-btn ${!pairingMode ? 'active' : ''}`}
-                  onClick={() => selectPairingTab(false)}
+            {!pairingCode &&
+              !hasPostLinkProgress && (
+                <div
+                  className="pairing-tabs"
+                  role="tablist"
                 >
-                  {t('sessions.pairing.tabQr')}
-                </button>
-                <button
-                  role="tab"
-                  aria-selected={pairingMode}
-                  className={`pairing-tab-btn ${pairingMode ? 'active' : ''}`}
-                  onClick={() => selectPairingTab(true)}
-                >
-                  {t('sessions.pairing.tabPhone')}
-                </button>
-              </div>
-            )}
+                  <button
+                    role="tab"
+                    aria-selected={!pairingMode}
+                    className={`pairing-tab-btn ${
+                      !pairingMode
+                        ? 'active'
+                        : ''
+                    }`}
+                    onClick={() =>
+                      selectPairingTab(false)
+                    }
+                  >
+                    {t(
+                      'sessions.pairing.tabQr',
+                    )}
+                  </button>
+                  <button
+                    role="tab"
+                    aria-selected={pairingMode}
+                    className={`pairing-tab-btn ${
+                      pairingMode
+                        ? 'active'
+                        : ''
+                    }`}
+                    onClick={() =>
+                      selectPairingTab(true)
+                    }
+                  >
+                    {t(
+                      'sessions.pairing.tabPhone',
+                    )}
+                  </button>
+                </div>
+              )}
+
             {connectionProgressPanel ??
               (!pairingMode ? (
-                // QR Code Content
                 qrData.qrCode ? (
                   <>
-                    <img src={qrData.qrCode} alt="QR" style={{ maxWidth: '280px', borderRadius: '12px' }} />
+                    <img
+                      src={qrData.qrCode}
+                      alt="QR"
+                      style={{
+                        maxWidth: '280px',
+                        borderRadius: '12px',
+                      }}
+                    />
                     <div className="qr-instructions">
                       <p className="qr-step">
-                        <Trans i18nKey="sessions.qr.step1" components={{ strong: <strong /> }} />
+                        <Trans
+                          i18nKey="sessions.qr.step1"
+                          components={{
+                            strong: <strong />,
+                          }}
+                        />
                       </p>
                       <p className="qr-step">
-                        <Trans i18nKey="sessions.qr.step2" components={{ strong: <strong /> }} />
+                        <Trans
+                          i18nKey="sessions.qr.step2"
+                          components={{
+                            strong: <strong />,
+                          }}
+                        />
                       </p>
                       <p className="qr-step">
-                        <Trans i18nKey="sessions.qr.step3" components={{ strong: <strong /> }} />
+                        <Trans
+                          i18nKey="sessions.qr.step3"
+                          components={{
+                            strong: <strong />,
+                          }}
+                        />
                       </p>
                     </div>
                     <p className="qr-auto-refresh">
-                      <RefreshCw size={14} className="spin-slow" /> {t('sessions.qr.autoRefresh')}
+                      <RefreshCw
+                        size={14}
+                        className="spin-slow"
+                      />{' '}
+                      {t(
+                        'sessions.qr.autoRefresh',
+                      )}
                     </p>
                   </>
                 ) : (
-                  <div style={{ padding: '2rem' }}>
-                    <Loader2 className="animate-spin" size={48} />
-                    <p>{t('sessions.qr.generating')}</p>
+                  <div
+                    style={{
+                      padding: '2rem',
+                    }}
+                  >
+                    <Loader2
+                      className="animate-spin"
+                      size={48}
+                    />
+                    <p>
+                      {t(
+                        'sessions.qr.generating',
+                      )}
+                    </p>
                   </div>
                 )
               ) : (
-                // Pairing Code Content
-                <div className="pairing-container" role="tabpanel">
-                  {pairingError && <div className="pairing-error">{pairingError}</div>}
+                <div
+                  className="pairing-container"
+                  role="tabpanel"
+                >
+                  {pairingError && (
+                    <div className="pairing-error">
+                      {pairingError}
+                    </div>
+                  )}
+
                   {!pairingCode ? (
                     <div className="pairing-form">
-                      <label htmlFor="pairing-phone" className="pairing-label">
-                        {t('sessions.pairing.phoneLabel')}
+                      <label
+                        htmlFor="pairing-phone"
+                        className="pairing-label"
+                      >
+                        {t(
+                          'sessions.pairing.phoneLabel',
+                        )}
                       </label>
                       <input
                         id="pairing-phone"
@@ -637,60 +1637,176 @@ export function Sessions() {
                         type="tel"
                         inputMode="numeric"
                         maxLength={15}
-                        placeholder={t('sessions.pairing.phonePlaceholder')}
+                        placeholder={t(
+                          'sessions.pairing.phonePlaceholder',
+                        )}
                         value={phoneNumber}
-                        onChange={e => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
-                        onKeyDown={e => e.key === 'Enter' && handleGeneratePairingCode()}
+                        onChange={event =>
+                          setPhoneNumber(
+                            event.target.value.replace(
+                              /\D/g,
+                              '',
+                            ),
+                          )
+                        }
+                        onKeyDown={event => {
+                          if (
+                            event.key === 'Enter'
+                          ) {
+                            void handleGeneratePairingCode();
+                          }
+                        }}
                       />
-                      <p className="input-hint" style={{ marginBottom: '1.5rem' }}>
-                        {t('sessions.pairing.phoneHint')}
+                      <p
+                        className="input-hint"
+                        style={{
+                          marginBottom:
+                            '1.5rem',
+                        }}
+                      >
+                        {t(
+                          'sessions.pairing.phoneHint',
+                        )}
                       </p>
                       <button
                         className="btn-primary"
-                        onClick={handleGeneratePairingCode}
-                        disabled={requestingPairing || !isValidPairingPhone(phoneNumber)}
-                        style={{ width: '100%', justifyContent: 'center' }}
+                        onClick={() =>
+                          void handleGeneratePairingCode()
+                        }
+                        disabled={
+                          requestingPairing ||
+                          !isValidPairingPhone(
+                            phoneNumber,
+                          )
+                        }
+                        style={{
+                          width: '100%',
+                          justifyContent:
+                            'center',
+                        }}
                       >
                         {requestingPairing ? (
                           <>
-                            <Loader2 className="animate-spin" size={16} />
-                            <span style={{ marginLeft: '0.5rem' }}>{t('sessions.pairing.generating')}</span>
+                            <Loader2
+                              className="animate-spin"
+                              size={16}
+                            />
+                            <span
+                              style={{
+                                marginLeft:
+                                  '0.5rem',
+                              }}
+                            >
+                              {t(
+                                'sessions.pairing.generating',
+                              )}
+                            </span>
                           </>
                         ) : (
-                          t('sessions.pairing.generateButton')
+                          t(
+                            'sessions.pairing.generateButton',
+                          )
                         )}
                       </button>
                     </div>
                   ) : (
                     <>
-                      <label style={{ display: 'block', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                        {t('sessions.pairing.codeLabel')}
+                      <label
+                        style={{
+                          display: 'block',
+                          fontWeight: 600,
+                          color:
+                            'var(--text-secondary)',
+                        }}
+                      >
+                        {t(
+                          'sessions.pairing.codeLabel',
+                        )}
                       </label>
                       <div className="pairing-code-display">
-                        {pairingCode.substring(0, 4)} - {pairingCode.substring(4)}
+                        {pairingCode.substring(
+                          0,
+                          4,
+                        )}{' '}
+                        -{' '}
+                        {pairingCode.substring(
+                          4,
+                        )}
                       </div>
                       <div className="qr-instructions">
-                        <p className="pairing-instructions-title">{t('sessions.pairing.instructions')}</p>
-                        <p className="qr-step">
-                          <Trans i18nKey="sessions.pairing.step1" components={{ strong: <strong /> }} />
+                        <p className="pairing-instructions-title">
+                          {t(
+                            'sessions.pairing.instructions',
+                          )}
                         </p>
                         <p className="qr-step">
-                          <Trans i18nKey="sessions.pairing.step2" components={{ strong: <strong /> }} />
+                          <Trans
+                            i18nKey="sessions.pairing.step1"
+                            components={{
+                              strong: (
+                                <strong />
+                              ),
+                            }}
+                          />
                         </p>
                         <p className="qr-step">
-                          <Trans i18nKey="sessions.pairing.step3" components={{ strong: <strong /> }} />
+                          <Trans
+                            i18nKey="sessions.pairing.step2"
+                            components={{
+                              strong: (
+                                <strong />
+                              ),
+                            }}
+                          />
                         </p>
                         <p className="qr-step">
-                          <Trans i18nKey="sessions.pairing.step4" components={{ strong: <strong /> }} />
+                          <Trans
+                            i18nKey="sessions.pairing.step3"
+                            components={{
+                              strong: (
+                                <strong />
+                              ),
+                            }}
+                          />
+                        </p>
+                        <p className="qr-step">
+                          <Trans
+                            i18nKey="sessions.pairing.step4"
+                            components={{
+                              strong: (
+                                <strong />
+                              ),
+                            }}
+                          />
                         </p>
                       </div>
-                      <div style={{ marginTop: '1.5rem' }}>
-                        <button className="btn-secondary" onClick={handleChangeNumber} style={{ width: '100%' }}>
-                          {t('sessions.pairing.changeNumber')}
+                      <div
+                        style={{
+                          marginTop: '1.5rem',
+                        }}
+                      >
+                        <button
+                          className="btn-secondary"
+                          onClick={
+                            handleChangeNumber
+                          }
+                          style={{
+                            width: '100%',
+                          }}
+                        >
+                          {t(
+                            'sessions.pairing.changeNumber',
+                          )}
                         </button>
                       </div>
                       <p className="qr-auto-refresh">
-                        <RefreshCw size={14} className="spin-slow" /> {t('sessions.pairing.waitingConnection')}
+                        <RefreshCw
+                          size={14}
+                          className="spin-slow"
+                        />{' '}
+                        {t(
+                          'sessions.pairing.waitingConnection',
+                        )}
                       </p>
                     </>
                   )}
@@ -699,254 +1815,589 @@ export function Sessions() {
           </div>
         </Modal>
       )}
+
       {selectedSession && (
         <Modal
           open
-          onClose={() => setSelectedSession(null)}
-          title={t('sessions.details.title')}
+          onClose={() =>
+            setSelectedSession(null)
+          }
+          title={t(
+            'sessions.details.title',
+          )}
           closeLabel={t('common.close')}
           footer={
-            <button className="btn-secondary" onClick={() => setSelectedSession(null)}>
+            <button
+              className="btn-secondary"
+              onClick={() =>
+                setSelectedSession(null)
+              }
+            >
               {t('common.close')}
             </button>
           }
         >
           <div className="detail-grid">
             <div className="detail-item">
-              <span className="detail-label">{t('sessions.details.name')}</span>
-              <span className="detail-value">{selectedSession.name}</span>
-            </div>
-            <div className="detail-item">
-              <span className="detail-label">{t('sessions.details.status')}</span>
-              <span className={`status-badge ${selectedSession.status}`}>{formatStatus(selectedSession.status)}</span>
-            </div>
-            <div className="detail-item">
-              <span className="detail-label">{t('sessions.details.sessionId')}</span>
-              <span className="detail-value mono">{selectedSession.id}</span>
-            </div>
-            <div className="detail-item">
-              <span className="detail-label">{t('sessions.details.phone')}</span>
-              <span className="detail-value">{selectedSession.phone || t('sessions.details.phoneNone')}</span>
-            </div>
-            <div className="detail-item">
-              <span className="detail-label">{t('sessions.details.created')}</span>
-              <span className="detail-value">{new Date(selectedSession.createdAt).toLocaleString()}</span>
-            </div>
-            <div className="detail-item">
-              <span className="detail-label">{t('sessions.details.lastActive')}</span>
+              <span className="detail-label">
+                {t('sessions.details.name')}
+              </span>
               <span className="detail-value">
-                {selectedSession.lastActive ? new Date(selectedSession.lastActive).toLocaleString() : t('common.never')}
+                {selectedSession.name}
               </span>
             </div>
+            <div className="detail-item">
+              <span className="detail-label">
+                {t('sessions.details.status')}
+              </span>
+              <span
+                className={`status-badge ${selectedSession.status}`}
+              >
+                {formatStatus(
+                  selectedSession.status,
+                )}
+              </span>
+            </div>
+            <div className="detail-item">
+              <span className="detail-label">
+                {t(
+                  'sessions.details.sessionId',
+                )}
+              </span>
+              <span className="detail-value mono">
+                {selectedSession.id}
+              </span>
+            </div>
+            <div className="detail-item">
+              <span className="detail-label">
+                {t('sessions.details.phone')}
+              </span>
+              <span className="detail-value">
+                {selectedSession.phone ||
+                  t(
+                    'sessions.details.phoneNone',
+                  )}
+              </span>
+            </div>
+            <div className="detail-item">
+              <span className="detail-label">
+                {t(
+                  'sessions.details.created',
+                )}
+              </span>
+              <span className="detail-value">
+                {new Date(
+                  selectedSession.createdAt,
+                ).toLocaleString()}
+              </span>
+            </div>
+            <div className="detail-item">
+              <span className="detail-label">
+                {t(
+                  'sessions.details.lastActive',
+                )}
+              </span>
+              <span className="detail-value">
+                {selectedSession.lastActive
+                  ? new Date(
+                      selectedSession.lastActive,
+                    ).toLocaleString()
+                  : t('common.never')}
+              </span>
+            </div>
+
             {sessionConfig && (
               <div className="detail-item detail-item-toggle">
                 <div className="detail-toggle-row">
-                  <span className="detail-label" id="auto-reject-calls-label">
-                    {t('sessions.details.autoRejectCalls')}
+                  <span
+                    className="detail-label"
+                    id="auto-reject-calls-label"
+                  >
+                    {t(
+                      'sessions.details.autoRejectCalls',
+                    )}
                   </span>
                   <label className="toggle-switch">
                     <input
                       type="checkbox"
                       aria-labelledby="auto-reject-calls-label"
-                      checked={sessionConfig.autoRejectCalls}
-                      disabled={!canWrite || savingConfig}
-                      onChange={e => void handleAutoRejectToggle(e.target.checked)}
+                      checked={
+                        sessionConfig.autoRejectCalls
+                      }
+                      disabled={
+                        !canManageSessions ||
+                        savingConfig
+                      }
+                      onChange={event =>
+                        void handleAutoRejectToggle(
+                          event.target.checked,
+                        )
+                      }
                     />
-                    <span className="toggle-slider"></span>
+                    <span className="toggle-slider" />
                   </label>
                 </div>
-                <small className="detail-hint">{t('sessions.details.autoRejectCallsHint')}</small>
+                <small className="detail-hint">
+                  {t(
+                    'sessions.details.autoRejectCallsHint',
+                  )}
+                </small>
               </div>
             )}
           </div>
         </Modal>
       )}
-      {deleteConfirmId && (
-        <Modal
-          open
-          onClose={() => setDeleteConfirmId(null)}
-          title={t('sessions.delete.title')}
-          className="confirm-modal"
-          closeLabel={t('common.close')}
-          footer={
-            <>
-              <button className="btn-secondary" onClick={() => setDeleteConfirmId(null)}>
-                {t('common.cancel')}
-              </button>
-              <button className="btn-danger" onClick={() => handleDelete(deleteConfirmId)}>
-                {t('common.delete')}
-              </button>
-            </>
-          }
-        >
-          <p>
-            <Trans
-              i18nKey="sessions.delete.message"
-              values={{ name: sessions.find(s => s.id === deleteConfirmId)?.name }}
-              components={{ strong: <strong /> }}
-            />
-          </p>
-          <p className="text-muted">{t('sessions.delete.warning')}</p>
-        </Modal>
-      )}
-      {killConfirmId && (
-        <Modal
-          open
-          onClose={() => setKillConfirmId(null)}
-          title={t('sessions.forceKill.title')}
-          className="confirm-modal"
-          closeLabel={t('common.close')}
-          footer={
-            <>
-              <button className="btn-secondary" onClick={() => setKillConfirmId(null)}>
-                {t('common.cancel')}
-              </button>
-              <button className="btn-danger" onClick={() => handleForceKill(killConfirmId)}>
-                {t('sessions.forceKill.confirm')}
-              </button>
-            </>
-          }
-        >
-          <p>
-            <Trans
-              i18nKey="sessions.forceKill.message"
-              values={{ name: sessions.find(s => s.id === killConfirmId)?.name }}
-              components={{ strong: <strong /> }}
-            />
-          </p>
-          <p className="text-muted">{t('sessions.forceKill.warning')}</p>
-        </Modal>
-      )}
-      {unlinkConfirmId && (
-        <Modal
-          open
-          onClose={() => setUnlinkConfirmId(null)}
-          title={t('sessions.unlink.title')}
-          className="confirm-modal"
-          closeLabel={t('common.close')}
-          footer={
-            <>
-              <button className="btn-secondary" onClick={() => setUnlinkConfirmId(null)}>
-                {t('common.cancel')}
-              </button>
-              <button
-                className="btn-danger"
-                onClick={() => handleUnlink(unlinkConfirmId)}
-                disabled={unlinkingId !== null}
-              >
-                {t('sessions.unlink.confirm')}
-              </button>
-            </>
-          }
-        >
-          <p>
-            <Trans
-              i18nKey="sessions.unlink.message"
-              values={{ name: sessions.find(s => s.id === unlinkConfirmId)?.name }}
-              components={{ strong: <strong /> }}
-            />
-          </p>
-          <p className="text-muted">{t('sessions.unlink.warning')}</p>
-        </Modal>
-      )}
+
+      {deleteConfirmId &&
+        canManageSessions && (
+          <Modal
+            open
+            onClose={() =>
+              setDeleteConfirmId(null)
+            }
+            title={t(
+              'sessions.delete.title',
+            )}
+            className="confirm-modal"
+            closeLabel={t('common.close')}
+            footer={
+              <>
+                <button
+                  className="btn-secondary"
+                  onClick={() =>
+                    setDeleteConfirmId(null)
+                  }
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  className="btn-danger"
+                  onClick={() =>
+                    void handleDelete(
+                      deleteConfirmId,
+                    )
+                  }
+                >
+                  {t('common.delete')}
+                </button>
+              </>
+            }
+          >
+            <p>
+              <Trans
+                i18nKey="sessions.delete.message"
+                values={{
+                  name: sessions.find(
+                    session =>
+                      session.id ===
+                      deleteConfirmId,
+                  )?.name,
+                }}
+                components={{
+                  strong: <strong />,
+                }}
+              />
+            </p>
+            <p className="text-muted">
+              {t(
+                'sessions.delete.warning',
+              )}
+            </p>
+          </Modal>
+        )}
+
+      {killConfirmId &&
+        canShutdownSessions && (
+          <Modal
+            open
+            onClose={() =>
+              setKillConfirmId(null)
+            }
+            title={t(
+              'sessions.forceKill.title',
+            )}
+            className="confirm-modal"
+            closeLabel={t('common.close')}
+            footer={
+              <>
+                <button
+                  className="btn-secondary"
+                  onClick={() =>
+                    setKillConfirmId(null)
+                  }
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  className="btn-danger"
+                  onClick={() =>
+                    void handleForceKill(
+                      killConfirmId,
+                    )
+                  }
+                >
+                  {t(
+                    'sessions.forceKill.confirm',
+                  )}
+                </button>
+              </>
+            }
+          >
+            <p>
+              <Trans
+                i18nKey="sessions.forceKill.message"
+                values={{
+                  name: sessions.find(
+                    session =>
+                      session.id ===
+                      killConfirmId,
+                  )?.name,
+                }}
+                components={{
+                  strong: <strong />,
+                }}
+              />
+            </p>
+            <p className="text-muted">
+              {t(
+                'sessions.forceKill.warning',
+              )}
+            </p>
+          </Modal>
+        )}
+
+      {unlinkConfirmId &&
+        canShutdownSessions && (
+          <Modal
+            open
+            onClose={() =>
+              setUnlinkConfirmId(null)
+            }
+            title={t(
+              'sessions.unlink.title',
+            )}
+            className="confirm-modal"
+            closeLabel={t('common.close')}
+            footer={
+              <>
+                <button
+                  className="btn-secondary"
+                  onClick={() =>
+                    setUnlinkConfirmId(null)
+                  }
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  className="btn-danger"
+                  onClick={() =>
+                    void handleUnlink(
+                      unlinkConfirmId,
+                    )
+                  }
+                  disabled={
+                    unlinkingId !== null
+                  }
+                >
+                  {t(
+                    'sessions.unlink.confirm',
+                  )}
+                </button>
+              </>
+            }
+          >
+            <p>
+              <Trans
+                i18nKey="sessions.unlink.message"
+                values={{
+                  name: sessions.find(
+                    session =>
+                      session.id ===
+                      unlinkConfirmId,
+                  )?.name,
+                }}
+                components={{
+                  strong: <strong />,
+                }}
+              />
+            </p>
+            <p className="text-muted">
+              {t(
+                'sessions.unlink.warning',
+              )}
+            </p>
+          </Modal>
+        )}
+
       <div className="sessions-grid">
         {filteredSessions.length === 0 ? (
           <div className="empty-state">
             <QrCode size={48} />
-            <h3>{t('sessions.empty.title')}</h3>
-            <p>{t('sessions.empty.description')}</p>
+            <h3>
+              {t('sessions.empty.title')}
+            </h3>
+            <p>
+              {t(
+                'sessions.empty.description',
+              )}
+            </p>
           </div>
         ) : (
           filteredSessions.map(session => (
-            <div key={session.id} className="session-card">
+            <div
+              key={session.id}
+              className="session-card"
+            >
               <div className="card-header">
-                <h3 title={session.name}>{session.name}</h3>
-                <span className={`status-pill ${session.status}`}>{formatStatus(session.status)}</span>
+                <h3 title={session.name}>
+                  {session.name}
+                </h3>
+                <span
+                  className={`status-pill ${session.status}`}
+                >
+                  {formatStatus(
+                    session.status,
+                  )}
+                </span>
               </div>
-              {session.status === 'initializing' || session.status === 'qr_ready' ? (
+
+              {session.status ===
+                'initializing' ||
+              session.status === 'qr_ready' ? (
                 <div className="qr-placeholder">
-                  <QrCode size={80} className="qr-icon" />
-                  <p>{session.status === 'qr_ready' ? t('sessions.qr.scanToConnect') : t('sessions.qr.preparing')}</p>
-                  <button
-                    className="btn-sm"
-                    onClick={() => handleShowQR(session.id)}
-                    disabled={session.status !== 'qr_ready'}
-                  >
-                    {session.status === 'qr_ready' ? t('sessions.qr.showQr') : t('sessions.qr.loading')}
-                  </button>
+                  <QrCode
+                    size={80}
+                    className="qr-icon"
+                  />
+                  <p>
+                    {session.status ===
+                    'qr_ready'
+                      ? t(
+                          'sessions.qr.scanToConnect',
+                        )
+                      : t(
+                          'sessions.qr.preparing',
+                        )}
+                  </p>
+                  {canManageSessions && (
+                    <button
+                      className="btn-sm"
+                      onClick={() =>
+                        handleShowQR(
+                          session.id,
+                        )
+                      }
+                      disabled={
+                        session.status !==
+                        'qr_ready'
+                      }
+                    >
+                      {session.status ===
+                      'qr_ready'
+                        ? t(
+                            'sessions.qr.showQr',
+                          )
+                        : t(
+                            'sessions.qr.loading',
+                          )}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="session-info">
                   <div className="info-row">
-                    <span className="info-label">{t('sessions.card.phone')}</span>
-                    <span className="info-value">{session.phone || '—'}</span>
+                    <span className="info-label">
+                      {t(
+                        'sessions.card.phone',
+                      )}
+                    </span>
+                    <span className="info-value">
+                      {session.phone || '—'}
+                    </span>
                   </div>
                   <div className="info-row">
-                    <span className="info-label">{t('sessions.card.sessionId')}</span>
-                    <span className="info-value mono">{session.id.substring(0, 12)}</span>
+                    <span className="info-label">
+                      {t(
+                        'sessions.card.sessionId',
+                      )}
+                    </span>
+                    <span className="info-value mono">
+                      {session.id.substring(
+                        0,
+                        12,
+                      )}
+                    </span>
                   </div>
                   <div className="info-row">
-                    <span className="info-label">{t('sessions.card.lastActive')}</span>
-                    <span className="info-value">{formatLastActive(session.lastActive)}</span>
+                    <span className="info-label">
+                      {t(
+                        'sessions.card.lastActive',
+                      )}
+                    </span>
+                    <span className="info-value">
+                      {formatLastActive(
+                        session.lastActive,
+                      )}
+                    </span>
                   </div>
-                  {(session.status === 'failed' || session.status === 'action_required') && session.lastError ? (
+
+                  {(session.status === 'failed' ||
+                    session.status ===
+                      'action_required') &&
+                  session.lastError ? (
                     <div className="info-row session-error">
-                      <span className="info-label">{t('sessions.card.error')}</span>
-                      <span className="info-value error-text" title={session.lastError}>
+                      <span className="info-label">
+                        {t(
+                          'sessions.card.error',
+                        )}
+                      </span>
+                      <span
+                        className="info-value error-text"
+                        title={
+                          session.lastError
+                        }
+                      >
                         {session.lastError}
                       </span>
                     </div>
                   ) : null}
-                  {/* Not gated on status, unlike the error above: a reachout timelock applies to a
-                      session that is perfectly `ready`, and hiding it behind a status would make it
-                      invisible exactly when the operator needs it. */}
+
                   {session.restriction ? (
                     <div className="info-row session-restriction">
-                      <span className="info-label">{t('sessions.card.restriction')}</span>
-                      <span className="info-value restriction-text" title={restrictionTitle(session.restriction, t)}>
-                        {t(`sessions.restriction.${session.restriction.kind}`)}
+                      <span className="info-label">
+                        {t(
+                          'sessions.card.restriction',
+                        )}
+                      </span>
+                      <span
+                        className="info-value restriction-text"
+                        title={restrictionTitle(
+                          session.restriction,
+                          t,
+                        )}
+                      >
+                        {t(
+                          `sessions.restriction.${session.restriction.kind}`,
+                        )}
                       </span>
                     </div>
                   ) : null}
                 </div>
               )}
+
               <div className="card-actions">
-                <button className="btn-action" onClick={() => setSelectedSession(session)}>
+                <button
+                  className="btn-action"
+                  onClick={() =>
+                    setSelectedSession(
+                      session,
+                    )
+                  }
+                >
                   <Eye size={16} />
                   {t('sessions.actions.view')}
                 </button>
-                {canWrite && isSessionStarted(session) ? (
-                  <button className="btn-action" onClick={() => handleStop(session.id)}>
-                    <Square size={16} />
-                    {t('sessions.actions.stop')}
-                  </button>
-                ) : canWrite && (session.status === 'created' || session.status === 'disconnected') ? (
-                  <button className="btn-action" onClick={() => handleStart(session.id)}>
+
+                {isSessionStarted(session) ? (
+                  canShutdownSessions ? (
+                    <button
+                      className="btn-action"
+                      onClick={() =>
+                        void handleStop(
+                          session.id,
+                        )
+                      }
+                    >
+                      <Square size={16} />
+                      {t(
+                        'sessions.actions.stop',
+                      )}
+                    </button>
+                  ) : null
+                ) : canStartSessions &&
+                  (session.status === 'created' ||
+                    session.status ===
+                      'disconnected') ? (
+                  <button
+                    className="btn-action"
+                    onClick={() =>
+                      void handleStart(
+                        session.id,
+                      )
+                    }
+                  >
                     <Play size={16} />
-                    {t('sessions.actions.start')}
+                    {t(
+                      'sessions.actions.start',
+                    )}
                   </button>
-                ) : canWrite ? (
-                  <button className="btn-action" onClick={() => handleStart(session.id)}>
+                ) : canStartSessions ? (
+                  <button
+                    className="btn-action"
+                    onClick={() =>
+                      void handleStart(
+                        session.id,
+                      )
+                    }
+                  >
                     <RefreshCw size={16} />
-                    {t('sessions.actions.reconnect')}
+                    {t(
+                      'sessions.actions.reconnect',
+                    )}
                   </button>
                 ) : null}
-                {canUnlinkSession(session, canWrite) && (
-                  <button className="btn-action danger" onClick={() => setUnlinkConfirmId(session.id)}>
+
+                {canUnlinkSession(
+                  session,
+                  canShutdownSessions,
+                ) && (
+                  <button
+                    className="btn-action danger"
+                    onClick={() =>
+                      setUnlinkConfirmId(
+                        session.id,
+                      )
+                    }
+                  >
                     <Unlink size={16} />
-                    {t('sessions.actions.unlink')}
+                    {t(
+                      'sessions.actions.unlink',
+                    )}
                   </button>
                 )}
-                {canWrite && (
-                  <button className="btn-action danger" onClick={() => setDeleteConfirmId(session.id)}>
+
+                {canManageSessions && (
+                  <button
+                    className="btn-action danger"
+                    onClick={() =>
+                      setDeleteConfirmId(
+                        session.id,
+                      )
+                    }
+                  >
                     <Trash2 size={16} />
-                    {t('sessions.actions.delete')}
+                    {t(
+                      'sessions.actions.delete',
+                    )}
                   </button>
                 )}
-                {canForceKillSession(session, canWrite) && (
-                  <button className="btn-action danger" onClick={() => setKillConfirmId(session.id)}>
+
+                {canForceKillSession(
+                  session,
+                  canShutdownSessions,
+                ) && (
+                  <button
+                    className="btn-action danger"
+                    onClick={() =>
+                      setKillConfirmId(
+                        session.id,
+                      )
+                    }
+                  >
                     <Skull size={16} />
-                    {t('sessions.actions.killStuck')}
+                    {t(
+                      'sessions.actions.killStuck',
+                    )}
                   </button>
                 )}
               </div>
@@ -957,6 +2408,3 @@ export function Sessions() {
     </div>
   );
 }
-
-
-
