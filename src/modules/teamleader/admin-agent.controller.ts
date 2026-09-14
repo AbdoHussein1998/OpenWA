@@ -13,25 +13,18 @@ import {
 import {
   ApiOperation,
   ApiParam,
-  ApiProperty,
-  ApiPropertyOptional,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import {
-  ArrayMinSize,
-  ArrayUnique,
-  IsArray,
-  IsBoolean,
-  IsOptional,
-  IsUUID,
-} from 'class-validator';
 
 import {
   RequireRole,
   RequireUnscopedKey,
 } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
+import { AssignAgentSessionDto } from './dto/assign-agent-session.dto';
+import { BulkReassignAdminAgentsDto } from './dto/bulk-reassignment.dto';
+import { ReassignAdminAgentDto } from './dto/reassign-agent.dto';
 import {
   TeamLeaderService,
   type AdminAgentOverview,
@@ -41,59 +34,20 @@ import {
 // while keeping the service as the single source of truth for the shape.
 export type { AdminAgentOverview } from './teamleader.service';
 
-export class ReassignAdminAgentDto {
-  @ApiProperty({
-    description: 'Team Leader UUID that will own the Agent after the move.',
-    format: 'uuid',
-  })
-  @IsUUID()
-  targetTeamLeaderId!: string;
-
-  @ApiPropertyOptional({
-    description:
-      'When true, explicitly clear the Agent Session assignment while moving the Agent. Required when the current Session is not owned by the target Team Leader.',
-    default: false,
-  })
-  @IsOptional()
-  @IsBoolean()
-  unassignSession = false;
-}
-
-export class BulkReassignAdminAgentsDto {
-  @ApiProperty({
-    description: 'Agent UUIDs to move.',
-    type: [String],
-    format: 'uuid',
-  })
-  @IsArray()
-  @ArrayMinSize(1)
-  @ArrayUnique()
-  @IsUUID(undefined, { each: true })
-  agentIds!: string[];
-
-  @ApiProperty({
-    description: 'Team Leader UUID that will own all selected Agents.',
-    format: 'uuid',
-  })
-  @IsUUID()
-  targetTeamLeaderId!: string;
-
-  @ApiPropertyOptional({
-    description:
-      'When true, clear the selected Agents\' Session assignments as part of the main-database transaction.',
-    default: false,
-  })
-  @IsOptional()
-  @IsBoolean()
-  unassignSession = false;
-}
-
 /**
  * Global Agent administration.
  *
- * Every endpoint is ADMIN-only and unavailable to session-scoped API keys
- * because these operations have no single Session dimension to which an
- * allowedSessions ceiling can safely be applied.
+ * These routes intentionally remain ADMIN-only in this batch.
+ *
+ * TEAM_MANAGE cannot safely replace the ADMIN role requirement yet because
+ * authenticated Team Leaders currently also possess TEAM_MANAGE for their own
+ * self-service surface. The later authorization phase can widen this global
+ * surface to Operator after introducing/enforcing the appropriate global
+ * management capability boundary.
+ *
+ * Session-scoped API keys are also rejected because these operations can span
+ * multiple Sessions and Team Leaders and therefore have no single Session
+ * dimension to which allowedSessions can safely be applied.
  */
 @ApiTags('admin/agents')
 @Controller('admin/agents')
@@ -145,11 +99,71 @@ export class AdminAgentController {
     status: HttpStatus.NOT_FOUND,
     description: 'Agent not found.',
   })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
+  })
   async findOne(
     @Param('id', ParseUUIDPipe)
     id: string,
   ): Promise<AdminAgentOverview> {
     return this.teamLeaderService.getAdminAgent(id);
+  }
+
+  /**
+   * Assign or unassign a Session as ADMIN.
+   *
+   * A non-null assignment is ownership-authoritative:
+   *
+   *   Session.ownerTeamLeaderId = Agent.teamLeaderId
+   *
+   * If another Agent currently owns the assignment, that Agent is unassigned
+   * as part of the same main-database transaction. This preserves the
+   * one-Agent-per-Session invariant while making the Agent's Team Leader the
+   * effective Session owner.
+   */
+  @Patch(':id/assignment')
+  @ApiOperation({
+    summary: 'Assign or unassign a Session for an Agent',
+    description:
+      'Assigns a Session to the selected Agent and automatically makes that Agent\'s Team Leader the Session owner. Send sessionId:null to remove only the Agent assignment; Team Leader ownership is preserved.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Agent UUID',
+    format: 'uuid',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Updated Agent overview.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'sessionId is not a valid UUID or null.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Agent or Session not found.',
+  })
+  @ApiResponse({
+    status: HttpStatus.CONFLICT,
+    description:
+      'The assignment could not be completed safely because ownership or assignment state changed concurrently.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
+  })
+  async assignSession(
+    @Param('id', ParseUUIDPipe)
+    id: string,
+    @Body()
+    dto: AssignAgentSessionDto,
+  ): Promise<AdminAgentOverview> {
+    return this.teamLeaderService.assignAdminAgentSession(
+      id,
+      dto.sessionId,
+    );
   }
 
   /** Move one Agent to another Team Leader. */
@@ -176,6 +190,10 @@ export class AdminAgentController {
     status: HttpStatus.CONFLICT,
     description:
       'The Agent has a Session assignment that cannot remain valid under the target Team Leader.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
   })
   async reassign(
     @Param('id', ParseUUIDPipe)
@@ -209,6 +227,10 @@ export class AdminAgentController {
     description:
       'One or more Session assignments cannot remain valid under the target Team Leader.',
   })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
+  })
   async bulkReassign(
     @Body()
     dto: BulkReassignAdminAgentsDto,
@@ -231,7 +253,7 @@ export class AdminAgentController {
   @ApiOperation({
     summary: 'Delete an Agent',
     description:
-      'Deletes the Agent principal and its AGENT credentials. Any assigned Session remains intact.',
+      'Deletes the Agent principal and its AGENT credentials. Any assigned Session remains intact and keeps its Team Leader owner.',
   })
   @ApiParam({
     name: 'id',
@@ -245,6 +267,10 @@ export class AdminAgentController {
   @ApiResponse({
     status: HttpStatus.NOT_FOUND,
     description: 'Agent not found.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
   })
   async delete(
     @Param('id', ParseUUIDPipe)

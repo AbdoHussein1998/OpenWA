@@ -1,25 +1,92 @@
-import { Reflector } from '@nestjs/core';
-import { StatsController } from './stats.controller';
-import { REQUIRED_ROLE_KEY } from '../auth/decorators/auth.decorators';
-import { ApiKeyRole } from '../auth/entities/api-key.entity';
 
-// the global stats routes aggregate across EVERY session and carry no scope param, so the
-// ApiKeyGuard's allowedSessions fence doesn't apply. They must require ADMIN so a VIEWER / a
-// session-restricted key can't read cross-tenant activity. The per-session route is left ungated:
-// it carries :sessionId, so the guard already scopes a restricted key to its own sessions.
+
+
+import { Reflector } from '@nestjs/core';
+
+import {
+  ApiCapability,
+} from '../auth/capabilities/api-capability';
+import {
+  REQUIRED_CAPABILITY_KEY,
+} from '../auth/decorators/capability.decorator';
+import {
+  SESSION_SCOPED_KEY,
+  UNSCOPED_KEY,
+} from '../auth/decorators/auth.decorators';
+
+import {
+  StatsController,
+} from './stats.controller';
+
 describe('StatsController access control', () => {
   const reflector = new Reflector();
-  // Opaque-object view of the prototype so the lint unbound-method rule doesn't fire on a
-  // metadata-only handler lookup.
-  const proto = StatsController.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
 
-  it.each(['getOverview', 'getMessageStats'] as const)('global stats route %s requires ADMIN', method => {
-    const role = reflector.get<ApiKeyRole | undefined>(REQUIRED_ROLE_KEY, proto[method]);
-    expect(role).toBe(ApiKeyRole.ADMIN);
+  const globalStatsHandlers = [
+    'getOverview',
+    'getMessageStats',
+  ] as const;
+
+  it('marks the controller as Session-scoped for :sessionId routes', () => {
+    expect(
+      reflector.get<boolean | undefined>(
+        SESSION_SCOPED_KEY,
+        StatsController,
+      ),
+    ).toBe(true);
   });
 
-  it('per-session stats is not globally ADMIN-gated (scope-enforced by its :sessionId param)', () => {
-    const role = reflector.get<ApiKeyRole | undefined>(REQUIRED_ROLE_KEY, proto.getSessionStats);
-    expect(role).toBeUndefined();
+  it.each(globalStatsHandlers)(
+    'global stats route %s requires STATS_READ',
+    method => {
+      const handler = StatsController.prototype[method];
+
+      expect(
+        reflector.get<ApiCapability | undefined>(
+          REQUIRED_CAPABILITY_KEY,
+          handler,
+        ),
+      ).toBe(ApiCapability.STATS_READ);
+    },
+  );
+
+  it.each(globalStatsHandlers)(
+    'global stats route %s requires an unrestricted API key',
+    method => {
+      const handler = StatsController.prototype[method];
+
+      expect(
+        reflector.get<boolean | undefined>(
+          UNSCOPED_KEY,
+          handler,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it('per-session stats requires SESSION_READ', () => {
+    const handler =
+      StatsController.prototype.getSessionStats;
+
+    expect(
+      reflector.get<ApiCapability | undefined>(
+        REQUIRED_CAPABILITY_KEY,
+        handler,
+      ),
+    ).toBe(ApiCapability.SESSION_READ);
+  });
+
+  it('per-session stats does not require an unrestricted key because :sessionId is tenant-scoped', () => {
+    const handler =
+      StatsController.prototype.getSessionStats;
+
+    expect(
+      reflector.get<boolean | undefined>(
+        UNSCOPED_KEY,
+        handler,
+      ),
+    ).toBeUndefined();
   });
 });
+
+
+

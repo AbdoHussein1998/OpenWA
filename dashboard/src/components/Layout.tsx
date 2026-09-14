@@ -275,8 +275,9 @@ export function Layout({
    *
    * - Team Leader sees the Team Leader workspace plus allowed tenant-scoped tools.
    * - Agent sees the Agent workspace and Templates. Assigned-session operations live inside /agent.
-   * - Admin retains administrative surfaces, including Logs.
-   * - Operator/Viewer keep only routes allowed by roleAccess.ts.
+   * - Admin retains every administrative surface.
+   * - Operator receives the same administrative navigation except Infrastructure.
+   * - Viewer remains read-only and sees only routes allowed by roleAccess.ts.
    *
    * This is UX only. NestJS remains the authorization boundary.
    */

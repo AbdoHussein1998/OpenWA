@@ -1,14 +1,9 @@
-
-
-
 /**
  * Fine-grained authorization capabilities.
  *
- * Capabilities describe WHAT an authenticated principal may do.
- * They intentionally do not describe WHICH sessions/resources the
- * principal may access.
- *
- * Resource/tenant authorization is handled separately by
+ * Capabilities describe WHAT an authenticated principal may do. They
+ * intentionally do not describe WHICH sessions/resources the principal may
+ * access. Resource/tenant authorization is handled separately by
  * SessionTenantAccessService.
  */
 export enum ApiCapability {
@@ -35,14 +30,26 @@ export enum ApiCapability {
   TEMPLATE_MANAGE = 'template_manage',
   SEARCH_MESSAGES = 'search_messages',
 
-  // Team Leader / Agent administration
+  /**
+   * Team Leader self-service management.
+   *
+   * TEAM_LEADER credentials intentionally retain this capability for their
+   * own /team-leader/* surface. Do not use it to protect global Admin/Operator
+   * principal-management routes.
+   */
   TEAM_MANAGE = 'team_manage',
+
+  /**
+   * Global Team Leader / Agent principal administration.
+   *
+   * ADMIN and OPERATOR receive this capability. TEAM_LEADER does not.
+   */
+  PRINCIPAL_MANAGE = 'principal_manage',
 
   // Administrative capabilities
   API_KEY_MANAGE = 'api_key_manage',
   AUDIT_READ = 'audit_read',
+  STATS_READ = 'stats_read',
   INFRA_MANAGE = 'infra_manage',
   PLUGIN_MANAGE = 'plugin_manage',
 }
-
-

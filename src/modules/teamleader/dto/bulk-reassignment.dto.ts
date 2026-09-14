@@ -2,7 +2,6 @@ import {
   ApiProperty,
   ApiPropertyOptional,
 } from '@nestjs/swagger';
-
 import {
   ArrayMinSize,
   ArrayUnique,
@@ -16,17 +15,22 @@ import {
  * Bulk Session ownership transfer.
  *
  * All listed Sessions are transferred to the same target Team Leader. Session
- * ids are required to be unique so the service can compare the requested set
- * with the rows it actually resolves from the data database.
+ * ids must be unique so the service can compare the requested set with the
+ * rows resolved from the data database and fail cleanly on missing resources.
+ *
+ * Assigned Sessions are still subject to the service-layer ownership rules;
+ * this DTO does not bypass Agent/Team Leader consistency checks.
  */
 export class BulkReassignAdminSessionsDto {
   @ApiProperty({
-    description:
-      'Unique Session UUIDs to transfer.',
+    description: 'Unique Session UUIDs to transfer.',
     type: [String],
-    format: 'uuid',
     minItems: 1,
     uniqueItems: true,
+    example: [
+      '2b859606-3998-4604-a228-e6001e43e828',
+      '72aa3f02-c57e-4d4d-9bef-56b7204953af',
+    ],
   })
   @IsArray()
   @ArrayMinSize(1)
@@ -49,18 +53,25 @@ export class BulkReassignAdminSessionsDto {
 /**
  * Bulk Agent transfer.
  *
- * All listed Agents are moved in one main-database transaction. Session
- * ownership is not changed by this DTO; unassignSession only controls whether
- * the Agents' existing Session assignments are cleared during the move.
+ * All listed Agents are moved to the same target Team Leader in one main-DB
+ * transaction. Session ownership is not implicitly changed by this request.
+ *
+ * If an Agent has a Session assignment that is not already owned by the
+ * target Team Leader, callers must set unassignSession=true. This keeps the
+ * invariant:
+ *
+ *   Agent.teamLeaderId === Session.ownerTeamLeaderId
  */
 export class BulkReassignAdminAgentsDto {
   @ApiProperty({
-    description:
-      'Unique Agent UUIDs to move.',
+    description: 'Unique Agent UUIDs to move.',
     type: [String],
-    format: 'uuid',
     minItems: 1,
     uniqueItems: true,
+    example: [
+      'a6a0ec5b-b7ef-4ab9-8f25-0dbfba763888',
+      '97ba1ebd-08b0-42ad-a29a-5c61dbac481f',
+    ],
   })
   @IsArray()
   @ArrayMinSize(1)
@@ -81,7 +92,7 @@ export class BulkReassignAdminAgentsDto {
 
   @ApiPropertyOptional({
     description:
-      'When true, clear Session assignments for all selected Agents as part of the move.',
+      'When true, clear existing Session assignments for the selected Agents while moving them. Leave false only when every retained Session is already owned by the target Team Leader.',
     default: false,
     type: Boolean,
   })
@@ -90,16 +101,16 @@ export class BulkReassignAdminAgentsDto {
   unassignSession = false;
 }
 
-/** Convenience aliases with shorter names for new imports. */
+/** Convenience aliases retained for existing imports. */
 export {
   BulkReassignAdminAgentsDto as BulkReassignAgentsDto,
   BulkReassignAdminSessionsDto as BulkReassignSessionsDto,
 };
 
 /**
- * Compile-time union for helpers that can accept either bulk request shape.
- * NestJS route handlers should use one of the concrete DTO classes above so
- * runtime validation and Swagger metadata remain unambiguous.
+ * Compile-time union for helpers that accept either bulk reassignment body.
+ * NestJS route handlers should continue to use one of the concrete DTO classes
+ * above so class-validator and Swagger metadata remain unambiguous at runtime.
  */
 export type BulkReassignmentDto =
   | BulkReassignAdminAgentsDto

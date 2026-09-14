@@ -11,6 +11,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -175,13 +176,23 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.SEARCH_MESSAGES,
 
     ApiCapability.TEAM_MANAGE,
+    ApiCapability.PRINCIPAL_MANAGE,
 
     ApiCapability.API_KEY_MANAGE,
     ApiCapability.AUDIT_READ,
+    ApiCapability.STATS_READ,
     ApiCapability.INFRA_MANAGE,
     ApiCapability.PLUGIN_MANAGE,
   ]),
 
+  /**
+   * OPERATOR is intentionally "Admin minus Infrastructure" at the
+   * capability layer.
+   *
+   * It does NOT inherit the ADMIN role through ROLE_PERMISSIONS. This keeps
+   * legacy ADMIN-only endpoints closed until they are deliberately migrated
+   * to a capability that Operator should receive.
+   */
   [ApiKeyRole.OPERATOR]: new Set([
     ApiCapability.SESSION_READ,
     ApiCapability.SESSION_CREATE,
@@ -201,6 +212,17 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.TEMPLATE_READ,
     ApiCapability.TEMPLATE_MANAGE,
     ApiCapability.SEARCH_MESSAGES,
+
+    ApiCapability.TEAM_MANAGE,
+    ApiCapability.PRINCIPAL_MANAGE,
+
+    ApiCapability.API_KEY_MANAGE,
+    ApiCapability.AUDIT_READ,
+    ApiCapability.STATS_READ,
+    ApiCapability.PLUGIN_MANAGE,
+
+    // Deliberately excluded:
+    // ApiCapability.INFRA_MANAGE,
   ]),
 
   [ApiKeyRole.VIEWER]: new Set([
@@ -226,6 +248,12 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.TEMPLATE_MANAGE,
     ApiCapability.SEARCH_MESSAGES,
 
+    /**
+     * Self-service Team Leader management only.
+     *
+     * Global Team Leader / Agent administration uses PRINCIPAL_MANAGE,
+     * which TEAM_LEADER credentials do not receive.
+     */
     ApiCapability.TEAM_MANAGE,
   ]),
 
@@ -272,6 +300,7 @@ export class AuthService
         displayKey,
         'Default Admin Key',
         ApiKeyRole.ADMIN,
+        true,
       );
 
       isNewKey = true;
@@ -291,6 +320,12 @@ export class AuthService
         (await this.readLiveBootstrapKey()) ??
         '(check dashboard for keys)';
     }
+
+    /**
+     * Existing installations predate the durable primary-key marker. Backfill
+     * it at startup after migrations/synchronization have created the column.
+     */
+    await this.ensurePrimaryAdminKey();
 
     const apiBaseUrl =
       process.env.BASE_URL ||
@@ -416,6 +451,97 @@ export class AuthService
     return null;
   }
 
+
+  /**
+   * Ensure that one durable primary administrative credential exists.
+   *
+   * Selection for an upgraded installation is deterministic:
+   *
+   * 1. an already-marked row;
+   * 2. the credential referenced by data/.api-key (hash first, prefix as a
+   *    pepper-change fallback);
+   * 3. the oldest ADMIN key.
+   *
+   * The marker is identity metadata, not an authorization grant. A marked key
+   * may later be renamed, reissued, revoked, or even have its role changed;
+   * OPERATOR deletion protection must remain attached to the same credential.
+   */
+  private async ensurePrimaryAdminKey(): Promise<ApiKey | null> {
+    const marked = await this.apiKeyRepository.find({
+      where: {
+        isPrimaryAdminKey: true,
+      },
+      order: {
+        createdAt: 'ASC',
+      },
+    });
+
+    if (marked.length > 0) {
+      const [primary, ...duplicates] = marked;
+
+      /**
+       * Older/manual schemas might contain more than one marked row. Normalize
+       * them deterministically rather than leaving ambiguous protection state.
+       */
+      for (const duplicate of duplicates) {
+        await this.applyUnguardedUpdate(
+          {
+            isPrimaryAdminKey: false,
+          },
+          duplicate.id,
+        );
+      }
+
+      return primary;
+    }
+
+    let candidate: ApiKey | null = null;
+    const bootstrapKey = readBootstrapKey(this.logger);
+
+    if (bootstrapKey) {
+      candidate = await this.apiKeyRepository.findOne({
+        where: {
+          keyHash: this.hashKey(bootstrapKey),
+        },
+      });
+
+      if (!candidate) {
+        candidate = await this.apiKeyRepository.findOne({
+          where: {
+            keyPrefix: bootstrapKey.substring(0, 12),
+          },
+          order: {
+            createdAt: 'ASC',
+          },
+        });
+      }
+    }
+
+    if (!candidate) {
+      candidate = await this.apiKeyRepository.findOne({
+        where: {
+          role: ApiKeyRole.ADMIN,
+        },
+        order: {
+          createdAt: 'ASC',
+        },
+      });
+    }
+
+    if (!candidate) {
+      return null;
+    }
+
+    await this.applyUnguardedUpdate(
+      {
+        isPrimaryAdminKey: true,
+      },
+      candidate.id,
+    );
+
+    return this.findOne(candidate.id);
+  }
+
   /**
    * Remove the bootstrap key file when it contains a credential that has
    * just been invalidated.
@@ -456,6 +582,7 @@ export class AuthService
     rawKey: string,
     name: string,
     role: ApiKeyRole,
+    isPrimaryAdminKey = false,
   ): Promise<ApiKey> {
     const keyHash =
       this.hashKey(rawKey);
@@ -469,6 +596,7 @@ export class AuthService
         keyHash,
         keyPrefix,
         role,
+        isPrimaryAdminKey,
       });
 
     return this.apiKeyRepository.save(
@@ -1048,11 +1176,29 @@ export class AuthService
     return saved;
   }
 
+  /**
+   * Delete an API key as an authenticated API-key manager.
+   *
+   * ADMIN may delete any key subject to the last-usable-admin invariant.
+   * OPERATOR may delete every key except the durable primary Admin key.
+   *
+   * The restriction is enforced here as well as by the controller capability
+   * guard so direct service callers cannot bypass it.
+   */
   async delete(
     id: string,
+    actor: ApiKey,
   ): Promise<void> {
     const apiKey =
       await this.findOne(id);
+
+    this.assertApiKeyDeletionAuthorized(
+      actor,
+      apiKey,
+    );
+
+    const deletedPrimary =
+      apiKey.isPrimaryAdminKey;
 
     if (
       apiKey.role ===
@@ -1088,14 +1234,60 @@ export class AuthService
       'deleted',
     );
 
+    /**
+     * If ADMIN deliberately deletes the primary credential, promote another
+     * existing ADMIN credential so Operator protection continues to have a
+     * stable target. The last-admin guard guarantees that a usable ADMIN
+     * remains when the deleted primary itself was the last usable ADMIN.
+     */
+    if (deletedPrimary) {
+      await this.ensurePrimaryAdminKey();
+    }
+
     this.logger.log(
       `API key deleted: ${apiKey.name}`,
       {
         keyId: id,
+        actorKeyId: actor.id,
+        actorRole: actor.role,
+        wasPrimaryAdminKey: deletedPrimary,
         action:
           'api_key_deleted',
       },
     );
+  }
+
+  private assertApiKeyDeletionAuthorized(
+    actor: ApiKey,
+    target: ApiKey,
+  ): void {
+    if (
+      !this.hasCapability(
+        actor,
+        ApiCapability.API_KEY_MANAGE,
+      )
+    ) {
+      throw new ForbiddenException(
+        'API key management permission is required',
+      );
+    }
+
+    if (
+      (actor.allowedSessions?.length ?? 0) > 0
+    ) {
+      throw new ForbiddenException(
+        'Session-scoped API keys are not permitted to manage API keys',
+      );
+    }
+
+    if (
+      actor.role === ApiKeyRole.OPERATOR &&
+      target.isPrimaryAdminKey
+    ) {
+      throw new ForbiddenException(
+        'Operators cannot delete the primary Admin API key',
+      );
+    }
   }
 
   async revoke(

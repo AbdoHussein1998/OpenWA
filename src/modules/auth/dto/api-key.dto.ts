@@ -1,5 +1,3 @@
-
-
 import {
   IsArray,
   IsDateString,
@@ -26,9 +24,9 @@ import {
  * Roles that may be created or assigned through the generic
  * /auth/api-keys management API.
  *
- * TEAM_LEADER and AGENT credentials are intentionally excluded.
- * Those roles require a corresponding principal record and are
- * provisioned atomically by TeamLeaderService.
+ * TEAM_LEADER and AGENT credentials are intentionally excluded. Those roles
+ * require a corresponding principal record and are provisioned atomically by
+ * TeamLeaderService.
  */
 const GENERIC_API_KEY_ROLES: ApiKeyRole[] = [
   ApiKeyRole.ADMIN,
@@ -114,25 +112,21 @@ export class ApiKeyResponseDto {
 
   /**
    * Responses intentionally expose the complete ApiKeyRole enum because
-   * Admin-visible key records may legitimately belong to Team Leaders
-   * or Agents even though generic key creation cannot mint those roles.
+   * management-visible key records may legitimately belong to Team Leaders or
+   * Agents even though generic key creation cannot mint those roles.
    */
   @ApiProperty({
     enum: ApiKeyRole,
   })
   role!: ApiKeyRole;
 
-  /**
-   * Principal binding for TEAM_LEADER credentials.
-   *
-   * This is intentionally nullable because ordinary ADMIN / OPERATOR /
-   * VIEWER keys and AGENT credentials are not bound to a Team Leader
-   * principal through this column.
-   *
-   * It is optional in this DTO while the controller migration is being
-   * completed, because existing controller response mappings do not yet
-   * include this property.
-   */
+  @ApiProperty({
+    description:
+      'Whether this credential is the installation primary Admin key. Operators may manage API keys generally but cannot delete this credential.',
+    default: false,
+  })
+  isPrimaryAdminKey!: boolean;
+
   @ApiPropertyOptional({
     description:
       'Team Leader principal id when this credential belongs to a Team Leader',
@@ -142,15 +136,6 @@ export class ApiKeyResponseDto {
   })
   teamLeaderId?: string | null;
 
-  /**
-   * Principal binding for AGENT credentials.
-   *
-   * It is nullable because all non-Agent credentials have no Agent
-   * principal binding.
-   *
-   * It remains optional in this DTO until all controller response
-   * mappings explicitly include it.
-   */
   @ApiPropertyOptional({
     description:
       'Agent principal id when this credential belongs to an Agent',
@@ -206,10 +191,7 @@ export class ApiKeyCreatedResponseDto extends ApiKeyResponseDto {
   apiKey!: string;
 }
 
-/**
- * Result of POST /auth/validate — the guard's verdict
- * on the presented key.
- */
+/** Result of POST /auth/validate. */
 export class ValidateApiKeyResponseDto {
   @ApiProperty({
     description:
@@ -277,4 +259,3 @@ export class UpdateApiKeyDto {
   @IsDateString()
   expiresAt?: string;
 }
-

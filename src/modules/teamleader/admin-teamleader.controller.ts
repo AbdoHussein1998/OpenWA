@@ -13,24 +13,19 @@ import {
 import {
   ApiOperation,
   ApiParam,
-  ApiProperty,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import {
-  ArrayMinSize,
-  ArrayUnique,
-  IsArray,
-  IsUUID,
-} from 'class-validator';
 
 import {
   RequireRole,
   RequireUnscopedKey,
 } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
+import { BulkReassignAdminSessionsDto } from './dto/bulk-reassignment.dto';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { CreateTeamLeaderDto } from './dto/create-team-leader.dto';
+import { ReassignAdminSessionDto } from './dto/reassign-session-owner.dto';
 import { TeamLeader } from './entities/team-leader.entity';
 import {
   TeamLeaderService,
@@ -40,39 +35,19 @@ import {
   type CreateTeamLeaderResult,
 } from './teamleader.service';
 
-export class ReassignAdminSessionDto {
-  @ApiProperty({
-    description: 'Team Leader UUID that will own the Session.',
-    format: 'uuid',
-  })
-  @IsUUID()
-  targetTeamLeaderId!: string;
-}
-
-export class BulkReassignAdminSessionsDto {
-  @ApiProperty({
-    description: 'Session UUIDs to transfer.',
-    type: [String],
-    format: 'uuid',
-  })
-  @IsArray()
-  @ArrayMinSize(1)
-  @ArrayUnique()
-  @IsUUID(undefined, { each: true })
-  sessionIds!: string[];
-
-  @ApiProperty({
-    description: 'Team Leader UUID that will own all selected Sessions.',
-    format: 'uuid',
-  })
-  @IsUUID()
-  targetTeamLeaderId!: string;
-}
-
 /**
  * Administrative Team Leader management.
  *
- * These endpoints are ADMIN-only and unavailable to session-scoped API keys.
+ * These routes intentionally remain ADMIN-only in this batch.
+ *
+ * TEAM_MANAGE cannot safely replace the ADMIN role requirement yet because
+ * authenticated Team Leaders currently also possess TEAM_MANAGE for their own
+ * self-service surface. The later authorization phase can widen this global
+ * surface to Operator after introducing/enforcing the appropriate global
+ * management capability boundary.
+ *
+ * Session-scoped API keys are rejected because these operations can span
+ * multiple Team Leaders and Sessions.
  */
 @ApiTags('admin/team-leaders')
 @Controller('admin/team-leaders')
@@ -166,6 +141,10 @@ export class AdminTeamLeaderController {
     status: HttpStatus.NOT_FOUND,
     description: 'Team Leader not found.',
   })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
+  })
   async createAgent(
     @Param('teamLeaderId', ParseUUIDPipe)
     teamLeaderId: string,
@@ -184,8 +163,63 @@ export class AdminTeamLeaderController {
     status: HttpStatus.OK,
     description: 'All Team Leader principals.',
   })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
+  })
   async findAll(): Promise<TeamLeader[]> {
     return this.teamLeaderService.listTeamLeaders();
+  }
+
+  /**
+   * Assign or change the Team Leader owner of a Session directly.
+   *
+   * This route is especially important for Sessions created by an ADMIN,
+   * because those Sessions may initially have ownerTeamLeaderId = null.
+   *
+   * If the Session is already assigned to an Agent, the requested Team Leader
+   * must match that Agent's Team Leader. To move an assigned Session across
+   * Team Leaders, use the ADMIN Agent assignment flow so Agent assignment and
+   * Session ownership remain consistent.
+   */
+  @Patch('sessions/:sessionId/owner')
+  @ApiOperation({
+    summary: 'Assign or change Session Team Leader ownership',
+    description:
+      'Assigns an unowned or unassigned Session to a Team Leader. If an Agent is already assigned, the target Team Leader must be that Agent\'s Team Leader.',
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Session UUID',
+    format: 'uuid',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Updated Session ownership summary.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Session or target Team Leader not found.',
+  })
+  @ApiResponse({
+    status: HttpStatus.CONFLICT,
+    description:
+      'The Session is assigned to an Agent belonging to another Team Leader, or assignment state changed concurrently.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
+  })
+  async setSessionOwner(
+    @Param('sessionId', ParseUUIDPipe)
+    sessionId: string,
+    @Body()
+    dto: ReassignAdminSessionDto,
+  ): Promise<AdminSessionOverview> {
+    return this.teamLeaderService.setAdminSessionOwner(
+      sessionId,
+      dto.targetTeamLeaderId,
+    );
   }
 
   /**
@@ -211,6 +245,10 @@ export class AdminTeamLeaderController {
     status: HttpStatus.NOT_FOUND,
     description: 'Team Leader not found.',
   })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
+  })
   async resources(
     @Param('id', ParseUUIDPipe)
     id: string,
@@ -221,9 +259,9 @@ export class AdminTeamLeaderController {
   /** Transfer one unassigned Session to another Team Leader. */
   @Patch(':id/sessions/:sessionId/owner')
   @ApiOperation({
-    summary: 'Reassign Session ownership',
+    summary: 'Reassign Session ownership from a known Team Leader',
     description:
-      'Transfers an unassigned Session from this Team Leader to another Team Leader. If an Agent is currently assigned, unassign/move the Agent first.',
+      'Transfers an unassigned Session from this Team Leader to another Team Leader. If an Agent is currently assigned, use the Agent assignment flow instead.',
   })
   @ApiParam({
     name: 'id',
@@ -248,6 +286,10 @@ export class AdminTeamLeaderController {
     status: HttpStatus.CONFLICT,
     description:
       'The Session is still assigned to an Agent or ownership changed concurrently.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
   })
   async reassignSession(
     @Param('id', ParseUUIDPipe)
@@ -291,6 +333,10 @@ export class AdminTeamLeaderController {
     description:
       'One or more Sessions are still assigned to Agents or ownership changed concurrently.',
   })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
+  })
   async bulkReassignSessions(
     @Param('id', ParseUUIDPipe)
     id: string,
@@ -321,6 +367,10 @@ export class AdminTeamLeaderController {
   @ApiResponse({
     status: HttpStatus.NOT_FOUND,
     description: 'Team Leader not found.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN.',
   })
   async findOne(
     @Param('id', ParseUUIDPipe)

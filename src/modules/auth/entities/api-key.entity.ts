@@ -32,8 +32,7 @@ export class ApiKey {
   @Column({ type: 'varchar', length: 64 })
   keyHash!: string;
 
-  // 12 to fit the 12-char prefix that auth.service writes (was varchar(8); harmless on the
-  // hardcoded-SQLite `main` connection, but kept consistent with the code).
+  // 12 to fit the 12-char prefix that auth.service writes.
   @Column({ type: 'varchar', length: 12 })
   keyPrefix!: string;
 
@@ -45,52 +44,60 @@ export class ApiKey {
   role!: ApiKeyRole;
 
   /**
+   * Durable identity of the installation's primary/bootstrap administrative
+   * credential.
+   *
+   * This flag is intentionally independent from name and current role so an
+   * Operator cannot bypass primary-key deletion protection by renaming or
+   * demoting the credential first. AuthService guarantees that, while at least
+   * one ADMIN key exists, one row is selected as the primary administrative
+   * anchor.
+   */
+  @Index('IDX_api_keys_isPrimaryAdminKey')
+  @Column({ type: 'boolean', default: false })
+  isPrimaryAdminKey!: boolean;
+
+  /**
    * Principal binding for TEAM_LEADER API keys.
    *
    * Must be non-null only when role === TEAM_LEADER.
-   * The main-database migration adds the FK to team_leaders.id.
    */
   @Index()
   @Column({ type: 'varchar', length: 36, nullable: true })
   teamLeaderId!: string | null;
 
   @ManyToOne(
-  () => TeamLeader,
-  {
-    nullable: true,
-    onDelete: 'CASCADE',
-  },
+    () => TeamLeader,
+    {
+      nullable: true,
+      onDelete: 'CASCADE',
+    },
   )
   @JoinColumn({
     name: 'teamLeaderId',
   })
   teamLeader!: TeamLeader | null;
 
-
   /**
    * Principal binding for AGENT API keys.
    *
    * Must be non-null only when role === AGENT.
-   * The main-database migration adds the FK to agents.id.
    */
   @Index()
   @Column({ type: 'varchar', length: 36, nullable: true })
   agentId!: string | null;
 
-
   @ManyToOne(
-  () => Agent,
-  {
-    nullable: true,
-    onDelete: 'CASCADE',
-  },
+    () => Agent,
+    {
+      nullable: true,
+      onDelete: 'CASCADE',
+    },
   )
   @JoinColumn({
     name: 'agentId',
   })
   agent!: Agent | null;
-
-
 
   @Column({ type: 'simple-array', nullable: true })
   allowedIps!: string[] | null;

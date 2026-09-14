@@ -3,6 +3,9 @@
 
 
 
+
+
+
 import {
   Suspense,
   useCallback,
@@ -212,10 +215,10 @@ function AppContent() {
   );
 
   const [
-    ,
-    setApiKey,
+    startupRoleResolved,
+    setStartupRoleResolved,
   ] = useState(
-    savedKey || '',
+    !savedKey,
   );
 
   const {
@@ -224,8 +227,8 @@ function AppContent() {
   } = useRole();
 
   /**
-   * Only used while a saved role is not yet available.
-   * Backend authorization remains authoritative.
+   * Conservative fallback used only after startup validation has had a chance
+   * to resolve a saved credential. Backend authorization remains authoritative.
    */
   const effectiveRole: UserRole =
     role ?? 'viewer';
@@ -234,8 +237,6 @@ function AppContent() {
     key: string,
     validatedRole?: string,
   ) => {
-    setApiKey(key);
-
     sessionStorage.setItem(
       'openwa_api_key',
       key,
@@ -247,12 +248,13 @@ function AppContent() {
         : 'viewer',
     );
 
+    setStartupRoleResolved(true);
     setIsAuthenticated(true);
   };
 
   const handleLogout =
     useCallback(() => {
-      setApiKey('');
+      setStartupRoleResolved(true);
       setIsAuthenticated(false);
       setRole(null);
 
@@ -269,6 +271,7 @@ function AppContent() {
 
   useEffect(() => {
     if (!savedKey) {
+      setStartupRoleResolved(true);
       return;
     }
 
@@ -311,8 +314,13 @@ function AppContent() {
       )
       .catch(() => {
         /**
-         * A network failure does not prove the key is invalid.
+         * A network failure does not prove the key is invalid. Keep the
+         * authenticated shell available using the conservative Viewer fallback
+         * if no role was restored locally.
          */
+      })
+      .finally(() => {
+        setStartupRoleResolved(true);
       });
   }, [
     savedKey,
@@ -338,6 +346,14 @@ function AppContent() {
       />
     </div>
   );
+
+  if (
+    isAuthenticated &&
+    savedKey &&
+    !startupRoleResolved
+  ) {
+    return loadingFallback;
+  }
 
   if (!isAuthenticated) {
     return (
@@ -630,6 +646,10 @@ function App() {
 }
 
 export default App;
+
+
+
+
 
 
 

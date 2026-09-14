@@ -1,3 +1,7 @@
+
+
+
+
 import {
   Controller,
   Get,
@@ -25,16 +29,18 @@ import {
   PluginCatalogEntryDto,
 } from './dto/plugin.dto';
 import type { CatalogPlugin } from './catalog';
-import { RequireRole, RequireUnscopedKey } from '../auth/decorators/auth.decorators';
-import { ApiKeyRole } from '../auth/entities/api-key.entity';
+import { ApiCapability } from '../auth/capabilities/api-capability';
+import { RequireCapability } from '../auth/decorators/capability.decorator';
+import { RequireUnscopedKey } from '../auth/decorators/auth.decorators';
 
 /** Max accepted upload size for a plugin package (compressed). */
 const MAX_PLUGIN_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 @ApiTags('plugins')
 @Controller('plugins')
-// Plugin installation and lifecycle are deployment-global and execute plugin code as the OpenWA
-// process user, so session-restricted keys are fenced off route by route below. The fence is NOT
+@RequireCapability(ApiCapability.PLUGIN_MANAGE)
+// Plugin installation and lifecycle require PLUGIN_MANAGE. Global operations execute plugin code
+// as the OpenWA process user, so session-restricted keys are fenced off route by route below. The fence is NOT
 // applied at class level because @RequireUnscopedKey takes no argument and cannot be opted out of:
 // `updateSessions` is fenced too (it overwrites the ENTIRE active set, so a scoped key could delete
 // another tenant's activation by sending its own session or []), and `updateSessionConfig` is
@@ -43,7 +49,6 @@ export class PluginsController {
   constructor(private readonly pluginsService: PluginsService) {}
 
   @Get()
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'List all plugins' })
   @ApiResponse({ status: 200, description: 'List of all plugins', type: PluginDto, isArray: true })
@@ -52,7 +57,6 @@ export class PluginsController {
   }
 
   @Post('install')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_PLUGIN_UPLOAD_BYTES } }))
   @ApiConsumes('multipart/form-data')
@@ -75,7 +79,6 @@ export class PluginsController {
   }
 
   @Post('install-url')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Install a plugin by downloading its .zip from a URL (SSRF-guarded)' })
   @ApiResponse({ status: 201, description: 'Plugin installed', type: PluginDto })
@@ -87,7 +90,6 @@ export class PluginsController {
 
   // Declared before `:id` so `GET /plugins/catalog` is not captured by the `:id` route.
   @Get('catalog')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'List the remote plugin catalog, annotated with install state' })
   @ApiResponse({ status: 200, description: 'Catalog entries', type: [PluginCatalogEntryDto] })
@@ -97,7 +99,6 @@ export class PluginsController {
   }
 
   @Get(':id')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Get plugin by ID' })
   @ApiResponse({ status: 200, description: 'Plugin details', type: PluginDto })
@@ -107,7 +108,6 @@ export class PluginsController {
   }
 
   @Post(':id/enable')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Enable a plugin' })
@@ -117,7 +117,6 @@ export class PluginsController {
   }
 
   @Post(':id/disable')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Disable a plugin' })
@@ -127,7 +126,6 @@ export class PluginsController {
   }
 
   @Put(':id/config')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Update plugin configuration' })
   @ApiResponse({ status: 200, description: 'Plugin configuration updated', type: PluginActionResponseDto })
@@ -139,7 +137,6 @@ export class PluginsController {
   // iframe srcdoc. It attaches that document's response-specific nonce to inline scripts so the
   // inherited CSP allows only the isolated editor bootstrap, without enabling parent unsafe-inline.
   @Get(':id/config-ui')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @Header('Content-Type', 'text/html; charset=utf-8')
   @Header('Content-Security-Policy', 'sandbox')
@@ -158,7 +155,6 @@ export class PluginsController {
   }
 
   @Put(':id/config/:sessionId')
-  @RequireRole(ApiKeyRole.ADMIN)
   @ApiOperation({ summary: 'Set a plugin config override for a specific session (empty = clear it)' })
   @ApiResponse({ status: 200, description: 'Per-session plugin configuration updated', type: PluginActionResponseDto })
   @ApiResponse({ status: 400, description: 'Plugin is global (not session-scoped)' })
@@ -172,7 +168,6 @@ export class PluginsController {
   }
 
   @Put(':id/sessions')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: "Set which sessions a session-scoped plugin is activated for (['*'] = all)" })
   @ApiResponse({ status: 200, description: 'Plugin session activation updated', type: PluginDto })
@@ -191,7 +186,6 @@ export class PluginsController {
   }
 
   @Post(':id/update')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Update an installed plugin in place from a URL (preserves config + enabled state)' })
   @ApiResponse({ status: 201, description: 'Plugin updated', type: PluginDto })
@@ -202,7 +196,6 @@ export class PluginsController {
   }
 
   @Delete(':id')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Uninstall a plugin (removes its files; built-ins are protected)' })
   @ApiResponse({ status: 200, description: 'Plugin uninstalled', type: PluginActionResponseDto })
@@ -213,7 +206,6 @@ export class PluginsController {
   }
 
   @Get(':id/health')
-  @RequireRole(ApiKeyRole.ADMIN)
   @RequireUnscopedKey()
   @ApiOperation({ summary: 'Check plugin health' })
   @ApiResponse({ status: 200, description: 'Plugin health status', type: PluginHealthResponseDto })
@@ -221,3 +213,6 @@ export class PluginsController {
     return await this.pluginsService.healthCheck(id);
   }
 }
+
+
+

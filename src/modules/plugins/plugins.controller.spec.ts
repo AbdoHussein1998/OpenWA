@@ -1,37 +1,78 @@
+
+
+
+
 import { Reflector } from '@nestjs/core';
-import { PluginsController } from './plugins.controller';
-import { REQUIRED_ROLE_KEY, UNSCOPED_KEY } from '../auth/decorators/auth.decorators';
-import { ApiKeyRole } from '../auth/entities/api-key.entity';
+
+import {
+  ApiCapability,
+} from '../auth/capabilities/api-capability';
+import {
+  REQUIRED_CAPABILITY_KEY,
+} from '../auth/decorators/capability.decorator';
+import {
+  UNSCOPED_KEY,
+} from '../auth/decorators/auth.decorators';
+
+import {
+  PluginsController,
+} from './plugins.controller';
 
 describe('PluginsController authorization', () => {
   const reflector = new Reflector();
 
-  // Plugin reads expose installed versions, non-secret config, and health/error text — privileged
-  // inventory on par with the ADMIN-gated write routes and the infra controllers' convention. A
-  // VIEWER/OPERATOR key (or a session-scoped key) must not be able to enumerate it via the raw API.
-  const adminOnly = [
+  const globallyUnscopedHandlers = [
     'findAll',
+    'install',
+    'installFromUrl',
+    'catalog',
     'findOne',
-    'healthCheck',
     'enable',
     'disable',
     'updateConfig',
     'getConfigUi',
-    'updateSessionConfig',
     'updateSessions',
+    'update',
+    'uninstall',
+    'healthCheck',
   ] as const;
 
-  it.each(adminOnly)('%s requires the ADMIN role', method => {
-    // Metadata lookup key, never invoked.
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const handler = PluginsController.prototype[method];
-    const role = reflector.get<ApiKeyRole | undefined>(REQUIRED_ROLE_KEY, handler);
-    expect(role).toBe(ApiKeyRole.ADMIN);
+  it('requires PLUGIN_MANAGE at the controller level', () => {
+    expect(
+      reflector.get<ApiCapability | undefined>(
+        REQUIRED_CAPABILITY_KEY,
+        PluginsController,
+      ),
+    ).toBe(ApiCapability.PLUGIN_MANAGE);
   });
 
-  it('updateSessions requires an unrestricted key because updateSessions replaces the complete active set', () => {
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const handler = PluginsController.prototype.updateSessions;
-    expect(reflector.get<boolean>(UNSCOPED_KEY, handler)).toBe(true);
+  it.each(globallyUnscopedHandlers)(
+    '%s requires an unrestricted API key',
+    method => {
+      // Metadata-only lookup; the handler is not detached and invoked.
+      const handler = PluginsController.prototype[method];
+
+      expect(
+        reflector.get<boolean | undefined>(
+          UNSCOPED_KEY,
+          handler,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it('allows updateSessionConfig to rely on its :sessionId tenant fence instead of requiring an unrestricted key', () => {
+    const handler =
+      PluginsController.prototype.updateSessionConfig;
+
+    expect(
+      reflector.get<boolean | undefined>(
+        UNSCOPED_KEY,
+        handler,
+      ),
+    ).toBeUndefined();
   });
 });
+
+
+

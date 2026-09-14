@@ -1,3 +1,7 @@
+
+
+
+
 import {
   ConflictException,
   NotFoundException,
@@ -50,6 +54,7 @@ describe('AdminTeamLeaderController', () => {
     createAgent: jest.Mock;
     listTeamLeaders: jest.Mock;
     getAdminTeamLeaderResources: jest.Mock;
+    setAdminSessionOwner: jest.Mock;
     reassignAdminSession: jest.Mock;
     reassignAdminSessions: jest.Mock;
     getTeamLeader: jest.Mock;
@@ -62,6 +67,7 @@ describe('AdminTeamLeaderController', () => {
       createAgent: jest.fn(),
       listTeamLeaders: jest.fn(),
       getAdminTeamLeaderResources: jest.fn(),
+      setAdminSessionOwner: jest.fn(),
       reassignAdminSession: jest.fn(),
       reassignAdminSessions: jest.fn(),
       getTeamLeader: jest.fn(),
@@ -234,6 +240,68 @@ describe('AdminTeamLeaderController', () => {
     });
   });
 
+
+  describe('setSessionOwner', () => {
+    it('assigns an unowned ADMIN-created Session directly to a Team Leader', async () => {
+      const updated = {
+        id: 'session-1',
+        name: 'support',
+        ownerTeamLeaderId: 'team-leader-2',
+        status: 'created' as const,
+        phone: null,
+        targetPhone: null,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      };
+
+      teamLeaderService.setAdminSessionOwner.mockResolvedValue(updated);
+
+      await expect(
+        controller.setSessionOwner(
+          'session-1',
+          {
+            targetTeamLeaderId: 'team-leader-2',
+          },
+        ),
+      ).resolves.toBe(updated);
+
+      expect(teamLeaderService.setAdminSessionOwner).toHaveBeenCalledWith(
+        'session-1',
+        'team-leader-2',
+      );
+    });
+
+    it('forwards conflicts when the Session is assigned to an Agent under another Team Leader', async () => {
+      const conflict = new ConflictException(
+        'Session is assigned to an Agent belonging to another Team Leader',
+      );
+      teamLeaderService.setAdminSessionOwner.mockRejectedValue(conflict);
+
+      await expect(
+        controller.setSessionOwner(
+          'session-1',
+          {
+            targetTeamLeaderId: 'team-leader-2',
+          },
+        ),
+      ).rejects.toBe(conflict);
+    });
+
+    it('forwards 404 when the Session or target Team Leader does not exist', async () => {
+      const notFound = new NotFoundException('Session not found');
+      teamLeaderService.setAdminSessionOwner.mockRejectedValue(notFound);
+
+      await expect(
+        controller.setSessionOwner(
+          'missing-session',
+          {
+            targetTeamLeaderId: 'team-leader-2',
+          },
+        ),
+      ).rejects.toBe(notFound);
+    });
+  });
+
   describe('reassignSession', () => {
     it('delegates one Session ownership transfer to the service', async () => {
       const updated = {
@@ -384,3 +452,6 @@ describe('AdminTeamLeaderController', () => {
     });
   });
 });
+
+
+

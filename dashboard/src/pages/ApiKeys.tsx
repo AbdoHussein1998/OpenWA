@@ -73,6 +73,10 @@ import {
 } from '../hooks/useToast';
 
 import {
+  useRole,
+} from '../hooks/useRole';
+
+import {
   copyToClipboard,
 } from '../utils/clipboard';
 
@@ -104,7 +108,7 @@ const roleFallbackDescriptions:
     admin:
       'Full administrative access.',
     operator:
-      'Operational access for sessions and messaging.',
+      'Administrative access except infrastructure; the primary Admin API key remains deletion-protected.',
     viewer:
       'Read-only dashboard access.',
     team_leader:
@@ -152,6 +156,59 @@ function isManagementRole(
     role === 'team_leader' ||
     role === 'agent'
   );
+}
+
+type ApiKeyWithPrimaryAdminFlag =
+  ApiKey & {
+    isPrimaryAdminKey?: boolean;
+  };
+
+function isPrimaryAdminKey(
+  apiKey: ApiKey,
+): boolean {
+  return (
+    apiKey as ApiKeyWithPrimaryAdminFlag
+  ).isPrimaryAdminKey === true;
+}
+
+/**
+ * Principal credentials are stored with a role prefix in the backend key
+ * name (for example "Team Leader: Ahmed"). The Role column already carries
+ * that information, so the Name column shows only the human-facing principal
+ * name while leaving the persisted value untouched.
+ */
+function credentialDisplayName(
+  apiKey: ApiKey,
+): string {
+  const name =
+    apiKey.name.trim();
+
+  if (
+    apiKey.role ===
+    'team_leader'
+  ) {
+    const stripped =
+      name.replace(
+        /^Team Leader:\s*/i,
+        '',
+      );
+
+    return stripped || name;
+  }
+
+  if (
+    apiKey.role === 'agent'
+  ) {
+    const stripped =
+      name.replace(
+        /^Agent:\s*/i,
+        '',
+      );
+
+    return stripped || name;
+  }
+
+  return name;
 }
 
 function isValidEmail(
@@ -213,6 +270,10 @@ export function ApiKeys() {
 
   const toast =
     useToast();
+
+  const {
+    isOperator,
+  } = useRole();
 
   useDocumentTitle(
     t(
@@ -791,6 +852,21 @@ export function ApiKeys() {
         await revokeMutation.mutateAsync(
           id,
         );
+
+        setKnownApiKeys(current => {
+          const next = {
+            ...current,
+          };
+          delete next[id];
+          return next;
+        });
+
+        setVisibleKeys(previous => {
+          const next =
+            new Set(previous);
+          next.delete(id);
+          return next;
+        });
       } catch (
         error
       ) {
@@ -822,6 +898,21 @@ export function ApiKeys() {
         await deleteMutation.mutateAsync(
           id,
         );
+
+        setKnownApiKeys(current => {
+          const next = {
+            ...current,
+          };
+          delete next[id];
+          return next;
+        });
+
+        setVisibleKeys(previous => {
+          const next =
+            new Set(previous);
+          next.delete(id);
+          return next;
+        });
       } catch (
         error
       ) {
@@ -923,13 +1014,29 @@ export function ApiKeys() {
                     ),
 
                 cell:
-                  info => (
-                    <span className="name-cell">
-                      {
-                        info.getValue()
-                      }
-                    </span>
-                  ),
+                  info => {
+                    const apiKey =
+                      info.row.original;
+
+                    return (
+                      <span className="name-cell">
+                        {credentialDisplayName(
+                          apiKey,
+                        )}
+
+                        {isPrimaryAdminKey(
+                          apiKey,
+                        ) && (
+                          <span
+                            className="permission-badge"
+                            title="Primary Admin API key"
+                          >
+                            Primary
+                          </span>
+                        )}
+                      </span>
+                    );
+                  },
               },
             ),
 
@@ -1100,6 +1207,27 @@ export function ApiKeys() {
                       reissueMutation.variables ===
                         apiKey.id;
 
+                    const isRevoking =
+                      revokeMutation.isPending &&
+                      revokeMutation.variables ===
+                        apiKey.id;
+
+                    const isDeleting =
+                      deleteMutation.isPending &&
+                      deleteMutation.variables ===
+                        apiKey.id;
+
+                    const displayName =
+                      credentialDisplayName(
+                        apiKey,
+                      );
+
+                    const deleteProtected =
+                      isOperator &&
+                      isPrimaryAdminKey(
+                        apiKey,
+                      );
+
                     return (
                       <span className="actions-cell">
                         <button
@@ -1131,8 +1259,8 @@ export function ApiKeys() {
                           }
                           aria-label={
                             rawKey
-                              ? `Copy API key for ${apiKey.name}`
-                              : `Plaintext API key for ${apiKey.name} is unavailable`
+                              ? `Copy API key for ${displayName}`
+                              : `Plaintext API key for ${displayName} is unavailable`
                           }
                         >
                           {copiedKeyId ===
@@ -1157,7 +1285,7 @@ export function ApiKeys() {
                                 id:
                                   apiKey.id,
                                 name:
-                                  apiKey.name,
+                                  displayName,
                               },
                             )
                           }
@@ -1171,7 +1299,7 @@ export function ApiKeys() {
                                 'Reissue',
                             },
                           )}
-                          aria-label={`Reissue API key for ${apiKey.name}`}
+                          aria-label={`Reissue API key for ${displayName}`}
                         >
                           {isReissuing ? (
                             <Loader2
@@ -1185,66 +1313,88 @@ export function ApiKeys() {
                           )}
                         </button>
 
-                        {isManagementRole(
-                          apiKey.role,
-                        ) ? (
-                          <span
-                            className="last-used"
-                            title="Delete/revoke is managed through Team Leader / Agent principal lifecycle."
-                          >
-                            Principal managed
-                          </span>
-                        ) : (
-                          <>
-                            {apiKey.isActive && (
-                              <button
-                                className="icon-btn"
-                                onClick={() =>
-                                  setConfirmAction(
-                                    {
-                                      type:
-                                        'revoke',
-                                      id:
-                                        apiKey.id,
-                                      name:
-                                        apiKey.name,
-                                    },
-                                  )
-                                }
-                                title={t(
-                                  'apiKeys.actions.revoke',
-                                )}
-                              >
-                                <KeyRound
-                                  size={16}
-                                />
-                              </button>
+                        {apiKey.isActive && (
+                          <button
+                            className="icon-btn"
+                            onClick={() =>
+                              setConfirmAction(
+                                {
+                                  type:
+                                    'revoke',
+                                  id:
+                                    apiKey.id,
+                                  name:
+                                    displayName,
+                                },
+                              )
+                            }
+                            disabled={
+                              revokeMutation.isPending ||
+                              deleteMutation.isPending ||
+                              reissueMutation.isPending
+                            }
+                            title={t(
+                              'apiKeys.actions.revoke',
                             )}
-
-                            <button
-                              className="icon-btn danger"
-                              onClick={() =>
-                                setConfirmAction(
-                                  {
-                                    type:
-                                      'delete',
-                                    id:
-                                      apiKey.id,
-                                    name:
-                                      apiKey.name,
-                                  },
-                                )
-                              }
-                              title={t(
-                                'apiKeys.actions.delete',
-                              )}
-                            >
-                              <Trash2
+                            aria-label={`Revoke API key for ${displayName}`}
+                          >
+                            {isRevoking ? (
+                              <Loader2
+                                size={16}
+                                className="animate-spin"
+                              />
+                            ) : (
+                              <KeyRound
                                 size={16}
                               />
-                            </button>
-                          </>
+                            )}
+                          </button>
                         )}
+
+                        <button
+                          className="icon-btn danger"
+                          onClick={() =>
+                            setConfirmAction(
+                              {
+                                type:
+                                  'delete',
+                                id:
+                                  apiKey.id,
+                                name:
+                                  displayName,
+                              },
+                            )
+                          }
+                          disabled={
+                            deleteProtected ||
+                            deleteMutation.isPending ||
+                            revokeMutation.isPending ||
+                            reissueMutation.isPending
+                          }
+                          title={
+                            deleteProtected
+                              ? 'Operators cannot delete the primary Admin API key.'
+                              : t(
+                                  'apiKeys.actions.delete',
+                                )
+                          }
+                          aria-label={
+                            deleteProtected
+                              ? `Primary Admin API key ${displayName} cannot be deleted by an Operator`
+                              : `Delete API key for ${displayName}`
+                          }
+                        >
+                          {isDeleting ? (
+                            <Loader2
+                              size={16}
+                              className="animate-spin"
+                            />
+                          ) : (
+                            <Trash2
+                              size={16}
+                            />
+                          )}
+                        </button>
                       </span>
                     );
                   },
@@ -1254,9 +1404,14 @@ export function ApiKeys() {
         ),
       [
         copiedKeyId,
+        deleteMutation.isPending,
+        deleteMutation.variables,
+        isOperator,
         knownApiKeys,
         reissueMutation.isPending,
         reissueMutation.variables,
+        revokeMutation.isPending,
+        revokeMutation.variables,
         roleLabel,
         t,
         visibleKeys,
@@ -1997,7 +2152,9 @@ export function ApiKeys() {
                   confirmAndExecute
                 }
                 disabled={
-                  reissueMutation.isPending
+                  reissueMutation.isPending ||
+                  revokeMutation.isPending ||
+                  deleteMutation.isPending
                 }
               >
                 {confirmAction.type ===

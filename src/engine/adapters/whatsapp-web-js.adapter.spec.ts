@@ -1,3 +1,7 @@
+
+
+
+
 import { Client, MessageMedia, WAState } from 'whatsapp-web.js';
 import { EventEmitter } from 'events';
 import {
@@ -1657,8 +1661,27 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     expect(jest.getTimerCount()).toBe(0);
   };
 
+  let savedReadyTimeoutMs: string | undefined;
+
+  beforeEach(() => {
+    /*
+     * Readiness reconciliation supports an operator override via
+     * WWEBJS_READY_TIMEOUT_MS. These regression tests verify the default
+     * deadline semantics, so they must not inherit a developer/CI shell
+     * override (for example 180000ms for slow phones).
+     */
+    savedReadyTimeoutMs = process.env.WWEBJS_READY_TIMEOUT_MS;
+    process.env.WWEBJS_READY_TIMEOUT_MS = String(READY_RECONCILE_TIMEOUT_MS);
+  });
+
   afterEach(() => {
     jest.useRealTimers();
+
+    if (savedReadyTimeoutMs === undefined) {
+      delete process.env.WWEBJS_READY_TIMEOUT_MS;
+    } else {
+      process.env.WWEBJS_READY_TIMEOUT_MS = savedReadyTimeoutMs;
+    }
   });
 
   it('marks the adapter ready when authenticated runtime is connected but the ready event is missed', async () => {
@@ -1822,7 +1845,7 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
 
     client.emit('authenticated');
-    await jest.advanceTimersByTimeAsync(91_000);
+    await jest.advanceTimersByTimeAsync(READY_RECONCILE_TIMEOUT_MS + 1_000);
 
     // The link itself is healthy — wiping the only copy of the credentials would trade a
     // restart-fixable fault for a forced re-pair. FAILED with the reason, auth left alone.
@@ -1997,11 +2020,12 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     const deleteProfile = braveProfileManagerOf(adapter).deleteProfile as jest.Mock;
 
     client.emit('authenticated');
-    await jest.advanceTimersByTimeAsync(80_000);
+    const beforeDeadlineMs = READY_RECONCILE_TIMEOUT_MS - 10_000;
+    await jest.advanceTimersByTimeAsync(beforeDeadlineMs);
     expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
 
-    client.emit('authenticated'); // re-fire 80s in — must not restart the window
-    await jest.advanceTimersByTimeAsync(11_000); // 91s total since the FIRST authenticated
+    client.emit('authenticated'); // re-fire near the deadline — must not restart the window
+    await jest.advanceTimersByTimeAsync(11_000); // crosses the ORIGINAL deadline by ~1s
     await recoveryDone.promise;
 
     // Hitting the original 90s deadline starts the one-shot stuck-auth recovery.
@@ -2324,7 +2348,8 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     (adapter as unknown as { callbacks: { onDisconnected?: jest.Mock } }).callbacks.onDisconnected = onDisconnected;
 
     client.emit('authenticated');
-    await jest.advanceTimersByTimeAsync(50_000);
+    const firstAdvanceMs = Math.floor(READY_RECONCILE_TIMEOUT_MS / 2);
+    await jest.advanceTimersByTimeAsync(firstAdvanceMs);
 
     // The reconciliation cadence is still armed. While a probe is actively waiting,
     // withProbeTimeout() owns a second timer for its 5s bound, so the exact Jest timer
@@ -2334,7 +2359,9 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     expect(jest.getTimerCount()).toBeGreaterThanOrEqual(1);
     expect(client.getState.mock.calls.length).toBeGreaterThan(1);
 
-    await jest.advanceTimersByTimeAsync(45_000); // ~95s total
+    await jest.advanceTimersByTimeAsync(
+      READY_RECONCILE_TIMEOUT_MS - firstAdvanceMs + 5_000,
+    ); // past the configured/default deadline
     // recoverFromStuckAuth() is intentionally launched fire-and-forget by the deadline tick.
     // Wait for its externally observable completion instead of assuming timer advancement also
     // drained the whole async destroy -> orphan-check -> profile-delete chain.
@@ -2389,7 +2416,7 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     });
 
     client.emit('authenticated');
-    await jest.advanceTimersByTimeAsync(95_000); // past the 90s give-up deadline
+    await jest.advanceTimersByTimeAsync(READY_RECONCILE_TIMEOUT_MS + 5_000); // past the give-up deadline
 
     const timeout = warnSpy.mock.calls.find(([message]) => /Timed out waiting/i.test(String(message)));
     expect(timeout).toBeDefined();
@@ -7398,3 +7425,6 @@ describe('WhatsAppWebJsAdapter raw-id extraction hardening', () => {
     expect(info.participantCount).toBe(3);
   });
 });
+
+
+

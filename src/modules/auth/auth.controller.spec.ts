@@ -4,6 +4,13 @@
 
 
 
+
+
+
+
+
+
+
 import 'reflect-metadata';
 
 import type { Request } from 'express';
@@ -24,6 +31,12 @@ import type {
 import {
   UNSCOPED_KEY,
 } from './decorators/auth.decorators';
+import {
+  REQUIRED_CAPABILITY_KEY,
+} from './decorators/capability.decorator';
+import {
+  ApiCapability,
+} from './capabilities/api-capability';
 import {
   ApiKeyRole,
   type ApiKey,
@@ -46,6 +59,9 @@ function createApiKey(
 
     role:
       ApiKeyRole.VIEWER,
+
+    isPrimaryAdminKey:
+      false,
 
     teamLeaderId:
       null,
@@ -110,6 +126,41 @@ describe(
             AuthController,
           ),
         ).toBe(true);
+      },
+    );
+  },
+);
+
+
+describe(
+  'AuthController — API-key capability metadata',
+  () => {
+    const methods = [
+      'create',
+      'findAll',
+      'findOne',
+      'update',
+      'reissue',
+      'delete',
+      'revoke',
+    ] as const;
+
+    it.each(methods)(
+      '%s requires API_KEY_MANAGE',
+      (methodName: (typeof methods)[number]) => {
+        const handler =
+          AuthController.prototype[
+            methodName
+          ];
+
+        expect(
+          Reflect.getMetadata(
+            REQUIRED_CAPABILITY_KEY,
+            handler,
+          ),
+        ).toBe(
+          ApiCapability.API_KEY_MANAGE,
+        );
       },
     );
   },
@@ -562,6 +613,44 @@ describe(
       },
     );
 
+
+    it(
+      'exposes the durable primary Admin marker in API-key responses',
+      async () => {
+        authService
+          .findOne
+          .mockResolvedValue(
+            createApiKey({
+              id:
+                'primary-admin',
+
+              role:
+                ApiKeyRole.ADMIN,
+
+              isPrimaryAdminKey:
+                true,
+            }),
+          );
+
+        await expect(
+          controller.findOne(
+            'primary-admin',
+          ),
+        ).resolves.toEqual(
+          expect.objectContaining({
+            id:
+              'primary-admin',
+
+            role:
+              ApiKeyRole.ADMIN,
+
+            isPrimaryAdminKey:
+              true,
+          }),
+        );
+      },
+    );
+
     it(
       'reissues an API key, returns the replacement plaintext once, and audits without the secret',
       async () => {
@@ -712,6 +801,7 @@ describe(
           authService.delete,
         ).toHaveBeenCalledWith(
           'k1',
+          actor,
         );
 
         expect(

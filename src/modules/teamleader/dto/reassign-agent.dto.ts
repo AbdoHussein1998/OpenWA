@@ -2,7 +2,6 @@ import {
   ApiProperty,
   ApiPropertyOptional,
 } from '@nestjs/swagger';
-
 import {
   IsBoolean,
   IsOptional,
@@ -12,9 +11,13 @@ import {
 /**
  * Request body for moving one Agent to another Team Leader.
  *
- * Agent and Session principals live in different databases. The caller must
- * therefore make Session handling explicit whenever the Agent's current
- * assignment cannot remain valid under the target Team Leader.
+ * This operation moves the Agent principal itself. It does not implicitly
+ * transfer Session ownership across databases.
+ *
+ * If the Agent currently has a Session assignment, that assignment may remain
+ * only when the Session is already owned by the target Team Leader. Otherwise
+ * the caller must explicitly set unassignSession=true before the Agent can be
+ * moved safely.
  */
 export class ReassignAdminAgentDto {
   @ApiProperty({
@@ -38,7 +41,8 @@ export class ReassignAdminAgentDto {
 }
 
 /**
- * Short domain-oriented alias. Both exports refer to the same decorated class.
+ * Compatibility alias for callers that use the shorter domain-oriented name.
+ * Both exports reference the same decorated runtime class.
  */
 export {
   ReassignAdminAgentDto as ReassignAgentDto,

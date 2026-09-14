@@ -1,49 +1,53 @@
 
 
+
+
 import {
   Controller,
   Get,
   Param,
   Query,
 } from '@nestjs/common';
-
 import {
-  ApiTags,
   ApiOperation,
   ApiResponse,
+  ApiTags,
 } from '@nestjs/swagger';
 
 import {
-  MessageStatsResponseDto,
-  OverviewStatsResponseDto,
-  SessionStatsResponseDto,
-} from './dto/stats-response.dto';
-
-import { StatsService } from './stats.service';
-import { StatsQueryDto } from './dto/stats-query.dto';
-
+  ApiCapability,
+} from '../auth/capabilities/api-capability';
 import {
-  RequireRole,
+  RequireCapability,
+} from '../auth/decorators/capability.decorator';
+import {
   RequireUnscopedKey,
   SessionScoped,
 } from '../auth/decorators/auth.decorators';
 
 import {
-  ApiKeyRole,
-} from '../auth/entities/api-key.entity';
+  StatsQueryDto,
+} from './dto/stats-query.dto';
+import {
+  MessageStatsResponseDto,
+  OverviewStatsResponseDto,
+  SessionStatsResponseDto,
+} from './dto/stats-response.dto';
+import {
+  StatsService,
+} from './stats.service';
 
 @ApiTags('statistics')
 @Controller('stats')
-
 /*
  * :sessionId in this controller always represents a WhatsApp Session ID.
  *
- * This allows ApiKeyGuard to apply the normal tenant fence to:
+ * ApiKeyGuard therefore applies the normal tenant fence to:
  *
  *   GET /stats/sessions/:sessionId
  *
- * Aggregate routes below do not contain :sessionId and remain protected
- * independently by ADMIN + RequireUnscopedKey.
+ * Aggregate routes do not contain a Session id and are protected separately
+ * by STATS_READ + RequireUnscopedKey().
  */
 @SessionScoped()
 export class StatsController {
@@ -51,20 +55,15 @@ export class StatsController {
     private readonly statsService: StatsService,
   ) {}
 
-  /*
-   * Deliberately GLOBAL.
+  /**
+   * Deliberately global.
    *
-   * This endpoint is not converted to effective SessionScope because its
-   * contract is explicitly a system-wide ADMIN aggregate.
-   *
-   * RequireUnscopedKey prevents a session-restricted ADMIN credential from
-   * using this route to bypass its allowedSessions ceiling.
-   *
-   * TEAM_LEADER / AGENT cannot reach this route because of the ADMIN role
-   * requirement.
+   * ADMIN and OPERATOR receive STATS_READ. RequireUnscopedKey prevents a
+   * session-restricted administrative credential from using this aggregate
+   * endpoint to bypass its allowedSessions ceiling.
    */
   @Get('overview')
-  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireCapability(ApiCapability.STATS_READ)
   @RequireUnscopedKey()
   @ApiOperation({
     summary: 'Get overall statistics',
@@ -75,17 +74,21 @@ export class StatsController {
       'Cross-session aggregate statistics (sessions, messages, etc.).',
     type: OverviewStatsResponseDto,
   })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Caller lacks STATS_READ or is using a session-scoped API key.',
+  })
   async getOverview() {
     return this.statsService.getOverview();
   }
 
-  /*
-   * Same reasoning as /stats/overview:
-   *
-   * this is intentionally a global ADMIN-only aggregate.
+  /**
+   * Global message aggregate using the same authorization boundary as the
+   * overview endpoint.
    */
   @Get('messages')
-  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireCapability(ApiCapability.STATS_READ)
   @RequireUnscopedKey()
   @ApiOperation({
     summary: 'Get message statistics with time series',
@@ -96,39 +99,54 @@ export class StatsController {
       'Message statistics with a time series for the requested period.',
     type: MessageStatsResponseDto,
   })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Caller lacks STATS_READ or is using a session-scoped API key.',
+  })
   async getMessageStats(
-    @Query() query: StatsQueryDto,
+    @Query()
+    query: StatsQueryDto,
   ) {
     return this.statsService.getMessageStats(
       query.period || '24h',
     );
   }
 
-  /*
-   * Per-session route.
+  /**
+   * Per-session statistics.
    *
-   * @SessionScoped() on the controller tells ApiKeyGuard that this
-   * :sessionId is a tenant-scoped WhatsApp Session ID.
+   * SESSION_READ answers WHAT the caller may do while ApiKeyGuard and
+   * SessionTenantAccessService enforce WHERE the caller may do it:
    *
-   * Therefore:
-   *
-   * ADMIN / legacy       -> normal allowedSessions rules
-   * TEAM_LEADER          -> must own the session
-   * AGENT                -> must be assigned + owner must match
-   * foreign/nonexistent  -> 404
+   * - ADMIN / OPERATOR / VIEWER: normal allowedSessions ceiling
+   * - TEAM_LEADER: must own the Session
+   * - AGENT: must be assigned and the Session owner must match
+   * - foreign/nonexistent Session: 404
    */
   @Get('sessions/:sessionId')
+  @RequireCapability(ApiCapability.SESSION_READ)
   @ApiOperation({
     summary: 'Get statistics for a specific session',
   })
   @ApiResponse({
     status: 200,
     description:
-      'Per-session statistics for the requested session.',
+      'Per-session statistics for the requested Session.',
     type: SessionStatsResponseDto,
   })
+  @ApiResponse({
+    status: 403,
+    description: 'Caller lacks SESSION_READ.',
+  })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Session does not exist or is outside the caller\'s tenant scope.',
+  })
   async getSessionStats(
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId')
+    sessionId: string,
   ) {
     return this.statsService.getSessionStats(
       sessionId,

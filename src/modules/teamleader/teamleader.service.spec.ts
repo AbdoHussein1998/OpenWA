@@ -1,3 +1,6 @@
+
+
+
 import {
   ConflictException,
   NotFoundException,
@@ -86,6 +89,7 @@ function createApiKey(
       '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     keyPrefix: 'owa_k1_test1',
     role: ApiKeyRole.OPERATOR,
+    isPrimaryAdminKey: false,
     teamLeaderId: null,
     teamLeader: null,
     agentId: null,
@@ -143,6 +147,7 @@ describe('TeamLeaderService', () => {
 
   let sessionTransactionalRepository: {
     find: jest.Mock;
+    findOne: jest.Mock;
     save: jest.Mock;
   };
 
@@ -192,6 +197,7 @@ describe('TeamLeaderService', () => {
 
     sessionTransactionalRepository = {
       find: jest.fn(),
+      findOne: jest.fn(),
       save: jest.fn(),
     };
 
@@ -475,6 +481,337 @@ describe('TeamLeaderService', () => {
       expect(result.canDelete).toBe(true);
       expect(result.sessions).toEqual([]);
       expect(result.agents).toEqual([]);
+    });
+  });
+
+
+  describe('setAdminSessionOwner', () => {
+    it('assigns an ADMIN-created unowned Session to the target Team Leader', async () => {
+      const targetTeamLeader = createTeamLeader({
+        id: 'team-leader-2',
+        name: 'Target Leader',
+      });
+      const session = createSession({
+        id: 'admin-created-session',
+        ownerTeamLeaderId: null,
+      });
+      const savedSession = createSession({
+        ...session,
+        ownerTeamLeaderId: targetTeamLeader.id,
+      });
+
+      teamLeaderRepository.findOne.mockResolvedValue(targetTeamLeader);
+      sessionRepository.findOne.mockResolvedValue(session);
+      agentRepository.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      sessionTransactionalRepository.findOne.mockResolvedValue(session);
+      sessionTransactionalRepository.save.mockResolvedValue(savedSession);
+      apiKeyRepository.find.mockResolvedValue([
+        createApiKey({
+          id: 'target-team-leader-key',
+          role: ApiKeyRole.TEAM_LEADER,
+          teamLeaderId: targetTeamLeader.id,
+        }),
+      ]);
+
+      const result = await service.setAdminSessionOwner(
+        session.id,
+        targetTeamLeader.id,
+      );
+
+      expect(sessionTransactionalRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: session.id,
+          ownerTeamLeaderId: targetTeamLeader.id,
+        }),
+      );
+      expect(result.ownerTeamLeaderId).toBe(targetTeamLeader.id);
+      expect(eventsGateway.evictApiKey).toHaveBeenCalledWith(
+        'target-team-leader-key',
+        'authorization_changed',
+      );
+    });
+
+    it('allows direct ownership when the assigned Agent already belongs to the target Team Leader', async () => {
+      const targetTeamLeader = createTeamLeader({
+        id: 'team-leader-2',
+      });
+      const session = createSession({
+        ownerTeamLeaderId: null,
+      });
+      const assignedAgent = createAgent({
+        id: 'agent-2',
+        teamLeaderId: targetTeamLeader.id,
+        assignedSessionId: session.id,
+      });
+      const savedSession = createSession({
+        ...session,
+        ownerTeamLeaderId: targetTeamLeader.id,
+      });
+
+      teamLeaderRepository.findOne.mockResolvedValue(targetTeamLeader);
+      sessionRepository.findOne.mockResolvedValue(session);
+      agentRepository.findOne
+        .mockResolvedValueOnce(assignedAgent)
+        .mockResolvedValueOnce(assignedAgent);
+      sessionTransactionalRepository.findOne.mockResolvedValue(session);
+      sessionTransactionalRepository.save.mockResolvedValue(savedSession);
+      apiKeyRepository.find
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await expect(
+        service.setAdminSessionOwner(session.id, targetTeamLeader.id),
+      ).resolves.toEqual(
+        expect.objectContaining({
+          ownerTeamLeaderId: targetTeamLeader.id,
+        }),
+      );
+    });
+
+    it('rejects direct ownership that conflicts with the assigned Agent Team Leader', async () => {
+      const targetTeamLeader = createTeamLeader({
+        id: 'team-leader-2',
+      });
+      const session = createSession({
+        ownerTeamLeaderId: null,
+      });
+
+      teamLeaderRepository.findOne.mockResolvedValue(targetTeamLeader);
+      sessionRepository.findOne.mockResolvedValue(session);
+      agentRepository.findOne.mockResolvedValue(
+        createAgent({
+          teamLeaderId: 'team-leader-1',
+          assignedSessionId: session.id,
+        }),
+      );
+
+      await expect(
+        service.setAdminSessionOwner(session.id, targetTeamLeader.id),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(sessionRepository.manager.transaction).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent when the Session already has the requested owner', async () => {
+      const teamLeader = createTeamLeader();
+      const session = createSession({
+        ownerTeamLeaderId: teamLeader.id,
+      });
+
+      teamLeaderRepository.findOne.mockResolvedValue(teamLeader);
+      sessionRepository.findOne.mockResolvedValue(session);
+      agentRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.setAdminSessionOwner(session.id, teamLeader.id),
+      ).resolves.toEqual(
+        expect.objectContaining({
+          id: session.id,
+          ownerTeamLeaderId: teamLeader.id,
+        }),
+      );
+
+      expect(sessionRepository.manager.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('assignAdminAgentSession', () => {
+    it('assigns a Session to an Agent and automatically transfers Session ownership to the Agent Team Leader', async () => {
+      const targetTeamLeader = createTeamLeader({
+        id: 'team-leader-2',
+        name: 'Target Leader',
+      });
+      const targetAgent = createAgent({
+        id: 'agent-target',
+        teamLeaderId: targetTeamLeader.id,
+        teamLeader: targetTeamLeader,
+        assignedSessionId: null,
+      });
+      const session = createSession({
+        id: 'session-admin-created',
+        ownerTeamLeaderId: null,
+      });
+      const finalSession = createSession({
+        ...session,
+        ownerTeamLeaderId: targetTeamLeader.id,
+      });
+      const finalAgent = createAgent({
+        ...targetAgent,
+        assignedSessionId: session.id,
+      });
+
+      agentRepository.findOne
+        .mockResolvedValueOnce(targetAgent)
+        .mockResolvedValueOnce(targetAgent)
+        .mockResolvedValueOnce(finalAgent);
+      teamLeaderRepository.findOne.mockResolvedValue(targetTeamLeader);
+      sessionRepository.findOne
+        .mockResolvedValueOnce(session)
+        .mockResolvedValueOnce(finalSession);
+      sessionRepository.find.mockResolvedValue([finalSession]);
+      agentRepository.find
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([finalAgent]);
+      sessionTransactionalRepository.findOne.mockResolvedValue(session);
+      sessionTransactionalRepository.save.mockResolvedValue(finalSession);
+      agentRepository.save.mockImplementation(async (agents: Agent[]) => agents);
+      apiKeyRepository.find
+        .mockResolvedValueOnce([
+          createApiKey({
+            id: 'agent-key',
+            role: ApiKeyRole.AGENT,
+            agentId: targetAgent.id,
+          }),
+        ])
+        .mockResolvedValueOnce([
+          createApiKey({
+            id: 'team-leader-key',
+            role: ApiKeyRole.TEAM_LEADER,
+            teamLeaderId: targetTeamLeader.id,
+          }),
+        ]);
+
+      const result = await service.assignAdminAgentSession(
+        targetAgent.id,
+        session.id,
+      );
+
+      expect(sessionTransactionalRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: session.id,
+          ownerTeamLeaderId: targetTeamLeader.id,
+        }),
+      );
+      expect(agentRepository.save).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: targetAgent.id,
+          assignedSessionId: session.id,
+        }),
+      ]);
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: targetAgent.id,
+          teamLeaderId: targetTeamLeader.id,
+          assignedSessionId: session.id,
+        }),
+      );
+      expect(eventsGateway.evictApiKey).toHaveBeenCalledWith(
+        'agent-key',
+        'authorization_changed',
+      );
+      expect(eventsGateway.evictApiKey).toHaveBeenCalledWith(
+        'team-leader-key',
+        'authorization_changed',
+      );
+    });
+
+    it('unassigns the previous Agent when the Session is moved to another Agent', async () => {
+      const targetTeamLeader = createTeamLeader({
+        id: 'team-leader-2',
+      });
+      const targetAgent = createAgent({
+        id: 'agent-target',
+        teamLeaderId: targetTeamLeader.id,
+        teamLeader: targetTeamLeader,
+        assignedSessionId: null,
+      });
+      const previousAgent = createAgent({
+        id: 'agent-previous',
+        teamLeaderId: 'team-leader-1',
+        assignedSessionId: 'session-1',
+      });
+      const session = createSession({
+        id: 'session-1',
+        ownerTeamLeaderId: 'team-leader-1',
+      });
+      const finalSession = createSession({
+        ...session,
+        ownerTeamLeaderId: targetTeamLeader.id,
+      });
+      const finalAgent = createAgent({
+        ...targetAgent,
+        assignedSessionId: session.id,
+      });
+
+      agentRepository.findOne
+        .mockResolvedValueOnce(targetAgent)
+        .mockResolvedValueOnce(targetAgent)
+        .mockResolvedValueOnce(finalAgent);
+      teamLeaderRepository.findOne.mockResolvedValue(targetTeamLeader);
+      sessionRepository.findOne
+        .mockResolvedValueOnce(session)
+        .mockResolvedValueOnce(finalSession);
+      sessionRepository.find.mockResolvedValue([finalSession]);
+      agentRepository.find
+        .mockResolvedValueOnce([previousAgent])
+        .mockResolvedValueOnce([previousAgent])
+        .mockResolvedValueOnce([finalAgent]);
+      sessionTransactionalRepository.findOne.mockResolvedValue(session);
+      sessionTransactionalRepository.save.mockResolvedValue(finalSession);
+      agentRepository.save.mockImplementation(async (agents: Agent[]) => agents);
+      apiKeyRepository.find.mockResolvedValue([]);
+
+      await service.assignAdminAgentSession(targetAgent.id, session.id);
+
+      expect(agentRepository.save).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: previousAgent.id,
+            assignedSessionId: null,
+          }),
+          expect.objectContaining({
+            id: targetAgent.id,
+            assignedSessionId: session.id,
+          }),
+        ]),
+      );
+    });
+
+    it('unassigns an Agent while preserving Session Team Leader ownership', async () => {
+      const agent = createAgent({
+        assignedSessionId: 'session-1',
+      });
+      const unassignedAgent = createAgent({
+        ...agent,
+        assignedSessionId: null,
+      });
+
+      agentRepository.findOne
+        .mockResolvedValueOnce(agent)
+        .mockResolvedValueOnce(agent)
+        .mockResolvedValueOnce(unassignedAgent);
+      agentRepository.find.mockResolvedValue([unassignedAgent]);
+      agentRepository.save.mockImplementation(async (value: Agent) => value);
+      apiKeyRepository.find.mockResolvedValue([]);
+
+      const result = await service.assignAdminAgentSession(agent.id, null);
+
+      expect(result.assignedSessionId).toBeNull();
+      expect(sessionRepository.findOne).not.toHaveBeenCalled();
+      expect(sessionRepository.manager.transaction).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the Agent does not exist', async () => {
+      agentRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.assignAdminAgentSession('missing-agent', 'session-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(sessionRepository.findOne).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the Session does not exist', async () => {
+      const agent = createAgent();
+      agentRepository.findOne.mockResolvedValue(agent);
+      sessionRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.assignAdminAgentSession(agent.id, 'missing-session'),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -1263,3 +1600,6 @@ describe('TeamLeaderService', () => {
     });
   });
 });
+
+
+

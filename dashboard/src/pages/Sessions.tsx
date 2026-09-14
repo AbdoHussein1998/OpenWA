@@ -1,3 +1,6 @@
+
+
+
 import {
   useCallback,
   useEffect,
@@ -190,6 +193,7 @@ export function Sessions() {
 
         const data = await sessionApi.list();
         setSessions(data);
+        setError(null);
 
         void invalidateSessionQueries(
           queryClient,
@@ -573,7 +577,10 @@ export function Sessions() {
   useEffect(() => {
     setSessionConfig(null);
 
-    if (!selectedSessionId) {
+    if (
+      !selectedSessionId ||
+      !canManageSessions
+    ) {
       return;
     }
 
@@ -593,7 +600,10 @@ export function Sessions() {
     return () => {
       cancelled = true;
     };
-  }, [selectedSessionId]);
+  }, [
+    selectedSessionId,
+    canManageSessions,
+  ]);
 
   const handleAutoRejectToggle = async (
     next: boolean,
@@ -2408,3 +2418,6 @@ export function Sessions() {
     </div>
   );
 }
+
+
+

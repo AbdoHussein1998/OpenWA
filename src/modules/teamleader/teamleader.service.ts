@@ -332,6 +332,165 @@ export class TeamLeaderService {
   }
 
   /**
+   * Assign or change the Team Leader owner of one Session directly.
+   *
+   * This method also supports ADMIN-created Sessions whose
+   * ownerTeamLeaderId is currently null.
+   *
+   * If an Agent is already assigned to the Session, the target Team Leader
+   * must be that Agent's Team Leader. Moving an assigned Session across Team
+   * Leaders must go through assignAdminAgentSession(), which updates both the
+   * Agent assignment and Session ownership coherently.
+   */
+  async setAdminSessionOwner(
+    sessionId: string,
+    targetTeamLeaderId: string,
+  ): Promise<AdminSessionOverview> {
+    await this.getTeamLeader(targetTeamLeaderId);
+
+    const session = await this.sessionRepository.findOne({
+      where: {
+        id: sessionId,
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
+
+    const assignedAgent = await this.agentRepository.findOne({
+      where: {
+        assignedSessionId: sessionId,
+      },
+      select: {
+        id: true,
+        teamLeaderId: true,
+        assignedSessionId: true,
+      },
+    });
+
+    if (
+      assignedAgent &&
+      assignedAgent.teamLeaderId !== targetTeamLeaderId
+    ) {
+      throw new ConflictException(
+        'Session is assigned to an Agent belonging to another Team Leader; reassign the Session through the Agent assignment flow',
+      );
+    }
+
+    const previousOwnerTeamLeaderId = session.ownerTeamLeaderId;
+
+    if (previousOwnerTeamLeaderId === targetTeamLeaderId) {
+      return this.toAdminSessionOverview(session);
+    }
+
+    const saved = await this.sessionRepository.manager.transaction(
+      async manager => {
+        const repository = manager.getRepository(Session);
+
+        const current = await repository.findOne({
+          where: {
+            id: sessionId,
+          },
+        });
+
+        if (!current) {
+          throw new NotFoundException('Session not found');
+        }
+
+        if (
+          current.ownerTeamLeaderId !== previousOwnerTeamLeaderId
+        ) {
+          throw new ConflictException(
+            'Session ownership changed while the assignment was being prepared',
+          );
+        }
+
+        current.ownerTeamLeaderId = targetTeamLeaderId;
+
+        return repository.save(current);
+      },
+    );
+
+    /**
+     * Close the cross-database race where an Agent may have been assigned
+     * after the pre-check but before the data-DB ownership update committed.
+     */
+    const assignmentAfterUpdate = await this.agentRepository.findOne({
+      where: {
+        assignedSessionId: sessionId,
+      },
+      select: {
+        id: true,
+        teamLeaderId: true,
+        assignedSessionId: true,
+      },
+    });
+
+    if (
+      assignmentAfterUpdate &&
+      assignmentAfterUpdate.teamLeaderId !== targetTeamLeaderId
+    ) {
+      await this.compensateSessionOwner(
+        sessionId,
+        targetTeamLeaderId,
+        previousOwnerTeamLeaderId,
+        'direct ADMIN Session ownership assignment',
+      );
+
+      throw new ConflictException(
+        'Session became assigned to an Agent belonging to another Team Leader during ownership assignment; retry the operation',
+      );
+    }
+
+    const affectedTeamLeaderIds = [
+      previousOwnerTeamLeaderId,
+      targetTeamLeaderId,
+    ].filter(
+      (value): value is string =>
+        value !== null,
+    );
+
+    const [
+      teamLeaderKeyIds,
+      agentKeyIds,
+    ] = await Promise.all([
+      this.getTeamLeaderApiKeyIds(affectedTeamLeaderIds),
+      assignmentAfterUpdate
+        ? this.getAgentApiKeyIds([
+            assignmentAfterUpdate.id,
+          ])
+        : Promise.resolve([]),
+    ]);
+
+    this.evictApiKeys(
+      [
+        ...new Set([
+          ...teamLeaderKeyIds,
+          ...agentKeyIds,
+        ]),
+      ],
+      'authorization_changed',
+    );
+
+    this.logger.log(
+      'Session Team Leader ownership assigned by ADMIN',
+      {
+        sessionId,
+        previousOwnerTeamLeaderId,
+        targetTeamLeaderId,
+        assignedAgentId:
+          assignmentAfterUpdate?.id ??
+          null,
+        action:
+          'admin_session_owner_assigned',
+      },
+    );
+
+    return this.toAdminSessionOverview(saved);
+  }
+
+  /**
    * Transfer one Team Leader-owned Session to another Team Leader.
    *
    * An assigned Session is rejected. The Agent must first be explicitly
@@ -757,6 +916,470 @@ export class TeamLeaderService {
   }
 
   /**
+   * Assign or unassign a Session for one Agent as ADMIN.
+   *
+   * A non-null assignment makes the Agent's Team Leader authoritative for
+   * Session ownership:
+   *
+   *   Session.ownerTeamLeaderId = Agent.teamLeaderId
+   *
+   * If another Agent currently holds the Session assignment, that Agent is
+   * explicitly unassigned in the same main-database transaction that assigns
+   * the target Agent. The Session itself is never deleted.
+   *
+   * Because Agent rows and Session rows live in different databases, the
+   * ownership update is committed first and is compensated on a subsequent
+   * main-database failure.
+   *
+   * sessionId === null removes only the Agent assignment. It deliberately
+   * preserves the Session's Team Leader owner.
+   */
+  async assignAdminAgentSession(
+    agentId: string,
+    sessionId: string | null,
+  ): Promise<AdminAgentOverview> {
+    const agent = await this.agentRepository.findOne({
+      where: {
+        id: agentId,
+      },
+      relations: {
+        teamLeader: true,
+      },
+    });
+
+    if (!agent) {
+      throw new NotFoundException('Agent not found');
+    }
+
+    if (sessionId === null) {
+      if (agent.assignedSessionId === null) {
+        const [overview] =
+          await this.buildAdminAgentOverviews([
+            agent,
+          ]);
+
+        return overview;
+      }
+
+      const previousSessionId =
+        agent.assignedSessionId;
+
+      await this.mainDataSource.transaction(
+        async manager => {
+          const repository =
+            manager.getRepository(Agent);
+
+          const current =
+            await repository.findOne({
+              where: {
+                id: agentId,
+              },
+            });
+
+          if (!current) {
+            throw new NotFoundException(
+              'Agent not found',
+            );
+          }
+
+          if (
+            current.assignedSessionId ===
+            null
+          ) {
+            return;
+          }
+
+          current.assignedSessionId =
+            null;
+
+          await repository.save(current);
+        },
+      );
+
+      const keyIds =
+        await this.getAgentApiKeyIds([
+          agentId,
+        ]);
+
+      this.evictApiKeys(
+        keyIds,
+        'authorization_changed',
+      );
+
+      this.logger.log(
+        'Agent Session unassigned by ADMIN',
+        {
+          agentId,
+          teamLeaderId:
+            agent.teamLeaderId,
+          previousSessionId,
+          action:
+            'admin_agent_session_unassigned',
+        },
+      );
+
+      return this.getAdminAgent(agentId);
+    }
+
+    const session =
+      await this.sessionRepository.findOne({
+        where: {
+          id: sessionId,
+        },
+      });
+
+    if (!session) {
+      throw new NotFoundException(
+        'Session not found',
+      );
+    }
+
+    /**
+     * Main-DB FK integrity should already guarantee this Team Leader exists,
+     * but resolving it explicitly makes a stale/corrupt principal fail closed.
+     */
+    await this.getTeamLeader(
+      agent.teamLeaderId,
+    );
+
+    const targetTeamLeaderId =
+      agent.teamLeaderId;
+
+    const previousOwnerTeamLeaderId =
+      session.ownerTeamLeaderId;
+
+    const existingAssignments =
+      await this.agentRepository.find({
+        where: {
+          assignedSessionId:
+            sessionId,
+        },
+        select: {
+          id: true,
+          teamLeaderId: true,
+          assignedSessionId: true,
+        },
+      });
+
+    const onlyTargetAlreadyAssigned =
+      existingAssignments.length === 1 &&
+      existingAssignments[0].id ===
+        agentId;
+
+    if (
+      agent.assignedSessionId ===
+        sessionId &&
+      session.ownerTeamLeaderId ===
+        targetTeamLeaderId &&
+      onlyTargetAlreadyAssigned
+    ) {
+      const [overview] =
+        await this.buildAdminAgentOverviews([
+          agent,
+        ]);
+
+      return overview;
+    }
+
+    let ownerChanged = false;
+
+    if (
+      previousOwnerTeamLeaderId !==
+      targetTeamLeaderId
+    ) {
+      await this.sessionRepository.manager.transaction(
+        async manager => {
+          const repository =
+            manager.getRepository(
+              Session,
+            );
+
+          const current =
+            await repository.findOne({
+              where: {
+                id:
+                  sessionId,
+              },
+            });
+
+          if (!current) {
+            throw new NotFoundException(
+              'Session not found',
+            );
+          }
+
+          if (
+            current.ownerTeamLeaderId !==
+            previousOwnerTeamLeaderId
+          ) {
+            throw new ConflictException(
+              'Session ownership changed while the Agent assignment was being prepared',
+            );
+          }
+
+          current.ownerTeamLeaderId =
+            targetTeamLeaderId;
+
+          await repository.save(
+            current,
+          );
+        },
+      );
+
+      ownerChanged = true;
+    }
+
+    let changedAgentIds: string[] = [];
+    let previousAgentAssignments: Array<{
+      id: string;
+      assignedSessionId: string | null;
+    }> = [];
+    let targetPreviousSessionId =
+      agent.assignedSessionId;
+
+    try {
+      const assignmentResult =
+        await this.mainDataSource.transaction(
+          async manager => {
+            const repository =
+              manager.getRepository(
+                Agent,
+              );
+
+            const targetAgent =
+              await repository.findOne({
+                where: {
+                  id:
+                    agentId,
+                },
+              });
+
+            if (!targetAgent) {
+              throw new NotFoundException(
+                'Agent not found',
+              );
+            }
+
+            /**
+             * The Agent may itself have moved Team Leaders concurrently.
+             * Do not silently bind a Session to stale ownership information.
+             */
+            if (
+              targetAgent.teamLeaderId !==
+              targetTeamLeaderId
+            ) {
+              throw new ConflictException(
+                'Agent Team Leader changed while the Session assignment was being prepared',
+              );
+            }
+
+            targetPreviousSessionId =
+              targetAgent.assignedSessionId;
+
+            const currentAssignees =
+              await repository.find({
+                where: {
+                  assignedSessionId:
+                    sessionId,
+                },
+              });
+
+            const changedIds =
+              new Set<string>([
+                targetAgent.id,
+              ]);
+
+            const previousAssignments =
+              new Map<
+                string,
+                string | null
+              >();
+
+            previousAssignments.set(
+              targetAgent.id,
+              targetAgent.assignedSessionId,
+            );
+
+            for (
+              const currentAssignee of
+              currentAssignees
+            ) {
+              if (
+                !previousAssignments.has(
+                  currentAssignee.id,
+                )
+              ) {
+                previousAssignments.set(
+                  currentAssignee.id,
+                  currentAssignee.assignedSessionId,
+                );
+              }
+              if (
+                currentAssignee.id ===
+                targetAgent.id
+              ) {
+                continue;
+              }
+
+              currentAssignee.assignedSessionId =
+                null;
+
+              changedIds.add(
+                currentAssignee.id,
+              );
+            }
+
+            targetAgent.assignedSessionId =
+              sessionId;
+
+            const entitiesById =
+              new Map<string, Agent>();
+
+            for (
+              const currentAssignee of
+              currentAssignees
+            ) {
+              entitiesById.set(
+                currentAssignee.id,
+                currentAssignee,
+              );
+            }
+
+            entitiesById.set(
+              targetAgent.id,
+              targetAgent,
+            );
+
+            await repository.save([
+              ...entitiesById.values(),
+            ]);
+
+            return {
+              changedAgentIds: [
+                ...changedIds,
+              ],
+              previousAssignments: [
+                ...previousAssignments.entries(),
+              ].map(
+                ([
+                  id,
+                  assignedSessionId,
+                ]) => ({
+                  id,
+                  assignedSessionId,
+                }),
+              ),
+            };
+          },
+        );
+
+      changedAgentIds =
+        assignmentResult.changedAgentIds;
+      previousAgentAssignments =
+        assignmentResult.previousAssignments;
+    } catch (error) {
+      if (ownerChanged) {
+        await this.compensateSessionOwner(
+          sessionId,
+          targetTeamLeaderId,
+          previousOwnerTeamLeaderId,
+          'ADMIN Agent Session assignment',
+        );
+      }
+
+      throw error;
+    }
+
+    /**
+     * Validate the invariant after both database mutations. If a concurrent
+     * ownership change occurred after our data-DB commit, fail closed rather
+     * than returning an apparently valid assignment.
+     */
+    const finalSession =
+      await this.sessionRepository.findOne({
+        where: {
+          id:
+            sessionId,
+        },
+      });
+
+    if (
+      !finalSession ||
+      finalSession.ownerTeamLeaderId !==
+        targetTeamLeaderId
+    ) {
+      await this.compensateAgentAssignments(
+        previousAgentAssignments,
+        agentId,
+        sessionId,
+        'ADMIN Agent Session assignment post-check',
+      );
+
+      if (!finalSession) {
+        throw new NotFoundException(
+          'Session not found',
+        );
+      }
+
+      throw new ConflictException(
+        'Session ownership changed concurrently after Agent assignment; retry the operation',
+      );
+    }
+
+    const affectedTeamLeaderIds = [
+      previousOwnerTeamLeaderId,
+      targetTeamLeaderId,
+    ].filter(
+      (value): value is string =>
+        value !== null,
+    );
+
+    const [
+      agentKeyIds,
+      teamLeaderKeyIds,
+    ] = await Promise.all([
+      this.getAgentApiKeyIds(
+        changedAgentIds,
+      ),
+      ownerChanged
+        ? this.getTeamLeaderApiKeyIds(
+            affectedTeamLeaderIds,
+          )
+        : Promise.resolve([]),
+    ]);
+
+    this.evictApiKeys(
+      [
+        ...new Set([
+          ...agentKeyIds,
+          ...teamLeaderKeyIds,
+        ]),
+      ],
+      'authorization_changed',
+    );
+
+    this.logger.log(
+      'Agent Session assigned by ADMIN',
+      {
+        agentId,
+        sessionId,
+        targetTeamLeaderId,
+        previousOwnerTeamLeaderId,
+        previousAgentSessionId:
+          targetPreviousSessionId,
+        displacedAgentIds:
+          changedAgentIds.filter(
+            id => id !== agentId,
+          ),
+        action:
+          'admin_agent_session_assigned',
+      },
+    );
+
+    return this.getAdminAgent(agentId);
+  }
+
+  /**
    * Move one Agent to another Team Leader.
    *
    * If the Agent has an assigned Session and the target Team Leader does not
@@ -1143,6 +1766,183 @@ export class TeamLeaderService {
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Best-effort compensation for the main-DB side of an ADMIN Session
+   * assignment when the cross-database post-check fails.
+   *
+   * Compensation is guarded so it only rewrites rows that still look like
+   * the mutation performed by assignAdminAgentSession().
+   */
+  private async compensateAgentAssignments(
+    previousAssignments: ReadonlyArray<{
+      id: string;
+      assignedSessionId: string | null;
+    }>,
+    targetAgentId: string,
+    assignedSessionId: string,
+    operation: string,
+  ): Promise<void> {
+    if (previousAssignments.length === 0) {
+      return;
+    }
+
+    try {
+      await this.mainDataSource.transaction(
+        async manager => {
+          const repository =
+            manager.getRepository(
+              Agent,
+            );
+
+          const ids =
+            previousAssignments.map(
+              item => item.id,
+            );
+
+          const currentAgents =
+            await repository.find({
+              where: {
+                id: In(ids),
+              },
+            });
+
+          const previousById =
+            new Map(
+              previousAssignments.map(
+                item => [
+                  item.id,
+                  item.assignedSessionId,
+                ],
+              ),
+            );
+
+          const toSave: Agent[] = [];
+
+          for (
+            const currentAgent of
+            currentAgents
+          ) {
+            const expectedCurrentAssignment =
+              currentAgent.id ===
+              targetAgentId
+                ? assignedSessionId
+                : null;
+
+            if (
+              currentAgent.assignedSessionId !==
+              expectedCurrentAssignment
+            ) {
+              continue;
+            }
+
+            currentAgent.assignedSessionId =
+              previousById.get(
+                currentAgent.id,
+              ) ??
+              null;
+
+            toSave.push(
+              currentAgent,
+            );
+          }
+
+          if (toSave.length > 0) {
+            await repository.save(
+              toSave,
+            );
+          }
+        },
+      );
+    } catch (rollbackError) {
+      this.logger.error(
+        'Failed to compensate Agent assignments after cross-database management failure',
+        rollbackError instanceof Error
+          ? rollbackError.stack
+          : undefined,
+        {
+          targetAgentId,
+          assignedSessionId,
+          operation,
+          affectedAgentIds:
+            previousAssignments.map(
+              item => item.id,
+            ),
+          error:
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : String(
+                  rollbackError,
+                ),
+        },
+      );
+    }
+  }
+
+  /**
+   * Best-effort compensation for a data-DB Session ownership mutation that
+   * must be reverted after a later cross-database step fails.
+   *
+   * The expected-owner predicate prevents this helper from overwriting a
+   * clearly different ownership state written after the operation began.
+   */
+  private async compensateSessionOwner(
+    sessionId: string,
+    expectedOwnerTeamLeaderId: string,
+    restoreOwnerTeamLeaderId: string | null,
+    operation: string,
+  ): Promise<void> {
+    try {
+      await this.sessionRepository.manager.transaction(
+        async manager => {
+          const repository =
+            manager.getRepository(
+              Session,
+            );
+
+          const current =
+            await repository.findOne({
+              where: {
+                id:
+                  sessionId,
+                ownerTeamLeaderId:
+                  expectedOwnerTeamLeaderId,
+              },
+            });
+
+          if (!current) {
+            return;
+          }
+
+          current.ownerTeamLeaderId =
+            restoreOwnerTeamLeaderId;
+
+          await repository.save(
+            current,
+          );
+        },
+      );
+    } catch (rollbackError) {
+      this.logger.error(
+        'Failed to compensate Session ownership after cross-database management failure',
+        rollbackError instanceof Error
+          ? rollbackError.stack
+          : undefined,
+        {
+          sessionId,
+          expectedOwnerTeamLeaderId,
+          restoreOwnerTeamLeaderId,
+          operation,
+          error:
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : String(
+                  rollbackError,
+                ),
+        },
+      );
+    }
+  }
 
   private async buildAdminAgentOverviews(
     agents: Agent[],

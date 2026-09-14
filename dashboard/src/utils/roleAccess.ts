@@ -7,68 +7,118 @@ import type {
  * Frontend UX capabilities.
  *
  * IMPORTANT:
- * These capabilities do NOT replace backend authorization.
- * The NestJS guards/services remain authoritative for tenant and
- * assignment access. This file only controls what the dashboard shows
- * and which client-side routes it allows a role to enter.
+ * These capabilities do NOT replace backend authorization. NestJS
+ * guards/services remain authoritative for role, tenant, ownership, and
+ * assignment checks.
  *
- * The specific flags below intentionally mirror the backend distinctions
- * needed by the current dashboard work:
+ * The frontend distinctions intentionally mirror the backend capability
+ * model:
  *
- * - Agents may read/start/shutdown only their backend-assigned session.
- * - Agents may not create/delete/configure sessions broadly.
- * - Agents may fully manage stored templates for their authorized session.
- * - Team Leaders may manage sessions and stored templates.
- * - Team Leaders and Agents may not manage webhooks.
+ * - TEAM_MANAGE -> Team Leader/Agent domain self-service.
+ * - PRINCIPAL_MANAGE -> global Team Leader/Agent administration.
+ * - API_KEY_MANAGE -> API-key lifecycle administration.
+ * - AUDIT_READ -> global audit-log access.
+ * - STATS_READ -> system-wide aggregate statistics.
+ * - PLUGIN_MANAGE -> plugin administration.
+ * - INFRA_MANAGE -> infrastructure administration.
+ *
+ * ADMIN receives all of these.
+ *
+ * OPERATOR receives the administrative capabilities above except
+ * INFRA_MANAGE. The backend still remains responsible for the special rule
+ * that an OPERATOR cannot delete the primary Admin API key.
  */
 export const ROLE_CAPABILITIES: Readonly<
   Record<UserRole, Readonly<RoleCapabilities>>
 > = {
   admin: {
     canWrite: true,
+
     canManageSessions: true,
     canReadSessions: true,
     canStartSessions: true,
     canShutdownSessions: true,
+
     canOperateChats: true,
     canSendMessages: true,
+
     canReadTemplates: true,
     canManageTemplates: true,
+
     canManageWebhooks: true,
+
     canManageTeam: true,
+    canManagePrincipals: true,
+
     canManageApiKeys: true,
+
+    canReadAudit: true,
+    canReadGlobalStats: true,
+
+    canManagePlugins: true,
+
     canManageInfrastructure: true,
   },
 
   operator: {
     canWrite: true,
+
     canManageSessions: true,
     canReadSessions: true,
     canStartSessions: true,
     canShutdownSessions: true,
+
     canOperateChats: true,
     canSendMessages: true,
+
     canReadTemplates: true,
     canManageTemplates: true,
+
     canManageWebhooks: true,
-    canManageTeam: false,
-    canManageApiKeys: false,
+
+    canManageTeam: true,
+    canManagePrincipals: true,
+
+    canManageApiKeys: true,
+
+    canReadAudit: true,
+    canReadGlobalStats: true,
+
+    canManagePlugins: true,
+
+    /**
+     * Operator deliberately does not receive infrastructure administration.
+     * This is the primary frontend distinction between ADMIN and OPERATOR.
+     */
     canManageInfrastructure: false,
   },
 
   viewer: {
     canWrite: false,
+
     canManageSessions: false,
     canReadSessions: true,
     canStartSessions: false,
     canShutdownSessions: false,
+
     canOperateChats: false,
     canSendMessages: false,
+
     canReadTemplates: false,
     canManageTemplates: false,
+
     canManageWebhooks: false,
+
     canManageTeam: false,
+    canManagePrincipals: false,
+
     canManageApiKeys: false,
+
+    canReadAudit: false,
+    canReadGlobalStats: false,
+
+    canManagePlugins: false,
+
     canManageInfrastructure: false,
   },
 
@@ -76,23 +126,40 @@ export const ROLE_CAPABILITIES: Readonly<
     /**
      * Keep the legacy broad write flag false.
      *
-     * Team Leaders are allowed to perform specific write operations,
-     * but existing components that rely on `canWrite` may expose broader
-     * admin/operator controls. New Team Leader UI should use the explicit
-     * capabilities below.
+     * Team Leaders may perform specific writes, but `canWrite` historically
+     * exposes wider Admin/Operator UI. Team Leader UI must use the explicit
+     * capabilities below instead.
      */
     canWrite: false,
+
     canManageSessions: true,
     canReadSessions: true,
     canStartSessions: true,
     canShutdownSessions: true,
+
     canOperateChats: true,
     canSendMessages: true,
+
     canReadTemplates: true,
     canManageTemplates: true,
+
     canManageWebhooks: false,
+
+    /**
+     * Team Leaders may manage their own Agents through the self-service
+     * `/team-leader` surface, but may not enter global `/admin/*` principal
+     * management.
+     */
     canManageTeam: true,
+    canManagePrincipals: false,
+
     canManageApiKeys: false,
+
+    canReadAudit: false,
+    canReadGlobalStats: false,
+
+    canManagePlugins: false,
+
     canManageInfrastructure: false,
   },
 
@@ -100,48 +167,70 @@ export const ROLE_CAPABILITIES: Readonly<
     /**
      * Agents are assignment-scoped operators.
      *
-     * `canManageSessions` remains false intentionally because that flag
-     * represents broad session management such as create/delete/configure.
-     * Agents instead receive only the explicit operational capabilities
-     * below. The backend assignment fence remains responsible for ensuring
-     * they can act only on their own assigned session.
-     *
-     * Agents may also manage templates, but only for the session(s) the
-     * backend authorizes for that Agent.
+     * `canManageSessions` remains false because that flag represents broad
+     * Session management such as create/delete/configure. Agents instead
+     * receive only the explicit operational capabilities below, while the
+     * backend assignment fence limits them to their assigned Session.
      */
     canWrite: false,
+
     canManageSessions: false,
     canReadSessions: true,
     canStartSessions: true,
     canShutdownSessions: true,
+
     canOperateChats: true,
     canSendMessages: true,
+
     canReadTemplates: true,
     canManageTemplates: true,
+
     canManageWebhooks: false,
+
     canManageTeam: false,
+    canManagePrincipals: false,
+
     canManageApiKeys: false,
+
+    canReadAudit: false,
+    canReadGlobalStats: false,
+
+    canManagePlugins: false,
+
     canManageInfrastructure: false,
   },
 };
 
 /**
- * Null means there is no authenticated/known dashboard role yet, so
- * every capability is false.
+ * Null means there is no authenticated/known dashboard role yet, so every
+ * capability is false.
  */
 const NO_CAPABILITIES: Readonly<RoleCapabilities> = {
   canWrite: false,
+
   canManageSessions: false,
   canReadSessions: false,
   canStartSessions: false,
   canShutdownSessions: false,
+
   canOperateChats: false,
   canSendMessages: false,
+
   canReadTemplates: false,
   canManageTemplates: false,
+
   canManageWebhooks: false,
+
   canManageTeam: false,
+  canManagePrincipals: false,
+
   canManageApiKeys: false,
+
+  canReadAudit: false,
+  canReadGlobalStats: false,
+
+  canManagePlugins: false,
+
   canManageInfrastructure: false,
 };
 
@@ -158,7 +247,8 @@ export function getRoleCapabilities(
 /**
  * Default authenticated landing page for each role.
  *
- * The legacy roles keep the existing dashboard home route.
+ * ADMIN, OPERATOR, and VIEWER continue to use the existing dashboard home.
+ * Team Leaders and Agents use their dedicated workspaces.
  */
 export function getRoleHome(
   role: UserRole | null,
@@ -173,8 +263,6 @@ export function getRoleHome(
     case 'admin':
     case 'operator':
     case 'viewer':
-      return '/';
-
     default:
       return '/';
   }
@@ -215,12 +303,11 @@ function matchesRoute(
  * Dashboard route access.
  *
  * This is a navigation/UX guard only. It must never be treated as the
- * security boundary for session ownership, Team Leader tenancy, Agent
- * assignment, messages, templates, or WebSocket subscriptions.
+ * security boundary for Session ownership, Team Leader tenancy, Agent
+ * assignment, messages, templates, API-key protection, or WebSocket access.
  *
- * Unknown routes return false so an authenticated actor is not allowed
- * into a newly-added page merely because the route has not yet been
- * classified here.
+ * Unknown routes return false so a newly-added page is not exposed merely
+ * because it has not yet been classified here.
  */
 export function canAccessRoute(
   role: UserRole | null,
@@ -239,7 +326,7 @@ export function canAccessRoute(
   /**
    * Existing dashboard home.
    *
-   * Team Leaders and Agents get dedicated workspaces instead of the
+   * Team Leaders and Agents use their dedicated workspaces instead of the
    * legacy general-purpose home.
    */
   if (pathname === '/') {
@@ -265,24 +352,25 @@ export function canAccessRoute(
   }
 
   /**
-   * Global Team Leader and Agent inventories are Admin-only management
-   * surfaces. These are intentionally distinct from `/team-leader` and
-   * `/agent`, which are self-service workspaces for those principal roles.
+   * Global Team Leader and Agent inventories.
+   *
+   * This must use canManagePrincipals rather than canManageTeam. Team Leaders
+   * legitimately have canManageTeam for their own self-service surface but
+   * must never gain access to global `/admin/*` principal administration.
    */
   if (
     matchesRoute(pathname, '/admin/team-leaders') ||
     matchesRoute(pathname, '/admin/agents')
   ) {
-    return role === 'admin';
+    return capabilities.canManagePrincipals;
   }
 
   /**
    * Generic Sessions stays unavailable to Agents.
    *
    * Agents still have canReadSessions/canStartSessions/canShutdownSessions
-   * because Agent.tsx uses those capabilities for the single backend-
-   * assigned session. The Agent does not receive the generic Sessions
-   * page or its free session list in the dashboard navigation.
+   * because Agent.tsx uses those capabilities for the single backend-assigned
+   * Session. They do not receive the generic Session inventory.
    */
   if (matchesRoute(pathname, '/sessions')) {
     return (
@@ -292,8 +380,8 @@ export function canAccessRoute(
   }
 
   /**
-   * Generic Chats remains unavailable to Agents because their current
-   * chat workflow is assignment-driven through /agent.
+   * Generic Chats remains unavailable to Agents because their current chat
+   * workflow is assignment-driven through /agent.
    */
   if (matchesRoute(pathname, '/chats')) {
     return (
@@ -302,18 +390,13 @@ export function canAccessRoute(
     );
   }
 
-  /**
-   * Webhook management is available only where the backend grants the
-   * corresponding management capability.
-   */
   if (matchesRoute(pathname, '/webhooks')) {
     return capabilities.canManageWebhooks;
   }
 
   /**
-   * Stored templates are readable by every role with template read
-   * access. The Templates page uses canManageTemplates separately to
-   * decide whether create/edit/delete controls are enabled.
+   * Stored templates are readable by every role with template-read access.
+   * The page should use canManageTemplates separately for mutating controls.
    */
   if (matchesRoute(pathname, '/templates')) {
     return capabilities.canReadTemplates;
@@ -321,8 +404,7 @@ export function canAccessRoute(
 
   /**
    * The generic message tester needs send permission, but Agents stay on
-   * their assignment-driven /agent workspace to avoid a generic session
-   * selector.
+   * their assignment-driven /agent workspace to avoid a free Session selector.
    */
   if (matchesRoute(pathname, '/message-tester')) {
     return (
@@ -331,12 +413,6 @@ export function canAccessRoute(
     );
   }
 
-  /**
-   * API-key management is an administrative surface.
-   *
-   * Team Leaders create/manage their Agents through /team-leader rather
-   * than the generic API-key management page.
-   */
   if (
     matchesRoute(pathname, '/api-keys') ||
     matchesRoute(pathname, '/apikeys')
@@ -344,21 +420,30 @@ export function canAccessRoute(
     return capabilities.canManageApiKeys;
   }
 
-  /**
-   * Audit logs are currently Admin-only on the backend.
-   */
   if (matchesRoute(pathname, '/logs')) {
-    return role === 'admin';
+    return capabilities.canReadAudit;
   }
 
   /**
-   * Infrastructure and plugin management remain administrative.
+   * Keep Plugins and Infrastructure separate.
+   *
+   * OPERATOR receives plugin administration but deliberately does not receive
+   * infrastructure administration.
    */
-  if (
-    matchesRoute(pathname, '/infrastructure') ||
-    matchesRoute(pathname, '/plugins')
-  ) {
+  if (matchesRoute(pathname, '/plugins')) {
+    return capabilities.canManagePlugins;
+  }
+
+  if (matchesRoute(pathname, '/infrastructure')) {
     return capabilities.canManageInfrastructure;
+  }
+
+  /**
+   * Reserved for a dedicated global statistics page if/when one is mounted.
+   * The current dashboard home may consume the same capability directly.
+   */
+  if (matchesRoute(pathname, '/stats')) {
+    return capabilities.canReadGlobalStats;
   }
 
   return false;

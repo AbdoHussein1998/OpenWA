@@ -26,9 +26,14 @@ import { AuditAction } from '../audit/entities/audit-log.entity';
 import { AuthService } from './auth.service';
 import {
   CurrentApiKey,
-  RequireRole,
   RequireUnscopedKey,
 } from './decorators/auth.decorators';
+import {
+  RequireCapability,
+} from './decorators/capability.decorator';
+import {
+  ApiCapability,
+} from './capabilities/api-capability';
 import {
   ApiKeyCreatedResponseDto,
   ApiKeyResponseDto,
@@ -37,14 +42,13 @@ import {
 } from './dto';
 import {
   type ApiKey,
-  ApiKeyRole,
 } from './entities/api-key.entity';
 
 @ApiTags('auth')
 @Controller('auth/api-keys')
-// Key lifecycle routes have no session dimension, so a session-scoped ADMIN
-// key could otherwise escape its confinement here (for example by minting an
-// unrestricted key or widening another key's allowedSessions).
+// Key lifecycle routes have no session dimension, so a session-scoped API-key
+// manager could otherwise escape its confinement here (for example by minting
+// an unrestricted key or widening another key's allowedSessions).
 @RequireUnscopedKey()
 export class AuthController {
   constructor(
@@ -95,6 +99,9 @@ export class AuthController {
       keyPrefix: apiKey.keyPrefix,
       role: apiKey.role,
 
+      isPrimaryAdminKey:
+        apiKey.isPrimaryAdminKey,
+
       teamLeaderId:
         apiKey.teamLeaderId ?? null,
 
@@ -124,10 +131,10 @@ export class AuthController {
   }
 
   @Post()
-  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireCapability(ApiCapability.API_KEY_MANAGE)
   @ApiOperation({
     summary:
-      'Create a new API key (admin only)',
+      'Create a new API key',
   })
   @ApiResponse({
     status: HttpStatus.CREATED,
@@ -184,10 +191,10 @@ export class AuthController {
   }
 
   @Get()
-  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireCapability(ApiCapability.API_KEY_MANAGE)
   @ApiOperation({
     summary:
-      'List all API keys (admin only)',
+      'List all API keys',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -212,10 +219,10 @@ export class AuthController {
   }
 
   @Get(':id')
-  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireCapability(ApiCapability.API_KEY_MANAGE)
   @ApiOperation({
     summary:
-      'Get API key details (admin only)',
+      'Get API key details',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -238,10 +245,10 @@ export class AuthController {
   }
 
   @Put(':id')
-  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireCapability(ApiCapability.API_KEY_MANAGE)
   @ApiOperation({
     summary:
-      'Update API key (admin only)',
+      'Update API key',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -337,13 +344,13 @@ export class AuthController {
    * The replacement plaintext credential is returned exactly once.
    */
   @Post(':id/reissue')
-  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireCapability(ApiCapability.API_KEY_MANAGE)
   @HttpCode(
     HttpStatus.OK,
   )
   @ApiOperation({
     summary:
-      'Reissue API key (admin only)',
+      'Reissue API key',
     description:
       'Rotates the credential material for an existing API-key row while preserving its id, role, principal bindings, restrictions, active state, and expiration. The replacement plaintext API key is returned only once.',
   })
@@ -429,13 +436,13 @@ export class AuthController {
   }
 
   @Delete(':id')
-  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireCapability(ApiCapability.API_KEY_MANAGE)
   @HttpCode(
     HttpStatus.NO_CONTENT,
   )
   @ApiOperation({
     summary:
-      'Delete API key (admin only)',
+      'Delete API key',
   })
   @ApiResponse({
     status:
@@ -443,6 +450,13 @@ export class AuthController {
 
     description:
       'API key deleted',
+  })
+  @ApiResponse({
+    status:
+      HttpStatus.FORBIDDEN,
+
+    description:
+      'The caller cannot manage API keys, is session-scoped, or is an Operator attempting to delete the primary Admin key.',
   })
   @ApiResponse({
     status:
@@ -459,7 +473,7 @@ export class AuthController {
     req: Request,
 
     @CurrentApiKey()
-    actor?: ApiKey,
+    actor: ApiKey,
   ): Promise<void> {
     /**
      * Resolve the target before deletion so its identifying metadata can
@@ -472,6 +486,7 @@ export class AuthController {
 
     await this.authService.delete(
       id,
+      actor,
     );
 
     await this.auditService.logInfo(
@@ -494,13 +509,13 @@ export class AuthController {
   }
 
   @Post(':id/revoke')
-  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireCapability(ApiCapability.API_KEY_MANAGE)
   @HttpCode(
     HttpStatus.OK,
   )
   @ApiOperation({
     summary:
-      'Revoke API key (admin only)',
+      'Revoke API key',
   })
   @ApiResponse({
     status:

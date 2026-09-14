@@ -1,16 +1,22 @@
 import {
   ApiProperty,
 } from '@nestjs/swagger';
-
 import {
   IsUUID,
 } from 'class-validator';
 
 /**
- * Request body for transferring ownership of one Session.
+ * Request body for assigning or transferring Session ownership to a Team
+ * Leader.
  *
- * The Session id and current/source Team Leader id belong in the route path.
- * Only the destination Team Leader is accepted from the request body.
+ * The Session id is supplied by the route. Depending on the route, the
+ * current/source Team Leader may also be supplied by the route, but the
+ * destination Team Leader always comes from this request body.
+ *
+ * This DTO is used for both:
+ *
+ * - assigning an ADMIN-created Session whose ownerTeamLeaderId is null; and
+ * - transferring an existing Team Leader-owned Session to another Team Leader.
  */
 export class ReassignAdminSessionDto {
   @ApiProperty({
@@ -24,8 +30,8 @@ export class ReassignAdminSessionDto {
 }
 
 /**
- * Domain-oriented alias retained for callers that prefer the filename-based
- * DTO name. Both exports refer to the same decorated runtime class.
+ * Compatibility alias for callers that use the filename-oriented DTO name.
+ * Both exports reference the same decorated runtime class.
  */
 export {
   ReassignAdminSessionDto as ReassignSessionOwnerDto,

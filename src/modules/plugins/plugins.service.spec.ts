@@ -1,3 +1,7 @@
+
+
+
+
 // Spread the real fs so every method passes through, but as configurable props the test can spy on
 // (the bare `import * as fs` namespace is non-configurable, so jest.spyOn can't redefine its methods).
 jest.mock('fs', () => ({ __esModule: true, ...jest.requireActual<typeof import('fs')>('fs') }));
@@ -466,11 +470,28 @@ describe('PluginsService — getConfigUiHtml (sandboxed config editor)', () => {
     expect(() => service.getConfigUiHtml('cfgui-plg')).toThrow(/config ui/i);
   });
 
-  it('rejects a configUi entry that is a symlink escaping the plugin directory', () => {
-    installUi({ configUi: { entry: 'config/escape.html' } }, { 'config/index.html': HTML });
-    const outside = path.join(tmpDir, 'outside-secret.txt');
-    fs.writeFileSync(outside, 'TOP SECRET');
-    fs.symlinkSync(outside, path.join(pluginsDir, 'cfgui-plg', 'config', 'escape.html'));
+  it('rejects a configUi entry that escapes through a symlink/junction directory', () => {
+    installUi(
+      { configUi: { entry: 'config/escape/secret.html' } },
+      { 'config/index.html': HTML },
+    );
+
+    const outsideDir = path.join(tmpDir, 'outside-config-ui');
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, 'secret.html'), 'TOP SECRET');
+
+    /*
+     * Windows normally requires Developer Mode/elevation for ordinary
+     * symbolic links, which made this security regression test fail with
+     * EPERM before the service was exercised. Directory junctions provide
+     * the same realpath-containment escape on Windows without that privilege.
+     */
+    fs.symlinkSync(
+      outsideDir,
+      path.join(pluginsDir, 'cfgui-plg', 'config', 'escape'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
     expect(() => service.getConfigUiHtml('cfgui-plg')).toThrow(/not found/i);
   });
 });
@@ -802,7 +823,11 @@ describe('PluginsService — recovering a plugin whose code went missing', () =>
     fs.writeFileSync(path.join(outside, 'manifest.json'), 'victim');
     const { service, storage } = orphan();
     fs.rmSync(path.join(pluginsDir, 'svc-plg'), { recursive: true, force: true });
-    fs.symlinkSync(outside, path.join(pluginsDir, 'svc-plg'));
+    fs.symlinkSync(
+      outside,
+      path.join(pluginsDir, 'svc-plg'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     expect(storage.getPluginEntry('svc-plg')).toBeDefined();
 
     expect(() => service.install({ buffer: pkg() })).toThrow(ConflictException);
@@ -878,3 +903,7 @@ describe('PluginsService — recovering a plugin whose code went missing', () =>
     expect(fs.existsSync(path.join(pluginsDir, 'svc-plg', 'legacy.js'))).toBe(true);
   });
 });
+
+
+
+
