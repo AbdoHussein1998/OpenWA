@@ -184,8 +184,8 @@
     "invalidKey": "Invalid API key",
     "connectionError": "Unable to connect to server. Please try again.",
     "help": "Need help?",
-    "viewDocs": "View Documentation",
-    "footer": "Made with ❤️ by Yudhi Armyndharis and the OpenWA Community",
+    "viewDocs": "Commuincate With ",
+    "footer": "Made with ❤️ by Abdulrhman Al.Hakim Data Engineer  & Data Team",
     "version": "v{{version}} · {{date}}"
   },
   "dashboard": {

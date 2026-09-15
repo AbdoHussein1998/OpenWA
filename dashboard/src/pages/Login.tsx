@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff, Languages } from 'lucide-react';
 import { GithubIcon } from '../components/GithubIcon';
 import { CustomSelect } from '../components/CustomSelect';
+import { useAppVersion } from '../hooks/useAppVersion';
 import { languageOptions, resolveSupportedLanguage, type SupportedLanguage } from '../i18n';
 import { API_BASE_URL } from '../services/api';
 import './Login.css';
@@ -13,6 +14,7 @@ interface LoginProps {
 
 export function Login({ onLogin }: LoginProps) {
   const { t, i18n } = useTranslation();
+  const version = useAppVersion();
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -64,7 +66,7 @@ export function Login({ onLogin }: LoginProps) {
           <img src="/openwa_logo.webp" alt="OpenWA" className="logo-icon" />
           <span className="version-info">
             {t('login.version', {
-              version: __APP_VERSION__,
+              version,
               // ISO date (YYYYMMDD) so the format is stable across locales/regions instead of the
               // locale-dependent toLocaleDateString() which renders differently per browser region.
               date: new Date(__BUILD_TIME__).toISOString().slice(0, 10).replace(/-/g, ''),
@@ -110,19 +112,12 @@ export function Login({ onLogin }: LoginProps) {
             {isLoading ? t('login.connecting') : t('login.connect')}
           </button>
         </form>
-
-        <p className="login-help">
-          {t('login.help')}{' '}
-          <a href="https://docs.open-wa.org" target="_blank" rel="noopener noreferrer">
-            {t('login.viewDocs')}
-          </a>
-        </p>
       </div>
 
       <footer className="login-footer">
         <span>{t('login.footer')}</span>
         <a
-          href="https://github.com/rmyndharis/OpenWA"
+          href="https://github.com/AbdoHussein1998"
           target="_blank"
           rel="noopener noreferrer"
           className="github-link"

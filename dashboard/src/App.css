@@ -1,108 +1,635 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
 
+/* =========================================================
+   OPENWA BRAND THEME
+   =========================================================
+
+   Brand palette:
+
+   Turquoise:
+   #1abcbcfe
+
+   Orange:
+   #f6951df5
+
+   Blue:
+   #144993fd
+
+   Soft blue / teal:
+   #1677a43a
+
+   IMPORTANT:
+   #1677a43a is an 8-digit HEX color.
+   The final "3a" is alpha (~23% opacity), so it is intended
+   mainly for soft backgrounds, borders and highlights.
+   ========================================================= */
+
 :root {
-  --primary: #25d366;
-  /* The brand green as FOREGROUND is 1.98:1 on white, far under the 4.5:1 AA needs for text.
-     It stays the fill colour; anything rendering it as text or an icon uses --primary-text, the same
-     hue darkened until it clears 4.5:1 on all three light backgrounds it lands on: 4.95:1 on white,
-     4.73:1 on --bg-light, and 4.53:1 on --primary-soft, which is the tightest of the three and the
-     one the active sidebar item uses. */
-  --primary-text: #17813e;
-  --primary-hover: #1da851;
-  --primary-soft: rgba(37, 211, 102, 0.12);
-  --bg-light: #f8fafc;
+  /* =======================================================
+     BRAND COLORS
+     ======================================================= */
+
+  --brand-primary: #1abcbcfe;
+  --brand-orange: #f6951df5;
+  --brand-blue: #144993fd;
+  --brand-soft-blue: #1677a43a;
+
+  /*
+   * Solid version of #1677a43a.
+   *
+   * Use this where opacity would be inappropriate,
+   * e.g. icons, borders, text and hover states.
+   */
+  --brand-blue-light: #1677a4;
+
+  /* =======================================================
+     PRIMARY UI COLORS
+     ======================================================= */
+
+  --primary: var(--brand-primary);
+
+  /*
+   * #1abcbc is too light to use as small text on a white
+   * background, so light mode uses the strong brand blue.
+   */
+  --primary-text: var(--brand-blue);
+
+  /*
+   * Hover moves the turquoise toward the strong brand blue.
+   */
+  --primary-hover: color-mix(
+    in srgb,
+    var(--brand-primary) 72%,
+    var(--brand-blue)
+  );
+
+  /*
+   * Soft active rows, pills, selected navigation items,
+   * subtle highlights, etc.
+   */
+  --primary-soft: var(--brand-soft-blue);
+
+  /* =======================================================
+     SECONDARY / ACCENT COLORS
+     ======================================================= */
+
+  --accent: var(--brand-orange);
+
+  --accent-hover: color-mix(
+    in srgb,
+    var(--brand-orange) 82%,
+    var(--brand-blue)
+  );
+
+  --accent-soft: color-mix(
+    in srgb,
+    var(--brand-orange) 14%,
+    transparent
+  );
+
+  --secondary: var(--brand-blue);
+
+  --secondary-hover: var(--brand-blue-light);
+
+  --secondary-soft: color-mix(
+    in srgb,
+    var(--brand-blue) 10%,
+    transparent
+  );
+
+  /* =======================================================
+     LIGHT MODE SURFACES
+     ======================================================= */
+
+  /*
+   * Very subtle turquoise tint instead of completely neutral
+   * gray, giving the entire application the new brand feel.
+   */
+  --bg-light: color-mix(
+    in srgb,
+    var(--brand-primary) 4%,
+    #ffffff
+  );
+
   --bg-white: #ffffff;
-  --bg-card: #ffffff;
-  --text-primary: #0f172a; /* Slate 900 */
-  --text-secondary: #475569; /* Slate 600 */
-  --text-muted: #64748b; /* Slate 500; 4.76:1 on white (AA) */
-  --border: #e2e8f0; /* Slate 200 */
-  --error: #ef4444;
-  --success: #22c55e;
-  --warning: #f59e0b;
-  /* Status colours as FOREGROUND fail AA on light: error 3.76:1, success 2.28:1, warning 2.15:1.
-     They stay the fill/border colours; text and icons use these darkened twins. Each clears 4.5:1
-     against the darkest surface it actually lands on, which is not white but the 10-20% tint of its
-     own hue that the badges and callouts paint behind it. */
-  --error-text: #c63838;
-  --success-text: #157c3b;
-  --warning-text: #986207;
-  --info: #2563eb; /* Blue 600 — info/permission/log badges + qr-ready pill */
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  --bg-card: color-mix(
+    in srgb,
+    var(--brand-blue-light) 2%,
+    #ffffff
+  );
+
+  --bg-elevated: #ffffff;
+
+  --bg-hover: color-mix(
+    in srgb,
+    var(--brand-primary) 6%,
+    #ffffff
+  );
+
+  --bg-selected: color-mix(
+    in srgb,
+    var(--brand-primary) 10%,
+    #ffffff
+  );
+
+  /* =======================================================
+     LIGHT MODE TEXT
+     ======================================================= */
+
+  /*
+   * Keep normal body text neutral/dark for readability.
+   * Brand blue is used for interactive text and headings
+   * where appropriate through --primary-text.
+   */
+  --text-primary: #102433;
+
+  --text-secondary: #3e5968;
+
+  --text-muted: #657b87;
+
+  --text-on-primary: #071b22;
+
+  --text-on-accent: #172334;
+
+  --text-on-blue: #ffffff;
+
+  /* =======================================================
+     BORDERS / FOCUS
+     ======================================================= */
+
+  --border: color-mix(
+    in srgb,
+    var(--brand-blue-light) 20%,
+    #ffffff
+  );
+
+  --border-strong: color-mix(
+    in srgb,
+    var(--brand-blue-light) 45%,
+    #ffffff
+  );
+
+  --focus-ring: color-mix(
+    in srgb,
+    var(--brand-primary) 35%,
+    transparent
+  );
+
+  /* =======================================================
+     STATUS COLORS
+     =======================================================
+
+     These intentionally use the brand palette instead of
+     the old red/green/amber/blue palette.
+     ======================================================= */
+
+  --success: var(--brand-primary);
+
+  /*
+   * The solid blue-teal clears contrast much better than the
+   * bright turquoise as foreground text on white surfaces.
+   */
+  --success-text: var(--brand-blue-light);
+
+  --success-soft: color-mix(
+    in srgb,
+    var(--brand-primary) 12%,
+    transparent
+  );
+
+  --warning: var(--brand-orange);
+
+  --warning-text: color-mix(
+    in srgb,
+    var(--brand-orange) 52%,
+    #172334
+  );
+
+  --warning-soft: color-mix(
+    in srgb,
+    var(--brand-orange) 14%,
+    transparent
+  );
+
+  /*
+   * Error remains visually urgent using the orange family,
+   * while staying inside the requested brand palette.
+   */
+  --error: var(--brand-orange);
+
+  --error-text: color-mix(
+    in srgb,
+    var(--brand-orange) 42%,
+    #172334
+  );
+
+  --error-soft: color-mix(
+    in srgb,
+    var(--brand-orange) 12%,
+    transparent
+  );
+
+  --info: var(--brand-blue);
+
+  --info-text: var(--brand-blue);
+
+  --info-soft: color-mix(
+    in srgb,
+    var(--brand-blue) 10%,
+    transparent
+  );
+
+  /* =======================================================
+     WATERMARK / BRAND BACKGROUND
+     ======================================================= */
+
+  --watermark-opacity: 0.045;
+
+  --watermark-filter: none;
+
+  /* =======================================================
+     SHADOWS
+     ======================================================= */
+
+  --shadow-sm:
+    0 1px 2px 0 rgb(20 73 147 / 0.06);
+
+  --shadow-md:
+    0 4px 6px -1px rgb(20 73 147 / 0.10),
+    0 2px 4px -2px rgb(20 73 147 / 0.08);
+
+  --shadow-lg:
+    0 10px 15px -3px rgb(20 73 147 / 0.12),
+    0 4px 6px -4px rgb(20 73 147 / 0.09);
+
   --radius: 10px;
 }
 
-/* Dark Mode */
-[data-theme='dark'] {
-  /* Make native controls (select option popups, scrollbars, date pickers) follow the EXPLICIT
-     app theme, not just the OS preference — otherwise toggling dark while the OS is light left
-     native dropdowns rendered in the light scheme (#249). */
-  color-scheme: dark;
-  --bg-light: #0f172a; /* Slate 900 */
-  --bg-white: #1e293b; /* Slate 800 */
-  --bg-card: #1e293b;
-  --text-primary: #f1f5f9; /* Slate 100 */
-  --text-secondary: #cbd5e1; /* Slate 300 */
-  --text-muted: #94a3b8; /* Slate 400; 5.71:1 on Slate 800 (AA) */
-  --border: #334155; /* Slate 700 */
-  --info: #60a5fa; /* Blue 400 — lighter so it reads over the dark translucent-blue tints */
-  /* On the dark surfaces success and warning already clear AA (6.42:1 and 6.81:1), so they
-     keep their base value; error is 4.06:1 there and is lightened instead. */
-  --error-text: #f15e5e;
-  --success-text: var(--success);
-  --warning-text: var(--warning);
 
-  --primary-soft: color-mix(in srgb, var(--primary) 18%, transparent);
-  /* On Slate 800 the brand green already measures 7.38:1, so dark keeps it for text too. */
-  --primary-text: var(--primary);
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+/* =========================================================
+   DARK MODE
+   ========================================================= */
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* =======================================================
+     DARK SURFACES
+     ======================================================= */
+
+  /*
+   * Dark surfaces carry a subtle blue bias so the dark theme
+   * belongs to the same palette rather than generic Slate.
+   */
+
+  --bg-light: color-mix(
+    in srgb,
+    var(--brand-blue) 18%,
+    #071119
+  );
+
+  --bg-white: color-mix(
+    in srgb,
+    var(--brand-blue) 22%,
+    #0b1720
+  );
+
+  --bg-card: color-mix(
+    in srgb,
+    var(--brand-blue-light) 18%,
+    #0c1923
+  );
+
+  --bg-elevated: color-mix(
+    in srgb,
+    var(--brand-blue-light) 22%,
+    #0d1c27
+  );
+
+  --bg-hover: color-mix(
+    in srgb,
+    var(--brand-primary) 10%,
+    var(--bg-card)
+  );
+
+  --bg-selected: color-mix(
+    in srgb,
+    var(--brand-primary) 16%,
+    var(--bg-card)
+  );
+
+  /* =======================================================
+     DARK TEXT
+     ======================================================= */
+
+  --text-primary: #f3fbfc;
+
+  --text-secondary: #c4dce1;
+
+  --text-muted: #91afb8;
+
+  /*
+   * Turquoise has excellent contrast against our dark
+   * surfaces and can therefore be used directly as text.
+   */
+  --primary-text: var(--brand-primary);
+
+  --text-on-primary: #071b22;
+
+  --text-on-accent: #172334;
+
+  --text-on-blue: #ffffff;
+
+  /* =======================================================
+     DARK PRIMARY / ACCENT
+     ======================================================= */
+
+  --primary-soft: color-mix(
+    in srgb,
+    var(--brand-primary) 18%,
+    transparent
+  );
+
+  --accent-soft: color-mix(
+    in srgb,
+    var(--brand-orange) 18%,
+    transparent
+  );
+
+  --secondary-soft: color-mix(
+    in srgb,
+    var(--brand-blue-light) 20%,
+    transparent
+  );
+
+  /* =======================================================
+     DARK BORDERS
+     ======================================================= */
+
+  --border: color-mix(
+    in srgb,
+    var(--brand-blue-light) 38%,
+    #142735
+  );
+
+  --border-strong: color-mix(
+    in srgb,
+    var(--brand-primary) 42%,
+    #142735
+  );
+
+  --focus-ring: color-mix(
+    in srgb,
+    var(--brand-primary) 40%,
+    transparent
+  );
+
+  /* =======================================================
+     DARK STATUS COLORS
+     ======================================================= */
+
+  --success-text: var(--brand-primary);
+
+  --success-soft: color-mix(
+    in srgb,
+    var(--brand-primary) 18%,
+    transparent
+  );
+
+  --warning-text: var(--brand-orange);
+
+  --warning-soft: color-mix(
+    in srgb,
+    var(--brand-orange) 18%,
+    transparent
+  );
+
+  --error-text: var(--brand-orange);
+
+  --error-soft: color-mix(
+    in srgb,
+    var(--brand-orange) 18%,
+    transparent
+  );
+
+  /*
+   * Strong brand blue is too dark against the dark card
+   * surface, so informational foregrounds use turquoise.
+   */
+  --info: var(--brand-primary);
+
+  --info-text: var(--brand-primary);
+
+  --info-soft: color-mix(
+    in srgb,
+    var(--brand-blue-light) 20%,
+    transparent
+  );
+
+  /* =======================================================
+     DARK WATERMARK
+     ======================================================= */
+
+  --watermark-opacity: 0.055;
+
+  /*
+   * Useful later when the new logo is used as a watermark.
+   */
+  --watermark-filter:
+    brightness(1.2)
+    saturate(0.8);
+
+  /* =======================================================
+     DARK SHADOWS
+     ======================================================= */
+
+  --shadow-sm:
+    0 1px 2px 0 rgb(0 0 0 / 0.35);
+
+  --shadow-md:
+    0 4px 6px -1px rgb(0 0 0 / 0.38),
+    0 2px 4px -2px rgb(0 0 0 / 0.32);
+
+  --shadow-lg:
+    0 10px 15px -3px rgb(0 0 0 / 0.45),
+    0 4px 6px -4px rgb(0 0 0 / 0.38);
 }
 
-/* Explicit light toggle: keep native controls light even if the OS prefers dark. */
+
+/* =========================================================
+   EXPLICIT LIGHT MODE
+   ========================================================= */
+
 [data-theme='light'] {
   color-scheme: light;
 }
 
-/* System preference dark mode */
+
+/* =========================================================
+   SYSTEM DARK MODE
+   ========================================================= */
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    /* Match native controls (e.g. the Login page <select> option popup) to the dark theme.
-       The Login screen never sets data-theme, so it relies solely on this block — without an
-       explicit color-scheme the popup rendered light, leaving the light option text illegible (#249). */
     color-scheme: dark;
-    --bg-light: #0f172a;
-    --bg-white: #1e293b;
-    --bg-card: #1e293b;
-    --text-primary: #f1f5f9;
-    --text-secondary: #cbd5e1;
-    --text-muted: #94a3b8;
-    --border: #334155;
-    --info: #60a5fa;
-    /* On the dark surfaces success and warning already clear AA (6.42:1 and 6.81:1), so they
-       keep their base value; error is 4.06:1 there and is lightened instead. */
-    --error-text: #f15e5e;
-    --success-text: var(--success);
-    --warning-text: var(--warning);
-    --primary-soft: color-mix(in srgb, var(--primary) 18%, transparent);
-    /* Must be restated here, not inherited: the light value (#17833f) measures 3.03:1 on Slate 800
-       and would fail worse than the brand green it replaced. On dark the brand green is 7.38:1. */
-    --primary-text: var(--primary);
-    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
-    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
-    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+
+    --bg-light: color-mix(
+      in srgb,
+      var(--brand-blue) 18%,
+      #071119
+    );
+
+    --bg-white: color-mix(
+      in srgb,
+      var(--brand-blue) 22%,
+      #0b1720
+    );
+
+    --bg-card: color-mix(
+      in srgb,
+      var(--brand-blue-light) 18%,
+      #0c1923
+    );
+
+    --bg-elevated: color-mix(
+      in srgb,
+      var(--brand-blue-light) 22%,
+      #0d1c27
+    );
+
+    --bg-hover: color-mix(
+      in srgb,
+      var(--brand-primary) 10%,
+      var(--bg-card)
+    );
+
+    --bg-selected: color-mix(
+      in srgb,
+      var(--brand-primary) 16%,
+      var(--bg-card)
+    );
+
+    --text-primary: #f3fbfc;
+
+    --text-secondary: #c4dce1;
+
+    --text-muted: #91afb8;
+
+    --primary-text: var(--brand-primary);
+
+    --text-on-primary: #071b22;
+
+    --text-on-accent: #172334;
+
+    --text-on-blue: #ffffff;
+
+    --primary-soft: color-mix(
+      in srgb,
+      var(--brand-primary) 18%,
+      transparent
+    );
+
+    --accent-soft: color-mix(
+      in srgb,
+      var(--brand-orange) 18%,
+      transparent
+    );
+
+    --secondary-soft: color-mix(
+      in srgb,
+      var(--brand-blue-light) 20%,
+      transparent
+    );
+
+    --border: color-mix(
+      in srgb,
+      var(--brand-blue-light) 38%,
+      #142735
+    );
+
+    --border-strong: color-mix(
+      in srgb,
+      var(--brand-primary) 42%,
+      #142735
+    );
+
+    --focus-ring: color-mix(
+      in srgb,
+      var(--brand-primary) 40%,
+      transparent
+    );
+
+    --success-text: var(--brand-primary);
+
+    --success-soft: color-mix(
+      in srgb,
+      var(--brand-primary) 18%,
+      transparent
+    );
+
+    --warning-text: var(--brand-orange);
+
+    --warning-soft: color-mix(
+      in srgb,
+      var(--brand-orange) 18%,
+      transparent
+    );
+
+    --error-text: var(--brand-orange);
+
+    --error-soft: color-mix(
+      in srgb,
+      var(--brand-orange) 18%,
+      transparent
+    );
+
+    --info: var(--brand-primary);
+
+    --info-text: var(--brand-primary);
+
+    --info-soft: color-mix(
+      in srgb,
+      var(--brand-blue-light) 20%,
+      transparent
+    );
+
+    --watermark-opacity: 0.055;
+
+    --watermark-filter:
+      brightness(1.2)
+      saturate(0.8);
+
+    --shadow-sm:
+      0 1px 2px 0 rgb(0 0 0 / 0.35);
+
+    --shadow-md:
+      0 4px 6px -1px rgb(0 0 0 / 0.38),
+      0 2px 4px -2px rgb(0 0 0 / 0.32);
+
+    --shadow-lg:
+      0 10px 15px -3px rgb(0 0 0 / 0.45),
+      0 4px 6px -4px rgb(0 0 0 / 0.38);
   }
 }
+
+
+/* =========================================================
+   GLOBAL RESET
+   ========================================================= */
 
 * {
   box-sizing: border-box;
 }
 
+
+/* =========================================================
+   BODY
+   ========================================================= */
+
 body {
   margin: 0;
+
   font-family:
     'Plus Jakarta Sans',
     -apple-system,
@@ -112,44 +639,95 @@ body {
     Helvetica,
     Arial,
     sans-serif;
+
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
   background: var(--bg-light);
+
   color: var(--text-primary);
+
   line-height: 1.6;
 }
+
+
+/* =========================================================
+   BUTTONS
+   ========================================================= */
 
 button {
   font-family: inherit;
 }
 
+
+/* =========================================================
+   FORM CONTROLS
+   ========================================================= */
+
 input,
 select,
 textarea {
   font-family: inherit;
+
   background: var(--bg-white);
+
   color: var(--text-primary);
+
   border-color: var(--border);
 }
 
+input:focus,
+select:focus,
+textarea:focus {
+  outline-color: var(--primary);
+
+  box-shadow:
+    0 0 0 3px var(--focus-ring);
+}
+
+
+/* =========================================================
+   LINKS
+   ========================================================= */
+
 a {
   color: var(--primary-text);
+
   text-decoration: none;
 }
 
 a:hover {
+  color: var(--primary-hover);
+
   text-decoration: underline;
 }
 
-/* Error banner — shared across pages (moved out of Plugins.css so any page can use it). */
+
+/* =========================================================
+   SHARED ERROR BANNER
+   ========================================================= */
+
 .error-banner {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: var(--error-soft);
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--error) 35%,
+      transparent
+    );
+
   border-radius: 8px;
+
   padding: 1rem;
+
   margin-bottom: 1.5rem;
+
   display: flex;
+
   align-items: center;
+
   gap: 0.75rem;
 }
 
@@ -161,10 +739,25 @@ a:hover {
   color: var(--error-text);
 }
 
-/* yarl theme — match dashboard dark palette. */
+
+/* =========================================================
+   YARL / IMAGE LIGHTBOX
+   ========================================================= */
+
 .yarl__container {
-  --yarl__color_backdrop: rgba(0, 0, 0, 0.92);
+  --yarl__color_backdrop:
+    color-mix(
+      in srgb,
+      var(--brand-blue) 20%,
+      rgba(0, 0, 0, 0.94)
+    );
 }
+
 .yarl__button {
-  --yarl__color_button: rgba(255, 255, 255, 0.9);
+  --yarl__color_button:
+    color-mix(
+      in srgb,
+      var(--brand-primary) 25%,
+      rgba(255, 255, 255, 0.95)
+    );
 }

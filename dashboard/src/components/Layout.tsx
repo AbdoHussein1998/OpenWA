@@ -61,8 +61,8 @@ import {
 } from '../i18n';
 
 import {
-  healthApi,
-} from '../services/api';
+  useAppVersion,
+} from '../hooks/useAppVersion';
 
 import './Layout.css';
 
@@ -309,17 +309,8 @@ export function Layout({
       768,
   );
 
-  /**
-   * Show the build-time version immediately, then replace it with the
-   * live backend version so a stale dashboard bundle cannot display the
-   * wrong running version.
-   */
-  const [
-    version,
-    setVersion,
-  ] = useState(
-    __APP_VERSION__,
-  );
+  const version =
+    useAppVersion();
 
   const [
     isLanguageMenuOpen,
@@ -359,32 +350,6 @@ export function Layout({
         'resize',
         handleResize,
       );
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    healthApi
-      .check()
-      .then(info => {
-        if (
-          active &&
-          info?.version
-        ) {
-          setVersion(
-            info.version,
-          );
-        }
-      })
-      .catch(() => {
-        /**
-         * Keep the build-time version fallback.
-         */
-      });
-
-    return () => {
-      active = false;
-    };
   }, []);
 
   const handleNavClick =

@@ -1,9 +1,13 @@
+
+
+
 .layout {
   display: flex;
   min-height: 100vh;
 }
 
 /* ==================== Sidebar ==================== */
+
 .sidebar {
   width: 260px;
   background: var(--bg-white);
@@ -72,6 +76,7 @@
 }
 
 /* Collapse Toggle Button - Circular design at edge */
+
 .collapse-toggle {
   position: absolute;
   right: -14px;
@@ -96,7 +101,7 @@
   background: var(--primary);
   border-color: var(--primary);
   color: white;
-  box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+  box-shadow: 0 4px 12px var(--focus-ring);
 }
 
 .collapse-toggle svg {
@@ -193,7 +198,6 @@
   width: 24px;
   height: 24px;
   flex-shrink: 0;
-  /* Plain icon, no brand orb — the green swatch belonged to the removed palette picker. */
   color: inherit;
 }
 
@@ -286,12 +290,17 @@
 }
 
 .logout-btn:hover {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.3);
+  background: var(--error-soft);
+  border-color: color-mix(
+    in srgb,
+    var(--error) 35%,
+    transparent
+  );
   color: var(--error-text);
 }
 
 /* ==================== Main Content ==================== */
+
 .main-content {
   flex: 1;
   margin-left: 260px;
@@ -299,9 +308,96 @@
   background: var(--bg-light);
   min-height: 100vh;
   overflow-x: hidden;
+
+  /*
+   * Creates the positioning and stacking context used by the
+   * application-wide watermark.
+   */
+  position: relative;
+  isolation: isolate;
+
   transition:
     margin-left 0.3s ease,
     width 0.3s ease;
+}
+
+/*
+ * ========================================================
+ * GLOBAL APPLICATION WATERMARK
+ * ========================================================
+ *
+ * The watermark is attached to .main-content, so every page
+ * rendered through the shared Layout automatically receives it.
+ *
+ * /openwa_logo.webp is served from dashboard/public.
+ *
+ * Replacing that file later with your final company logo updates:
+ * - Sidebar logo
+ * - Mobile logo
+ * - Watermark
+ *
+ * automatically.
+ */
+.main-content::before {
+  content: '';
+
+  /*
+   * Fixed rather than absolute so the watermark remains centered
+   * while long dashboard pages scroll.
+   */
+  position: fixed;
+
+  /*
+   * Desktop content begins after the 260px sidebar.
+   */
+  left: 260px;
+  right: 0;
+  top: 0;
+  bottom: 0;
+
+  background-image: url('/openwa_logo.webp');
+  background-repeat: no-repeat;
+  background-position: center;
+
+  /*
+   * Responsive sizing:
+   * minimum 220px
+   * scales with viewport
+   * maximum 460px
+   */
+  background-size: clamp(220px, 32vw, 460px);
+
+  /*
+   * Values come from App.css:
+   *
+   * Light:
+   * --watermark-opacity: 0.045
+   *
+   * Dark:
+   * --watermark-opacity: 0.055
+   */
+  opacity: var(--watermark-opacity, 0.045);
+  filter: var(--watermark-filter, none);
+
+  /*
+   * Watermark must never intercept clicks, selections,
+   * scrolling or hover events.
+   */
+  pointer-events: none;
+  user-select: none;
+
+  /*
+   * Keep the watermark below the actual page contents.
+   */
+  z-index: 0;
+}
+
+/*
+ * Every direct page rendered by <Outlet /> sits above the watermark.
+ */
+.main-content > * {
+  position: relative;
+  z-index: 1;
 }
 
 .main-content.expanded {
@@ -309,7 +405,16 @@
   width: calc(100% - 72px);
 }
 
+/*
+ * Sidebar collapsed:
+ * shift watermark to remain centered in the larger content region.
+ */
+.main-content.expanded::before {
+  left: 72px;
+}
+
 /* ==================== Mobile Styles ==================== */
+
 .mobile-header {
   display: none;
 }
@@ -391,6 +496,7 @@
     from {
       opacity: 0;
     }
+
     to {
       opacity: 1;
     }
@@ -405,12 +511,29 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  /*
+   * On mobile there is no permanent sidebar.
+   *
+   * Start the watermark below the fixed 56px mobile header and
+   * make it smaller so it does not dominate narrow screens.
+   */
+  .main-content.mobile::before,
+  .main-content.mobile.expanded::before {
+    left: 0;
+    right: 0;
+    top: 56px;
+    bottom: 0;
+
+    background-size: clamp(160px, 55vw, 260px);
+  }
+
   .collapse-toggle {
     display: none;
   }
 }
 
 /* ==================== RTL support ==================== */
+
 [dir='rtl'] .sidebar {
   border-right: none;
   border-left: 1px solid var(--border);
@@ -437,6 +560,7 @@
 [dir='rtl'] .main-content {
   margin-left: 0;
   margin-right: 260px;
+
   transition:
     margin-right 0.3s ease,
     width 0.3s ease;
@@ -446,9 +570,34 @@
   margin-right: 72px;
 }
 
+/*
+ * RTL watermark:
+ * sidebar lives on the right, so reserve that side instead.
+ */
+[dir='rtl'] .main-content::before {
+  left: 0;
+  right: 260px;
+}
+
+[dir='rtl'] .main-content.expanded::before {
+  left: 0;
+  right: 72px;
+}
+
 @media (max-width: 768px) {
   [dir='rtl'] .main-content,
   [dir='rtl'] .main-content.mobile {
     margin-right: 0;
   }
+
+  /*
+   * No permanent sidebar on mobile, regardless of direction.
+   */
+  [dir='rtl'] .main-content::before,
+  [dir='rtl'] .main-content.mobile::before,
+  [dir='rtl'] .main-content.expanded::before {
+    left: 0;
+    right: 0;
+  }
 }
+
