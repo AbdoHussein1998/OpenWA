@@ -12,6 +12,7 @@ import {
   ArrowRightLeft,
   ExternalLink,
   Loader2,
+  Plus,
   RefreshCw,
   Search,
   Smartphone,
@@ -26,6 +27,14 @@ import {
 } from '../components/Modal';
 
 import {
+  AgentRetirementModal,
+} from '../components/AgentRetirementModal';
+
+import {
+  GeneratedKeyField,
+} from '../components/GeneratedKeyField';
+
+import {
   PageHeader,
 } from '../components/PageHeader';
 
@@ -33,7 +42,7 @@ import {
   useAdminAgentsQuery,
   useAdminTeamLeadersQuery,
   useBulkReassignAdminAgentsMutation,
-  useDeleteAdminAgentMutation,
+  useCreateAdminAgentMutation,
   useReassignAdminAgentMutation,
 } from '../hooks/queries';
 
@@ -50,6 +59,7 @@ import type {
 } from '../services/api';
 
 import './AdminAgents.css';
+import './AdminAgentsEnhancements.css';
 
 function errorMessage(
   error: unknown,
@@ -137,6 +147,14 @@ function templateQuotaLabel(
   return `${limit} / 24h`;
 }
 
+function isValidEmail(
+  value: string,
+): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    value,
+  );
+}
+
 function matchesSearch(
   agent: AdminAgentOverview,
   searchTerm: string,
@@ -196,13 +214,60 @@ export function AdminAgents() {
   const bulkReassignAgentsMutation =
     useBulkReassignAdminAgentsMutation();
 
-  const deleteAgentMutation =
-    useDeleteAdminAgentMutation();
+  const createAgentMutation =
+    useCreateAdminAgentMutation();
 
   const [
     search,
     setSearch,
   ] = useState('');
+
+  const [
+    showCreateModal,
+    setShowCreateModal,
+  ] = useState(false);
+
+  const [
+    createName,
+    setCreateName,
+  ] = useState('');
+
+  const [
+    createEmail,
+    setCreateEmail,
+  ] = useState('');
+
+  const [
+    createTeamLeaderId,
+    setCreateTeamLeaderId,
+  ] = useState('');
+
+  const [
+    createTemplateLimit,
+    setCreateTemplateLimit,
+  ] = useState('');
+
+  const [
+    createError,
+    setCreateError,
+  ] = useState<string | null>(
+    null,
+  );
+
+  const [
+    createdAgentCredential,
+    setCreatedAgentCredential,
+  ] = useState<{
+    name: string;
+    apiKey: string;
+  } | null>(null);
+
+  const [
+    retiringAgentId,
+    setRetiringAgentId,
+  ] = useState<string | null>(
+    null,
+  );
 
   const [
     selectedAgentIds,
@@ -244,6 +309,38 @@ export function AdminAgents() {
     teamLeadersQuery.data ??
     [];
 
+  const trimmedCreateName =
+    createName.trim();
+
+  const trimmedCreateEmail =
+    createEmail.trim();
+
+  const parsedTemplateLimit =
+    createTemplateLimit === ''
+      ? null
+      : Number(createTemplateLimit);
+
+  const createTemplateLimitValid =
+    parsedTemplateLimit === null ||
+    (
+      Number.isInteger(
+        parsedTemplateLimit,
+      ) &&
+      parsedTemplateLimit >= 0
+    );
+
+  const canCreateAgent =
+    trimmedCreateName.length > 0 &&
+    trimmedCreateName.length <= 100 &&
+    Boolean(createTeamLeaderId) &&
+    (
+      !trimmedCreateEmail ||
+      isValidEmail(
+        trimmedCreateEmail,
+      )
+    ) &&
+    createTemplateLimitValid;
+
   const managedAgent =
     useMemo(
       () =>
@@ -281,6 +378,22 @@ export function AdminAgents() {
     );
   }, [
     managedAgent,
+    teamLeaders,
+  ]);
+
+  useEffect(() => {
+    if (
+      showCreateModal &&
+      !createTeamLeaderId &&
+      teamLeaders.length > 0
+    ) {
+      setCreateTeamLeaderId(
+        teamLeaders[0].id,
+      );
+    }
+  }, [
+    showCreateModal,
+    createTeamLeaderId,
     teamLeaders,
   ]);
 
@@ -368,7 +481,86 @@ export function AdminAgents() {
   const isMutating =
     reassignAgentMutation.isPending ||
     bulkReassignAgentsMutation.isPending ||
-    deleteAgentMutation.isPending;
+    createAgentMutation.isPending;
+
+  const openCreateAgent =
+    () => {
+      setCreateName('');
+      setCreateEmail('');
+      setCreateTeamLeaderId(
+        teamLeaders[0]?.id ?? '',
+      );
+      setCreateTemplateLimit('');
+      setCreateError(null);
+      setCreatedAgentCredential(null);
+      setShowCreateModal(true);
+    };
+
+  const closeCreateAgent =
+    () => {
+      if (
+        createAgentMutation.isPending
+      ) {
+        return;
+      }
+
+      setShowCreateModal(false);
+      setCreateError(null);
+      setCreatedAgentCredential(null);
+    };
+
+  const createAgent =
+    async () => {
+      if (!canCreateAgent) {
+        return;
+      }
+
+      setCreateError(null);
+
+      try {
+        const created =
+          await createAgentMutation.mutateAsync({
+            teamLeaderId:
+              createTeamLeaderId,
+            data: {
+              name:
+                trimmedCreateName,
+              ...(trimmedCreateEmail
+                ? {
+                    email:
+                      trimmedCreateEmail,
+                  }
+                : {}),
+              templateSendLimit24h:
+                parsedTemplateLimit,
+            },
+          });
+
+        setCreatedAgentCredential({
+          name:
+            created.agent.name,
+          apiKey:
+            created.apiKey,
+        });
+
+        toast.success(
+          'Agent created',
+          `${created.agent.name} was created successfully.`,
+        );
+      } catch (error) {
+        const message =
+          errorMessage(error);
+
+        setCreateError(
+          message,
+        );
+
+        toast.error(
+          'Agent creation failed',
+          message,
+        );
+      }
+    };
 
   const refresh =
     () => {
@@ -518,52 +710,6 @@ export function AdminAgents() {
       }
     };
 
-  const deleteAgent =
-    async (
-      agent: AdminAgentOverview,
-    ) => {
-      const confirmed =
-        window.confirm(
-          `Delete Agent "${agent.name}"? The Agent credential will be removed. The WhatsApp Session itself will not be deleted.`,
-        );
-
-      if (!confirmed) {
-        return;
-      }
-
-      try {
-        await deleteAgentMutation.mutateAsync(
-          agent.id,
-        );
-
-        setSelectedAgentIds(
-          previous => {
-            const next =
-              new Set(previous);
-            next.delete(agent.id);
-            return next;
-          },
-        );
-
-        if (
-          managedAgentId ===
-          agent.id
-        ) {
-          setManagedAgentId('');
-        }
-
-        toast.success(
-          'Agent deleted',
-          `${agent.name} was deleted successfully.`,
-        );
-      } catch (error) {
-        toast.error(
-          'Agent deletion failed',
-          errorMessage(error),
-        );
-      }
-    };
-
   if (
     agentsQuery.isLoading
   ) {
@@ -589,28 +735,45 @@ export function AdminAgents() {
         title="Agents"
         subtitle="Move Agents between Team Leaders, resolve Session assignment conflicts, and delete Agent principals safely."
         actions={
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={refresh}
-            disabled={
-              agentsQuery.isFetching ||
-              teamLeadersQuery.isFetching ||
-              isMutating
-            }
-          >
-            <RefreshCw
-              size={17}
-              className={
-                agentsQuery.isFetching ||
-                teamLeadersQuery.isFetching
-                  ? 'animate-spin'
-                  : undefined
+          <div className="admin-agents-header-actions">
+            <button
+              type="button"
+              className="admin-agents-create-btn"
+              onClick={
+                openCreateAgent
               }
-            />
+              disabled={
+                teamLeaders.length === 0 ||
+                createAgentMutation.isPending
+              }
+            >
+              <Plus size={17} />
+              New Agent
+            </button>
 
-            Refresh
-          </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={refresh}
+              disabled={
+                agentsQuery.isFetching ||
+                teamLeadersQuery.isFetching ||
+                isMutating
+              }
+            >
+              <RefreshCw
+                size={17}
+                className={
+                  agentsQuery.isFetching ||
+                  teamLeadersQuery.isFetching
+                    ? 'animate-spin'
+                    : undefined
+                }
+              />
+
+              Refresh
+            </button>
+          </div>
         }
       />
 
@@ -1136,8 +1299,8 @@ export function AdminAgents() {
                               type="button"
                               className="admin-agents-action-btn admin-agents-action-btn--danger"
                               onClick={() =>
-                                void deleteAgent(
-                                  agent,
+                                setRetiringAgentId(
+                                  agent.id,
                                 )
                               }
                               disabled={isMutating}
@@ -1156,6 +1319,301 @@ export function AdminAgents() {
           </div>
         )}
       </section>
+
+      <Modal
+        open={showCreateModal}
+        onClose={
+          closeCreateAgent
+        }
+        title={
+          createdAgentCredential
+            ? 'Agent created'
+            : 'Create Agent'
+        }
+        className="admin-agents-create-modal"
+        hideCloseButton={
+          createAgentMutation.isPending
+        }
+        closeLabel="Close"
+        footer={
+          createdAgentCredential ? (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={
+                closeCreateAgent
+              }
+            >
+              Close
+            </button>
+          ) : (
+            <div className="admin-agents-create-modal-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={
+                  closeCreateAgent
+                }
+                disabled={
+                  createAgentMutation.isPending
+                }
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="admin-agents-create-btn"
+                onClick={() =>
+                  void createAgent()
+                }
+                disabled={
+                  !canCreateAgent ||
+                  createAgentMutation.isPending
+                }
+              >
+                {createAgentMutation.isPending ? (
+                  <Loader2
+                    size={16}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <Plus size={16} />
+                )}
+                Create Agent
+              </button>
+            </div>
+          )
+        }
+      >
+        {createdAgentCredential ? (
+          <div className="admin-agents-created-credential">
+            <div>
+              <strong>
+                {createdAgentCredential.name}
+              </strong>
+              <span>
+                The Agent principal and its AGENT credential were created together.
+              </span>
+            </div>
+
+            <GeneratedKeyField
+              value={
+                createdAgentCredential.apiKey
+              }
+              label="Agent API key"
+              description="This plaintext key is returned only once. Copy and store it securely before closing this dialog."
+            />
+          </div>
+        ) : (
+          <div className="admin-agents-create-form">
+            <label htmlFor="admin-agent-team-leader">
+              <span>
+                Team Leader
+              </span>
+              <select
+                id="admin-agent-team-leader"
+                value={
+                  createTeamLeaderId
+                }
+                onChange={
+                  event =>
+                    setCreateTeamLeaderId(
+                      event.target.value,
+                    )
+                }
+                disabled={
+                  createAgentMutation.isPending
+                }
+              >
+                <option value="">
+                  Select Team Leader
+                </option>
+
+                {teamLeaders.map(
+                  teamLeader => (
+                    <option
+                      key={
+                        teamLeader.id
+                      }
+                      value={
+                        teamLeader.id
+                      }
+                    >
+                      {teamLeader.name}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+
+            <label htmlFor="admin-agent-name">
+              <span>
+                Agent name
+              </span>
+              <input
+                id="admin-agent-name"
+                type="text"
+                maxLength={100}
+                value={createName}
+                placeholder="Mohamed Ali"
+                autoComplete="off"
+                disabled={
+                  createAgentMutation.isPending
+                }
+                onChange={
+                  event => {
+                    setCreateName(
+                      event.target.value,
+                    );
+                    setCreateError(null);
+                  }
+                }
+              />
+            </label>
+
+            <label htmlFor="admin-agent-email">
+              <span>
+                Email
+                <small>
+                  Optional
+                </small>
+              </span>
+              <input
+                id="admin-agent-email"
+                type="email"
+                maxLength={255}
+                value={createEmail}
+                placeholder="mohamed.ali@example.com"
+                autoComplete="email"
+                disabled={
+                  createAgentMutation.isPending
+                }
+                onChange={
+                  event => {
+                    setCreateEmail(
+                      event.target.value,
+                    );
+                    setCreateError(null);
+                  }
+                }
+              />
+            </label>
+
+            <label htmlFor="admin-agent-template-limit">
+              <span>
+                Template send limit / 24h
+                <small>
+                  Blank = unlimited
+                </small>
+              </span>
+              <input
+                id="admin-agent-template-limit"
+                type="number"
+                min={0}
+                step={1}
+                value={
+                  createTemplateLimit
+                }
+                placeholder="Unlimited"
+                disabled={
+                  createAgentMutation.isPending
+                }
+                onChange={
+                  event => {
+                    setCreateTemplateLimit(
+                      event.target.value,
+                    );
+                    setCreateError(null);
+                  }
+                }
+                onKeyDown={
+                  event => {
+                    if (
+                      event.key === 'Enter' &&
+                      canCreateAgent &&
+                      !createAgentMutation.isPending
+                    ) {
+                      void createAgent();
+                    }
+                  }
+                }
+              />
+            </label>
+
+            {trimmedCreateEmail &&
+              !isValidEmail(
+                trimmedCreateEmail,
+              ) && (
+                <p className="admin-agents-field-error">
+                  Enter a valid email address or leave it blank.
+                </p>
+              )}
+
+            {!createTemplateLimitValid && (
+              <p className="admin-agents-field-error">
+                Template limit must be a whole number greater than or equal to 0.
+              </p>
+            )}
+
+            {createError && (
+              <div
+                className="admin-agents-alert admin-agents-alert--error"
+                role="alert"
+              >
+                <AlertCircle size={18} />
+                <div>
+                  <strong>
+                    Agent could not be created.
+                  </strong>
+                  <span>
+                    {createError}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      <AgentRetirementModal
+        open={
+          retiringAgentId !== null
+        }
+        agentId={
+          retiringAgentId
+        }
+        onClose={() =>
+          setRetiringAgentId(
+            null,
+          )
+        }
+        onRetired={
+          retiredAgentId => {
+            setSelectedAgentIds(
+              previous => {
+                const next =
+                  new Set(previous);
+                next.delete(
+                  retiredAgentId,
+                );
+                return next;
+              },
+            );
+
+            if (
+              managedAgentId ===
+              retiredAgentId
+            ) {
+              setManagedAgentId('');
+            }
+
+            setRetiringAgentId(
+              null,
+            );
+          }
+        }
+      />
 
       <Modal
         open={Boolean(managedAgent)}

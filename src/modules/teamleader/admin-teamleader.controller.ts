@@ -30,6 +30,7 @@ import { BulkReassignAdminSessionsDto } from './dto/bulk-reassignment.dto';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { CreateTeamLeaderDto } from './dto/create-team-leader.dto';
 import { ReassignAdminSessionDto } from './dto/reassign-session-owner.dto';
+import { RetireTeamLeaderDto } from './dto/retire-team-leader.dto';
 import { TeamLeader } from './entities/team-leader.entity';
 import {
   TeamLeaderService,
@@ -38,6 +39,7 @@ import {
   type CreateAgentResult,
   type CreateTeamLeaderResult,
   type ForceDeleteTeamLeaderResult,
+  type RetireTeamLeaderResult,
 } from './teamleader.service';
 
 /**
@@ -378,6 +380,50 @@ export class AdminTeamLeaderController {
     return this.teamLeaderService.getTeamLeader(id);
   }
 
+
+  /**
+   * Delegate the complete current resource graph and delete the Team Leader.
+   *
+   * This is the lifecycle used when a TEAM_LEADER credential is deleted from
+   * the API Keys page with delegation instead of destructive force deletion.
+   */
+  @Post(':id/retire')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delegate all Team Leader resources and retire the principal',
+    description:
+      'Validates that the submitted plan exactly covers every current Session and Agent, delegates those resources, preserves compatible Agent Session assignments, and deletes the now-empty Team Leader principal and its TEAM_LEADER credential.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Team Leader UUID',
+    format: 'uuid',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Resources delegated and Team Leader retired successfully.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Source or target Team Leader not found.',
+  })
+  @ApiResponse({
+    status: HttpStatus.CONFLICT,
+    description:
+      'The delegation plan does not match the current resource graph, would create an invalid Agent/Session relationship, or resources changed concurrently.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller lacks global principal-management permission.',
+  })
+  async retire(
+    @Param('id', ParseUUIDPipe)
+    id: string,
+    @Body()
+    dto: RetireTeamLeaderDto,
+  ): Promise<RetireTeamLeaderResult> {
+    return this.teamLeaderService.retireTeamLeader(id, dto);
+  }
 
   /**
    * Permanently delete a Team Leader together with every owned Session,

@@ -224,6 +224,26 @@ export interface ForceDeleteTeamLeaderResult {
   deletedAgentIds: string[];
 }
 
+export interface RetireTeamLeaderInput {
+  sessionReassignments: Array<{
+    sessionId: string;
+    targetTeamLeaderId: string;
+  }>;
+  agentReassignments: Array<{
+    agentId: string;
+    targetTeamLeaderId: string;
+    unassignSession?: boolean;
+  }>;
+}
+
+export interface RetireTeamLeaderResult {
+  teamLeaderId: string;
+  teamLeaderName: string;
+  delegatedSessionIds: string[];
+  delegatedAgentIds: string[];
+  preservedAgentSessionAssignments: number;
+}
+
 export interface ReassignAdminSessionInput {
   targetTeamLeaderId: string;
 }
@@ -1322,6 +1342,18 @@ export const adminTeamLeaderApi = {
       `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/force`,
       {
         method: 'DELETE',
+      },
+    ),
+
+  retire: (
+    teamLeaderId: string,
+    data: RetireTeamLeaderInput,
+  ) =>
+    request<RetireTeamLeaderResult>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/retire`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
       },
     ),
 };

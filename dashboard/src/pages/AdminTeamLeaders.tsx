@@ -24,6 +24,10 @@ import {
 } from '../components/Modal';
 
 import {
+  TeamLeaderRetirementModal,
+} from '../components/TeamLeaderRetirementModal';
+
+import {
   PageHeader,
 } from '../components/PageHeader';
 
@@ -225,6 +229,12 @@ export function AdminTeamLeaders() {
     managedTeamLeaderId,
     setManagedTeamLeaderId,
   ] = useState('');
+
+
+  const [
+    retirementTeamLeaderId,
+    setRetirementTeamLeaderId,
+  ] = useState<string | null>(null);
 
   const [
     deleteConfirmation,
@@ -1554,6 +1564,17 @@ export function AdminTeamLeaders() {
         )}
       </Modal>
 
+      <TeamLeaderRetirementModal
+        open={retirementTeamLeaderId !== null}
+        teamLeaderId={retirementTeamLeaderId}
+        onClose={() =>
+          setRetirementTeamLeaderId(null)
+        }
+        onRetired={() =>
+          setRetirementTeamLeaderId(null)
+        }
+      />
+
       <Modal
         open={Boolean(managedTeamLeaderId) && deleteConfirmation === null}
         onClose={closeManagement}
@@ -1597,6 +1618,29 @@ export function AdminTeamLeaders() {
                   <Trash2 size={16} />
                   Delete Team Leader
                 </button>
+
+                {!resources.canDelete && (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => {
+                      const id =
+                        managedTeamLeaderId;
+
+                      if (!id) {
+                        return;
+                      }
+
+                      setManagedTeamLeaderId('');
+                      setDeleteConfirmation(null);
+                      setRetirementTeamLeaderId(id);
+                    }}
+                    disabled={isMutating}
+                  >
+                    <ArrowRightLeft size={16} />
+                    Delegate all & delete
+                  </button>
+                )}
 
                 <button
                   type="button"

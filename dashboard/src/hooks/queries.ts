@@ -34,6 +34,7 @@ import {
   type BulkReassignAdminSessionsInput,
   type ReassignAdminAgentInput,
   type ReassignAdminSessionInput,
+  type RetireTeamLeaderInput,
   type AssignAdminAgentSessionInput,
   type GenericApiKeyRole,
 } from '../services/api';
@@ -304,6 +305,42 @@ export function useForceDeleteAdminTeamLeaderMutation() {
         queryKey: queryKeys.apiKeys,
       });
       // Prefix invalidation also drops any cached per-Team-Leader resource graph.
+      void queryClient.invalidateQueries({
+        queryKey: ['admin', 'team-leaders'],
+      });
+    },
+  });
+}
+
+
+export function useRetireAdminTeamLeaderMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      teamLeaderId,
+      data,
+    }: {
+      teamLeaderId: string;
+      data: RetireTeamLeaderInput;
+    }) =>
+      adminTeamLeaderApi.retire(
+        teamLeaderId,
+        data,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaders,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.apiKeys,
+      });
       void queryClient.invalidateQueries({
         queryKey: ['admin', 'team-leaders'],
       });

@@ -66,6 +66,7 @@ describe('AdminTeamLeaderController', () => {
     reassignAdminSession: jest.Mock;
     reassignAdminSessions: jest.Mock;
     getTeamLeader: jest.Mock;
+    retireTeamLeader: jest.Mock;
     forceDeleteTeamLeader: jest.Mock;
     deleteTeamLeader: jest.Mock;
   };
@@ -80,6 +81,7 @@ describe('AdminTeamLeaderController', () => {
       reassignAdminSession: jest.fn(),
       reassignAdminSessions: jest.fn(),
       getTeamLeader: jest.fn(),
+      retireTeamLeader: jest.fn(),
       forceDeleteTeamLeader: jest.fn(),
       deleteTeamLeader: jest.fn(),
     };
@@ -448,6 +450,58 @@ describe('AdminTeamLeaderController', () => {
       await expect(
         controller.findOne('missing-team-leader'),
       ).rejects.toBe(notFound);
+    });
+  });
+
+  describe('retire', () => {
+    it('delegates the complete retirement plan to TeamLeaderService', async () => {
+      const dto = {
+        sessionReassignments: [
+          {
+            sessionId: 'session-1',
+            targetTeamLeaderId: 'team-leader-2',
+          },
+        ],
+        agentReassignments: [
+          {
+            agentId: 'agent-1',
+            targetTeamLeaderId: 'team-leader-2',
+            unassignSession: false,
+          },
+        ],
+      };
+      const result = {
+        teamLeaderId: 'team-leader-1',
+        teamLeaderName: 'Ahmed Hassan',
+        delegatedSessionIds: ['session-1'],
+        delegatedAgentIds: ['agent-1'],
+        preservedAgentSessionAssignments: 1,
+      };
+
+      teamLeaderService.retireTeamLeader.mockResolvedValue(result);
+
+      await expect(
+        controller.retire('team-leader-1', dto),
+      ).resolves.toBe(result);
+
+      expect(teamLeaderService.retireTeamLeader).toHaveBeenCalledWith(
+        'team-leader-1',
+        dto,
+      );
+    });
+
+    it('forwards retirement conflicts', async () => {
+      const conflict = new ConflictException(
+        'Retirement plan must include every Session',
+      );
+      teamLeaderService.retireTeamLeader.mockRejectedValue(conflict);
+
+      await expect(
+        controller.retire('team-leader-1', {
+          sessionReassignments: [],
+          agentReassignments: [],
+        }),
+      ).rejects.toBe(conflict);
     });
   });
 

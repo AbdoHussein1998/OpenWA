@@ -1080,6 +1080,53 @@ describe('TeamLeaderService', () => {
     });
   });
 
+  describe('retireTeamLeader', () => {
+    it('deletes an already-empty Team Leader through the safe principal lifecycle', async () => {
+      const teamLeader = createTeamLeader();
+
+      teamLeaderRepository.findOne.mockResolvedValue(teamLeader);
+      sessionRepository.find.mockResolvedValue([]);
+      agentRepository.find.mockResolvedValue([]);
+      sessionRepository.count.mockResolvedValue(0);
+      agentRepository.count.mockResolvedValue(0);
+      apiKeyRepository.find.mockResolvedValue([]);
+      teamLeaderRepository.remove.mockResolvedValue(teamLeader);
+
+      await expect(
+        service.retireTeamLeader(teamLeader.id, {
+          sessionReassignments: [],
+          agentReassignments: [],
+        }),
+      ).resolves.toEqual({
+        teamLeaderId: teamLeader.id,
+        teamLeaderName: teamLeader.name,
+        delegatedSessionIds: [],
+        delegatedAgentIds: [],
+        preservedAgentSessionAssignments: 0,
+      });
+
+      expect(teamLeaderRepository.remove).toHaveBeenCalledWith(teamLeader);
+    });
+
+    it('rejects a retirement plan that omits current resources', async () => {
+      const teamLeader = createTeamLeader();
+      const session = createSession();
+
+      teamLeaderRepository.findOne.mockResolvedValue(teamLeader);
+      sessionRepository.find.mockResolvedValue([session]);
+      agentRepository.find.mockResolvedValue([]);
+
+      await expect(
+        service.retireTeamLeader(teamLeader.id, {
+          sessionReassignments: [],
+          agentReassignments: [],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(mainDataSource.transaction).not.toHaveBeenCalled();
+    });
+  });
+
   describe('forceDeleteTeamLeader', () => {
     it('deletes owned Sessions through SessionService before deleting Agents and the Team Leader', async () => {
       const teamLeader = createTeamLeader();

@@ -32,6 +32,7 @@ import { SessionService } from '../session/session.service';
 
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { CreateTeamLeaderDto } from './dto/create-team-leader.dto';
+import { RetireTeamLeaderDto } from './dto/retire-team-leader.dto';
 import { Agent } from './entities/agent.entity';
 import { TeamLeader } from './entities/team-leader.entity';
 
@@ -142,6 +143,14 @@ export interface ForceDeleteTeamLeaderResult {
   teamLeaderName: string;
   deletedSessionIds: string[];
   deletedAgentIds: string[];
+}
+
+export interface RetireTeamLeaderResult {
+  teamLeaderId: string;
+  teamLeaderName: string;
+  delegatedSessionIds: string[];
+  delegatedAgentIds: string[];
+  preservedAgentSessionAssignments: number;
 }
 
 @Injectable()
@@ -777,6 +786,324 @@ export class TeamLeaderService {
     });
   }
 
+
+  /**
+   * Delegate every current Team Leader resource according to a complete
+   * retirement plan and then delete the now-empty Team Leader principal.
+   *
+   * TEAM_LEADER credentials represent a principal, so deleting one from the
+   * dashboard must retire or delegate the principal instead of deleting only
+   * the credential row.
+   */
+  async retireTeamLeader(
+    teamLeaderId: string,
+    dto: RetireTeamLeaderDto,
+  ): Promise<RetireTeamLeaderResult> {
+    const teamLeader = await this.getTeamLeader(teamLeaderId);
+    const resources = await this.getAdminTeamLeaderResources(teamLeaderId);
+
+    const sessionPlans = new Map(
+      dto.sessionReassignments.map(item => [item.sessionId, item]),
+    );
+    const agentPlans = new Map(
+      dto.agentReassignments.map(item => [item.agentId, item]),
+    );
+
+    const currentSessionIds = resources.sessions.map(session => session.id);
+    const currentAgentIds = resources.agents.map(agent => agent.id);
+
+    const planCoversExactly = (
+      currentIds: readonly string[],
+      plannedIds: readonly string[],
+    ): boolean => {
+      if (currentIds.length !== plannedIds.length) {
+        return false;
+      }
+
+      const current = new Set(currentIds);
+      return plannedIds.every(id => current.has(id));
+    };
+
+    if (
+      !planCoversExactly(
+        currentSessionIds,
+        dto.sessionReassignments.map(item => item.sessionId),
+      )
+    ) {
+      throw new ConflictException(
+        'Retirement plan must include every Session currently owned by the Team Leader exactly once',
+      );
+    }
+
+    if (
+      !planCoversExactly(
+        currentAgentIds,
+        dto.agentReassignments.map(item => item.agentId),
+      )
+    ) {
+      throw new ConflictException(
+        'Retirement plan must include every Agent currently owned by the Team Leader exactly once',
+      );
+    }
+
+    const targetTeamLeaderIds = [
+      ...new Set([
+        ...dto.sessionReassignments.map(item => item.targetTeamLeaderId),
+        ...dto.agentReassignments.map(item => item.targetTeamLeaderId),
+      ]),
+    ];
+
+    if (targetTeamLeaderIds.includes(teamLeaderId)) {
+      throw new ConflictException(
+        'A retiring Team Leader cannot be the destination of its own resources',
+      );
+    }
+
+    await Promise.all(
+      targetTeamLeaderIds.map(targetId => this.getTeamLeader(targetId)),
+    );
+
+    const originalAssignments = new Map(
+      resources.agents.map(agent => [agent.id, agent.assignedSessionId]),
+    );
+
+    const preservedAssignments: Array<{
+      agentId: string;
+      sessionId: string;
+    }> = [];
+
+    for (const agent of resources.agents) {
+      const plan = agentPlans.get(agent.id);
+
+      if (!plan) {
+        throw new ConflictException(
+          `Retirement plan is missing Agent ${agent.id}`,
+        );
+      }
+
+      if (!agent.assignedSessionId) {
+        continue;
+      }
+
+      const sessionPlan = sessionPlans.get(agent.assignedSessionId);
+      const assignmentCanSurvive =
+        sessionPlan !== undefined &&
+        sessionPlan.targetTeamLeaderId === plan.targetTeamLeaderId;
+
+      if (!assignmentCanSurvive && !plan.unassignSession) {
+        throw new ConflictException(
+          `Agent ${agent.id} cannot keep Session ${agent.assignedSessionId} because the Agent and Session are not delegated to the same Team Leader`,
+        );
+      }
+
+      if (assignmentCanSurvive && !plan.unassignSession) {
+        preservedAssignments.push({
+          agentId: agent.id,
+          sessionId: agent.assignedSessionId,
+        });
+      }
+    }
+
+    const sessionGroups = new Map<string, string[]>();
+    for (const item of dto.sessionReassignments) {
+      const ids = sessionGroups.get(item.targetTeamLeaderId) ?? [];
+      ids.push(item.sessionId);
+      sessionGroups.set(item.targetTeamLeaderId, ids);
+    }
+
+    const agentGroups = new Map<string, string[]>();
+    for (const item of dto.agentReassignments) {
+      const ids = agentGroups.get(item.targetTeamLeaderId) ?? [];
+      ids.push(item.agentId);
+      agentGroups.set(item.targetTeamLeaderId, ids);
+    }
+
+    try {
+      if (currentAgentIds.length > 0) {
+        await this.mainDataSource.transaction(async manager => {
+          const repository = manager.getRepository(Agent);
+          const currentAgents = await repository.find({
+            where: {
+              id: In(currentAgentIds),
+              teamLeaderId,
+            },
+          });
+
+          if (currentAgents.length !== currentAgentIds.length) {
+            throw new ConflictException(
+              'Agent ownership changed while the retirement plan was being prepared',
+            );
+          }
+
+          for (const agent of currentAgents) {
+            agent.assignedSessionId = null;
+          }
+
+          if (currentAgents.length > 0) {
+            await repository.save(currentAgents);
+          }
+        });
+
+        const agentKeyIds = await this.getAgentApiKeyIds(currentAgentIds);
+        this.evictApiKeys(agentKeyIds, 'authorization_changed');
+      }
+
+      for (const [targetTeamLeaderId, sessionIds] of sessionGroups) {
+        if (sessionIds.length > 0) {
+          await this.reassignAdminSessions(
+            teamLeaderId,
+            sessionIds,
+            targetTeamLeaderId,
+          );
+        }
+      }
+
+      for (const [targetTeamLeaderId, agentIds] of agentGroups) {
+        if (agentIds.length > 0) {
+          await this.reassignAdminAgents(
+            agentIds,
+            targetTeamLeaderId,
+            true,
+          );
+        }
+      }
+
+      for (const assignment of preservedAssignments) {
+        await this.assignAdminAgentSession(
+          assignment.agentId,
+          assignment.sessionId,
+        );
+      }
+
+      const [remainingSessionCount, remainingAgentCount] = await Promise.all([
+        this.sessionRepository.count({
+          where: {
+            ownerTeamLeaderId: teamLeaderId,
+          },
+        }),
+        this.agentRepository.count({
+          where: {
+            teamLeaderId,
+          },
+        }),
+      ]);
+
+      if (remainingSessionCount > 0 || remainingAgentCount > 0) {
+        throw new ConflictException(
+          'Team Leader resources changed during retirement; retry after concurrent changes stop',
+        );
+      }
+
+      await this.deleteTeamLeader(teamLeaderId);
+    } catch (error) {
+      try {
+        if (currentAgentIds.length > 0) {
+          await this.mainDataSource.transaction(async manager => {
+            const repository = manager.getRepository(Agent);
+            const currentAgents = await repository.find({
+              where: {
+                id: In(currentAgentIds),
+              },
+            });
+
+            for (const agent of currentAgents) {
+              agent.teamLeaderId = teamLeaderId;
+              agent.assignedSessionId = null;
+            }
+
+            if (currentAgents.length > 0) {
+              await repository.save(currentAgents);
+            }
+          });
+        }
+
+        if (currentSessionIds.length > 0) {
+          await this.sessionRepository.manager.transaction(async manager => {
+            const repository = manager.getRepository(Session);
+            const currentSessions = await repository.find({
+              where: {
+                id: In(currentSessionIds),
+              },
+            });
+
+            for (const session of currentSessions) {
+              session.ownerTeamLeaderId = teamLeaderId;
+            }
+
+            if (currentSessions.length > 0) {
+              await repository.save(currentSessions);
+            }
+          });
+        }
+
+        if (currentAgentIds.length > 0) {
+          await this.mainDataSource.transaction(async manager => {
+            const repository = manager.getRepository(Agent);
+            const currentAgents = await repository.find({
+              where: {
+                id: In(currentAgentIds),
+                teamLeaderId,
+              },
+            });
+
+            for (const agent of currentAgents) {
+              agent.assignedSessionId =
+                originalAssignments.get(agent.id) ?? null;
+            }
+
+            if (currentAgents.length > 0) {
+              await repository.save(currentAgents);
+            }
+          });
+
+          const agentKeyIds = await this.getAgentApiKeyIds(currentAgentIds);
+          this.evictApiKeys(agentKeyIds, 'authorization_changed');
+        }
+
+        const teamLeaderKeyIds = await this.getTeamLeaderApiKeyIds([
+          teamLeaderId,
+          ...targetTeamLeaderIds,
+        ]);
+        this.evictApiKeys(teamLeaderKeyIds, 'authorization_changed');
+      } catch (rollbackError) {
+        this.logger.error(
+          'Failed to fully compensate Team Leader retirement',
+          rollbackError instanceof Error
+            ? rollbackError.stack
+            : undefined,
+          {
+            teamLeaderId,
+            error:
+              rollbackError instanceof Error
+                ? rollbackError.message
+                : String(rollbackError),
+            action: 'team_leader_retirement_compensation_failed',
+          },
+        );
+      }
+
+      throw error;
+    }
+
+    this.logger.log(
+      `Team Leader retired after resource delegation: ${teamLeader.name}`,
+      {
+        teamLeaderId,
+        delegatedSessionIds: currentSessionIds,
+        delegatedAgentIds: currentAgentIds,
+        preservedAgentSessionAssignments: preservedAssignments.length,
+        action: 'team_leader_retired',
+      },
+    );
+
+    return {
+      teamLeaderId,
+      teamLeaderName: teamLeader.name,
+      delegatedSessionIds: currentSessionIds,
+      delegatedAgentIds: currentAgentIds,
+      preservedAgentSessionAssignments: preservedAssignments.length,
+    };
+  }
 
   /**
    * Permanently delete a Team Leader and every resource owned by that

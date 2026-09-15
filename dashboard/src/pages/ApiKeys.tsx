@@ -5,6 +5,7 @@
 
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -67,6 +68,14 @@ import {
 import {
   GeneratedKeyField,
 } from '../components/GeneratedKeyField';
+
+import {
+  AgentRetirementModal,
+} from '../components/AgentRetirementModal';
+
+import {
+  TeamLeaderRetirementModal,
+} from '../components/TeamLeaderRetirementModal';
 
 import {
   useToast,
@@ -374,6 +383,24 @@ export function ApiKeys() {
     >(
       null,
     );
+
+  const [
+    retiringTeamLeaderKey,
+    setRetiringTeamLeaderKey,
+  ] = useState<{
+    apiKeyId: string;
+    teamLeaderId: string;
+    name: string;
+  } | null>(null);
+
+  const [
+    retiringAgentKey,
+    setRetiringAgentKey,
+  ] = useState<{
+    apiKeyId: string;
+    agentId: string;
+    name: string;
+  } | null>(null);
 
   const [
     confirmAction,
@@ -935,6 +962,60 @@ export function ApiKeys() {
       }
     };
 
+  const requestDelete =
+    useCallback(
+      (
+        apiKey: ApiKey,
+      ) => {
+        const displayName =
+          credentialDisplayName(
+            apiKey,
+          );
+
+        if (
+          apiKey.role ===
+            'team_leader' &&
+          apiKey.teamLeaderId
+        ) {
+          setRetiringTeamLeaderKey({
+            apiKeyId:
+              apiKey.id,
+            teamLeaderId:
+              apiKey.teamLeaderId,
+            name:
+              displayName,
+          });
+          return;
+        }
+
+        if (
+          apiKey.role ===
+            'agent' &&
+          apiKey.agentId
+        ) {
+          setRetiringAgentKey({
+            apiKeyId:
+              apiKey.id,
+            agentId:
+              apiKey.agentId,
+            name:
+              displayName,
+          });
+          return;
+        }
+
+        setConfirmAction({
+          type:
+            'delete',
+          id:
+            apiKey.id,
+          name:
+            displayName,
+        });
+      },
+      [],
+    );
+
   const confirmAndExecute =
     () => {
       if (
@@ -1354,15 +1435,8 @@ export function ApiKeys() {
                         <button
                           className="icon-btn danger"
                           onClick={() =>
-                            setConfirmAction(
-                              {
-                                type:
-                                  'delete',
-                                id:
-                                  apiKey.id,
-                                name:
-                                  displayName,
-                              },
+                            requestDelete(
+                              apiKey,
                             )
                           }
                           disabled={
@@ -1410,6 +1484,7 @@ export function ApiKeys() {
         knownApiKeys,
         reissueMutation.isPending,
         reissueMutation.variables,
+        requestDelete,
         revokeMutation.isPending,
         revokeMutation.variables,
         roleLabel,
@@ -2094,6 +2169,88 @@ export function ApiKeys() {
           </div>
         </div>
       </div>
+
+      <AgentRetirementModal
+        open={
+          retiringAgentKey !==
+          null
+        }
+        agentId={
+          retiringAgentKey?.agentId ??
+          null
+        }
+        onClose={() =>
+          setRetiringAgentKey(
+            null,
+          )
+        }
+        onRetired={() => {
+          const keyId =
+            retiringAgentKey?.apiKeyId;
+
+          if (!keyId) {
+            return;
+          }
+
+          setKnownApiKeys(current => {
+            const next = {
+              ...current,
+            };
+            delete next[keyId];
+            return next;
+          });
+
+          setVisibleKeys(previous => {
+            const next =
+              new Set(previous);
+            next.delete(keyId);
+            return next;
+          });
+
+          setRetiringAgentKey(
+            null,
+          );
+        }}
+      />
+
+      <TeamLeaderRetirementModal
+        open={
+          retiringTeamLeaderKey !==
+          null
+        }
+        teamLeaderId={
+          retiringTeamLeaderKey?.teamLeaderId ??
+          null
+        }
+        onClose={() =>
+          setRetiringTeamLeaderKey(
+            null,
+          )
+        }
+        onRetired={() => {
+          const keyId =
+            retiringTeamLeaderKey?.apiKeyId;
+
+          if (!keyId) {
+            return;
+          }
+
+          setKnownApiKeys(current => {
+            const next = {
+              ...current,
+            };
+            delete next[keyId];
+            return next;
+          });
+
+          setVisibleKeys(previous => {
+            const next =
+              new Set(previous);
+            next.delete(keyId);
+            return next;
+          });
+        }}
+      />
 
       {confirmAction && (
         <Modal
