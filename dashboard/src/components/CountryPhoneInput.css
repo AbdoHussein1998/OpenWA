@@ -1,0 +1,85 @@
+.country-phone-input {
+  display: grid;
+  grid-template-columns: minmax(105px, 120px) minmax(180px, 1fr);
+  gap: 0.55rem;
+  width: 100%;
+}
+
+.country-phone-input__country,
+.country-phone-input__number {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.country-phone-input__country {
+  min-height: 40px;
+  padding: 0.625rem 1.8rem 0.625rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-white);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.country-phone-input__number-wrap {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-white);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.country-phone-input__prefix {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.7rem;
+  border-right: 1px solid var(--border);
+  background: var(--bg-light);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.country-phone-input__number {
+  min-height: 38px;
+  padding: 0.625rem 0.75rem;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: none;
+  background: transparent !important;
+  color: var(--text-primary);
+  box-shadow: none !important;
+}
+
+.country-phone-input__number::placeholder {
+  color: var(--text-muted);
+}
+
+.country-phone-input__country:focus,
+.country-phone-input__number-wrap:focus-within {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.1);
+}
+
+.country-phone-input__country:disabled,
+.country-phone-input__number:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (max-width: 640px) {
+  .country-phone-input {
+    grid-template-columns: 1fr;
+  }
+}

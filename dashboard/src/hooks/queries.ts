@@ -585,10 +585,11 @@ export function useTeamLeaderMeQuery() {
   });
 }
 
-export function useTeamLeaderAgentsQuery() {
+export function useTeamLeaderAgentsQuery(enabled = true) {
   return useQuery({
     queryKey: queryKeys.teamLeaderAgents,
     queryFn: teamLeaderApi.listAgents,
+    enabled,
     staleTime: 30_000,
   });
 }

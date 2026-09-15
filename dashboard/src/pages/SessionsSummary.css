@@ -1,0 +1,111 @@
+.sessions-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.sessions-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-white);
+  box-shadow: var(--shadow-sm);
+}
+
+.sessions-summary-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+}
+
+.sessions-summary-card--assigned .sessions-summary-icon {
+  background: rgba(22, 163, 74, 0.1);
+  color: #15803d;
+}
+
+.sessions-summary-card--unassigned .sessions-summary-icon {
+  background: rgba(245, 158, 11, 0.11);
+  color: #b45309;
+}
+
+.sessions-summary-card > div:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.sessions-summary-label {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sessions-summary-value {
+  color: var(--text-primary);
+  font-size: 1.65rem;
+  line-height: 1.1;
+}
+
+.sessions-summary-hint {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.session-card-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.session-assignment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.session-assignment-badge.assigned {
+  border-color: rgba(22, 163, 74, 0.22);
+  background: rgba(22, 163, 74, 0.1);
+  color: #15803d;
+}
+
+.session-assignment-badge.unassigned {
+  border-color: rgba(245, 158, 11, 0.24);
+  background: rgba(245, 158, 11, 0.11);
+  color: #b45309;
+}
+
+@media (max-width: 900px) {
+  .sessions-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .session-card-badges {
+    justify-content: flex-start;
+  }
+}

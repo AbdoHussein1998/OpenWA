@@ -1,9 +1,7 @@
-
-
-
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -15,6 +13,7 @@ import {
 import {
   Eye,
   Filter,
+  Layers3,
   Loader2,
   Play,
   Plus,
@@ -25,6 +24,8 @@ import {
   Square,
   Trash2,
   Unlink,
+  UserCheck,
+  UserMinus,
   Users,
 } from 'lucide-react';
 import type { TFunction } from 'i18next';
@@ -42,6 +43,7 @@ import {
   useAdminTeamLeadersQuery,
   useAssignAdminAgentSessionMutation,
   useSetAdminSessionOwnerMutation,
+  useTeamLeaderAgentsQuery,
 } from '../hooks/queries';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import {
@@ -73,7 +75,9 @@ import { useSessionCreateForm } from '../hooks/useSessionCreateForm';
 import { PageHeader } from '../components/PageHeader';
 import { CustomSelect } from '../components/CustomSelect';
 import { Modal } from '../components/Modal';
+import { CountryPhoneInput } from '../components/CountryPhoneInput';
 import './Sessions.css';
+import './SessionsSummary.css';
 
 type AdminAssignmentMode = 'team_leader' | 'agent';
 
@@ -163,6 +167,7 @@ export function Sessions() {
     canStartSessions,
     canShutdownSessions,
     canManagePrincipals,
+    isTeamLeader,
   } = useRole();
   const queryClient = useQueryClient();
 
@@ -170,6 +175,8 @@ export function Sessions() {
     useAdminTeamLeadersQuery(canManagePrincipals);
   const adminAgentsQuery =
     useAdminAgentsQuery(canManagePrincipals);
+  const teamLeaderAgentsQuery =
+    useTeamLeaderAgentsQuery(isTeamLeader);
   const setAdminSessionOwnerMutation =
     useSetAdminSessionOwnerMutation();
   const assignAdminAgentSessionMutation =
@@ -1071,6 +1078,80 @@ export function Sessions() {
     }
   };
 
+  const assignedSessionIds =
+    useMemo(() => {
+      const ids =
+        new Set<string>();
+
+      if (canManagePrincipals) {
+        for (
+          const agent of
+          adminAgentsQuery.data ?? []
+        ) {
+          if (agent.assignedSessionId) {
+            ids.add(
+              agent.assignedSessionId,
+            );
+          }
+        }
+      } else if (isTeamLeader) {
+        for (
+          const agent of
+          teamLeaderAgentsQuery.data ?? []
+        ) {
+          if (agent.assignedSessionId) {
+            ids.add(
+              agent.assignedSessionId,
+            );
+          }
+        }
+      }
+
+      return ids;
+    }, [
+      adminAgentsQuery.data,
+      canManagePrincipals,
+      isTeamLeader,
+      teamLeaderAgentsQuery.data,
+    ]);
+
+  const assignmentDataLoading =
+    canManagePrincipals
+      ? adminAgentsQuery.isLoading
+      : isTeamLeader
+        ? teamLeaderAgentsQuery.isLoading
+        : false;
+
+  const assignmentDataAvailable =
+    canManagePrincipals
+      ? !adminAgentsQuery.isError
+      : isTeamLeader
+        ? !teamLeaderAgentsQuery.isError
+        : false;
+
+  const totalSessionCount =
+    sessions.length;
+
+  const assignedSessionCount =
+    assignmentDataAvailable
+      ? sessions.reduce(
+          (count, session) =>
+            count +
+            (assignedSessionIds.has(
+              session.id,
+            )
+              ? 1
+              : 0),
+          0,
+        )
+      : null;
+
+  const unassignedSessionCount =
+    assignedSessionCount === null
+      ? null
+      : totalSessionCount -
+        assignedSessionCount;
+
   const filteredSessions =
     filterSessions(
       sessions,
@@ -1268,6 +1349,120 @@ export function Sessions() {
           ) : null
         }
       />
+
+      <section
+        className="sessions-summary-grid"
+        aria-label="Session assignment overview"
+      >
+        <article className="sessions-summary-card">
+          <div className="sessions-summary-icon">
+            <Layers3 size={20} />
+          </div>
+          <div>
+            <span className="sessions-summary-label">
+              {t(
+                'sessions.summary.total',
+                {
+                  defaultValue:
+                    'Total Sessions',
+                },
+              )}
+            </span>
+            <strong className="sessions-summary-value">
+              {totalSessionCount}
+            </strong>
+            <span className="sessions-summary-hint">
+              {t(
+                'sessions.summary.totalHint',
+                {
+                  defaultValue:
+                    'All Sessions visible to this account',
+                },
+              )}
+            </span>
+          </div>
+        </article>
+
+        <article className="sessions-summary-card sessions-summary-card--assigned">
+          <div className="sessions-summary-icon">
+            <UserCheck size={20} />
+          </div>
+          <div>
+            <span className="sessions-summary-label">
+              {t(
+                'sessions.summary.assigned',
+                {
+                  defaultValue:
+                    'Assigned Sessions',
+                },
+              )}
+            </span>
+            <strong className="sessions-summary-value">
+              {assignmentDataLoading
+                ? '…'
+                : assignedSessionCount ??
+                  '—'}
+            </strong>
+            <span className="sessions-summary-hint">
+              {assignmentDataAvailable
+                ? t(
+                    'sessions.summary.assignedHint',
+                    {
+                      defaultValue:
+                        'Sessions assigned to Agents',
+                    },
+                  )
+                : t(
+                    'sessions.summary.assignmentUnavailable',
+                    {
+                      defaultValue:
+                        'Assignment data unavailable for this role',
+                    },
+                  )}
+            </span>
+          </div>
+        </article>
+
+        <article className="sessions-summary-card sessions-summary-card--unassigned">
+          <div className="sessions-summary-icon">
+            <UserMinus size={20} />
+          </div>
+          <div>
+            <span className="sessions-summary-label">
+              {t(
+                'sessions.summary.unassigned',
+                {
+                  defaultValue:
+                    'Unassigned Sessions',
+                },
+              )}
+            </span>
+            <strong className="sessions-summary-value">
+              {assignmentDataLoading
+                ? '…'
+                : unassignedSessionCount ??
+                  '—'}
+            </strong>
+            <span className="sessions-summary-hint">
+              {assignmentDataAvailable
+                ? t(
+                    'sessions.summary.unassignedHint',
+                    {
+                      defaultValue:
+                        'Sessions with no Agent assignment',
+                    },
+                  )
+                : t(
+                    'sessions.summary.assignmentUnavailable',
+                    {
+                      defaultValue:
+                        'Assignment data unavailable for this role',
+                    },
+                  )}
+            </span>
+          </div>
+        </article>
+      </section>
 
       <div className="filters-bar">
         <div className="search-input">
@@ -1481,17 +1676,21 @@ export function Sessions() {
                     },
                   )}
                 </label>
-                <input
+                <CountryPhoneInput
                   id="sess-target-phone"
-                  type="tel"
-                  maxLength={20}
-                  placeholder="+201234567890"
                   value={targetPhone}
-                  onChange={event =>
+                  placeholder="Local phone number"
+                  ariaLabel={t(
+                    'sessions.create.targetPhoneCountry',
+                    {
+                      defaultValue:
+                        'Target phone country code',
+                    },
+                  )}
+                  onChange={value =>
                     setCreateInput(current => ({
                       ...current,
-                      targetPhone:
-                        event.target.value,
+                      targetPhone: value,
                     }))
                   }
                 />
@@ -1501,7 +1700,7 @@ export function Sessions() {
                       'sessions.create.targetPhoneInvalid',
                       {
                         defaultValue:
-                          'Use an international number with 7 to 15 digits, optionally prefixed with +.',
+                          'Choose a country code and enter a valid phone number. The complete international number must contain 7 to 15 digits.',
                       },
                     )}
                   </p>
@@ -1858,27 +2057,31 @@ export function Sessions() {
                           'sessions.pairing.phoneLabel',
                         )}
                       </label>
-                      <input
+                      <CountryPhoneInput
                         id="pairing-phone"
-                        className="pairing-input"
-                        type="tel"
-                        inputMode="numeric"
-                        maxLength={15}
-                        placeholder={t(
-                          'sessions.pairing.phonePlaceholder',
-                        )}
+                        inputClassName="pairing-input"
                         value={phoneNumber}
-                        onChange={event =>
-                          setPhoneNumber(
-                            event.target.value.replace(
-                              /\D/g,
-                              '',
-                            ),
-                          )
-                        }
+                        placeholder={t(
+                          'sessions.pairing.localPhonePlaceholder',
+                          {
+                            defaultValue:
+                              'Local phone number',
+                          },
+                        )}
+                        ariaLabel={t(
+                          'sessions.pairing.countryCode',
+                          {
+                            defaultValue:
+                              'Country code',
+                          },
+                        )}
+                        onChange={setPhoneNumber}
                         onKeyDown={event => {
                           if (
-                            event.key === 'Enter'
+                            event.key === 'Enter' &&
+                            isValidPairingPhone(
+                              phoneNumber,
+                            )
                           ) {
                             void handleGeneratePairingCode();
                           }
@@ -2636,13 +2839,72 @@ export function Sessions() {
                 <h3 title={session.name}>
                   {session.name}
                 </h3>
-                <span
-                  className={`status-pill ${session.status}`}
-                >
-                  {formatStatus(
-                    session.status,
-                  )}
-                </span>
+                <div className="session-card-badges">
+                  <span
+                    className={`status-pill ${session.status}`}
+                  >
+                    {formatStatus(
+                      session.status,
+                    )}
+                  </span>
+
+                  {assignmentDataAvailable ? (
+                    <span
+                      className={`session-assignment-badge ${
+                        assignedSessionIds.has(
+                          session.id,
+                        )
+                          ? 'assigned'
+                          : 'unassigned'
+                      }`}
+                      title={
+                        assignedSessionIds.has(
+                          session.id,
+                        )
+                          ? t(
+                              'sessions.assignment.assignedTitle',
+                              {
+                                defaultValue:
+                                  'Assigned to an Agent',
+                              },
+                            )
+                          : t(
+                              'sessions.assignment.unassignedTitle',
+                              {
+                                defaultValue:
+                                  'Not assigned to any Agent',
+                              },
+                            )
+                      }
+                    >
+                      {assignedSessionIds.has(
+                        session.id,
+                      ) ? (
+                        <>
+                          <UserCheck size={13} />
+                          {t(
+                            'sessions.assignment.assigned',
+                            {
+                              defaultValue:
+                                'Assigned',
+                            },
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <UserMinus size={13} />
+                          {t(
+                            'sessions.assignment.unassigned',
+                            {
+                              defaultValue:
+                                'Unassigned',
+                            },
+                          )}
+                        </>
+                      )}
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
               {session.status ===
@@ -2909,6 +3171,3 @@ export function Sessions() {
     </div>
   );
 }
-
-
-

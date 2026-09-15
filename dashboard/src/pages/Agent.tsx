@@ -133,6 +133,9 @@ import {
   useMarkChatRead,
 } from '../hooks/useMarkChatRead';
 
+import {
+  Modal,
+} from '../components/Modal';
 
 import ChatSidebar from '../components/chats/ChatSidebar';
 
@@ -146,10 +149,15 @@ import MediaLightbox, {
   type LightboxItem,
 } from '../components/chats/MediaLightbox';
 
+import {
+  CountryPhoneInput,
+} from '../components/CountryPhoneInput';
+
 import KindIcon from '../components/chats/KindIcon';
 
 import './Chats.css';
 import './Agent.css';
+import './AgentQrModal.css';
 
 /* ================================================================
    CONSTANTS
@@ -536,6 +544,37 @@ export function Agent() {
       null,
     );
 
+  /**
+   * QR display is intentionally user-controlled.
+   *
+   * Receiving/generating a QR only makes the "Show QR Code" action
+   * available. The image itself is rendered in a modal only after the Agent
+   * explicitly clicks that action, so short-lived Session status transitions
+   * cannot make the QR flash on screen and disappear before it can be scanned.
+   */
+  const [
+    qrDisplayOpen,
+    setQrDisplayOpen,
+  ] =
+    useState(false);
+
+  /**
+   * Stable copy of the latest generated QR for the currently assigned Session.
+   *
+   * `useSessionPairing().qrData` is transport/polling state and may be cleared
+   * during short status transitions. UI availability must not depend on that
+   * transient value, otherwise the Show QR button can flash and disappear.
+   * This value is cleared only when the assignment changes, the Session becomes
+   * ready, or the Agent explicitly stops/unlinks/kills the Session.
+   */
+  const [
+    latchedQrData,
+    setLatchedQrData,
+  ] = useState<{
+    sessionId: string;
+    qrCode: string;
+  } | null>(null);
+
   const activeChatId =
     activeChat?.id ??
     null;
@@ -574,7 +613,12 @@ export function Agent() {
       sessions,
     );
 
-  const qrAutoOpenKeyRef =
+  const qrPrefetchKeyRef =
+    useRef<string | null>(
+      null,
+    );
+
+  const qrReadyNotifiedSessionRef =
     useRef<string | null>(
       null,
     );
@@ -664,6 +708,31 @@ export function Agent() {
       handleShowQR;
   }, [
     handleShowQR,
+  ]);
+
+  /**
+   * Capture QR values obtained through the REST/polling path. Once captured,
+   * the UI no longer depends on the hook continuing to expose `qrData`.
+   */
+  useEffect(() => {
+    if (
+      !assignedSession ||
+      !qrData?.qrCode ||
+      qrData.sessionId !==
+        assignedSession.id
+    ) {
+      return;
+    }
+
+    setLatchedQrData({
+      sessionId:
+        qrData.sessionId,
+      qrCode:
+        qrData.qrCode,
+    });
+  }, [
+    assignedSession,
+    qrData,
   ]);
 
   /* ================================================================
@@ -795,8 +864,20 @@ export function Agent() {
       previousAssignedSessionIdRef.current !==
       selectedSessionId
     ) {
+      setQrDisplayOpen(
+        false,
+      );
+
+      setLatchedQrData(
+        null,
+      );
+
       handleCloseQRModal();
-      qrAutoOpenKeyRef.current =
+
+      qrPrefetchKeyRef.current =
+        null;
+
+      qrReadyNotifiedSessionRef.current =
         null;
 
       previousAssignedSessionIdRef.current =
@@ -808,48 +889,36 @@ export function Agent() {
   ]);
 
   /**
-   * Prime the inline QR panel whenever the assigned session enters a
-   * state where pairing can be completed. `useSessionPairing` then owns
-   * the 5-second refresh loop and the latest QR value.
+   * Prime the QR data in the background, but never display it automatically.
    *
-   * The stable ref avoids re-running this effect simply because the
-   * hook's public handler function gets a new identity on render.
+   * `useSessionPairing` owns fetching/refreshing the latest QR. This page only
+   * exposes the QR after the Agent explicitly presses "Show QR Code".
+   *
+   * Importantly, we do not dismiss cached QR data merely because the Session
+   * briefly leaves `qr_ready`. WhatsApp engines can move through transient
+   * states very quickly; tying visibility to those states caused the QR to
+   * flash and disappear before the Agent could scan it.
    */
   useEffect(() => {
     if (
       !assignedSession
     ) {
-      qrAutoOpenKeyRef.current =
+      qrPrefetchKeyRef.current =
         null;
       return;
     }
 
-    const shouldPrimeQr =
+    const shouldPrefetchQr =
       assignedSession.status ===
         'initializing' ||
       assignedSession.status ===
         'qr_ready';
 
     if (
-      !shouldPrimeQr
+      !shouldPrefetchQr
     ) {
-      qrAutoOpenKeyRef.current =
+      qrPrefetchKeyRef.current =
         null;
-
-      /**
-       * Keep the existing QR/pairing state through the short
-       * `authenticating` handshake only. Every other state means the QR
-       * is no longer actionable and must disappear from the card.
-       */
-      if (
-        assignedSession.status !==
-        'authenticating'
-      ) {
-        dismissQrForSession(
-          assignedSession.id,
-        );
-      }
-
       return;
     }
 
@@ -857,13 +926,13 @@ export function Agent() {
       `${assignedSession.id}:${assignedSession.status}`;
 
     if (
-      qrAutoOpenKeyRef.current ===
+      qrPrefetchKeyRef.current ===
       key
     ) {
       return;
     }
 
-    qrAutoOpenKeyRef.current =
+    qrPrefetchKeyRef.current =
       key;
 
     void handleShowQRRef.current(
@@ -871,7 +940,6 @@ export function Agent() {
     );
   }, [
     assignedSession,
-    dismissQrForSession,
   ]);
 
   useEffect(() => {
@@ -1233,6 +1301,13 @@ export function Agent() {
             assignedSession.id,
           );
 
+          setQrDisplayOpen(
+            false,
+          );
+          setLatchedQrData(
+            null,
+          );
+
           dismissQrForSession(
             assignedSession.id,
           );
@@ -1310,6 +1385,13 @@ export function Agent() {
         try {
           await sessionApi.logout(
             assignedSession.id,
+          );
+
+          setQrDisplayOpen(
+            false,
+          );
+          setLatchedQrData(
+            null,
           );
 
           dismissQrForSession(
@@ -1414,6 +1496,13 @@ export function Agent() {
         try {
           await sessionApi.forceKill(
             assignedSession.id,
+          );
+
+          setQrDisplayOpen(
+            false,
+          );
+          setLatchedQrData(
+            null,
           );
 
           dismissQrForSession(
@@ -2523,17 +2612,33 @@ export function Agent() {
           return;
         }
 
+        /**
+         * Do not clear QR state on transient engine statuses.
+         *
+         * A generated QR must remain available until the Agent closes the
+         * popup or authentication actually completes. Explicit stop/unlink/
+         * force-kill handlers already clear pairing state themselves.
+         */
         if (
-          event.status !==
-            'initializing' &&
-          event.status !==
-            'qr_ready' &&
-          event.status !==
-            'authenticating'
+          event.status ===
+          'ready'
         ) {
+          setQrDisplayOpen(
+            false,
+          );
+          setLatchedQrData(
+            null,
+          );
+
           dismissQrForSession(
             event.sessionId,
           );
+
+          qrPrefetchKeyRef.current =
+            null;
+
+          qrReadyNotifiedSessionRef.current =
+            null;
         }
 
         void reloadSessions();
@@ -2560,6 +2665,13 @@ export function Agent() {
         ) {
           return;
         }
+
+        setLatchedQrData({
+          sessionId:
+            event.sessionId,
+          qrCode:
+            event.qrCode,
+        });
 
         applyQrPush(
           event,
@@ -2865,10 +2977,54 @@ export function Agent() {
 
   const assignedQrData =
     assignedSession &&
-    qrData?.sessionId ===
+    latchedQrData?.sessionId ===
       assignedSession.id
-      ? qrData
-      : null;
+      ? latchedQrData
+      : assignedSession &&
+          qrData?.sessionId ===
+            assignedSession.id
+        ? qrData
+        : null;
+
+  /**
+   * Surface QR readiness as a notification instead of auto-opening the image.
+   * This also covers QR values obtained by the REST prefetch path, not only
+   * WebSocket `session.qr` pushes.
+   */
+  useEffect(() => {
+    if (
+      !assignedSession ||
+      !assignedQrData?.qrCode ||
+      qrReadyNotifiedSessionRef.current ===
+        assignedSession.id
+    ) {
+      return;
+    }
+
+    qrReadyNotifiedSessionRef.current =
+      assignedSession.id;
+
+    toast.info(
+      t(
+        'agent.qrReadyTitle',
+        'QR code ready',
+      ),
+      t(
+        'agent.qrReadyDescription',
+        'Use the green "Show QR Code" button beside the Session controls to open it.',
+      ),
+    );
+  }, [
+    assignedQrData?.qrCode,
+    assignedSession,
+    t,
+    toast,
+  ]);
+
+  const qrCodeReady =
+    Boolean(
+      assignedQrData?.qrCode,
+    );
 
   const showPairingPanel =
     Boolean(
@@ -3357,6 +3513,30 @@ export function Agent() {
               )
             )}
 
+            {qrCodeReady && (
+              <button
+                type="button"
+                className="agent-show-qr-btn"
+                onClick={() =>
+                  setQrDisplayOpen(
+                    true,
+                  )
+                }
+                disabled={
+                  sessionActionPending
+                }
+              >
+                <QrCode
+                  size={17}
+                />
+
+                {t(
+                  'agent.showQrButton',
+                  'Show QR Code',
+                )}
+              </button>
+            )}
+
             {canUnlinkSession(
               assignedSession,
               canShutdownSessions,
@@ -3517,35 +3697,38 @@ export function Agent() {
                   className="agent-qr-panel"
                   role="tabpanel"
                 >
-                  {assignedQrData?.qrCode ? (
-                    <>
-                      <img
-                        src={
-                          assignedQrData.qrCode
-                        }
-                        alt={t(
-                          'sessions.qr.title',
-                          'WhatsApp QR code',
-                        )}
-                        className="agent-qr-image"
-                      />
+                  {qrCodeReady ? (
+                    <div className="agent-qr-ready">
+                      <div className="agent-qr-ready-copy">
+                        <QrCode
+                          size={28}
+                          aria-hidden="true"
+                        />
 
-                      <div className="agent-qr-copy">
-                        <strong>
-                          {t(
-                            'sessions.qr.scanToConnect',
-                            'Scan to connect',
-                          )}
-                        </strong>
+                        <div>
+                          <strong>
+                            {t(
+                              'agent.qrReadyTitle',
+                              'QR code ready',
+                            )}
+                          </strong>
 
-                        <span>
-                          {t(
-                            'agent.qrLiveHint',
-                            'This QR updates automatically when WhatsApp issues a new code.',
-                          )}
-                        </span>
+                          <span>
+                            {t(
+                              'agent.qrReadyInlineHint',
+                              'The QR will not open automatically. Open it when you are ready to scan.',
+                            )}
+                          </span>
+                        </div>
                       </div>
-                    </>
+
+                      <span className="agent-qr-ready-action-hint">
+                        {t(
+                          'agent.qrReadyControlHint',
+                          'Use the green Show QR Code button in the Session controls above.',
+                        )}
+                      </span>
+                    </div>
                   ) : (
                     <div className="agent-qr-loading">
                       <Loader2
@@ -3555,8 +3738,8 @@ export function Agent() {
 
                       <span>
                         {t(
-                          'sessions.qr.generating',
-                          'Generating QR code…',
+                          'agent.qrGeneratingButtonHint',
+                          'Generating QR code… The Show QR Code button will appear when it is ready.',
                         )}
                       </span>
                     </div>
@@ -3596,42 +3779,30 @@ export function Agent() {
                         )}
                       </label>
 
-                      <input
+                      <CountryPhoneInput
                         id="agent-pairing-phone"
-                        type="tel"
-                        inputMode="numeric"
-                        maxLength={15}
-                        className="agent-pairing-input"
+                        inputClassName="agent-pairing-input"
+                        value={phoneNumber}
                         placeholder={t(
-                          'sessions.pairing.phonePlaceholder',
-                          'International phone number',
+                          'sessions.pairing.localPhonePlaceholder',
+                          'Local phone number',
                         )}
-                        value={
-                          phoneNumber
-                        }
-                        onChange={
-                          event =>
-                            setPhoneNumber(
-                              event.target.value.replace(
-                                /\D/g,
-                                '',
-                              ),
+                        ariaLabel={t(
+                          'sessions.pairing.countryCode',
+                          'Country code',
+                        )}
+                        onChange={setPhoneNumber}
+                        onKeyDown={event => {
+                          if (
+                            event.key === 'Enter' &&
+                            assignedQrData &&
+                            isValidPairingPhone(
+                              phoneNumber,
                             )
-                        }
-                        onKeyDown={
-                          event => {
-                            if (
-                              event.key ===
-                              'Enter' &&
-                              assignedQrData &&
-                              isValidPairingPhone(
-                                phoneNumber,
-                              )
-                            ) {
-                              void handleGeneratePairingCode();
-                            }
+                          ) {
+                            void handleGeneratePairingCode();
                           }
-                        }
+                        }}
                       />
 
                       <button
@@ -3707,7 +3878,7 @@ export function Agent() {
       </section>
 
       <section
-        className="agent-identity-grid\"
+        className="agent-identity-grid"
         aria-label={t(
           'agent.assignmentSummary',
           'Agent assignment summary',
@@ -4134,6 +4305,82 @@ export function Agent() {
           </div>
         </section>
       )}
+
+      <Modal
+        open={
+          qrDisplayOpen
+        }
+        onClose={() =>
+          setQrDisplayOpen(
+            false,
+          )
+        }
+        title={t(
+          'sessions.qr.title',
+          'WhatsApp QR code',
+        )}
+        className="agent-qr-modal"
+        closeLabel={t(
+          'common.close',
+          'Close',
+        )}
+      >
+        <div className="agent-qr-modal-content">
+          {assignedQrData?.qrCode ? (
+            <>
+              <div className="agent-qr-modal-image-wrap">
+                <img
+                  src={
+                    assignedQrData.qrCode
+                  }
+                  alt={t(
+                    'sessions.qr.title',
+                    'WhatsApp QR code',
+                  )}
+                  className="agent-qr-modal-image"
+                />
+              </div>
+
+              <div className="agent-qr-modal-copy">
+                <strong>
+                  {t(
+                    'sessions.qr.scanToConnect',
+                    'Scan to connect',
+                  )}
+                </strong>
+
+                <span>
+                  {t(
+                    'agent.qrModalHint',
+                    'Keep this window open while scanning. If WhatsApp rotates the QR, the latest code will replace this one automatically.',
+                  )}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="agent-qr-modal-loading">
+              <Loader2
+                size={36}
+                className="animate-spin"
+              />
+
+              <strong>
+                {t(
+                  'sessions.qr.generating',
+                  'Generating QR code…',
+                )}
+              </strong>
+
+              <span>
+                {t(
+                  'agent.qrModalWaitingHint',
+                  'This popup will stay open and show the QR as soon as the latest code arrives.',
+                )}
+              </span>
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <MediaLightbox
         items={
