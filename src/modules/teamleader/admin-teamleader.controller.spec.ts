@@ -1,11 +1,19 @@
-
-
-
+import 'reflect-metadata';
 
 import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+
+import {
+  ApiCapability,
+} from '../auth/capabilities/api-capability';
+import {
+  REQUIRED_CAPABILITY_KEY,
+} from '../auth/decorators/capability.decorator';
+import {
+  UNSCOPED_KEY,
+} from '../auth/decorators/auth.decorators';
 
 import {
   AdminTeamLeaderController,
@@ -58,6 +66,7 @@ describe('AdminTeamLeaderController', () => {
     reassignAdminSession: jest.Mock;
     reassignAdminSessions: jest.Mock;
     getTeamLeader: jest.Mock;
+    forceDeleteTeamLeader: jest.Mock;
     deleteTeamLeader: jest.Mock;
   };
 
@@ -71,12 +80,35 @@ describe('AdminTeamLeaderController', () => {
       reassignAdminSession: jest.fn(),
       reassignAdminSessions: jest.fn(),
       getTeamLeader: jest.fn(),
+      forceDeleteTeamLeader: jest.fn(),
       deleteTeamLeader: jest.fn(),
     };
 
     controller = new AdminTeamLeaderController(
       teamLeaderService as unknown as TeamLeaderService,
     );
+  });
+
+  describe('authorization metadata', () => {
+    it('requires PRINCIPAL_MANAGE at the controller level', () => {
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController,
+        ),
+      ).toBe(
+        ApiCapability.PRINCIPAL_MANAGE,
+      );
+    });
+
+    it('requires an unscoped API key at the controller level', () => {
+      expect(
+        Reflect.getMetadata(
+          UNSCOPED_KEY,
+          AdminTeamLeaderController,
+        ),
+      ).toBe(true);
+    });
   });
 
   describe('create', () => {
@@ -416,6 +448,78 @@ describe('AdminTeamLeaderController', () => {
       await expect(
         controller.findOne('missing-team-leader'),
       ).rejects.toBe(notFound);
+    });
+  });
+
+  describe('forceDelete', () => {
+    it('delegates destructive Team Leader retirement to the service', async () => {
+      const result = {
+        teamLeaderId:
+          'team-leader-1',
+        teamLeaderName:
+          'Ahmed Hassan',
+        deletedSessionIds: [
+          'session-1',
+          'session-2',
+        ],
+        deletedAgentIds: [
+          'agent-1',
+        ],
+      };
+
+      teamLeaderService.forceDeleteTeamLeader.mockResolvedValue(
+        result,
+      );
+
+      await expect(
+        controller.forceDelete(
+          'team-leader-1',
+        ),
+      ).resolves.toEqual(result);
+
+      expect(
+        teamLeaderService.forceDeleteTeamLeader,
+      ).toHaveBeenCalledWith(
+        'team-leader-1',
+      );
+    });
+
+    it('forwards force-delete conflicts without altering them', async () => {
+      const conflict =
+        new ConflictException(
+          'Team Leader resources changed repeatedly during force deletion',
+        );
+
+      teamLeaderService.forceDeleteTeamLeader.mockRejectedValue(
+        conflict,
+      );
+
+      await expect(
+        controller.forceDelete(
+          'team-leader-1',
+        ),
+      ).rejects.toBe(
+        conflict,
+      );
+    });
+
+    it('forwards 404 for an unknown Team Leader', async () => {
+      const notFound =
+        new NotFoundException(
+          'Team Leader not found',
+        );
+
+      teamLeaderService.forceDeleteTeamLeader.mockRejectedValue(
+        notFound,
+      );
+
+      await expect(
+        controller.forceDelete(
+          'missing-team-leader',
+        ),
+      ).rejects.toBe(
+        notFound,
+      );
     });
   });
 

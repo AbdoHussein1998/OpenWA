@@ -1,5 +1,3 @@
-
-
 import 'reflect-metadata';
 
 import {
@@ -8,10 +6,12 @@ import {
 } from '@nestjs/common';
 
 import {
-  ApiKeyRole,
-} from '../auth/entities/api-key.entity';
+  ApiCapability,
+} from '../auth/capabilities/api-capability';
 import {
-  REQUIRED_ROLE_KEY,
+  REQUIRED_CAPABILITY_KEY,
+} from '../auth/decorators/capability.decorator';
+import {
   UNSCOPED_KEY,
 } from '../auth/decorators/auth.decorators';
 
@@ -79,13 +79,15 @@ describe('AdminAgentController', () => {
   });
 
   describe('authorization metadata', () => {
-    it('requires ADMIN role at the controller level in this batch', () => {
+    it('requires PRINCIPAL_MANAGE at the controller level', () => {
       expect(
         Reflect.getMetadata(
-          REQUIRED_ROLE_KEY,
+          REQUIRED_CAPABILITY_KEY,
           AdminAgentController,
         ),
-      ).toBe(ApiKeyRole.ADMIN);
+      ).toBe(
+        ApiCapability.PRINCIPAL_MANAGE,
+      );
     });
 
     it('requires an unscoped API key at the controller level', () => {
@@ -317,5 +319,3 @@ describe('AdminAgentController', () => {
     });
   });
 });
-
-

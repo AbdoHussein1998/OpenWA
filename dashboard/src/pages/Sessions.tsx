@@ -25,6 +25,7 @@ import {
   Square,
   Trash2,
   Unlink,
+  Users,
 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -35,7 +36,13 @@ import {
   type Session,
   type SessionConfig,
 } from '../services/api';
-import { queryKeys } from '../hooks/queries';
+import {
+  queryKeys,
+  useAdminAgentsQuery,
+  useAdminTeamLeadersQuery,
+  useAssignAdminAgentSessionMutation,
+  useSetAdminSessionOwnerMutation,
+} from '../hooks/queries';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import {
   canForceKillSession,
@@ -67,6 +74,8 @@ import { PageHeader } from '../components/PageHeader';
 import { CustomSelect } from '../components/CustomSelect';
 import { Modal } from '../components/Modal';
 import './Sessions.css';
+
+type AdminAssignmentMode = 'team_leader' | 'agent';
 
 interface ConnectionProgress {
   attemptId: string;
@@ -153,8 +162,18 @@ export function Sessions() {
     canManageSessions,
     canStartSessions,
     canShutdownSessions,
+    canManagePrincipals,
   } = useRole();
   const queryClient = useQueryClient();
+
+  const adminTeamLeadersQuery =
+    useAdminTeamLeadersQuery(canManagePrincipals);
+  const adminAgentsQuery =
+    useAdminAgentsQuery(canManagePrincipals);
+  const setAdminSessionOwnerMutation =
+    useSetAdminSessionOwnerMutation();
+  const assignAdminAgentSessionMutation =
+    useAssignAdminAgentSessionMutation();
 
   const [sessions, setSessions] =
     useState<Session[]>([]);
@@ -169,6 +188,14 @@ export function Sessions() {
     useState('all');
   const [selectedSession, setSelectedSession] =
     useState<Session | null>(null);
+  const [assignmentSessionId, setAssignmentSessionId] =
+    useState<string | null>(null);
+  const [assignmentMode, setAssignmentMode] =
+    useState<AdminAssignmentMode>('team_leader');
+  const [assignmentTeamLeaderId, setAssignmentTeamLeaderId] =
+    useState('');
+  const [assignmentAgentId, setAssignmentAgentId] =
+    useState('');
   const [deleteConfirmId, setDeleteConfirmId] =
     useState<string | null>(null);
   const [killConfirmId, setKillConfirmId] =
@@ -748,6 +775,196 @@ export function Sessions() {
     } finally {
       setUnlinkConfirmId(null);
       setUnlinkingId(null);
+    }
+  };
+
+  const assignmentSession =
+    assignmentSessionId
+      ? sessions.find(
+          session =>
+            session.id === assignmentSessionId,
+        ) ?? null
+      : null;
+
+  const adminTeamLeaders =
+    adminTeamLeadersQuery.data ?? [];
+  const adminAgents =
+    adminAgentsQuery.data ?? [];
+
+  const currentAssignedAgent =
+    assignmentSession
+      ? adminAgents.find(
+          agent =>
+            agent.assignedSessionId ===
+            assignmentSession.id,
+        ) ?? null
+      : null;
+
+  const currentOwnerTeamLeader =
+    assignmentSession?.ownerTeamLeaderId
+      ? adminTeamLeaders.find(
+          teamLeader =>
+            teamLeader.id ===
+            assignmentSession.ownerTeamLeaderId,
+        ) ?? null
+      : null;
+
+  const assignmentBusy =
+    setAdminSessionOwnerMutation.isPending ||
+    assignAdminAgentSessionMutation.isPending;
+
+  const openAssignmentModal = (
+    session: Session,
+  ) => {
+    const assignedAgent =
+      adminAgents.find(
+        agent =>
+          agent.assignedSessionId ===
+          session.id,
+      );
+
+    setAssignmentSessionId(session.id);
+    setAssignmentMode(
+      assignedAgent
+        ? 'agent'
+        : 'team_leader',
+    );
+    setAssignmentAgentId(
+      assignedAgent?.id ?? '',
+    );
+    setAssignmentTeamLeaderId(
+      session.ownerTeamLeaderId ?? '',
+    );
+  };
+
+  const closeAssignmentModal = () => {
+    if (assignmentBusy) {
+      return;
+    }
+
+    setAssignmentSessionId(null);
+    setAssignmentAgentId('');
+    setAssignmentTeamLeaderId('');
+    setAssignmentMode('team_leader');
+  };
+
+  const assignSessionToTeamLeader = async () => {
+    if (
+      !assignmentSession ||
+      !assignmentTeamLeaderId ||
+      assignmentBusy
+    ) {
+      return;
+    }
+
+    try {
+      await setAdminSessionOwnerMutation.mutateAsync({
+        sessionId: assignmentSession.id,
+        data: {
+          targetTeamLeaderId:
+            assignmentTeamLeaderId,
+        },
+      });
+
+      await fetchSessions();
+      toast.success(
+        t('sessions.assignment.teamLeaderSuccessTitle', {
+          defaultValue: 'Session assigned',
+        }),
+        t('sessions.assignment.teamLeaderSuccessDescription', {
+          defaultValue:
+            'Session ownership was assigned to the selected Team Leader.',
+        }),
+      );
+      closeAssignmentModal();
+    } catch (err) {
+      toast.error(
+        t('sessions.assignment.failedTitle', {
+          defaultValue: 'Assignment failed',
+        }),
+        err instanceof Error
+          ? err.message
+          : t('common.unknownError'),
+      );
+    }
+  };
+
+  const assignSessionToAgent = async () => {
+    if (
+      !assignmentSession ||
+      !assignmentAgentId ||
+      assignmentBusy
+    ) {
+      return;
+    }
+
+    try {
+      await assignAdminAgentSessionMutation.mutateAsync({
+        agentId: assignmentAgentId,
+        data: {
+          sessionId: assignmentSession.id,
+        },
+      });
+
+      await fetchSessions();
+      toast.success(
+        t('sessions.assignment.agentSuccessTitle', {
+          defaultValue: 'Agent assigned',
+        }),
+        t('sessions.assignment.agentSuccessDescription', {
+          defaultValue:
+            'The Session was assigned to the Agent and ownership was synchronized to that Agent\'s Team Leader.',
+        }),
+      );
+      closeAssignmentModal();
+    } catch (err) {
+      toast.error(
+        t('sessions.assignment.failedTitle', {
+          defaultValue: 'Assignment failed',
+        }),
+        err instanceof Error
+          ? err.message
+          : t('common.unknownError'),
+      );
+    }
+  };
+
+  const unassignCurrentAgent = async () => {
+    if (
+      !currentAssignedAgent ||
+      assignmentBusy
+    ) {
+      return;
+    }
+
+    try {
+      await assignAdminAgentSessionMutation.mutateAsync({
+        agentId: currentAssignedAgent.id,
+        data: {
+          sessionId: null,
+        },
+      });
+
+      setAssignmentAgentId('');
+      await fetchSessions();
+      toast.success(
+        t('sessions.assignment.agentUnassignedTitle', {
+          defaultValue: 'Agent unassigned',
+        }),
+        t('sessions.assignment.agentUnassignedDescription', {
+          defaultValue:
+            'The Agent assignment was cleared. Team Leader ownership was left unchanged.',
+        }),
+      );
+    } catch (err) {
+      toast.error(
+        t('sessions.assignment.failedTitle', {
+          defaultValue: 'Assignment failed',
+        }),
+        err instanceof Error
+          ? err.message
+          : t('common.unknownError'),
+      );
     }
   };
 
@@ -1826,6 +2043,263 @@ export function Sessions() {
         </Modal>
       )}
 
+      {assignmentSession &&
+        canManagePrincipals && (
+          <Modal
+            open
+            onClose={closeAssignmentModal}
+            title={t('sessions.assignment.title', {
+              defaultValue: `Assign ${assignmentSession.name}`,
+            })}
+            closeLabel={t('common.close')}
+            hideCloseButton={assignmentBusy}
+            footer={
+              <>
+                <button
+                  className="btn-secondary"
+                  onClick={closeAssignmentModal}
+                  disabled={assignmentBusy}
+                >
+                  {t('common.cancel')}
+                </button>
+
+                <button
+                  className="btn-primary"
+                  onClick={() =>
+                    void (
+                      assignmentMode === 'agent'
+                        ? assignSessionToAgent()
+                        : assignSessionToTeamLeader()
+                    )
+                  }
+                  disabled={
+                    assignmentBusy ||
+                    (assignmentMode === 'agent'
+                      ? !assignmentAgentId
+                      : !assignmentTeamLeaderId)
+                  }
+                >
+                  {assignmentBusy ? (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
+                  ) : (
+                    <Users size={16} />
+                  )}
+                  {t('sessions.assignment.confirm', {
+                    defaultValue: 'Assign',
+                  })}
+                </button>
+              </>
+            }
+          >
+            <div
+              style={{
+                display: 'grid',
+                gap: '1rem',
+              }}
+            >
+              <div className="detail-grid">
+                <div className="detail-item">
+                  <span className="detail-label">
+                    {t('sessions.details.sessionId')}
+                  </span>
+                  <span className="detail-value mono">
+                    {assignmentSession.id}
+                  </span>
+                </div>
+
+                <div className="detail-item">
+                  <span className="detail-label">
+                    {t('sessions.assignment.currentOwner', {
+                      defaultValue: 'Current Team Leader',
+                    })}
+                  </span>
+                  <span className="detail-value">
+                    {currentOwnerTeamLeader?.name ??
+                      assignmentSession.ownerTeamLeaderId ??
+                      t('sessions.assignment.unassigned', {
+                        defaultValue: 'Unassigned',
+                      })}
+                  </span>
+                </div>
+
+                <div className="detail-item">
+                  <span className="detail-label">
+                    {t('sessions.assignment.currentAgent', {
+                      defaultValue: 'Current Agent',
+                    })}
+                  </span>
+                  <span className="detail-value">
+                    {currentAssignedAgent?.name ??
+                      t('sessions.assignment.unassigned', {
+                        defaultValue: 'Unassigned',
+                      })}
+                  </span>
+                </div>
+              </div>
+
+              {(adminTeamLeadersQuery.isError ||
+                adminAgentsQuery.isError) && (
+                <div
+                  role="alert"
+                  style={{
+                    color: 'var(--error)',
+                  }}
+                >
+                  {t('sessions.assignment.loadError', {
+                    defaultValue:
+                      'Team Leaders or Agents could not be loaded. Refresh and try again.',
+                  })}
+                </div>
+              )}
+
+              <label htmlFor="session-assignment-mode">
+                {t('sessions.assignment.assignTo', {
+                  defaultValue: 'Assign to',
+                })}
+              </label>
+              <select
+                id="session-assignment-mode"
+                value={assignmentMode}
+                disabled={assignmentBusy}
+                onChange={event =>
+                  setAssignmentMode(
+                    event.target.value as AdminAssignmentMode,
+                  )
+                }
+              >
+                <option value="team_leader">
+                  {t('sessions.assignment.teamLeader', {
+                    defaultValue: 'Team Leader',
+                  })}
+                </option>
+                <option value="agent">
+                  {t('sessions.assignment.agent', {
+                    defaultValue: 'Agent',
+                  })}
+                </option>
+              </select>
+
+              {assignmentMode === 'team_leader' ? (
+                <>
+                  <label htmlFor="session-assignment-team-leader">
+                    {t('sessions.assignment.teamLeader', {
+                      defaultValue: 'Team Leader',
+                    })}
+                  </label>
+                  <select
+                    id="session-assignment-team-leader"
+                    value={assignmentTeamLeaderId}
+                    disabled={
+                      assignmentBusy ||
+                      adminTeamLeadersQuery.isLoading
+                    }
+                    onChange={event =>
+                      setAssignmentTeamLeaderId(
+                        event.target.value,
+                      )
+                    }
+                  >
+                    <option value="">
+                      {adminTeamLeadersQuery.isLoading
+                        ? t('common.loading', {
+                            defaultValue: 'Loading...',
+                          })
+                        : t('sessions.assignment.selectTeamLeader', {
+                            defaultValue: 'Select a Team Leader',
+                          })}
+                    </option>
+                    {adminTeamLeaders.map(teamLeader => (
+                      <option
+                        key={teamLeader.id}
+                        value={teamLeader.id}
+                      >
+                        {teamLeader.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {currentAssignedAgent && (
+                    <p className="input-hint">
+                      {t('sessions.assignment.ownerConflictHint', {
+                        defaultValue:
+                          'This Session is currently assigned to an Agent. Direct Team Leader transfer must remain compatible with that Agent, or clear/reassign the Agent first.',
+                      })}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <label htmlFor="session-assignment-agent">
+                    {t('sessions.assignment.agent', {
+                      defaultValue: 'Agent',
+                    })}
+                  </label>
+                  <select
+                    id="session-assignment-agent"
+                    value={assignmentAgentId}
+                    disabled={
+                      assignmentBusy ||
+                      adminAgentsQuery.isLoading
+                    }
+                    onChange={event =>
+                      setAssignmentAgentId(
+                        event.target.value,
+                      )
+                    }
+                  >
+                    <option value="">
+                      {adminAgentsQuery.isLoading
+                        ? t('common.loading', {
+                            defaultValue: 'Loading...',
+                          })
+                        : t('sessions.assignment.selectAgent', {
+                            defaultValue: 'Select an Agent',
+                          })}
+                    </option>
+                    {adminAgents.map(agent => (
+                      <option
+                        key={agent.id}
+                        value={agent.id}
+                      >
+                        {agent.name} · {agent.teamLeader.name}
+                        {agent.assignedSessionId &&
+                        agent.assignedSessionId !== assignmentSession.id
+                          ? ' · currently assigned'
+                          : ''}
+                      </option>
+                    ))}
+                  </select>
+
+                  <p className="input-hint">
+                    {t('sessions.assignment.agentOwnershipHint', {
+                      defaultValue:
+                        "Assigning to an Agent automatically sets Session ownership to that Agent's Team Leader. If another Agent currently has this Session, that old assignment is cleared automatically.",
+                    })}
+                  </p>
+
+                  {currentAssignedAgent && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() =>
+                        void unassignCurrentAgent()
+                      }
+                      disabled={assignmentBusy}
+                    >
+                      {t('sessions.assignment.unassignAgent', {
+                        defaultValue: 'Unassign current Agent',
+                      })}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </Modal>
+        )}
+
       {selectedSession && (
         <Modal
           open
@@ -2307,6 +2781,23 @@ export function Sessions() {
                   <Eye size={16} />
                   {t('sessions.actions.view')}
                 </button>
+
+                {canManagePrincipals && (
+                  <button
+                    className="btn-action"
+                    onClick={() =>
+                      openAssignmentModal(session)
+                    }
+                  >
+                    <Users size={16} />
+                    {t('sessions.actions.assignment', {
+                      defaultValue:
+                        session.ownerTeamLeaderId
+                          ? 'Assignment'
+                          : 'Assign',
+                    })}
+                  </button>
+                )}
 
                 {isSessionStarted(session) ? (
                   canShutdownSessions ? (

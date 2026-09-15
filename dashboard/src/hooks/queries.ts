@@ -34,6 +34,7 @@ import {
   type BulkReassignAdminSessionsInput,
   type ReassignAdminAgentInput,
   type ReassignAdminSessionInput,
+  type AssignAdminAgentSessionInput,
   type GenericApiKeyRole,
 } from '../services/api';
 
@@ -282,6 +283,34 @@ export function useDeleteAdminTeamLeaderMutation() {
   });
 }
 
+
+export function useForceDeleteAdminTeamLeaderMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (teamLeaderId: string) =>
+      adminTeamLeaderApi.forceDelete(teamLeaderId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaders,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.apiKeys,
+      });
+      // Prefix invalidation also drops any cached per-Team-Leader resource graph.
+      void queryClient.invalidateQueries({
+        queryKey: ['admin', 'team-leaders'],
+      });
+    },
+  });
+}
+
 export function useCreateAdminAgentMutation() {
   const queryClient = useQueryClient();
 
@@ -303,6 +332,66 @@ export function useCreateAdminAgentMutation() {
       });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.apiKeys,
+      });
+    },
+  });
+}
+
+export function useSetAdminSessionOwnerMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      data,
+    }: {
+      sessionId: string;
+      data: ReassignAdminSessionInput;
+    }) =>
+      adminTeamLeaderApi.setSessionOwner(
+        sessionId,
+        data,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      // Prefix invalidation refreshes the Team Leader inventory and every
+      // cached Team Leader resource graph.
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaders,
+      });
+    },
+  });
+}
+
+export function useAssignAdminAgentSessionMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      agentId,
+      data,
+    }: {
+      agentId: string;
+      data: AssignAdminAgentSessionInput;
+    }) =>
+      adminAgentApi.assignSession(
+        agentId,
+        data,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminAgents,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaders,
       });
     },
   });

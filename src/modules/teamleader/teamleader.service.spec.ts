@@ -18,6 +18,7 @@ import {
 } from '../auth/entities/api-key.entity';
 import { EventsGateway } from '../events/events.gateway';
 import { Session } from '../session/entities/session.entity';
+import { SessionService } from '../session/session.service';
 
 import { Agent } from './entities/agent.entity';
 import { TeamLeader } from './entities/team-leader.entity';
@@ -128,6 +129,7 @@ describe('TeamLeaderService', () => {
     create: jest.Mock;
     save: jest.Mock;
     remove: jest.Mock;
+    delete: jest.Mock;
   };
 
   let apiKeyRepository: {
@@ -153,6 +155,10 @@ describe('TeamLeaderService', () => {
 
   let authService: {
     createApiKeyInTransaction: jest.Mock;
+  };
+
+  let sessionService: {
+    delete: jest.Mock;
   };
 
   let eventsGateway: {
@@ -187,6 +193,7 @@ describe('TeamLeaderService', () => {
       create: jest.fn(),
       save: jest.fn(),
       remove: jest.fn(),
+      delete: jest.fn(),
     };
 
     apiKeyRepository = {
@@ -230,6 +237,10 @@ describe('TeamLeaderService', () => {
 
     authService = {
       createApiKeyInTransaction: jest.fn(),
+    };
+
+    sessionService = {
+      delete: jest.fn(),
     };
 
     eventsGateway = {
@@ -283,6 +294,7 @@ describe('TeamLeaderService', () => {
       sessionRepository as unknown as Repository<Session>,
       authService as unknown as AuthService,
       moduleRef as unknown as ModuleRef,
+      sessionService as unknown as SessionService,
     );
   });
 
@@ -1065,6 +1077,183 @@ describe('TeamLeaderService', () => {
 
       expect(sessionRepository.count).not.toHaveBeenCalled();
       expect(agentRepository.count).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('forceDeleteTeamLeader', () => {
+    it('deletes owned Sessions through SessionService before deleting Agents and the Team Leader', async () => {
+      const teamLeader = createTeamLeader();
+      const sessionA = createSession({
+        id: 'session-a',
+        ownerTeamLeaderId: teamLeader.id,
+      });
+      const sessionB = createSession({
+        id: 'session-b',
+        ownerTeamLeaderId: teamLeader.id,
+      });
+      const agentA = createAgent({
+        id: 'agent-a',
+        teamLeaderId: teamLeader.id,
+        assignedSessionId: sessionA.id,
+      });
+      const agentB = createAgent({
+        id: 'agent-b',
+        teamLeaderId: teamLeader.id,
+        assignedSessionId: null,
+      });
+
+      teamLeaderRepository.findOne
+        .mockResolvedValueOnce(teamLeader)
+        .mockResolvedValueOnce(teamLeader);
+
+      sessionRepository.find
+        .mockResolvedValueOnce([
+          sessionA,
+          sessionB,
+        ])
+        .mockResolvedValueOnce([]);
+
+      sessionService.delete.mockResolvedValue(undefined);
+      sessionRepository.count.mockResolvedValue(0);
+
+      agentRepository.find.mockResolvedValue([
+        agentA,
+        agentB,
+      ]);
+
+      apiKeyRepository.find.mockResolvedValue([
+        createApiKey({
+          id: 'team-leader-key',
+          role: ApiKeyRole.TEAM_LEADER,
+          teamLeaderId: teamLeader.id,
+        }),
+        createApiKey({
+          id: 'agent-a-key',
+          role: ApiKeyRole.AGENT,
+          agentId: agentA.id,
+        }),
+      ]);
+
+      agentRepository.delete.mockResolvedValue({
+        affected: 2,
+        raw: [],
+      });
+      teamLeaderRepository.remove.mockResolvedValue(teamLeader);
+
+      const result =
+        await service.forceDeleteTeamLeader(
+          teamLeader.id,
+        );
+
+      expect(
+        sessionService.delete,
+      ).toHaveBeenNthCalledWith(
+        1,
+        sessionA.id,
+      );
+      expect(
+        sessionService.delete,
+      ).toHaveBeenNthCalledWith(
+        2,
+        sessionB.id,
+      );
+
+      expect(
+        agentRepository.delete,
+      ).toHaveBeenCalledWith({
+        id: expect.anything(),
+      });
+
+      expect(
+        teamLeaderRepository.remove,
+      ).toHaveBeenCalledWith(
+        teamLeader,
+      );
+
+      expect(result).toEqual({
+        teamLeaderId:
+          teamLeader.id,
+        teamLeaderName:
+          teamLeader.name,
+        deletedSessionIds: [
+          sessionA.id,
+          sessionB.id,
+        ],
+        deletedAgentIds: [
+          agentA.id,
+          agentB.id,
+        ],
+      });
+
+      expect(
+        eventsGateway.evictApiKey,
+      ).toHaveBeenCalledWith(
+        'team-leader-key',
+        'deleted',
+      );
+      expect(
+        eventsGateway.evictApiKey,
+      ).toHaveBeenCalledWith(
+        'agent-a-key',
+        'deleted',
+      );
+    });
+
+    it('does not delete Agents or the Team Leader if a Session lifecycle deletion fails', async () => {
+      const teamLeader = createTeamLeader();
+      const session = createSession({
+        id: 'session-a',
+        ownerTeamLeaderId:
+          teamLeader.id,
+      });
+      const error =
+        new Error(
+          'Session teardown failed',
+        );
+
+      teamLeaderRepository.findOne.mockResolvedValue(
+        teamLeader,
+      );
+      sessionRepository.find.mockResolvedValue([
+        session,
+      ]);
+      sessionService.delete.mockRejectedValue(
+        error,
+      );
+
+      await expect(
+        service.forceDeleteTeamLeader(
+          teamLeader.id,
+        ),
+      ).rejects.toBe(error);
+
+      expect(
+        mainDataSource.transaction,
+      ).not.toHaveBeenCalled();
+      expect(
+        agentRepository.delete,
+      ).not.toHaveBeenCalled();
+      expect(
+        teamLeaderRepository.remove,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the Team Leader does not exist', async () => {
+      teamLeaderRepository.findOne.mockResolvedValue(
+        null,
+      );
+
+      await expect(
+        service.forceDeleteTeamLeader(
+          'missing-team-leader',
+        ),
+      ).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+
+      expect(
+        sessionService.delete,
+      ).not.toHaveBeenCalled();
     });
   });
 

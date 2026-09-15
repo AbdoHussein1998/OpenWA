@@ -18,10 +18,14 @@ import {
 } from '@nestjs/swagger';
 
 import {
-  RequireRole,
   RequireUnscopedKey,
 } from '../auth/decorators/auth.decorators';
-import { ApiKeyRole } from '../auth/entities/api-key.entity';
+import {
+  RequireCapability,
+} from '../auth/decorators/capability.decorator';
+import {
+  ApiCapability,
+} from '../auth/capabilities/api-capability';
 import { AssignAgentSessionDto } from './dto/assign-agent-session.dto';
 import { BulkReassignAdminAgentsDto } from './dto/bulk-reassignment.dto';
 import { ReassignAdminAgentDto } from './dto/reassign-agent.dto';
@@ -37,13 +41,9 @@ export type { AdminAgentOverview } from './teamleader.service';
 /**
  * Global Agent administration.
  *
- * These routes intentionally remain ADMIN-only in this batch.
- *
- * TEAM_MANAGE cannot safely replace the ADMIN role requirement yet because
- * authenticated Team Leaders currently also possess TEAM_MANAGE for their own
- * self-service surface. The later authorization phase can widen this global
- * surface to Operator after introducing/enforcing the appropriate global
- * management capability boundary.
+ * These routes require PRINCIPAL_MANAGE, which is granted to ADMIN and
+ * OPERATOR but not to Team Leaders. TEAM_MANAGE remains reserved for the
+ * Team Leader self-service surface.
  *
  * Session-scoped API keys are also rejected because these operations can span
  * multiple Sessions and Team Leaders and therefore have no single Session
@@ -51,7 +51,7 @@ export type { AdminAgentOverview } from './teamleader.service';
  */
 @ApiTags('admin/agents')
 @Controller('admin/agents')
-@RequireRole(ApiKeyRole.ADMIN)
+@RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
 @RequireUnscopedKey()
 export class AdminAgentController {
   constructor(
@@ -72,7 +72,7 @@ export class AdminAgentController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN.',
+    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
   })
   async findAll(): Promise<AdminAgentOverview[]> {
     return this.teamLeaderService.getAdminAgents();
@@ -101,7 +101,7 @@ export class AdminAgentController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN.',
+    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
   })
   async findOne(
     @Param('id', ParseUUIDPipe)
@@ -152,7 +152,7 @@ export class AdminAgentController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN.',
+    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
   })
   async assignSession(
     @Param('id', ParseUUIDPipe)
@@ -193,7 +193,7 @@ export class AdminAgentController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN.',
+    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
   })
   async reassign(
     @Param('id', ParseUUIDPipe)
@@ -229,7 +229,7 @@ export class AdminAgentController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN.',
+    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
   })
   async bulkReassign(
     @Body()
@@ -270,7 +270,7 @@ export class AdminAgentController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN.',
+    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
   })
   async delete(
     @Param('id', ParseUUIDPipe)

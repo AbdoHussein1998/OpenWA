@@ -9,6 +9,7 @@ import {
   ArrowRightLeft,
   Loader2,
   Mail,
+  Plus,
   RefreshCw,
   Search,
   ShieldAlert,
@@ -27,13 +28,21 @@ import {
 } from '../components/PageHeader';
 
 import {
+  GeneratedKeyField,
+} from '../components/GeneratedKeyField';
+
+import {
+  useAdminAgentsQuery,
   useAdminTeamLeaderResourcesQuery,
   useAdminTeamLeadersQuery,
   useBulkReassignAdminAgentsMutation,
   useBulkReassignAdminSessionsMutation,
+  useCreateAdminTeamLeaderMutation,
   useDeleteAdminTeamLeaderMutation,
+  useForceDeleteAdminTeamLeaderMutation,
   useReassignAdminAgentMutation,
   useReassignAdminSessionMutation,
+  useSessionsQuery,
 } from '../hooks/queries';
 
 import {
@@ -145,6 +154,14 @@ function wasCreatedInLastThirtyDays(
   );
 }
 
+function isValidEmail(
+  value: string,
+): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    value,
+  );
+}
+
 function sessionLabel(
   session: AdminSessionOverview,
 ): string {
@@ -162,15 +179,59 @@ export function AdminTeamLeaders() {
   const teamLeadersQuery =
     useAdminTeamLeadersQuery();
 
+  const sessionsQuery =
+    useSessionsQuery();
+
+  const adminAgentsQuery =
+    useAdminAgentsQuery();
+
+  const createTeamLeaderMutation =
+    useCreateAdminTeamLeaderMutation();
+
   const [
     search,
     setSearch,
   ] = useState('');
 
   const [
+    showCreateModal,
+    setShowCreateModal,
+  ] = useState(false);
+
+  const [
+    createName,
+    setCreateName,
+  ] = useState('');
+
+  const [
+    createEmail,
+    setCreateEmail,
+  ] = useState('');
+
+  const [
+    createError,
+    setCreateError,
+  ] = useState<string | null>(null);
+
+  const [
+    createdCredential,
+    setCreatedCredential,
+  ] = useState<{
+    name: string;
+    apiKey: string;
+  } | null>(null);
+
+  const [
     managedTeamLeaderId,
     setManagedTeamLeaderId,
   ] = useState('');
+
+  const [
+    deleteConfirmation,
+    setDeleteConfirmation,
+  ] = useState<
+    'safe' | 'force' | null
+  >(null);
 
   const [
     sessionTargetTeamLeaderId,
@@ -222,9 +283,59 @@ export function AdminTeamLeaders() {
   const deleteTeamLeaderMutation =
     useDeleteAdminTeamLeaderMutation();
 
+  const forceDeleteTeamLeaderMutation =
+    useForceDeleteAdminTeamLeaderMutation();
+
   const teamLeaders =
     teamLeadersQuery.data ??
     [];
+
+  const ownedSessionCounts =
+    useMemo(() => {
+      const counts =
+        new Map<string, number>();
+
+      for (
+        const session of
+        sessionsQuery.data ?? []
+      ) {
+        const ownerId =
+          session.ownerTeamLeaderId;
+
+        if (!ownerId) {
+          continue;
+        }
+
+        counts.set(
+          ownerId,
+          (counts.get(ownerId) ?? 0) + 1,
+        );
+      }
+
+      return counts;
+    }, [
+      sessionsQuery.data,
+    ]);
+
+  const agentCounts =
+    useMemo(() => {
+      const counts =
+        new Map<string, number>();
+
+      for (
+        const agent of
+        adminAgentsQuery.data ?? []
+      ) {
+        counts.set(
+          agent.teamLeaderId,
+          (counts.get(agent.teamLeaderId) ?? 0) + 1,
+        );
+      }
+
+      return counts;
+    }, [
+      adminAgentsQuery.data,
+    ]);
 
   const normalizedSearch =
     search
@@ -332,19 +443,111 @@ export function AdminTeamLeaders() {
       wasCreatedInLastThirtyDays,
     ).length;
 
+  const trimmedCreateName =
+    createName.trim();
+
+  const trimmedCreateEmail =
+    createEmail.trim();
+
+  const canCreateTeamLeader =
+    trimmedCreateName.length > 0 &&
+    trimmedCreateName.length <= 100 &&
+    (
+      !trimmedCreateEmail ||
+      isValidEmail(
+        trimmedCreateEmail,
+      )
+    );
+
   const isMutating =
     reassignSessionMutation.isPending ||
     bulkReassignSessionsMutation.isPending ||
     reassignAgentMutation.isPending ||
     bulkReassignAgentsMutation.isPending ||
-    deleteTeamLeaderMutation.isPending;
+    deleteTeamLeaderMutation.isPending ||
+    forceDeleteTeamLeaderMutation.isPending;
 
   const refresh =
     () => {
-      void teamLeadersQuery.refetch();
+      void Promise.all([
+        teamLeadersQuery.refetch(),
+        sessionsQuery.refetch(),
+        adminAgentsQuery.refetch(),
+      ]);
 
       if (managedTeamLeaderId) {
         void resourcesQuery.refetch();
+      }
+    };
+
+  const openCreateTeamLeader =
+    () => {
+      setCreateName('');
+      setCreateEmail('');
+      setCreateError(null);
+      setCreatedCredential(null);
+      setShowCreateModal(true);
+    };
+
+  const closeCreateTeamLeader =
+    () => {
+      if (
+        createTeamLeaderMutation.isPending
+      ) {
+        return;
+      }
+
+      setShowCreateModal(false);
+      setCreateName('');
+      setCreateEmail('');
+      setCreateError(null);
+      setCreatedCredential(null);
+    };
+
+  const createTeamLeader =
+    async () => {
+      if (!canCreateTeamLeader) {
+        return;
+      }
+
+      setCreateError(null);
+
+      try {
+        const created =
+          await createTeamLeaderMutation.mutateAsync({
+            name:
+              trimmedCreateName,
+            ...(trimmedCreateEmail
+              ? {
+                  email:
+                    trimmedCreateEmail,
+                }
+              : {}),
+          });
+
+        setCreatedCredential({
+          name:
+            created.teamLeader.name,
+          apiKey:
+            created.apiKey,
+        });
+
+        toast.success(
+          'Team Leader created',
+          `${created.teamLeader.name} was created successfully.`,
+        );
+      } catch (error) {
+        const message =
+          errorMessage(error);
+
+        setCreateError(
+          message,
+        );
+
+        toast.error(
+          'Team Leader creation failed',
+          message,
+        );
       }
     };
 
@@ -354,6 +557,7 @@ export function AdminTeamLeaders() {
         return;
       }
 
+      setDeleteConfirmation(null);
       setManagedTeamLeaderId('');
     };
 
@@ -566,15 +770,6 @@ export function AdminTeamLeaders() {
         return;
       }
 
-      const confirmed =
-        window.confirm(
-          `Delete Team Leader "${resources.teamLeader.name}"? This removes the principal and its TEAM_LEADER credentials.`,
-        );
-
-      if (!confirmed) {
-        return;
-      }
-
       try {
         await deleteTeamLeaderMutation.mutateAsync(
           managedTeamLeaderId,
@@ -585,6 +780,7 @@ export function AdminTeamLeaders() {
           `${resources.teamLeader.name} was deleted successfully.`,
         );
 
+        setDeleteConfirmation(null);
         setManagedTeamLeaderId('');
       } catch (error) {
         toast.error(
@@ -593,6 +789,37 @@ export function AdminTeamLeaders() {
         );
       }
     };
+
+  const forceDeleteManagedTeamLeader =
+    async () => {
+      if (
+        !managedTeamLeaderId ||
+        !resources
+      ) {
+        return;
+      }
+
+      try {
+        const result =
+          await forceDeleteTeamLeaderMutation.mutateAsync(
+            managedTeamLeaderId,
+          );
+
+        toast.success(
+          'Team Leader force deleted',
+          `${result.teamLeaderName} and ${result.deletedSessionIds.length} Session${result.deletedSessionIds.length === 1 ? '' : 's'} / ${result.deletedAgentIds.length} Agent${result.deletedAgentIds.length === 1 ? '' : 's'} were permanently deleted.`,
+        );
+
+        setDeleteConfirmation(null);
+        setManagedTeamLeaderId('');
+      } catch (error) {
+        toast.error(
+          'Force deletion failed',
+          errorMessage(error),
+        );
+      }
+    };
+
 
   if (
     teamLeadersQuery.isLoading
@@ -619,26 +846,46 @@ export function AdminTeamLeaders() {
         title="Team Leaders"
         subtitle="Inspect Team Leader resources, transfer ownership, and safely retire management principals."
         actions={
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={refresh}
-            disabled={
-              teamLeadersQuery.isFetching ||
-              isMutating
-            }
-          >
-            <RefreshCw
-              size={17}
-              className={
-                teamLeadersQuery.isFetching
-                  ? 'animate-spin'
-                  : undefined
+          <div className="admin-team-leaders-header-actions">
+            <button
+              type="button"
+              className="admin-team-leaders-create-btn"
+              onClick={
+                openCreateTeamLeader
               }
-            />
+              disabled={
+                createTeamLeaderMutation.isPending
+              }
+            >
+              <Plus size={17} />
+              New Team Leader
+            </button>
 
-            Refresh
-          </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={refresh}
+              disabled={
+                teamLeadersQuery.isFetching ||
+                sessionsQuery.isFetching ||
+                adminAgentsQuery.isFetching ||
+                isMutating
+              }
+            >
+              <RefreshCw
+                size={17}
+                className={
+                  teamLeadersQuery.isFetching ||
+                  sessionsQuery.isFetching ||
+                  adminAgentsQuery.isFetching
+                    ? 'animate-spin'
+                    : undefined
+                }
+              />
+
+              Refresh
+            </button>
+          </div>
         }
       />
 
@@ -812,7 +1059,7 @@ export function AdminTeamLeaders() {
             </h3>
 
             <p>
-              Team Leaders will appear here after an Admin creates them.
+              Team Leaders will appear here after an Admin or Operator creates them.
             </p>
           </div>
         ) : filteredTeamLeaders.length === 0 ? (
@@ -844,6 +1091,8 @@ export function AdminTeamLeaders() {
                 <tr>
                   <th>Team Leader</th>
                   <th>Email</th>
+                  <th>Sessions</th>
+                  <th>Agents</th>
                   <th>Team Leader ID</th>
                   <th>Created</th>
                   <th>Updated</th>
@@ -888,6 +1137,42 @@ export function AdminTeamLeaders() {
                             No email
                           </span>
                         )}
+                      </td>
+
+                      <td
+                        data-label="Sessions"
+                        className="admin-team-leaders-count-cell"
+                      >
+                        <span
+                          className="admin-team-leaders-count-badge admin-team-leaders-count-badge--sessions"
+                          title="Sessions owned by this Team Leader"
+                        >
+                          {sessionsQuery.isLoading
+                            ? '…'
+                            : sessionsQuery.isError
+                              ? '—'
+                              : ownedSessionCounts.get(
+                                  teamLeader.id,
+                                ) ?? 0}
+                        </span>
+                      </td>
+
+                      <td
+                        data-label="Agents"
+                        className="admin-team-leaders-count-cell"
+                      >
+                        <span
+                          className="admin-team-leaders-count-badge admin-team-leaders-count-badge--agents"
+                          title="Agents assigned to this Team Leader"
+                        >
+                          {adminAgentsQuery.isLoading
+                            ? '…'
+                            : adminAgentsQuery.isError
+                              ? '—'
+                              : agentCounts.get(
+                                  teamLeader.id,
+                                ) ?? 0}
+                        </span>
                       </td>
 
                       <td data-label="Team Leader ID">
@@ -959,6 +1244,177 @@ export function AdminTeamLeaders() {
         )}
       </section>
 
+      <Modal
+        open={showCreateModal}
+        onClose={
+          closeCreateTeamLeader
+        }
+        title={
+          createdCredential
+            ? 'Team Leader created'
+            : 'Create Team Leader'
+        }
+        className="admin-team-leaders-create-modal"
+        hideCloseButton={
+          createTeamLeaderMutation.isPending
+        }
+        footer={
+          createdCredential ? (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={
+                closeCreateTeamLeader
+              }
+            >
+              Close
+            </button>
+          ) : (
+            <div className="admin-team-leaders-create-modal-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={
+                  closeCreateTeamLeader
+                }
+                disabled={
+                  createTeamLeaderMutation.isPending
+                }
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="admin-team-leaders-create-btn"
+                onClick={() =>
+                  void createTeamLeader()
+                }
+                disabled={
+                  !canCreateTeamLeader ||
+                  createTeamLeaderMutation.isPending
+                }
+              >
+                {createTeamLeaderMutation.isPending ? (
+                  <Loader2
+                    size={16}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <Plus size={16} />
+                )}
+                Create Team Leader
+              </button>
+            </div>
+          )
+        }
+      >
+        {createdCredential ? (
+          <div className="admin-team-leaders-created-credential">
+            <div className="admin-team-leaders-created-credential-copy">
+              <strong>
+                {createdCredential.name}
+              </strong>
+              <span>
+                The Team Leader and its credential were created together.
+              </span>
+            </div>
+
+            <GeneratedKeyField
+              value={
+                createdCredential.apiKey
+              }
+              label="Team Leader API key"
+              description="This plaintext key is returned only once. Copy and store it securely before closing this dialog."
+            />
+          </div>
+        ) : (
+          <div className="admin-team-leaders-create-form">
+            <label htmlFor="new-team-leader-name">
+              <span>Name</span>
+              <input
+                id="new-team-leader-name"
+                type="text"
+                value={createName}
+                maxLength={100}
+                autoComplete="off"
+                placeholder="Ahmed Hassan"
+                disabled={
+                  createTeamLeaderMutation.isPending
+                }
+                onChange={event => {
+                  setCreateName(
+                    event.target.value,
+                  );
+                  setCreateError(null);
+                }}
+              />
+            </label>
+
+            <label htmlFor="new-team-leader-email">
+              <span>
+                Email
+                <small>Optional</small>
+              </span>
+              <input
+                id="new-team-leader-email"
+                type="email"
+                value={createEmail}
+                maxLength={255}
+                autoComplete="email"
+                placeholder="ahmed.hassan@example.com"
+                disabled={
+                  createTeamLeaderMutation.isPending
+                }
+                onChange={event => {
+                  setCreateEmail(
+                    event.target.value,
+                  );
+                  setCreateError(null);
+                }}
+                onKeyDown={event => {
+                  if (
+                    event.key === 'Enter' &&
+                    canCreateTeamLeader &&
+                    !createTeamLeaderMutation.isPending
+                  ) {
+                    void createTeamLeader();
+                  }
+                }}
+              />
+            </label>
+
+            {trimmedCreateEmail &&
+              !isValidEmail(
+                trimmedCreateEmail,
+              ) && (
+                <p className="admin-team-leaders-field-error">
+                  Enter a valid email address or leave the field empty.
+                </p>
+              )}
+
+            {createError && (
+              <div
+                className="admin-team-leaders-alert admin-team-leaders-alert--error"
+                role="alert"
+              >
+                <AlertCircle size={18} />
+                <div>
+                  <strong>
+                    Team Leader could not be created.
+                  </strong>
+                  <span>{createError}</span>
+                </div>
+              </div>
+            )}
+
+            <p className="admin-team-leaders-create-hint">
+              A TEAM_LEADER API key will be created atomically with the principal and shown once after creation.
+            </p>
+          </div>
+        )}
+      </Modal>
+
       <div
         className="admin-team-leaders-note"
         role="note"
@@ -966,12 +1422,140 @@ export function AdminTeamLeaders() {
         <ShieldAlert size={18} />
 
         <p>
-          Deletion is intentionally blocked until the selected Team Leader owns no Sessions and no Agents. Transfer or otherwise resolve those resources first.
+          Normal deletion remains blocked until no Sessions or Agents remain. Force delete is available for administrators who explicitly want to permanently remove the Team Leader and every owned resource.
         </p>
       </div>
 
       <Modal
-        open={Boolean(managedTeamLeaderId)}
+        open={Boolean(
+          resources &&
+          deleteConfirmation,
+        )}
+        onClose={() => {
+          if (!isMutating) {
+            setDeleteConfirmation(null);
+          }
+        }}
+        title={
+          deleteConfirmation === 'force'
+            ? 'Force delete Team Leader'
+            : 'Delete Team Leader'
+        }
+        className="admin-team-leaders-delete-confirm-modal"
+        hideCloseButton={isMutating}
+        footer={
+          resources && deleteConfirmation ? (
+            <div className="admin-team-leaders-delete-confirm-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() =>
+                  setDeleteConfirmation(null)
+                }
+                disabled={isMutating}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className={
+                  deleteConfirmation === 'force'
+                    ? 'admin-team-leaders-force-delete-confirm-btn'
+                    : 'admin-team-leaders-delete-btn'
+                }
+                onClick={() =>
+                  deleteConfirmation === 'force'
+                    ? void forceDeleteManagedTeamLeader()
+                    : void deleteManagedTeamLeader()
+                }
+                disabled={
+                  isMutating ||
+                  (
+                    deleteConfirmation === 'safe' &&
+                    !resources.canDelete
+                  )
+                }
+              >
+                {deleteTeamLeaderMutation.isPending ||
+                forceDeleteTeamLeaderMutation.isPending ? (
+                  <Loader2
+                    size={16}
+                    className="animate-spin"
+                  />
+                ) : deleteConfirmation === 'force' ? (
+                  <ShieldAlert size={16} />
+                ) : (
+                  <Trash2 size={16} />
+                )}
+                {deleteConfirmation === 'force'
+                  ? 'Permanently delete everything'
+                  : 'Delete Team Leader'}
+              </button>
+            </div>
+          ) : undefined
+        }
+      >
+        {resources && deleteConfirmation && (
+          <div className="admin-team-leaders-delete-confirm-content">
+            <div
+              className={
+                deleteConfirmation === 'force'
+                  ? 'admin-team-leaders-delete-confirm-icon admin-team-leaders-delete-confirm-icon--danger'
+                  : 'admin-team-leaders-delete-confirm-icon'
+              }
+            >
+              {deleteConfirmation === 'force' ? (
+                <ShieldAlert size={28} />
+              ) : (
+                <Trash2 size={28} />
+              )}
+            </div>
+
+            <div className="admin-team-leaders-delete-confirm-copy">
+              <strong>
+                {deleteConfirmation === 'force'
+                  ? `Permanently delete ${resources.teamLeader.name} and all owned resources?`
+                  : `Delete ${resources.teamLeader.name}?`}
+              </strong>
+
+              {deleteConfirmation === 'force' ? (
+                <>
+                  <p>
+                    This operation uses the normal Session deletion lifecycle first, then removes every Agent, principal-bound API key, and the Team Leader itself. It cannot be undone.
+                  </p>
+
+                  <div className="admin-team-leaders-force-delete-summary">
+                    <div>
+                      <span>Sessions</span>
+                      <strong>{resources.sessions.length}</strong>
+                    </div>
+                    <div>
+                      <span>Agents</span>
+                      <strong>{resources.agents.length}</strong>
+                    </div>
+                    <div>
+                      <span>Team Leader</span>
+                      <strong>1</strong>
+                    </div>
+                  </div>
+
+                  <p className="admin-team-leaders-force-delete-warning">
+                    WhatsApp Session records and their dependent data will be deleted, not transferred. Agent and Team Leader credentials will stop authenticating immediately after principal deletion.
+                  </p>
+                </>
+              ) : (
+                <p>
+                  This Team Leader has no remaining Sessions or Agents. Its principal and TEAM_LEADER credential will be removed.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={Boolean(managedTeamLeaderId) && deleteConfirmation === null}
         onClose={closeManagement}
         title={
           resources
@@ -996,27 +1580,38 @@ export function AdminTeamLeaders() {
                 </span>
               </div>
 
-              <button
-                type="button"
-                className="admin-team-leaders-delete-btn"
-                onClick={() =>
-                  void deleteManagedTeamLeader()
-                }
-                disabled={
-                  !resources.canDelete ||
-                  isMutating
-                }
-              >
-                {deleteTeamLeaderMutation.isPending ? (
-                  <Loader2
-                    size={16}
-                    className="animate-spin"
-                  />
-                ) : (
+              <div className="admin-team-leaders-delete-actions">
+                <button
+                  type="button"
+                  className="admin-team-leaders-delete-btn"
+                  onClick={() =>
+                    setDeleteConfirmation(
+                      'safe',
+                    )
+                  }
+                  disabled={
+                    !resources.canDelete ||
+                    isMutating
+                  }
+                >
                   <Trash2 size={16} />
-                )}
-                Delete Team Leader
-              </button>
+                  Delete Team Leader
+                </button>
+
+                <button
+                  type="button"
+                  className="admin-team-leaders-force-delete-btn"
+                  onClick={() =>
+                    setDeleteConfirmation(
+                      'force',
+                    )
+                  }
+                  disabled={isMutating}
+                >
+                  <ShieldAlert size={16} />
+                  Force delete all
+                </button>
+              </div>
             </div>
           ) : undefined
         }
@@ -1057,7 +1652,7 @@ export function AdminTeamLeaders() {
           </div>
         ) : resources ? (
           <div className="admin-team-leaders-resource-stack">
-            <section className="admin-team-leaders-resource-panel">
+            <section className="admin-team-leaders-resource-panel admin-team-leaders-resource-panel--sessions">
               <div className="admin-team-leaders-resource-header">
                 <div>
                   <h3>
@@ -1210,7 +1805,7 @@ export function AdminTeamLeaders() {
               )}
             </section>
 
-            <section className="admin-team-leaders-resource-panel">
+            <section className="admin-team-leaders-resource-panel admin-team-leaders-resource-panel--agents">
               <div className="admin-team-leaders-resource-header">
                 <div>
                   <h3>

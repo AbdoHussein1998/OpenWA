@@ -1,7 +1,9 @@
 import {
   ConflictException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import {
@@ -26,6 +28,7 @@ import {
   type ApiKeyEvictionReason,
 } from '../events/events.gateway';
 import { Session } from '../session/entities/session.entity';
+import { SessionService } from '../session/session.service';
 
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { CreateTeamLeaderDto } from './dto/create-team-leader.dto';
@@ -127,6 +130,20 @@ export interface AdminTeamLeaderResources {
   canDelete: boolean;
 }
 
+/**
+ * Summary returned by the destructive Admin/Operator force-delete flow.
+ *
+ * Session deletion is intentionally delegated to SessionService so runtime
+ * engines, browser profiles, ownership claims, and cross-database Agent
+ * assignments are retired through the normal Session lifecycle.
+ */
+export interface ForceDeleteTeamLeaderResult {
+  teamLeaderId: string;
+  teamLeaderName: string;
+  deletedSessionIds: string[];
+  deletedAgentIds: string[];
+}
+
 @Injectable()
 export class TeamLeaderService {
   private readonly logger = createLogger('TeamLeaderService');
@@ -172,6 +189,18 @@ export class TeamLeaderService {
      * to statically depend on EventsModule.
      */
     private readonly moduleRef: ModuleRef,
+
+    /**
+     * Full Session lifecycle owner used only by destructive Team Leader
+     * retirement. It is optional here so direct-construction unit tests that
+     * exercise the non-destructive TeamLeaderService surface remain source-
+     * compatible; TeamLeaderModule provides it in the running application.
+     *
+     * Keep this optional dependency last: TypeScript does not allow a required
+     * constructor parameter after an optional parameter.
+     */
+    @Optional()
+    private readonly sessionService?: SessionService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -746,6 +775,188 @@ export class TeamLeaderService {
       teamLeaderId,
       action: 'team_leader_deleted',
     });
+  }
+
+
+  /**
+   * Permanently delete a Team Leader and every resource owned by that
+   * principal.
+   *
+   * This is deliberately separate from deleteTeamLeader(), which remains the
+   * safe/default operation and still refuses to delete a non-empty principal.
+   *
+   * Cross-database deletion cannot be atomic because Sessions live in `data`
+   * while Team Leader / Agent principals and credentials live in `main`.
+   * Therefore the destructive flow is ordered fail-safe:
+   *
+   * 1. Delete every owned Session through SessionService.delete().
+   * 2. Only after all Session lifecycle deletions succeed, delete Agents and
+   *    the Team Leader together in one main-database transaction.
+   * 3. Evict every affected principal credential from WebSocket state.
+   *
+   * If a Session deletion fails, the Team Leader and Agents are intentionally
+   * left intact so the operation can be inspected/retried instead of silently
+   * orphaning management principals.
+   */
+  async forceDeleteTeamLeader(
+    teamLeaderId: string,
+  ): Promise<ForceDeleteTeamLeaderResult> {
+    const teamLeader = await this.getTeamLeader(teamLeaderId);
+
+    if (!this.sessionService) {
+      throw new InternalServerErrorException(
+        'Session lifecycle service is unavailable for force deletion',
+      );
+    }
+
+    const deletedSessionIds: string[] = [];
+
+    /**
+     * Re-read the owned Session set after each pass. This closes the common
+     * cross-database race where an ownership change lands while the destructive
+     * operation is already running. Five passes is intentionally bounded so a
+     * continuously-mutating installation cannot hold the request forever.
+     */
+    const maxSessionDeletePasses = 5;
+
+    for (let pass = 0; pass < maxSessionDeletePasses; pass += 1) {
+      const sessions = await this.sessionRepository.find({
+        where: {
+          ownerTeamLeaderId: teamLeaderId,
+        },
+        order: {
+          createdAt: 'ASC',
+        },
+      });
+
+      if (sessions.length === 0) {
+        break;
+      }
+
+      for (const session of sessions) {
+        try {
+          await this.sessionService.delete(session.id);
+          deletedSessionIds.push(session.id);
+        } catch (error) {
+          if (error instanceof NotFoundException) {
+            // The Session disappeared after the ownership snapshot. Treat it
+            // as already retired and continue with the current resource graph.
+            continue;
+          }
+
+          this.logger.error(
+            'Force Team Leader deletion stopped because a Session could not be deleted',
+            error instanceof Error ? error.message : String(error),
+            {
+              teamLeaderId,
+              sessionId: session.id,
+              deletedSessionIds,
+              action: 'team_leader_force_delete_session_failed',
+            },
+          );
+
+          throw error;
+        }
+      }
+    }
+
+    const remainingSessionCount = await this.sessionRepository.count({
+      where: {
+        ownerTeamLeaderId: teamLeaderId,
+      },
+    });
+
+    if (remainingSessionCount > 0) {
+      throw new ConflictException(
+        'Team Leader resources changed repeatedly during force deletion; retry after concurrent Session changes stop',
+      );
+    }
+
+    const mainDeletion = await this.mainDataSource.transaction(async manager => {
+      const teamLeaderRepository = manager.getRepository(TeamLeader);
+      const agentRepository = manager.getRepository(Agent);
+      const apiKeyRepository = manager.getRepository(ApiKey);
+
+      const currentTeamLeader = await teamLeaderRepository.findOne({
+        where: {
+          id: teamLeaderId,
+        },
+      });
+
+      if (!currentTeamLeader) {
+        throw new NotFoundException('Team Leader not found');
+      }
+
+      const agents = await agentRepository.find({
+        where: {
+          teamLeaderId,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      const agentIds = agents.map(agent => agent.id);
+
+      const keyWhere = [
+        {
+          teamLeaderId,
+        },
+        ...(agentIds.length > 0
+          ? [
+              {
+                agentId: In(agentIds),
+              },
+            ]
+          : []),
+      ];
+
+      const keys = await apiKeyRepository.find({
+        where: keyWhere,
+        select: {
+          id: true,
+        },
+      });
+
+      /**
+       * AgentTemplateSendUsage and principal API keys are FK-cascaded from
+       * Agent/TeamLeader rows in the main database.
+       */
+      if (agentIds.length > 0) {
+        await agentRepository.delete({
+          id: In(agentIds),
+        });
+      }
+
+      await teamLeaderRepository.remove(currentTeamLeader);
+
+      return {
+        agentIds,
+        keyIds: keys.map(key => key.id),
+      };
+    });
+
+    this.evictApiKeys(mainDeletion.keyIds, 'deleted');
+
+    this.logger.warn(
+      `Team Leader force-deleted with all resources: ${teamLeader.name}`,
+      {
+        teamLeaderId,
+        deletedSessionCount: deletedSessionIds.length,
+        deletedAgentCount: mainDeletion.agentIds.length,
+        deletedSessionIds,
+        deletedAgentIds: mainDeletion.agentIds,
+        action: 'team_leader_force_deleted',
+      },
+    );
+
+    return {
+      teamLeaderId,
+      teamLeaderName: teamLeader.name,
+      deletedSessionIds,
+      deletedAgentIds: mainDeletion.agentIds,
+    };
   }
 
   // ---------------------------------------------------------------------------

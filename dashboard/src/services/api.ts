@@ -47,6 +47,8 @@ export interface SessionConfig {
 export interface Session {
   id: string;
   name: string;
+  /** Team Leader that owns the Session, or null for an unassigned Admin-created Session. */
+  ownerTeamLeaderId?: string | null;
   status:
     | 'created'
     | 'initializing'
@@ -215,8 +217,20 @@ export interface AdminTeamLeaderResources {
   canDelete: boolean;
 }
 
+export interface ForceDeleteTeamLeaderResult {
+  teamLeaderId: string;
+  teamLeaderName: string;
+  deletedSessionIds: string[];
+  deletedAgentIds: string[];
+}
+
 export interface ReassignAdminSessionInput {
   targetTeamLeaderId: string;
+}
+
+/** Assign or clear an Agent's Session from the global Admin surface. */
+export interface AssignAdminAgentSessionInput {
+  sessionId: string | null;
 }
 
 export interface BulkReassignAdminSessionsInput extends ReassignAdminSessionInput {
@@ -347,6 +361,8 @@ export interface ApiKey {
   allowedIps?: string[];
   allowedSessions?: string[];
   isActive: boolean;
+  /** Stable marker for the protected bootstrap/main Admin credential. */
+  isPrimaryAdminKey: boolean;
   expiresAt?: string;
   lastUsedAt?: string;
   usageCount: number;
@@ -1245,6 +1261,23 @@ export const adminTeamLeaderApi = {
       },
     ),
 
+  /**
+   * Assign or transfer a Session directly to a Team Leader without requiring
+   * the current owner in the route. This is the route used for Admin-created
+   * Sessions whose ownerTeamLeaderId is null.
+   */
+  setSessionOwner: (
+    sessionId: string,
+    data: ReassignAdminSessionInput,
+  ) =>
+    request<AdminSessionOverview>(
+      `/admin/team-leaders/sessions/${encodeURIComponent(sessionId)}/owner`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    ),
+
   reassignSession: (
     teamLeaderId: string,
     sessionId: string,
@@ -1277,6 +1310,20 @@ export const adminTeamLeaderApi = {
         method: 'DELETE',
       },
     ),
+
+  /**
+   * Permanently delete the Team Leader and every owned Session/Agent.
+   *
+   * This is intentionally separate from delete(), which remains the safe
+   * empty-principal deletion path.
+   */
+  forceDelete: (teamLeaderId: string) =>
+    request<ForceDeleteTeamLeaderResult>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/force`,
+      {
+        method: 'DELETE',
+      },
+    ),
 };
 
 /**
@@ -1292,6 +1339,22 @@ export const adminAgentApi = {
   get: (agentId: string) =>
     request<AdminAgentOverview>(
       `/admin/agents/${encodeURIComponent(agentId)}`,
+    ),
+
+  /**
+   * Assign a Session to an Agent, or clear the Agent assignment with null.
+   * The backend derives Session.ownerTeamLeaderId from Agent.teamLeaderId.
+   */
+  assignSession: (
+    agentId: string,
+    data: AssignAdminAgentSessionInput,
+  ) =>
+    request<AdminAgentOverview>(
+      `/admin/agents/${encodeURIComponent(agentId)}/assignment`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
     ),
 
   reassign: (
