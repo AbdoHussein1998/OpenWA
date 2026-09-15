@@ -497,6 +497,114 @@ describe('TeamLeaderService', () => {
   });
 
 
+  describe('getAdminTeamLeaderResourceSummary', () => {
+    it('returns authoritative per-Team-Leader and global Session/Agent counts', async () => {
+      const teamLeaderA = createTeamLeader({
+        id: 'team-leader-a',
+        name: 'Leader A',
+      });
+      const teamLeaderB = createTeamLeader({
+        id: 'team-leader-b',
+        name: 'Leader B',
+      });
+
+      const assignedSession = createSession({
+        id: 'session-assigned',
+        ownerTeamLeaderId: teamLeaderA.id,
+      });
+      const unassignedSessionA = createSession({
+        id: 'session-unassigned-a',
+        ownerTeamLeaderId: teamLeaderA.id,
+      });
+      const unassignedSessionB = createSession({
+        id: 'session-unassigned-b',
+        ownerTeamLeaderId: teamLeaderB.id,
+      });
+      const adminUnownedSession = createSession({
+        id: 'session-admin-unowned',
+        ownerTeamLeaderId: null,
+      });
+      const staleOwnerSession = createSession({
+        id: 'session-stale-owner',
+        ownerTeamLeaderId: 'deleted-team-leader',
+      });
+
+      const agentA = createAgent({
+        id: 'agent-a',
+        teamLeaderId: teamLeaderA.id,
+        teamLeader: teamLeaderA,
+        assignedSessionId: assignedSession.id,
+      });
+      const agentB = createAgent({
+        id: 'agent-b',
+        teamLeaderId: teamLeaderB.id,
+        teamLeader: teamLeaderB,
+        assignedSessionId: null,
+      });
+
+      teamLeaderRepository.find.mockResolvedValue([
+        teamLeaderA,
+        teamLeaderB,
+      ]);
+      sessionRepository.find.mockResolvedValue([
+        assignedSession,
+        unassignedSessionA,
+        unassignedSessionB,
+        adminUnownedSession,
+        staleOwnerSession,
+      ]);
+      agentRepository.find.mockResolvedValue([
+        agentA,
+        agentB,
+      ]);
+
+      await expect(
+        service.getAdminTeamLeaderResourceSummary(),
+      ).resolves.toEqual({
+        totals: {
+          teamLeaderCount: 2,
+          sessionCount: 3,
+          agentCount: 2,
+          unassignedSessionCount: 2,
+        },
+        teamLeaders: [
+          {
+            teamLeaderId: teamLeaderA.id,
+            sessionCount: 2,
+            agentCount: 1,
+            unassignedSessionCount: 1,
+          },
+          {
+            teamLeaderId: teamLeaderB.id,
+            sessionCount: 1,
+            agentCount: 1,
+            unassignedSessionCount: 1,
+          },
+        ],
+      });
+
+      expect(teamLeaderRepository.find).toHaveBeenCalledWith({
+        select: {
+          id: true,
+        },
+      });
+      expect(sessionRepository.find).toHaveBeenCalledWith({
+        select: {
+          id: true,
+          ownerTeamLeaderId: true,
+        },
+      });
+      expect(agentRepository.find).toHaveBeenCalledWith({
+        select: {
+          id: true,
+          teamLeaderId: true,
+          assignedSessionId: true,
+        },
+      });
+    });
+  });
+
+
   describe('setAdminSessionOwner', () => {
     it('assigns an ADMIN-created unowned Session to the target Team Leader', async () => {
       const targetTeamLeader = createTeamLeader({

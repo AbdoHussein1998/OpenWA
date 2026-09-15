@@ -62,6 +62,7 @@ describe('AdminTeamLeaderController', () => {
     createAgent: jest.Mock;
     listTeamLeaders: jest.Mock;
     getAdminTeamLeaderResources: jest.Mock;
+    getAdminTeamLeaderResourceSummary: jest.Mock;
     setAdminSessionOwner: jest.Mock;
     reassignAdminSession: jest.Mock;
     reassignAdminSessions: jest.Mock;
@@ -77,6 +78,7 @@ describe('AdminTeamLeaderController', () => {
       createAgent: jest.fn(),
       listTeamLeaders: jest.fn(),
       getAdminTeamLeaderResources: jest.fn(),
+      getAdminTeamLeaderResourceSummary: jest.fn(),
       setAdminSessionOwner: jest.fn(),
       reassignAdminSession: jest.fn(),
       reassignAdminSessions: jest.fn(),
@@ -216,6 +218,45 @@ describe('AdminTeamLeaderController', () => {
 
       await expect(controller.findAll()).resolves.toBe(teamLeaders);
       expect(teamLeaderService.listTeamLeaders).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('resourceSummary', () => {
+    it('returns authoritative Team Leader resource counts', async () => {
+      const summary = {
+        totals: {
+          teamLeaderCount: 2,
+          sessionCount: 5,
+          agentCount: 3,
+          unassignedSessionCount: 2,
+        },
+        teamLeaders: [
+          {
+            teamLeaderId: 'team-leader-1',
+            sessionCount: 3,
+            agentCount: 2,
+            unassignedSessionCount: 1,
+          },
+          {
+            teamLeaderId: 'team-leader-2',
+            sessionCount: 2,
+            agentCount: 1,
+            unassignedSessionCount: 1,
+          },
+        ],
+      };
+
+      teamLeaderService.getAdminTeamLeaderResourceSummary.mockResolvedValue(
+        summary,
+      );
+
+      await expect(
+        controller.resourceSummary(),
+      ).resolves.toBe(summary);
+
+      expect(
+        teamLeaderService.getAdminTeamLeaderResourceSummary,
+      ).toHaveBeenCalledTimes(1);
     });
   });
 

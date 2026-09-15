@@ -217,6 +217,21 @@ export interface AdminTeamLeaderResources {
   canDelete: boolean;
 }
 
+export interface AdminTeamLeaderResourceSummary {
+  totals: {
+    teamLeaderCount: number;
+    sessionCount: number;
+    agentCount: number;
+    unassignedSessionCount: number;
+  };
+  teamLeaders: Array<{
+    teamLeaderId: string;
+    sessionCount: number;
+    agentCount: number;
+    unassignedSessionCount: number;
+  }>;
+}
+
 export interface ForceDeleteTeamLeaderResult {
   teamLeaderId: string;
   teamLeaderName: string;
@@ -1252,6 +1267,11 @@ export const contactApi = {
 export const adminTeamLeaderApi = {
   list: () =>
     request<TeamLeader[]>('/admin/team-leaders'),
+
+  resourceSummary: () =>
+    request<AdminTeamLeaderResourceSummary>(
+      '/admin/team-leaders/resource-summary',
+    ),
 
   get: (teamLeaderId: string) =>
     request<TeamLeader>(

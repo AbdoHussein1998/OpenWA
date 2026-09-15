@@ -35,6 +35,7 @@ import { TeamLeader } from './entities/team-leader.entity';
 import {
   TeamLeaderService,
   type AdminSessionOverview,
+  type AdminTeamLeaderResourceSummary,
   type AdminTeamLeaderResources,
   type CreateAgentResult,
   type CreateTeamLeaderResult,
@@ -170,6 +171,25 @@ export class AdminTeamLeaderController {
   })
   async findAll(): Promise<TeamLeader[]> {
     return this.teamLeaderService.listTeamLeaders();
+  }
+
+  /** Return aggregate and per-Team-Leader resource counts. */
+  @Get('resource-summary')
+  @ApiOperation({
+    summary: 'Get Team Leader resource counts',
+    description:
+      'Returns authoritative Session and Agent counts for every Team Leader, plus global totals used by the Admin/Operator Team Leader dashboard.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Current Team Leader resource counts.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
+  })
+  async resourceSummary(): Promise<AdminTeamLeaderResourceSummary> {
+    return this.teamLeaderService.getAdminTeamLeaderResourceSummary();
   }
 
   /**

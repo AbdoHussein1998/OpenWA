@@ -8,7 +8,6 @@ import {
   AlertCircle,
   ArrowRightLeft,
   Loader2,
-  Mail,
   Plus,
   RefreshCw,
   Search,
@@ -36,7 +35,7 @@ import {
 } from '../components/GeneratedKeyField';
 
 import {
-  useAdminAgentsQuery,
+  useAdminTeamLeaderResourceSummaryQuery,
   useAdminTeamLeaderResourcesQuery,
   useAdminTeamLeadersQuery,
   useBulkReassignAdminAgentsMutation,
@@ -46,7 +45,6 @@ import {
   useForceDeleteAdminTeamLeaderMutation,
   useReassignAdminAgentMutation,
   useReassignAdminSessionMutation,
-  useSessionsQuery,
 } from '../hooks/queries';
 
 import {
@@ -128,43 +126,6 @@ function matchesSearch(
   );
 }
 
-function wasCreatedInLastThirtyDays(
-  teamLeader: TeamLeader,
-): boolean {
-  const createdAt =
-    new Date(
-      teamLeader.createdAt,
-    );
-
-  if (
-    Number.isNaN(
-      createdAt.getTime(),
-    )
-  ) {
-    return false;
-  }
-
-  const thirtyDaysAgo =
-    Date.now() -
-    30 *
-      24 *
-      60 *
-      60 *
-      1000;
-
-  return (
-    createdAt.getTime() >=
-    thirtyDaysAgo
-  );
-}
-
-function isValidEmail(
-  value: string,
-): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-    value,
-  );
-}
 
 function sessionLabel(
   session: AdminSessionOverview,
@@ -183,11 +144,8 @@ export function AdminTeamLeaders() {
   const teamLeadersQuery =
     useAdminTeamLeadersQuery();
 
-  const sessionsQuery =
-    useSessionsQuery();
-
-  const adminAgentsQuery =
-    useAdminAgentsQuery();
+  const resourceSummaryQuery =
+    useAdminTeamLeaderResourceSummaryQuery();
 
   const createTeamLeaderMutation =
     useCreateAdminTeamLeaderMutation();
@@ -300,52 +258,25 @@ export function AdminTeamLeaders() {
     teamLeadersQuery.data ??
     [];
 
-  const ownedSessionCounts =
-    useMemo(() => {
-      const counts =
-        new Map<string, number>();
+  const resourceSummary =
+    resourceSummaryQuery.data;
 
-      for (
-        const session of
-        sessionsQuery.data ?? []
-      ) {
-        const ownerId =
-          session.ownerTeamLeaderId;
-
-        if (!ownerId) {
-          continue;
-        }
-
-        counts.set(
-          ownerId,
-          (counts.get(ownerId) ?? 0) + 1,
-        );
-      }
-
-      return counts;
-    }, [
-      sessionsQuery.data,
-    ]);
-
-  const agentCounts =
-    useMemo(() => {
-      const counts =
-        new Map<string, number>();
-
-      for (
-        const agent of
-        adminAgentsQuery.data ?? []
-      ) {
-        counts.set(
-          agent.teamLeaderId,
-          (counts.get(agent.teamLeaderId) ?? 0) + 1,
-        );
-      }
-
-      return counts;
-    }, [
-      adminAgentsQuery.data,
-    ]);
+  const resourceCountsByTeamLeaderId =
+    useMemo(
+      () =>
+        new Map(
+          (
+            resourceSummary
+              ?.teamLeaders ?? []
+          ).map(
+            counts => [
+              counts.teamLeaderId,
+              counts,
+            ],
+          ),
+        ),
+      [resourceSummary],
+    );
 
   const normalizedSearch =
     search
@@ -436,23 +367,6 @@ export function AdminTeamLeaders() {
       [resources],
     );
 
-  const withEmailCount =
-    teamLeaders.filter(
-      teamLeader =>
-        Boolean(
-          teamLeader.email,
-        ),
-    ).length;
-
-  const withoutEmailCount =
-    teamLeaders.length -
-    withEmailCount;
-
-  const recentCount =
-    teamLeaders.filter(
-      wasCreatedInLastThirtyDays,
-    ).length;
-
   const trimmedCreateName =
     createName.trim();
 
@@ -481,8 +395,7 @@ export function AdminTeamLeaders() {
     () => {
       void Promise.all([
         teamLeadersQuery.refetch(),
-        sessionsQuery.refetch(),
-        adminAgentsQuery.refetch(),
+        resourceSummaryQuery.refetch(),
       ]);
 
       if (managedTeamLeaderId) {
@@ -877,8 +790,7 @@ export function AdminTeamLeaders() {
               onClick={refresh}
               disabled={
                 teamLeadersQuery.isFetching ||
-                sessionsQuery.isFetching ||
-                adminAgentsQuery.isFetching ||
+                resourceSummaryQuery.isFetching ||
                 isMutating
               }
             >
@@ -886,8 +798,7 @@ export function AdminTeamLeaders() {
                 size={17}
                 className={
                   teamLeadersQuery.isFetching ||
-                  sessionsQuery.isFetching ||
-                  adminAgentsQuery.isFetching
+                  resourceSummaryQuery.isFetching
                     ? 'animate-spin'
                     : undefined
                 }
@@ -933,6 +844,40 @@ export function AdminTeamLeaders() {
         </div>
       )}
 
+      {resourceSummaryQuery.isError && (
+        <div
+          className="admin-team-leaders-alert admin-team-leaders-alert--error"
+          role="alert"
+        >
+          <AlertCircle size={20} />
+
+          <div>
+            <strong>
+              Resource counts could not be loaded.
+            </strong>
+
+            <span>
+              {errorMessage(
+                resourceSummaryQuery.error,
+              )}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() =>
+              void resourceSummaryQuery.refetch()
+            }
+            disabled={
+              resourceSummaryQuery.isFetching
+            }
+          >
+            Retry counts
+          </button>
+        </div>
+      )}
+
       <section
         className="admin-team-leaders-summary-grid"
         aria-label="Team Leader overview"
@@ -948,31 +893,40 @@ export function AdminTeamLeaders() {
             </span>
 
             <strong className="admin-team-leaders-summary-value">
-              {teamLeaders.length}
+              {resourceSummaryQuery.isLoading
+                ? '…'
+                : resourceSummaryQuery.isError
+                  ? teamLeaders.length
+                  : resourceSummary?.totals.teamLeaderCount ??
+                    teamLeaders.length}
             </strong>
 
             <span className="admin-team-leaders-summary-hint">
-              Total management principals
+              Total Team Leader principals
             </span>
           </div>
         </article>
 
         <article className="admin-team-leaders-summary-card">
           <div className="admin-team-leaders-summary-icon">
-            <Mail size={20} />
+            <Smartphone size={20} />
           </div>
 
           <div>
             <span className="admin-team-leaders-summary-label">
-              With email
+              Owned Sessions
             </span>
 
             <strong className="admin-team-leaders-summary-value">
-              {withEmailCount}
+              {resourceSummaryQuery.isLoading
+                ? '…'
+                : resourceSummaryQuery.isError
+                  ? '—'
+                  : resourceSummary?.totals.sessionCount ?? 0}
             </strong>
 
             <span className="admin-team-leaders-summary-hint">
-              Optional email is configured
+              Sessions assigned to all Team Leaders
             </span>
           </div>
         </article>
@@ -984,35 +938,43 @@ export function AdminTeamLeaders() {
 
           <div>
             <span className="admin-team-leaders-summary-label">
-              Name only
+              Agents
             </span>
 
             <strong className="admin-team-leaders-summary-value">
-              {withoutEmailCount}
+              {resourceSummaryQuery.isLoading
+                ? '…'
+                : resourceSummaryQuery.isError
+                  ? '—'
+                  : resourceSummary?.totals.agentCount ?? 0}
             </strong>
 
             <span className="admin-team-leaders-summary-hint">
-              No email configured
+              Agents across all Team Leaders
             </span>
           </div>
         </article>
 
         <article className="admin-team-leaders-summary-card">
           <div className="admin-team-leaders-summary-icon">
-            <RefreshCw size={20} />
+            <ShieldAlert size={20} />
           </div>
 
           <div>
             <span className="admin-team-leaders-summary-label">
-              New in 30 days
+              Unassigned Sessions
             </span>
 
             <strong className="admin-team-leaders-summary-value">
-              {recentCount}
+              {resourceSummaryQuery.isLoading
+                ? '…'
+                : resourceSummaryQuery.isError
+                  ? '—'
+                  : resourceSummary?.totals.unassignedSessionCount ?? 0}
             </strong>
 
             <span className="admin-team-leaders-summary-hint">
-              Recently created principals
+              Team Leader-owned Sessions with no Agent
             </span>
           </div>
         </article>
@@ -1157,13 +1119,13 @@ export function AdminTeamLeaders() {
                           className="admin-team-leaders-count-badge admin-team-leaders-count-badge--sessions"
                           title="Sessions owned by this Team Leader"
                         >
-                          {sessionsQuery.isLoading
+                          {resourceSummaryQuery.isLoading
                             ? '…'
-                            : sessionsQuery.isError
+                            : resourceSummaryQuery.isError
                               ? '—'
-                              : ownedSessionCounts.get(
+                              : resourceCountsByTeamLeaderId.get(
                                   teamLeader.id,
-                                ) ?? 0}
+                                )?.sessionCount ?? 0}
                         </span>
                       </td>
 
@@ -1175,13 +1137,13 @@ export function AdminTeamLeaders() {
                           className="admin-team-leaders-count-badge admin-team-leaders-count-badge--agents"
                           title="Agents assigned to this Team Leader"
                         >
-                          {adminAgentsQuery.isLoading
+                          {resourceSummaryQuery.isLoading
                             ? '…'
-                            : adminAgentsQuery.isError
+                            : resourceSummaryQuery.isError
                               ? '—'
-                              : agentCounts.get(
+                              : resourceCountsByTeamLeaderId.get(
                                   teamLeader.id,
-                                ) ?? 0}
+                                )?.agentCount ?? 0}
                         </span>
                       </td>
 

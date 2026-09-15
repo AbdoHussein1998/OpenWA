@@ -132,6 +132,28 @@ export interface AdminTeamLeaderResources {
 }
 
 /**
+ * Compact authoritative resource counts for the global Team Leader inventory.
+ *
+ * Counts are produced directly from the management principal/session stores
+ * rather than from the generic Session list endpoint, so pagination or
+ * dashboard filtering cannot make the Admin table under-count ownership.
+ */
+export interface AdminTeamLeaderResourceSummary {
+  totals: {
+    teamLeaderCount: number;
+    sessionCount: number;
+    agentCount: number;
+    unassignedSessionCount: number;
+  };
+  teamLeaders: Array<{
+    teamLeaderId: string;
+    sessionCount: number;
+    agentCount: number;
+    unassignedSessionCount: number;
+  }>;
+}
+
+/**
  * Summary returned by the destructive Admin/Operator force-delete flow.
  *
  * Session deletion is intentionally delegated to SessionService so runtime
@@ -366,6 +388,164 @@ export class TeamLeaderService {
         updatedAt: agent.updatedAt,
       })),
       canDelete: sessions.length === 0 && agents.length === 0,
+    };
+  }
+
+  /**
+   * Return authoritative resource counts for every Team Leader in one
+   * management request.
+   *
+   * Team Leader / Agent rows live in `main` and Session rows live in `data`,
+   * so the service performs one read per store and aggregates in memory. This
+   * avoids the N+1 request pattern that would result from asking the dashboard
+   * to fetch /:id/resources for every Team Leader.
+   *
+   * `unassignedSessionCount` means a Session has a Team Leader owner but no
+   * Agent currently references that Session through assignedSessionId.
+   */
+  async getAdminTeamLeaderResourceSummary(): Promise<AdminTeamLeaderResourceSummary> {
+    const [teamLeaders, sessions, agents] = await Promise.all([
+      this.teamLeaderRepository.find({
+        select: {
+          id: true,
+        },
+      }),
+      this.sessionRepository.find({
+        select: {
+          id: true,
+          ownerTeamLeaderId: true,
+        },
+      }),
+      this.agentRepository.find({
+        select: {
+          id: true,
+          teamLeaderId: true,
+          assignedSessionId: true,
+        },
+      }),
+    ]);
+
+    const teamLeaderIds =
+      new Set(
+        teamLeaders.map(
+          teamLeader => teamLeader.id,
+        ),
+      );
+
+    const countsByTeamLeaderId =
+      new Map<
+        string,
+        {
+          sessionCount: number;
+          agentCount: number;
+          unassignedSessionCount: number;
+        }
+      >(
+        teamLeaders.map(
+          teamLeader => [
+            teamLeader.id,
+            {
+              sessionCount: 0,
+              agentCount: 0,
+              unassignedSessionCount: 0,
+            },
+          ],
+        ),
+      );
+
+    const assignedSessionIds =
+      new Set(
+        agents
+          .map(
+            agent => agent.assignedSessionId,
+          )
+          .filter(
+            (
+              sessionId,
+            ): sessionId is string =>
+              sessionId !== null,
+          ),
+      );
+
+    for (const agent of agents) {
+      const counts =
+        countsByTeamLeaderId.get(
+          agent.teamLeaderId,
+        );
+
+      if (counts) {
+        counts.agentCount += 1;
+      }
+    }
+
+    let sessionCount = 0;
+    let unassignedSessionCount = 0;
+
+    for (const session of sessions) {
+      const ownerTeamLeaderId =
+        session.ownerTeamLeaderId;
+
+      if (
+        !ownerTeamLeaderId ||
+        !teamLeaderIds.has(
+          ownerTeamLeaderId,
+        )
+      ) {
+        continue;
+      }
+
+      const counts =
+        countsByTeamLeaderId.get(
+          ownerTeamLeaderId,
+        );
+
+      if (!counts) {
+        continue;
+      }
+
+      counts.sessionCount += 1;
+      sessionCount += 1;
+
+      if (
+        !assignedSessionIds.has(
+          session.id,
+        )
+      ) {
+        counts.unassignedSessionCount += 1;
+        unassignedSessionCount += 1;
+      }
+    }
+
+    return {
+      totals: {
+        teamLeaderCount: teamLeaders.length,
+        sessionCount,
+        agentCount: agents.filter(
+          agent =>
+            teamLeaderIds.has(
+              agent.teamLeaderId,
+            ),
+        ).length,
+        unassignedSessionCount,
+      },
+      teamLeaders: teamLeaders.map(
+        teamLeader => {
+          const counts =
+            countsByTeamLeaderId.get(
+              teamLeader.id,
+            );
+
+          return {
+            teamLeaderId: teamLeader.id,
+            sessionCount:
+              counts?.sessionCount ?? 0,
+            agentCount:
+              counts?.agentCount ?? 0,
+            unassignedSessionCount:
+              counts?.unassignedSessionCount ?? 0,
+          };
+        },
+      ),
     };
   }
 

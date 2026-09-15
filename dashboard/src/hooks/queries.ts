@@ -45,6 +45,7 @@ export const queryKeys = {
   sessions: ['sessions'] as const,
   sessionStats: ['sessions', 'stats'] as const,
   adminTeamLeaders: ['admin', 'team-leaders'] as const,
+  adminTeamLeaderResourceSummary: ['admin', 'team-leaders', 'resource-summary'] as const,
   adminTeamLeaderResources: (teamLeaderId: string) =>
     ['admin', 'team-leaders', teamLeaderId, 'resources'] as const,
   adminAgents: ['admin', 'agents'] as const,
@@ -226,6 +227,15 @@ export function useAdminTeamLeadersQuery(enabled = true) {
   });
 }
 
+export function useAdminTeamLeaderResourceSummaryQuery(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.adminTeamLeaderResourceSummary,
+    queryFn: adminTeamLeaderApi.resourceSummary,
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
 export function useAdminAgentsQuery(enabled = true) {
   return useQuery({
     queryKey: queryKeys.adminAgents,
@@ -368,6 +378,9 @@ export function useCreateAdminAgentMutation() {
         queryKey: queryKeys.adminAgents,
       });
       void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaderResourceSummary,
+      });
+      void queryClient.invalidateQueries({
         queryKey: queryKeys.apiKeys,
       });
     },
@@ -460,6 +473,9 @@ export function useReassignAdminSessionMutation() {
         queryKey: queryKeys.adminTeamLeaderResources(params.data.targetTeamLeaderId),
       });
       void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaderResourceSummary,
+      });
+      void queryClient.invalidateQueries({
         queryKey: queryKeys.adminAgents,
       });
       void queryClient.invalidateQueries({
@@ -487,6 +503,9 @@ export function useBulkReassignAdminSessionsMutation() {
       });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.adminTeamLeaderResources(params.data.targetTeamLeaderId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.adminTeamLeaderResourceSummary,
       });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.adminAgents,
