@@ -16,6 +16,7 @@ import { useRole } from '../hooks/useRole';
 import { useSessionsQuery, useSessionGroupsQuery } from '../hooks/queries';
 import { parseBulkRecipients, BULK_MAX_RECIPIENTS } from '../utils/bulkRecipients';
 import { PageHeader } from '../components/PageHeader';
+import { CountryPhoneInput } from '../components/CountryPhoneInput';
 import './MessageTester.css';
 
 
@@ -575,11 +576,13 @@ export function MessageTester() {
                   </>
                 ) : (
                   <>
-                    <input
-                      type="text"
+                    <CountryPhoneInput
+                      id="mt-13"
                       value={recipient}
-                      onChange={e => setRecipient(e.target.value)}
-                      placeholder="+62812345678"
+                      onChange={setRecipient}
+                      placeholder="1012345678"
+                      ariaLabel={t('messageTester.recipientPhone')}
+                      autoComplete="tel"
                     />
                     <span className="hint">{t('messageTester.phoneHint')}</span>
                   </>
@@ -789,12 +792,13 @@ export function MessageTester() {
               </div>
               <div className="form-group">
                 <label htmlFor="mt-7">{t('messageTester.contactNumber')}</label>
-                <input
+                <CountryPhoneInput
                   id="mt-7"
-                  type="text"
                   value={contactNumber}
-                  onChange={e => setContactNumber(e.target.value)}
-                  placeholder="+62812345678"
+                  onChange={setContactNumber}
+                  placeholder="1012345678"
+                  ariaLabel={t('messageTester.contactNumber')}
+                  autoComplete="tel"
                 />
               </div>
             </>

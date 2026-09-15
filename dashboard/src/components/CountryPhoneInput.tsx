@@ -366,12 +366,56 @@ export interface CountryPhoneInputProps {
   ariaLabel?: string;
 }
 
+function flagImageUrl(
+  countryCode: string,
+): string {
+  return `https://flagcdn.com/24x18/${countryCode.toLowerCase()}.png`;
+}
+
+function CountryFlag({
+  country,
+}: {
+  country: PhoneCountry;
+}) {
+  return (
+    <span
+      className="country-phone-input__flag-wrap"
+      aria-hidden="true"
+    >
+      <img
+        className="country-phone-input__flag"
+        src={flagImageUrl(country.code)}
+        width={24}
+        height={18}
+        alt=""
+        loading="lazy"
+        onError={event => {
+          event.currentTarget.style.display = 'none';
+          const fallback =
+            event.currentTarget.nextElementSibling as HTMLElement | null;
+          if (fallback) {
+            fallback.style.display = 'inline-flex';
+          }
+        }}
+      />
+      <span className="country-phone-input__flag-fallback">
+        {country.code}
+      </span>
+    </span>
+  );
+}
+
 /**
  * Country-code selector + national phone textbox.
  *
  * `value` and `onChange` deliberately keep the existing API shape: one full
- * international phone number containing digits only. This means the Sessions
- * and pairing endpoints do not need to change.
+ * international phone number containing digits only. This means the Sessions,
+ * Agent pairing, and Message Tester APIs do not need to change.
+ *
+ * The country picker is custom rather than a native <select>. Native selects
+ * render option content through the operating system, and Windows in
+ * particular does not reliably render flag emoji. The button/menu below uses
+ * actual flag images, so the selected country is visually consistent.
  */
 export function CountryPhoneInput({
   id,
@@ -417,6 +461,14 @@ export function CountryPhoneInput({
       initialCountry,
     ),
   );
+
+  const [
+    countryMenuOpen,
+    setCountryMenuOpen,
+  ] = useState(false);
+
+  const pickerRef =
+    useRef<HTMLDivElement>(null);
 
   const lastEmittedValueRef =
     useRef(
@@ -467,6 +519,54 @@ export function CountryPhoneInput({
     value,
   ]);
 
+  useEffect(() => {
+    if (!countryMenuOpen) {
+      return undefined;
+    }
+
+    const closeOnOutsideClick = (
+      event: MouseEvent,
+    ) => {
+      if (
+        pickerRef.current &&
+        event.target instanceof Node &&
+        !pickerRef.current.contains(
+          event.target,
+        )
+      ) {
+        setCountryMenuOpen(false);
+      }
+    };
+
+    const closeOnEscape = (
+      event: globalThis.KeyboardEvent,
+    ) => {
+      if (event.key === 'Escape') {
+        setCountryMenuOpen(false);
+      }
+    };
+
+    document.addEventListener(
+      'mousedown',
+      closeOnOutsideClick,
+    );
+    document.addEventListener(
+      'keydown',
+      closeOnEscape,
+    );
+
+    return () => {
+      document.removeEventListener(
+        'mousedown',
+        closeOnOutsideClick,
+      );
+      document.removeEventListener(
+        'keydown',
+        closeOnEscape,
+      );
+    };
+  }, [countryMenuOpen]);
+
   const emit = (
     country: PhoneCountry,
     localNumber: string,
@@ -491,8 +591,22 @@ export function CountryPhoneInput({
     onChange(fullNumber);
   };
 
+  const selectCountry = (
+    nextCountry: PhoneCountry,
+  ) => {
+    setCountryCode(
+      nextCountry.code,
+    );
+    setCountryMenuOpen(false);
+    emit(
+      nextCountry,
+      nationalNumber,
+    );
+  };
+
   return (
     <div
+      ref={pickerRef}
       className={[
         'country-phone-input',
         wrapperClassName,
@@ -500,90 +614,123 @@ export function CountryPhoneInput({
         .filter(Boolean)
         .join(' ')}
     >
-      <select
-        className={[
-          'country-phone-input__country',
-          countrySelectClassName,
-        ]
-          .filter(Boolean)
-          .join(' ')}
-        value={countryCode}
-        disabled={disabled}
-        aria-label={ariaLabel}
-        onChange={event => {
-          const nextCountry =
-            COUNTRY_BY_CODE.get(
-              event.target.value,
-            );
-
-          if (!nextCountry) {
-            return;
-          }
-
-          setCountryCode(
-            nextCountry.code,
-          );
-          emit(
-            nextCountry,
-            nationalNumber,
-          );
-        }}
-      >
-        {PHONE_COUNTRIES.map(
-          country => (
-            <option
-              key={country.code}
-              value={country.code}
-              aria-label={`${country.name} (+${country.dialCode})`}
-              title={`${country.name} (+${country.dialCode})`}
-            >
-              {country.flag}{' '}+{country.dialCode}
-            </option>
-          ),
-        )}
-      </select>
-
-      <div className="country-phone-input__number-wrap">
-        <span
-          className="country-phone-input__prefix"
-          aria-hidden="true"
-        >
-          +{selectedCountry.dialCode}
-        </span>
-
-        <input
-          id={id}
-          type="tel"
-          inputMode="numeric"
-          autoComplete={autoComplete}
+      <div className="country-phone-input__picker">
+        <button
+          type="button"
           className={[
-            'country-phone-input__number',
-            inputClassName,
+            'country-phone-input__country-button',
+            countrySelectClassName,
           ]
             .filter(Boolean)
             .join(' ')}
-          value={nationalNumber}
           disabled={disabled}
-          required={required}
-          maxLength={15}
-          placeholder={placeholder}
-          onKeyDown={onKeyDown}
-          onChange={event => {
-            const nextNational =
-              digitsOnly(
-                event.target.value,
-              );
+          aria-label={`${ariaLabel}: ${selectedCountry.name} +${selectedCountry.dialCode}`}
+          aria-haspopup="listbox"
+          aria-expanded={countryMenuOpen}
+          title={`${selectedCountry.name} (+${selectedCountry.dialCode})`}
+          onClick={() =>
+            setCountryMenuOpen(
+              current => !current,
+            )
+          }
+        >
+          <CountryFlag
+            country={selectedCountry}
+          />
 
-            setNationalNumber(
-              nextNational,
-            );
-            emit(
-              selectedCountry,
-              nextNational,
-            );
-          }}
-        />
+          <span className="country-phone-input__dial-code">
+            +{selectedCountry.dialCode}
+          </span>
+
+          <span
+            className="country-phone-input__chevron"
+            aria-hidden="true"
+          >
+            ▾
+          </span>
+        </button>
+
+        {countryMenuOpen && !disabled && (
+          <div
+            className="country-phone-input__menu"
+            role="listbox"
+            aria-label={ariaLabel}
+          >
+            {PHONE_COUNTRIES.map(
+              country => (
+                <button
+                  key={country.code}
+                  type="button"
+                  role="option"
+                  aria-selected={
+                    country.code ===
+                    selectedCountry.code
+                  }
+                  className={[
+                    'country-phone-input__option',
+                    country.code ===
+                    selectedCountry.code
+                      ? 'country-phone-input__option--selected'
+                      : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={() =>
+                    selectCountry(
+                      country,
+                    )
+                  }
+                >
+                  <CountryFlag
+                    country={country}
+                  />
+
+                  <span className="country-phone-input__option-name">
+                    {country.name}
+                  </span>
+
+                  <span className="country-phone-input__option-code">
+                    +{country.dialCode}
+                  </span>
+                </button>
+              ),
+            )}
+          </div>
+        )}
       </div>
+
+      <input
+        id={id}
+        type="tel"
+        inputMode="numeric"
+        autoComplete={autoComplete}
+        className={[
+          'country-phone-input__number',
+          inputClassName,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        value={nationalNumber}
+        disabled={disabled}
+        required={required}
+        maxLength={15}
+        placeholder={placeholder}
+        onKeyDown={onKeyDown}
+        onChange={event => {
+          const nextNational =
+            digitsOnly(
+              event.target.value,
+            );
+
+          setNationalNumber(
+            nextNational,
+          );
+          emit(
+            selectedCountry,
+            nextNational,
+          );
+        }}
+      />
     </div>
   );
 }
