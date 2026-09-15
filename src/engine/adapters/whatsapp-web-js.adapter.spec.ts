@@ -21,6 +21,7 @@ import {
   READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS,
   NAVIGATION_REINJECT_GRACE_MS,
   NAVIGATION_EPISODE_CAP_MS,
+  PAGE_TRANSPORT_CONFIRMATION_MS,
 } from './whatsapp-web-js.adapter';
 import { getEffectiveWebVersionInfo, resolveWebVersionPin, __resetWebVersionCache } from '../wa-web-version';
 import * as fs from 'fs';
@@ -5111,8 +5112,13 @@ describe('WhatsAppWebJsAdapter navigation re-inject grace (#1081)', () => {
     getState: jest.Mock;
     getChats?: jest.Mock;
     lastLoggedOut?: boolean;
+    eventsAttached?: boolean;
     pupBrowser: EventEmitter;
-    pupPage: EventEmitter & { mainFrame?: () => unknown };
+    pupPage: EventEmitter & {
+      mainFrame?: () => unknown;
+      isClosed?: () => boolean;
+      evaluate?: jest.Mock;
+    };
   };
 
   const wireAdapter = (
@@ -5186,6 +5192,34 @@ describe('WhatsAppWebJsAdapter navigation re-inject grace (#1081)', () => {
     client.emit('ready');
 
     await expect(adapter.probeLiveness()).resolves.toBe(false);
+  });
+
+  it('does not close the navigation window on a premature ready while eventsAttached is still false', async () => {
+    const { adapter, client } = wireAdapter({ eventsAttached: false });
+
+    client.pupPage.emit('framenavigated', navFrame());
+    client.emit('ready');
+
+    // getState still rejects in the fake client. Remaining alive proves the ready edge did not clear
+    // the reinjection grace before the message bridge finished attaching.
+    await expect(adapter.probeLiveness()).resolves.toBe(true);
+  });
+
+  it('does not close the navigation window merely because getState is CONNECTED while the bridge is unattached', async () => {
+    const { adapter, client } = wireAdapter({
+      eventsAttached: false,
+      getState: jest.fn().mockResolvedValueOnce(WAState.CONNECTED),
+    });
+
+    client.pupPage.emit('framenavigated', navFrame());
+
+    await expect(adapter.probeLiveness()).resolves.toBe(true);
+
+    // If CONNECTED had cleared the episode, this second failing probe would report false.
+    client.getState.mockRejectedValueOnce(
+      new Error('Execution context was destroyed, most likely because of a navigation.'),
+    );
+    await expect(adapter.probeLiveness()).resolves.toBe(true);
   });
 
   it('does not stamp a post_logout navigation — the credential teardown path must win', async () => {
@@ -5275,6 +5309,61 @@ describe('WhatsAppWebJsAdapter navigation re-inject grace (#1081)', () => {
     expect(adapter.getStatus()).toBe(EngineStatus.READY);
   });
 
+  it('keeps the Session READY when an ambiguous transport error is followed by a healthy page probe', async () => {
+    const healthyPage = Object.assign(new EventEmitter(), {
+      evaluate: jest.fn().mockResolvedValue(true),
+      isClosed: jest.fn().mockReturnValue(false),
+    });
+    const { adapter } = wireAdapter({
+      pupPage: healthyPage,
+    });
+    const report = (adapter as unknown as { reportIfPageTransportError: (e: unknown, c: string) => void })
+      .reportIfPageTransportError;
+
+    report.call(
+      adapter,
+      new Error('Protocol error (Runtime.callFunctionOn): Execution context was destroyed.'),
+      'getProfilePicture',
+    );
+
+    // The confirmation is intentionally background work; let its first health probe settle.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(healthyPage.evaluate).toHaveBeenCalled();
+    expect(adapter.getStatus()).toBe(EngineStatus.READY);
+  });
+
+  it('disconnects only after the bounded confirmation window when an ambiguous transport error never recovers', async () => {
+    jest.useFakeTimers();
+
+    const deadPage = Object.assign(new EventEmitter(), {
+      evaluate: jest.fn().mockRejectedValue(
+        new Error('Protocol error (Runtime.callFunctionOn): Execution context was destroyed.'),
+      ),
+      isClosed: jest.fn().mockReturnValue(false),
+    });
+    const { adapter } = wireAdapter({
+      pupPage: deadPage,
+    });
+    const report = (adapter as unknown as { reportIfPageTransportError: (e: unknown, c: string) => void })
+      .reportIfPageTransportError;
+
+    report.call(
+      adapter,
+      new Error('Protocol error (Runtime.callFunctionOn): Execution context was destroyed.'),
+      'getProfilePicture',
+    );
+
+    expect(adapter.getStatus()).toBe(EngineStatus.READY);
+
+    await jest.advanceTimersByTimeAsync(
+      PAGE_TRANSPORT_CONFIRMATION_MS + 1,
+    );
+
+    expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+  });
+
   it('reports a transport-matching error as death again once the window expired', () => {
     jest.useFakeTimers();
     const { adapter, client } = wireAdapter();
@@ -5288,14 +5377,22 @@ describe('WhatsAppWebJsAdapter navigation re-inject grace (#1081)', () => {
     expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
   });
 
-  it('answers engine operations with a retryable 409 while the page is re-injecting', async () => {
+  it('answers engine operations with a machine-readable retryable 409 while the page is re-injecting', async () => {
     const getChats = jest.fn();
     const { adapter, client } = wireAdapter({ getChats });
 
     client.pupPage.emit('framenavigated', navFrame());
 
-    await expect(adapter.getChats()).rejects.toBeInstanceOf(EngineNotReadyError);
-    await expect(adapter.getChats()).rejects.toThrow(/reload/i);
+    const error = await adapter.getChats().catch(value => value as EngineNotReadyError);
+
+    expect(error).toBeInstanceOf(EngineNotReadyError);
+    expect(error.message).toMatch(/reload/i);
+    expect(error.getStatus()).toBe(409);
+    expect(error.getResponse()).toMatchObject({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'ENGINE_REINJECTING',
+    });
     expect(getChats).not.toHaveBeenCalled();
   });
 

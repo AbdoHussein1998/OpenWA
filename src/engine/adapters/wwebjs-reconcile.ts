@@ -37,6 +37,12 @@ export interface WwebjsReadyReconcileHost {
   markReadyFromClientInfo(): void;
   /** The deadline's non-bridge branch: clear the broken auth and let the lifecycle re-pair. */
   recoverFromStuckAuth(): Promise<void>;
+  /**
+   * Stamp the lifecycle's navigation grace before an intentional page.reload() starts. Puppeteer's
+   * framenavigated event arrives later, so without this pre-stamp an in-flight delegate evaluate can
+   * fail in the small gap and be misclassified as a dead Session.
+   */
+  beginNavigationReinjectWindow(reason: string): void;
 }
 
 const AUTH_RECONCILE_INTERVAL_MS = 2000;
@@ -741,6 +747,10 @@ export class WwebjsReadyReconcile {
       },
     );
 
+    this.host.beginNavigationReinjectWindow(
+      'qr_connected_runtime_reinject',
+    );
+
     void page.reload().catch((error: unknown) =>
       this.host.logger.warn('QR-connected runtime reinjection failed', {
         sessionId: this.host.config.sessionId,
@@ -792,6 +802,10 @@ export class WwebjsReadyReconcile {
         observedForMs: Date.now() - this.bridgeDeadObservedAt,
         action: 'event_bridge_reload',
       },
+    );
+
+    this.host.beginNavigationReinjectWindow(
+      'event_bridge_reload',
     );
 
     void page.reload().catch((error: unknown) =>

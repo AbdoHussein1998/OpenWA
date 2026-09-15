@@ -193,6 +193,7 @@ export {
   isExecutionContextDestroyedError,
   NAVIGATION_REINJECT_GRACE_MS,
   NAVIGATION_EPISODE_CAP_MS,
+  PAGE_TRANSPORT_CONFIRMATION_MS,
 } from './wwebjs-lifecycle';
 export { READY_RECONCILE_TIMEOUT_MS, READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS } from './wwebjs-reconcile';
 
@@ -332,6 +333,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       getCallbacks: () => this.callbacks,
       markReadyFromClientInfo: () => this.lifecycle.markReadyFromClientInfo(),
       recoverFromStuckAuth: () => this.recoverFromStuckAuth(),
+      beginNavigationReinjectWindow: reason =>
+        this.lifecycle.beginNavigationReinjectWindow(reason),
     });
     this.stuckAuth = new WwebjsStuckAuth({
       logger: this.logger,
@@ -1062,6 +1065,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     if (this.lifecycle.isInNavigationReinjectWindow()) {
       throw new EngineNotReadyError(
         'WhatsApp Web is reloading its page and the session is re-injecting. Retry in a few seconds.',
+        'ENGINE_REINJECTING',
       );
     }
   }

@@ -167,6 +167,9 @@ function createHost(
       },
     );
 
+  const beginNavigationReinjectWindow =
+    jest.fn();
+
   const host:
     WwebjsReadyReconcileHost = {
       logger,
@@ -183,6 +186,7 @@ function createHost(
         () => callbacks,
       markReadyFromClientInfo,
       recoverFromStuckAuth,
+      beginNavigationReinjectWindow,
     };
 
   return {
@@ -190,6 +194,7 @@ function createHost(
     callbacks,
     markReadyFromClientInfo,
     recoverFromStuckAuth,
+    beginNavigationReinjectWindow,
     setStatus,
     getStatus:
       () => status,
@@ -447,6 +452,7 @@ describe('WwebjsReadyReconcile', () => {
       host,
       getStatus,
       recoverFromStuckAuth,
+      beginNavigationReinjectWindow,
     } =
       createHost(
         client,
@@ -493,9 +499,21 @@ describe('WwebjsReadyReconcile', () => {
       client.pupPage as TestPage;
 
     expect(
+      beginNavigationReinjectWindow,
+    ).toHaveBeenCalledWith(
+      'qr_connected_runtime_reinject',
+    );
+
+    expect(
       page.reload,
     ).toHaveBeenCalledTimes(
       1,
+    );
+
+    expect(
+      beginNavigationReinjectWindow.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      page.reload.mock.invocationCallOrder[0],
     );
 
     expect(

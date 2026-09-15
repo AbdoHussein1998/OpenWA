@@ -77,6 +77,16 @@ export const NAVIGATION_REINJECT_GRACE_MS = 60_000;
 // probe reports the truth again and the watchdog takes over.
 export const NAVIGATION_EPISODE_CAP_MS = 3 * NAVIGATION_REINJECT_GRACE_MS;
 
+/**
+ * Ambiguous Puppeteer/CDP failures such as "Execution context was destroyed" are not proof that
+ * the browser died. They also occur during normal WhatsApp Web navigations. Outside the explicit
+ * navigation grace, keep the Session alive for this bounded confirmation window while probing the
+ * page. Hard-death signals (browser disconnected/page close/Target closed) still disconnect
+ * immediately.
+ */
+export const PAGE_TRANSPORT_CONFIRMATION_MS = 20_000;
+const PAGE_TRANSPORT_CONFIRMATION_PROBE_INTERVAL_MS = 2_500;
+
 // The single in-adapter retry of a navigation-killed first inject only runs while at least this much
 // of the lifecycle's outer init deadline remains — a retry the outer race SIGKILLs mid-launch would
 // surface as a bare 504 with no reason. Below it, fail with today's exact terminal shape instead.
@@ -174,6 +184,12 @@ export class WwebjsLifecycle {
    * trigger the existing forceDestroy() recovery path.
    */
   private consecutiveProtocolTimeouts = 0;
+  /**
+   * At most one ambiguous transport-death confirmation runs at a time. Delegate calls can fail in
+   * bursts while the page is navigating; coalescing prevents a burst from spawning competing
+   * health-check loops that could each independently disconnect the same client generation.
+   */
+  private pageTransportConfirmationInFlight = false;
   private lastMainFrameNavigationAt = 0;
   private navigationEpisodeStartedAt = 0;
   /** True after at least one QR was produced by this client generation. */
@@ -848,11 +864,12 @@ export class WwebjsLifecycle {
         return;
       }
 
-      // The library re-emits 'ready' at the end of EVERY completed (re)inject pipeline — for a
-      // post-navigation re-inject this is the completion edge, and the only one it offers. Close the
-      // navigation window HERE, before the guards below: markReadyFromClientInfo early-returns while
-      // already READY, so a clear behind it would never run for the re-inject case (#1081).
-      this.clearNavigationReinjectWindow();
+      // The library re-emits 'ready' at the end of EVERY completed (re)inject pipeline, but
+      // whatsapp-web.js can also emit a PREMATURE ready before its message bridge is attached.
+      // Therefore the navigation window must be cleared only after the eventsAttached guard below
+      // has proved that this ready edge belongs to a completed reinjection. Clearing it before the
+      // guard creates a false-death race: an avatar/contact read can then hit "Execution context was
+      // destroyed" while reinjection is still running and be misclassified as a dead Session.
       // whatsapp-web.js can emit `ready` BEFORE its message listeners are attached: its post-auth
       // callback runs once per hasSynced trigger, and any run that finds `window.WWebJS` already
       // defined skips the attach and bare-emits `ready` — including while the first run's attach is
@@ -869,6 +886,11 @@ export class WwebjsLifecycle {
         });
         return;
       }
+
+      // A bridge-capable ready is the completion edge for a post-navigation reinjection. Do this
+      // before markReadyFromClientInfo(): that helper intentionally early-returns while already
+      // READY, which is the normal state for a post-READY page reload.
+      this.clearNavigationReinjectWindow();
       this.markReadyFromClientInfo();
     });
 
@@ -1079,38 +1101,188 @@ export class WwebjsLifecycle {
 
 
   /**
-   * Report a failed client/page operation as a session death when the error matches
-   * PAGE_TRANSPORT_ERROR_PATTERN. A wedged page can fire NO events while still reporting CONNECTED
-   * (whatsapp-web.js #5728), so the watchdog takes minutes to notice — an operation failing with one
-   * of these errors is a much earlier death signal. Detection
-   * only: the error itself still propagates to the caller exactly as before, and
-   * handlePuppeteerDeath's guard makes this safe during teardown and against double-reporting.
+   * Error shapes that prove the target/CDP session is already gone. These can disconnect
+   * immediately. A plain "Protocol error", "Execution context was destroyed", or "detached frame"
+   * is deliberately NOT in this set because normal page navigation produces those too.
+   */
+  private static readonly HARD_PAGE_TRANSPORT_ERROR_PATTERN =
+    /target closed|targetclosederror|session closed|connection closed|browser (?:has )?disconnected/i;
+
+  /**
+   * Report a failed page operation without promoting every Puppeteer protocol exception into an
+   * immediate Session death.
+   *
+   * Hard target/connection closure is definitive and still disconnects synchronously. Ambiguous
+   * protocol/context failures are first protected by the explicit navigation grace; outside that
+   * window they receive a bounded PAGE_TRANSPORT_CONFIRMATION_MS health-check period. The original
+   * operation still rejects to its caller immediately — only the Session-level death decision is
+   * deferred.
    */
   reportIfPageTransportError(error: unknown, context: string): void {
     if (!this.isPageTransportError(error)) {
       return;
     }
-    // Inside the navigation re-inject window the same signatures ride a HEALING page: an in-flight
-    // evaluate killed by the navigation keeps its 'Protocol error' prefix (puppeteer only rewrites
-    // the shapes that END with a context-gone suffix), and a navigating page transiently detaches
-    // frames. Reporting that as death would tear down the session whatsapp-web.js is about to
-    // re-inject — faster than the watchdog the grace protects against (#1081). Log the match so the
-    // theory stays falsifiable from field logs; the error still propagates to the caller, and a
-    // REAL browser death still reports through the pupBrowser/pupPage death listeners untouched.
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
     if (this.isInNavigationReinjectWindow()) {
       this.host.logger.warn(
         `Page transport error during ${context} inside the navigation re-inject window — not a death`,
         {
-          error: error instanceof Error ? error.message : String(error),
+          sessionId: this.host.config.sessionId,
+          error: message,
           action: 'page_transport_error_graced',
         },
       );
       return;
     }
-    this.host.logger.warn(`Page transport error during ${context} — treating the session as dead`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    this.handlePuppeteerDeath(`Page transport error during ${context}`);
+
+    if (WwebjsLifecycle.HARD_PAGE_TRANSPORT_ERROR_PATTERN.test(message)) {
+      this.host.logger.warn(
+        `Hard page transport error during ${context} — treating the session as dead`,
+        {
+          sessionId: this.host.config.sessionId,
+          error: message,
+          action: 'page_transport_error_hard_death',
+        },
+      );
+      this.handlePuppeteerDeath(`Page transport error during ${context}`);
+      return;
+    }
+
+    if (this.pageTransportConfirmationInFlight) {
+      this.host.logger.warn(
+        `Ambiguous page transport error during ${context} while a health confirmation is already running`,
+        {
+          sessionId: this.host.config.sessionId,
+          error: message,
+          action: 'page_transport_error_confirmation_coalesced',
+        },
+      );
+      return;
+    }
+
+    this.pageTransportConfirmationInFlight = true;
+    this.host.logger.warn(
+      `Ambiguous page transport error during ${context}; confirming browser death before disconnecting`,
+      {
+        sessionId: this.host.config.sessionId,
+        error: message,
+        confirmationMs: PAGE_TRANSPORT_CONFIRMATION_MS,
+        action: 'page_transport_error_confirmation_started',
+      },
+    );
+
+    void this.confirmAmbiguousPageTransportFailure(context)
+      .catch(confirmError => {
+        this.host.logger.warn('Page transport health confirmation failed unexpectedly', {
+          sessionId: this.host.config.sessionId,
+          context,
+          error:
+            confirmError instanceof Error
+              ? confirmError.message
+              : String(confirmError),
+          action: 'page_transport_error_confirmation_failed',
+        });
+      })
+      .finally(() => {
+        this.pageTransportConfirmationInFlight = false;
+      });
+  }
+
+  /**
+   * Confirm ambiguous transport death with repeated direct page probes. Twenty seconds is long
+   * enough to absorb the short context-destruction/reload gap seen in production without turning a
+   * truly wedged READY session into a multi-minute zombie.
+   */
+  private async confirmAmbiguousPageTransportFailure(context: string): Promise<void> {
+    const sourceClient = this.client;
+    if (
+      !sourceClient ||
+      this.tearingDown ||
+      this.status !== EngineStatus.READY
+    ) {
+      return;
+    }
+
+    const deadline =
+      Date.now() +
+      PAGE_TRANSPORT_CONFIRMATION_MS;
+
+    while (Date.now() < deadline) {
+      if (
+        this.client !== sourceClient ||
+        this.tearingDown ||
+        this.status !== EngineStatus.READY
+      ) {
+        return;
+      }
+
+      if (this.isInNavigationReinjectWindow()) {
+        this.host.logger.warn(
+          `Navigation/reinjection was observed while confirming ${context}; keeping the session alive`,
+          {
+            sessionId: this.host.config.sessionId,
+            action: 'page_transport_error_confirmation_graced',
+          },
+        );
+        return;
+      }
+
+      if (await this.probeBrowserHealth()) {
+        this.host.logger.warn(
+          `Browser recovered while confirming page transport error during ${context}; keeping the session alive`,
+          {
+            sessionId: this.host.config.sessionId,
+            action: 'page_transport_error_confirmation_recovered',
+          },
+        );
+        return;
+      }
+
+      const remainingMs =
+        deadline -
+        Date.now();
+
+      if (remainingMs <= 0) {
+        break;
+      }
+
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(
+          resolve,
+          Math.min(
+            PAGE_TRANSPORT_CONFIRMATION_PROBE_INTERVAL_MS,
+            remainingMs,
+          ),
+        );
+        timer.unref?.();
+      });
+    }
+
+    if (
+      this.client !== sourceClient ||
+      this.tearingDown ||
+      this.status !== EngineStatus.READY
+    ) {
+      return;
+    }
+
+    if (this.isInNavigationReinjectWindow()) {
+      return;
+    }
+
+    this.host.logger.warn(
+      `Page transport remained unhealthy for ${PAGE_TRANSPORT_CONFIRMATION_MS}ms during ${context}; treating the session as dead`,
+      {
+        sessionId: this.host.config.sessionId,
+        action: 'page_transport_error_confirmed_dead',
+      },
+    );
+    this.handlePuppeteerDeath(`Confirmed page transport failure during ${context}`);
   }
 
   markReadyFromClientInfo(): void {
@@ -1347,6 +1519,37 @@ export class WwebjsLifecycle {
    * probeLiveness()/ensureReady() — a teardown or LOGOUT drops the status first, and the grace must
    * never outrank that (#1081).
    */
+  /**
+   * Stamp the navigation/reinjection grace BEFORE code intentionally calls page.reload().
+   *
+   * Relying only on Puppeteer's later `framenavigated` event leaves a small race where an in-flight
+   * delegate evaluate rejects first. The readiness reconciler calls this method immediately before
+   * its deliberate reinjection reloads, so those errors are correctly treated as transient from
+   * the first millisecond of the reload.
+   */
+  beginNavigationReinjectWindow(reason: string): void {
+    if (
+      this.tearingDown ||
+      this.status === EngineStatus.DISCONNECTED ||
+      this.status === EngineStatus.FAILED
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    if (this.navigationEpisodeStartedAt === 0) {
+      this.navigationEpisodeStartedAt = now;
+    }
+    this.lastMainFrameNavigationAt = now;
+
+    this.host.logger.warn('WhatsApp Web page reload/reinjection is expected', {
+      sessionId: this.host.config.sessionId,
+      reason,
+      action: 'page_navigation_reinject_expected',
+      graced: this.isInNavigationReinjectWindow(),
+    });
+  }
+
   isInNavigationReinjectWindow(): boolean {
     if (this.lastMainFrameNavigationAt === 0) return false;
     const now = Date.now();
@@ -1381,10 +1584,20 @@ export class WwebjsLifecycle {
         }),
       ]);
       if (state === WAState.CONNECTED) {
-        // Observed recovery closes the navigation episode. Without this, an episode whose re-inject
-        // died silently (no 'ready' re-emit, but WA Web's socket back up) would keep a stale episode
-        // anchor forever, denying the grace to every LATER navigation via the episode cap.
-        this.clearNavigationReinjectWindow();
+        // CONNECTED alone is not enough to close a reinjection window on the patched client:
+        // eventsAttached=false means the page socket recovered but the message bridge is still being
+        // rebuilt. Closing the grace there recreates the exact false-death race this window exists
+        // to prevent. Unpatched clients expose `undefined`; preserve the legacy behaviour for them.
+        const eventsAttached =
+          (this.client as Client & { eventsAttached?: boolean } | null)?.eventsAttached;
+
+        if (eventsAttached !== false) {
+          // Observed recovery closes the navigation episode. Without this, an episode whose re-inject
+          // died silently (no 'ready' re-emit, but WA Web's socket back up) would keep a stale episode
+          // anchor forever, denying the grace to every LATER navigation via the episode cap.
+          this.clearNavigationReinjectWindow();
+        }
+
         return true;
       }
       return this.isInNavigationReinjectWindow();

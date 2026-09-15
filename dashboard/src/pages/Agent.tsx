@@ -48,6 +48,7 @@ import {
   asMessageType,
   messageApi,
   sessionApi,
+  type ApiRequestError,
   type Channel,
   type Chat,
   type ChatKind,
@@ -177,6 +178,56 @@ const AGENT_WS_EVENTS = [
   'message.revoked',
   'message.edited',
 ] as const;
+
+/**
+ * Controlled retry cadence for the short period where the Session remains
+ * logically READY while whatsapp-web.js rebuilds window.WWebJS after a page
+ * navigation. Total wait is 64 seconds, matching the backend's ~60 second
+ * navigation reinjection grace without ever approaching the API throttle.
+ */
+const CHAT_REINJECT_RETRY_DELAYS_MS = [
+  2_000,
+  4_000,
+  8_000,
+  10_000,
+  10_000,
+  10_000,
+  10_000,
+  10_000,
+] as const;
+
+function isEngineReinjectingError(
+  error: unknown,
+): error is ApiRequestError {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const candidate =
+    error as ApiRequestError;
+
+  return (
+    candidate.status === 409 &&
+    (
+      candidate.code ===
+        'ENGINE_REINJECTING' ||
+      /re-?injecting/i.test(
+        candidate.message,
+      )
+    )
+  );
+}
+
+function waitForRetry(
+  delayMs: number,
+): Promise<void> {
+  return new Promise(resolve => {
+    setTimeout(
+      resolve,
+      delayMs,
+    );
+  });
+}
 
 /* ================================================================
    TYPES
@@ -394,6 +445,15 @@ export function Agent() {
   const toast =
     useToast();
 
+  // `ToastProvider` includes the live toast list in its context value, so the
+  // context object itself changes whenever a toast is added/removed. Keep the
+  // stable callback functions separately for loadChats; depending on the whole
+  // object creates a toast -> render -> loadChats identity -> effect loop.
+  const showLoadChatsError =
+    toast.error;
+  const showLoadChatsWarning =
+    toast.warning;
+
   const queryClient =
     useQueryClient();
 
@@ -602,6 +662,13 @@ export function Agent() {
 
   const loadChatsVersionRef =
     useRef(0);
+
+  // Deduplicate sidebar reloads from effects/WebSocket recovery while one
+  // request/retry sequence for the same Session is already active.
+  const loadChatsInFlightSessionRef =
+    useRef<string | null>(
+      null,
+    );
 
   const selectedSessionIdRef =
     useRef(
@@ -1029,9 +1096,6 @@ export function Agent() {
         sessionId:
           string,
       ) => {
-        const requestId =
-          ++loadChatsVersionRef.current;
-
         if (!sessionId) {
           commitChats(
             [],
@@ -1039,67 +1103,136 @@ export function Agent() {
           return;
         }
 
+        if (
+          loadChatsInFlightSessionRef.current ===
+          sessionId
+        ) {
+          return;
+        }
+
+        loadChatsInFlightSessionRef.current =
+          sessionId;
+
+        const requestId =
+          ++loadChatsVersionRef.current;
+
         setLoadingChats(
           true,
         );
 
         try {
-          const data =
-            await sessionApi.getChats(
-              sessionId,
-            );
-
-          if (
-            !isMountedRef.current ||
-            requestId !==
-              loadChatsVersionRef.current ||
-            selectedSessionIdRef.current !==
-              sessionId
+          for (
+            let attempt = 0;
+            ;
+            attempt += 1
           ) {
-            return;
+            try {
+              const data =
+                await sessionApi.getChats(
+                  sessionId,
+                );
+
+              if (
+                !isMountedRef.current ||
+                requestId !==
+                  loadChatsVersionRef.current ||
+                selectedSessionIdRef.current !==
+                  sessionId
+              ) {
+                return;
+              }
+
+              const sorted = [
+                ...data,
+              ].sort(
+                (
+                  a,
+                  b,
+                ) =>
+                  (b.timestamp ||
+                    0) -
+                  (a.timestamp ||
+                    0),
+              );
+
+              commitChats(
+                sorted,
+              );
+              return;
+            } catch (
+              error
+            ) {
+              if (
+                !isMountedRef.current ||
+                requestId !==
+                  loadChatsVersionRef.current ||
+                selectedSessionIdRef.current !==
+                  sessionId
+              ) {
+                return;
+              }
+
+              if (
+                isEngineReinjectingError(
+                  error,
+                )
+              ) {
+                const delayMs =
+                  CHAT_REINJECT_RETRY_DELAYS_MS[
+                    attempt
+                  ];
+
+                if (
+                  delayMs ===
+                  undefined
+                ) {
+                  showLoadChatsWarning(
+                    t(
+                      'agent.chatsReinjectingTitle',
+                      'WhatsApp is still reconnecting',
+                    ),
+                    t(
+                      'agent.chatsReinjectingDescription',
+                      'The WhatsApp Web page is still rebuilding its connection. Existing chats were kept. Refresh again shortly if they do not update automatically.',
+                    ),
+                  );
+                  return;
+                }
+
+                // This is an expected recovery window, not a chat-list failure:
+                // keep the last good chats, do not create an error toast, and
+                // retry slowly enough to stay far below the global throttle.
+                await waitForRetry(
+                  delayMs,
+                );
+                continue;
+              }
+
+              commitChats(
+                [],
+              );
+
+              showLoadChatsError(
+                t(
+                  'chats.errors.loadChats',
+                ),
+                error instanceof
+                  Error
+                  ? error.message
+                  : undefined,
+              );
+              return;
+            }
           }
-
-          const sorted = [
-            ...data,
-          ].sort(
-            (
-              a,
-              b,
-            ) =>
-              (b.timestamp ||
-                0) -
-              (a.timestamp ||
-                0),
-          );
-
-          commitChats(
-            sorted,
-          );
-        } catch (
-          error
-        ) {
-          if (
-            !isMountedRef.current ||
-            requestId !==
-              loadChatsVersionRef.current
-          ) {
-            return;
-          }
-
-          commitChats(
-            [],
-          );
-
-          toast.error(
-            t(
-              'chats.errors.loadChats',
-            ),
-            error instanceof
-              Error
-              ? error.message
-              : undefined,
-          );
         } finally {
+          if (
+            loadChatsInFlightSessionRef.current ===
+            sessionId
+          ) {
+            loadChatsInFlightSessionRef.current =
+              null;
+          }
+
           if (
             isMountedRef.current &&
             requestId ===
@@ -1113,8 +1246,9 @@ export function Agent() {
       },
       [
         commitChats,
+        showLoadChatsError,
+        showLoadChatsWarning,
         t,
-        toast,
       ],
     );
 
