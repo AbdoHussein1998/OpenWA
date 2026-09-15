@@ -1,7 +1,3 @@
-
-
-
-
 import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -22,7 +18,6 @@ import { MessageSendService, SaveOutgoingMessageData } from './message-send.serv
 // Type-only: the module binds this class to PLUGIN_MESSAGE_PORT with a `useExisting` alias, which
 // TypeScript does not check, so `implements` is what keeps the two in step.
 import type { PluginMessagePort } from '../../core/plugins/plugin-host-ports';
-
 // Re-exported for existing importers (bulk send shares the rendered-template cap with the send path).
 export { DEFAULT_TEMPLATE_RENDER_MAX_CHARS } from './message-send.service';
 
@@ -33,7 +28,6 @@ export interface GetMessagesOptions {
   limit?: number;
   offset?: number;
 }
-
 /**
  * Aggregate budget for the inline base64 media ONE message-list response may carry, counted in the
  * encoded bytes that actually land in the JSON body. Override with
@@ -51,7 +45,6 @@ export interface GetMessagesOptions {
  * large photo no client can ever read back. Raising MEDIA_DOWNLOAD_MAX_BYTES raises this too.
  */
 export const DEFAULT_MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES = 8 * 1024 * 1024;
-
 export function resolveMessageListInlineMediaBudgetBytes(): number {
   const parsed = Number.parseInt(process.env.MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES ?? '', 10);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : DEFAULT_MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES;
@@ -59,7 +52,6 @@ export function resolveMessageListInlineMediaBudgetBytes(): number {
 
 /** `metadata.media.data` holds `base64 || url`, so a pointer must never be mistaken for a payload. */
 const MEDIA_URL_POINTER = /^https?:\/\//i;
-
 /**
  * Spend the budget over an already-ordered (newest-first) page, replacing each payload past it with
  * the engine's own `{ omitted: true, sizeBytes }` marker — the same shape `capInboundMedia` writes
@@ -76,7 +68,6 @@ export function spendInlineMediaBudget(messages: Message[], budgetBytes: number)
     if (!metadata || typeof metadata !== 'object') continue;
     const media = metadata.media as { data?: unknown; sizeBytes?: number } | null | undefined;
     if (!media || typeof media.data !== 'string' || MEDIA_URL_POINTER.test(media.data)) continue;
-
     const encoded = Buffer.byteLength(media.data, 'utf8');
     // The newest payload is always let through when inlining is enabled at all. Without this an
     // item larger than the whole budget was omitted even as the ONLY media on the page, so a single
@@ -99,10 +90,8 @@ export function spendInlineMediaBudget(messages: Message[], budgetBytes: number)
   }
   return messages;
 }
-
 /** Pin window applied when the caller does not choose one — WhatsApp's own default of 24h. */
 export const DEFAULT_PIN_DURATION_SECONDS = 86400;
-
 /**
  * Mimetypes an archived chat-media file may be served as. Everything else — documents, and notably
  * `image/svg+xml`, which is scriptable despite the `image/` prefix — is served as inert
@@ -110,7 +99,6 @@ export const DEFAULT_PIN_DURATION_SECONDS = 86400;
  */
 const INERT_MEDIA_MIMETYPE =
   /^(image\/(jpeg|png|gif|webp|bmp)|video\/(mp4|webm|quicktime|3gpp)|audio\/(mpeg|mp4|ogg|aac|wav|webm))(;|$)/;
-
 /** The declared mimetype when it is safe to echo back, else inert octet-stream. */
 function inertMimetype(mimetype: string): string {
   return INERT_MEDIA_MIMETYPE.test(mimetype) ? mimetype : 'application/octet-stream';
@@ -119,7 +107,6 @@ function inertMimetype(mimetype: string): string {
 @Injectable()
 export class MessageService implements PluginMessagePort {
   private readonly logger = createLogger('MessageService');
-
   constructor(
     @InjectRepository(Message, 'data')
     private readonly messageRepository: Repository<Message>,
@@ -138,7 +125,6 @@ export class MessageService implements PluginMessagePort {
     @Optional()
     private readonly storageService?: StorageService,
   ) {}
-
   // ========== Outbound sends (delegated) ==========
   //
   // The send family lives on MessageSendService; these pass-throughs keep the MessageService
@@ -148,7 +134,6 @@ export class MessageService implements PluginMessagePort {
   sendText(sessionId: string, dto: SendTextMessageDto): Promise<MessageResponseDto> {
     return this.sender.sendText(sessionId, dto);
   }
-
   /**
    * Send a stored template through the shared send path.
    *
@@ -160,7 +145,6 @@ export class MessageService implements PluginMessagePort {
   sendTemplate(sessionId: string, dto: SendTemplateMessageDto): Promise<MessageResponseDto> {
     return this.sender.sendTemplate(sessionId, dto);
   }
-
   sendImage(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     return this.sender.sendImage(sessionId, dto);
   }
@@ -172,7 +156,6 @@ export class MessageService implements PluginMessagePort {
   sendAudio(sessionId: string, dto: SendAudioMessageDto): Promise<MessageResponseDto> {
     return this.sender.sendAudio(sessionId, dto);
   }
-
   sendDocument(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     return this.sender.sendDocument(sessionId, dto);
   }
@@ -190,7 +173,6 @@ export class MessageService implements PluginMessagePort {
   ): Promise<MessageResponseDto> {
     return this.sender.sendLocation(sessionId, dto);
   }
-
   sendContact(
     sessionId: string,
     dto: { chatId: string; contactName: string; contactNumber: string; quotedMessageId?: string },
@@ -204,18 +186,15 @@ export class MessageService implements PluginMessagePort {
   ): Promise<MessageResponseDto> {
     return this.sender.sendPoll(sessionId, dto);
   }
-
   sendSticker(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     return this.sender.sendSticker(sessionId, dto);
   }
-
   // Typed by the DTO rather than an inline literal, like every sibling forwarder here. The literal
   // listed three fields while the controller already handed it a fourth, so the declaration said
   // less than what flowed through, and a non-REST caller (the agent tool) could not pass it at all.
   reply(sessionId: string, dto: ReplyMessageDto): Promise<MessageResponseDto> {
     return this.sender.reply(sessionId, dto);
   }
-
   forward(
     sessionId: string,
     dto: { fromChatId: string; toChatId: string; messageId: string },
@@ -227,7 +206,6 @@ export class MessageService implements PluginMessagePort {
   saveOutgoingMessage(sessionId: string, data: SaveOutgoingMessageData): Promise<Message> {
     return this.sender.saveOutgoingMessage(sessionId, data);
   }
-
   /**
    * Get message history for a session
    */
@@ -243,21 +221,18 @@ export class MessageService implements PluginMessagePort {
     const limit =
       typeof rawLimit === 'number' && Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100) : 50;
     const offset = typeof rawOffset === 'number' && Number.isFinite(rawOffset) ? Math.max(Math.trunc(rawOffset), 0) : 0;
-
     const query = this.messageRepository
       .createQueryBuilder('message')
       .where('message.sessionId = :sessionId', { sessionId })
       .orderBy('message.createdAt', 'DESC')
       .skip(offset)
       .take(limit);
-
     if (chatId) {
       // Match across dialects: a stored chatId may be `@s.whatsapp.net` (e.g. an outbound send addressed
       // by a raw engine id) while the caller filters by the neutral `@c.us` from the chat list - same
       // chat, different dialect. Resolving both sides through the table keeps them equal.
       query.andWhere('message.chatId IN (:...chatIds)', { chatIds: this.resolveJidCandidates(chatId) });
     }
-
     if (from) {
       // Resolve the filter through the lid->phone table so a phone matches not just the stored
       // `<phone>@c.us` id but also any lid that resolves to the same person - turning the prior
@@ -274,14 +249,12 @@ export class MessageService implements PluginMessagePort {
         authorFroms: froms,
       });
     }
-
     const [messages, total] = await query.getManyAndCount();
     // The 1..100 clamp above bounds the ROW COUNT, not the response: each row carries its inline
     // base64 in metadata.media.data. Spent newest-first (the query orders createdAt DESC), so the
     // most recently viewed media still arrives inline and the rest keeps its omitted marker.
     return { messages: spendInlineMediaBudget(messages, resolveMessageListInlineMediaBudgetBytes()), total };
   }
-
   /**
    * Expand a user JID filter into every stored id that refers to the same person: the literal input
    * (so an exact lid filter still matches), the user-part in both user dialects (`@c.us` /
@@ -315,7 +288,6 @@ export class MessageService implements PluginMessagePort {
     }
     return [...candidates];
   }
-
   /**
    * Save incoming message (called from session webhook dispatch)
    */
@@ -329,7 +301,6 @@ export class MessageService implements PluginMessagePort {
   }
 
   // ========== Phase 3: Reactions ==========
-
   async reactToMessage(sessionId: string, dto: { chatId: string; messageId: string; emoji: string }): Promise<void> {
     const engine = this.getEngine(sessionId);
     await engine.reactToMessage(dto.chatId, dto.messageId, dto.emoji);
@@ -339,7 +310,6 @@ export class MessageService implements PluginMessagePort {
     const engine = this.getEngine(sessionId);
     return engine.getMessageReactions(chatId, messageId);
   }
-
   /**
    * Read a message's media: the archived file when one exists, else the inline copy persisted on
    * the message row. The fallback is what makes media sent BY the account retrievable here — the
@@ -372,7 +342,6 @@ export class MessageService implements PluginMessagePort {
         }
       }
     }
-
     // Match across dialects like getMessages does: an outbound row stores the caller's literal
     // chatId (REST persist) or the engine-neutral form (own-send echo) depending on which writer
     // won the persist race, so a literal match would 404 on half the rows this fallback exists for.
@@ -396,17 +365,21 @@ export class MessageService implements PluginMessagePort {
     }
     return { buffer: Buffer.from(inline.data, 'base64'), mimetype: inertMimetype(inline.mimetype) };
   }
-
   /** Maximum messages a single getChatHistory call may request from the engine. */
   private static readonly MAX_CHAT_HISTORY_LIMIT = 100;
 
   /** Higher ceiling for opt-in deep history (`deep=true`). Bounded so a caller still can't ask unbounded. */
   private static readonly MAX_DEEP_CHAT_HISTORY_LIMIT = 2000;
-
   /**
-   * Fetch chat history live from WhatsApp (bypasses local DB).
-   * Returns the most recent `limit` messages for the given chat.
+   * Fetch chat history live from WhatsApp and best-effort materialize missing messages into the local DB.
+   * Returns the most recent `limit` messages for the given chat exactly as the engine returned them.
    * When `includeMedia` is true, downloads media (base64) for messages that have it.
+   *
+   * The persistence side effect deliberately goes through MessageProjector.persistHistoryMessages():
+   * it de-duplicates by `(sessionId, waMessageId)`, preserves historical timestamps/direction, applies
+   * the same ephemeral-message policy as live ingestion, and never re-dispatches old messages as live
+   * WebSocket/webhook events. Persistence is best-effort — a DB failure must not turn a successful
+   * WhatsApp history read into an HTTP failure.
    *
    * `limit` is clamped to [1, 100] (and falls back to 50 for non-finite input) so a caller cannot ask the
    * engine to fetch an unbounded number of messages. When `deep` is true the ceiling is raised to 2000
@@ -428,13 +401,28 @@ export class MessageService implements PluginMessagePort {
     const ceiling = deep ? MessageService.MAX_DEEP_CHAT_HISTORY_LIMIT : MessageService.MAX_CHAT_HISTORY_LIMIT;
     const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), ceiling) : 50;
     const media = deep ? false : includeMedia;
-    return signal
-      ? engine.getChatHistory(chatId, safeLimit, media, undefined, signal)
-      : engine.getChatHistory(chatId, safeLimit, media);
+
+    const history = signal
+      ? await engine.getChatHistory(chatId, safeLimit, media, undefined, signal)
+      : await engine.getChatHistory(chatId, safeLimit, media);
+
+    if (history.length > 0) {
+      try {
+        await this.messageProjector.persistHistoryMessages(sessionId, history);
+      } catch (error) {
+        this.logger.warn('Failed to persist live WhatsApp history; returning the fetched messages anyway', {
+          sessionId,
+          chatId,
+          messageCount: history.length,
+          error: error instanceof Error ? error.message : String(error),
+          action: 'chat_history_persist_failed',
+        });
+      }
+    }
+
+    return history;
   }
-
   // ========== Delete Message ==========
-
   /**
    * Pin a message for a bounded window. Nothing is persisted locally: a pin is chat state owned by
    * WhatsApp, not a property of our message row, and it expires on WhatsApp's clock — a mirrored
@@ -445,13 +433,11 @@ export class MessageService implements PluginMessagePort {
     await engine.pinMessage(dto.chatId, dto.messageId, dto.durationSeconds ?? DEFAULT_PIN_DURATION_SECONDS);
     return { success: true };
   }
-
   async unpinMessage(sessionId: string, dto: { chatId: string; messageId: string }) {
     const engine = this.getEngine(sessionId);
     await engine.unpinMessage(dto.chatId, dto.messageId);
     return { success: true };
   }
-
   /**
    * Star or unstar a message. Like a pin, this is WhatsApp-owned state and is not mirrored locally
    * — but unlike a pin it is private to the account and never expires.
@@ -465,7 +451,6 @@ export class MessageService implements PluginMessagePort {
     await engine.starMessage(dto.chatId, dto.messageId, dto.star);
     return { success: true };
   }
-
   /**
    * Cast a vote on a poll. Not supported on the Baileys engine, which surfaces as a 501 from the
    * adapter. `options` are option texts — see the engine interface for why there are no ids.
@@ -475,14 +460,12 @@ export class MessageService implements PluginMessagePort {
     await engine.votePoll(dto.chatId, dto.pollMessageId, dto.options);
     return { success: true };
   }
-
   async deleteMessage(
     sessionId: string,
     dto: { chatId: string; messageId: string; forEveryone?: boolean },
   ): Promise<void> {
     const engine = this.getEngine(sessionId);
     await engine.deleteMessage(dto.chatId, dto.messageId, dto.forEveryone ?? true);
-
     // Flag the stored message as revoked. No localized display string is persisted here;
     // the dashboard renders the localized "message deleted" text.
     try {
@@ -493,7 +476,6 @@ export class MessageService implements PluginMessagePort {
   }
 
   // ========== Edit Message ==========
-
   async editMessage(
     sessionId: string,
     dto: { chatId: string; messageId: string; body: string; mentions?: string[] },
@@ -506,14 +488,12 @@ export class MessageService implements PluginMessagePort {
     const result = finalDto.mentions?.length
       ? await engine.editMessage(finalDto.chatId, finalDto.messageId, finalDto.body, finalDto.mentions)
       : await engine.editMessage(finalDto.chatId, finalDto.messageId, finalDto.body);
-
     // Best-effort: reflect the new body in the stored copy (mirrors deleteMessage's revoked flag),
     // serialized with the inbound edit/reaction writers through the session's per-message mutation
     // queue. A missing row must not fail the request — the engine edit already succeeded.
     await this.messageProjector.recordOutboundMessageEdit(sessionId, finalDto.messageId, finalDto.body);
     return { messageId: result.id, timestamp: result.timestamp };
   }
-
   /**
    * Run the pre-send `message:sending` plugin gate for one outbound message and return the
    * (possibly plugin-modified) input, or throw BadRequestException if a plugin blocked the send.
@@ -536,7 +516,6 @@ export class MessageService implements PluginMessagePort {
     await this.pacing.assertSendAllowed(sessionId, target.chatId ?? target.toChatId);
     return applySendingGate(this.hookManager, sessionId, type, input, 'MessageService');
   }
-
   private getEngine(sessionId: string) {
     return this.engines.require(
       sessionId,
@@ -544,7 +523,3 @@ export class MessageService implements PluginMessagePort {
     );
   }
 }
-
-
-
-
