@@ -1,28 +1,47 @@
-import { Column, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 import { jsonColumnType } from '../../../common/utils/column-types';
+import { Session } from '../../session/entities/session.entity';
+import { PluginInstance } from './plugin-instance.entity';
 
 export type HandoverState = 'bot' | 'human' | 'closed';
-
-// Maps a WA chat to a provider conversation, both directions. sessionId is non-FK provenance
-// (a mapping outlives a session; last-write-wins).
+// Maps a WA chat to a provider conversation, both directions. This is active OLTP state: a mapping
+// is valid only while both its Session and PluginInstance exist, so both parent references are real FKs.
 @Entity('conversation_mappings')
 @Index('UQ_conversation_mappings_forward', ['sessionId', 'chatId', 'pluginId', 'instanceId'], { unique: true })
 @Index('UQ_conversation_mappings_reverse', ['pluginId', 'instanceId', 'providerConversationId'], { unique: true })
 export class ConversationMapping {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
-
-  @Column()
+  @Column({ type: 'varchar' })
   sessionId!: string;
+
+  @ManyToOne(() => Session, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'sessionId' })
+  session?: Session;
 
   @Column()
   chatId!: string;
 
-  @Column()
+  @Column({ type: 'varchar' })
   pluginId!: string;
 
-  @Column()
+  @Column({ type: 'varchar' })
   instanceId!: string;
+
+  @ManyToOne(() => PluginInstance, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn([
+    { name: 'pluginId', referencedColumnName: 'pluginId' },
+    { name: 'instanceId', referencedColumnName: 'instanceId' },
+  ])
+  pluginInstance?: PluginInstance;
 
   @Column()
   providerConversationId!: string;

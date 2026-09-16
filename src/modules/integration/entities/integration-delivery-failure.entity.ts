@@ -1,10 +1,21 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { jsonColumnType } from '../../../common/utils/column-types';
-
+import { Session } from '../../session/entities/session.entity';
+import { PluginInstance } from './plugin-instance.entity';
 // DLQ-of-record for both inbound (ingress) and outbound (provider egress) delivery failures.
-// Generalizes webhook_delivery_failures. sessionId is provenance (no FK).
+// A failure is operationally owned by its PluginInstance; when sessionId is concrete it also points
+// to a live Session. Both references are enforced so redrive state cannot become orphaned.
 @Entity('integration_delivery_failures')
 @Index('IDX_integration_delivery_failures_instance', ['pluginId', 'instanceId'])
+@Index('IDX_integration_delivery_failures_sessionId', ['sessionId'])
 export class IntegrationDeliveryFailure {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -12,14 +23,25 @@ export class IntegrationDeliveryFailure {
   @Column()
   direction!: 'inbound' | 'outbound';
 
-  @Column()
+  @Column({ type: 'varchar' })
   pluginId!: string;
 
-  @Column()
+  @Column({ type: 'varchar' })
   instanceId!: string;
+
+  @ManyToOne(() => PluginInstance, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn([
+    { name: 'pluginId', referencedColumnName: 'pluginId' },
+    { name: 'instanceId', referencedColumnName: 'instanceId' },
+  ])
+  pluginInstance?: PluginInstance;
 
   @Column({ type: 'varchar', nullable: true })
   sessionId!: string | null;
+
+  @ManyToOne(() => Session, { nullable: true, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'sessionId' })
+  session?: Session | null;
 
   @Column({ type: 'varchar', nullable: true })
   deliveryId!: string | null;

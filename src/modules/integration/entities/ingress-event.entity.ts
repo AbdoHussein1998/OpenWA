@@ -1,7 +1,16 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+} from 'typeorm';
 import { dateColumnType, jsonColumnType } from '../../../common/utils/column-types';
 import { DateTransformer } from '../../../common/transformers/date.transformer';
-
+import { Session } from '../../session/entities/session.entity';
+import { PluginInstance } from './plugin-instance.entity';
 // The enqueue-outcome lifecycle of a persisted event, recorded AFTER the fast ack (persist-before-ack
 // means the row always exists before dispatch is attempted):
 //  - 'pending'    — written by recordOrSkip; dispatch not (yet) confirmed. The reconciler sweeps these.
@@ -14,7 +23,6 @@ import { DateTransformer } from '../../../common/transformers/date.transformer';
 // NULL reads as "not watched" — the reconciler never sweeps it, so an upgrade can never mass-replay
 // the historical dedup log.
 export type IngressDispatchState = 'pending' | 'dispatched' | 'failed';
-
 // Persist-before-ack durable row + inbound dedup oracle. UNIQUE(pluginId, instanceId, providerDeliveryId):
 // instanceId is only unique within a plugin, so pluginId must be part of the key or two plugins sharing an
 // instanceId string would drop each other's deliveries as false duplicates.
@@ -28,30 +36,35 @@ export type IngressDispatchState = 'pending' | 'dispatched' | 'failed';
 @Index('UQ_ingress_events_instance_delivery', ['pluginId', 'instanceId', 'providerDeliveryId'], { unique: true })
 @Index('IDX_ingress_events_createdAt', ['createdAt'])
 @Index('IDX_ingress_events_dispatchState', ['dispatchState', 'createdAt'])
+@Index('IDX_ingress_events_sessionId', ['sessionId'])
 export class IngressEvent {
   // Host-minted uuid (crypto.randomUUID()), NOT DB-generated — the id and the jobId (= deliveryId)
   // are decoupled on purpose. @PrimaryColumn, not @PrimaryGeneratedColumn.
   @PrimaryColumn()
   id!: string;
-
-  @Column()
+  @Column({ type: 'varchar' })
   instanceId!: string;
 
-  @Column()
+  @Column({ type: 'varchar' })
   pluginId!: string;
+
+  @ManyToOne(() => PluginInstance, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn([
+    { name: 'pluginId', referencedColumnName: 'pluginId' },
+    { name: 'instanceId', referencedColumnName: 'instanceId' },
+  ])
+  pluginInstance?: PluginInstance;
 
   @Column()
   providerDeliveryId!: string;
 
   @Column()
   route!: string;
-
   // NULL once the dispatch outcome is recorded (see the storage-shape comment above). The reconciler
   // only replays 'pending' rows, which always still carry the payload. NULL on a 'pending' row is
   // unreadable history (e.g. imported without one) — the reconciler skips it loudly.
   @Column({ type: jsonColumnType(), nullable: true })
   payload!: { headers: Record<string, string>; query: Record<string, string>; body: string; rawBody: string } | null;
-
   // sha256 hex of the rawBody, written at recordOrSkip. Survives payload retirement so operators can
   // still correlate a dedup row with a provider delivery without storing the payload. NULL on rows
   // that predate the column (no backfill — their payloads are retired anyway).
@@ -61,13 +74,16 @@ export class IngressEvent {
   @Column({ type: 'varchar', nullable: true })
   sessionId!: string | null;
 
+  @ManyToOne(() => Session, { nullable: true, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'sessionId' })
+  session?: Session | null;
+
   // Nullable by design (see the IngressDispatchState comment above): NO DB default, because the
   // default 'pending' would also stamp pre-upgrade rows on the synchronize path and the reconciler
   // would replay the whole dedup log on deploy. New rows are 'pending' via recordOrSkip explicitly;
   // migration-managed DBs backfill existing rows to 'dispatched' instead.
   @Column({ type: 'varchar', nullable: true })
   dispatchState!: IngressDispatchState | null;
-
   // Dispatch-attempt counter the reconciler caps its replay budget against; the live path bumps it
   // on a swallowed inline-dispatch failure so those retries count too.
   @Column({ type: 'int', default: 0 })

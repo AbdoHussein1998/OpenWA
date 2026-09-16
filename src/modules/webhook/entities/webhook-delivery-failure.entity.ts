@@ -1,5 +1,13 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
-
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  Index,
+  JoinColumn,
+  ManyToOne,
+} from 'typeorm';
+import { Webhook } from './webhook.entity';
 /**
  * A durable record of a webhook delivery that exhausted all of its retries. The queued path (BullMQ)
  * otherwise only leaves a `failed` job that the queue evicts after a day, and the direct fallback path
@@ -7,6 +15,10 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 
  * events with no operator-visible trail. Each lost delivery is appended here once (see
  * `recordWebhookDeliveryFailure`, which skips a delivery it has already recorded so a replayed one is
  * not reported several times) and surfaced via the ADMIN `GET /webhooks/delivery-failures` endpoint.
+ *
+ * The row is still operationally owned by its Webhook. A composite FK on (webhookId, sessionId)
+ * prevents orphan rows and guarantees the recorded Session is the Webhook's actual Session. Deleting
+ * the Webhook retires its associated operational delivery records through ON DELETE CASCADE.
  *
  * Lives on the `data` connection (auto-loaded by the webhook entity glob).
  */
@@ -18,12 +30,18 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 
 export class WebhookDeliveryFailure {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
-
-  @Column()
+  @Column({ type: 'varchar' })
   webhookId!: string;
 
-  @Column()
+  @Column({ type: 'varchar' })
   sessionId!: string;
+
+  @ManyToOne(() => Webhook, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn([
+    { name: 'webhookId', referencedColumnName: 'id' },
+    { name: 'sessionId', referencedColumnName: 'sessionId' },
+  ])
+  webhook?: Webhook;
 
   @Column()
   event!: string;
@@ -41,7 +59,6 @@ export class WebhookDeliveryFailure {
   /** Total attempts made before giving up. */
   @Column({ type: 'int' })
   attempts!: number;
-
   /** Last HTTP status, when the failure was a non-2xx response (null for a network/timeout/SSRF error). */
   @Column({ type: 'int', nullable: true })
   lastStatusCode!: number | null;

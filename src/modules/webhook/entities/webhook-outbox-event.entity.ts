@@ -1,7 +1,15 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { dateColumnType, jsonColumnType } from '../../../common/utils/column-types';
 import { DateTransformer } from '../../../common/transformers/date.transformer';
-
+import { Webhook } from './webhook.entity';
 // The dispatch lifecycle of one outbound delivery, mirroring ingress_events on the inbound side:
 //  - 'pending'    - the row was written before the attempt; nothing durable owns the delivery yet.
 //                   The reconciler sweeps these.
@@ -15,7 +23,6 @@ import { DateTransformer } from '../../../common/transformers/date.transformer';
 // NULL marks rows that predate these columns on a synchronize-bootstrapped database. NULL reads as
 // "not watched", so an upgrade can never mass-replay history.
 export type WebhookOutboxState = 'pending' | 'dispatched' | 'failed';
-
 /**
  * Durable record of an outbound webhook delivery, written before the attempt.
  *
@@ -27,6 +34,9 @@ export type WebhookOutboxState = 'pending' | 'dispatched' | 'failed';
  * UNIQUE(webhookId, idempotencyKey): the key is already salted per webhook at dispatch, so the pair
  * names one delivery attempt-set exactly, and a replay reuses the STORED key rather than deriving a
  * new one, which is what keeps a redelivery deduplicable at the receiver.
+ *
+ * The (`webhookId`, `sessionId`) pair is a real FK to Webhook. That both prevents an orphan outbox
+ * row and guarantees that its duplicated sessionId agrees with the parent Webhook's Session.
  */
 @Entity('webhook_outbox_events')
 @Index('UQ_webhook_outbox_events_webhook_key', ['webhookId', 'idempotencyKey'], { unique: true })
@@ -34,12 +44,18 @@ export type WebhookOutboxState = 'pending' | 'dispatched' | 'failed';
 export class WebhookOutboxEvent {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
-
-  @Column()
+  @Column({ type: 'varchar' })
   webhookId!: string;
 
-  @Column()
+  @Column({ type: 'varchar' })
   sessionId!: string;
+
+  @ManyToOne(() => Webhook, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn([
+    { name: 'webhookId', referencedColumnName: 'id' },
+    { name: 'sessionId', referencedColumnName: 'sessionId' },
+  ])
+  webhook?: Webhook;
 
   @Column()
   event!: string;
@@ -54,7 +70,6 @@ export class WebhookOutboxEvent {
   // dispatched or failed row has no reason to keep a payload that can carry a whole message body.
   @Column({ type: jsonColumnType(), nullable: true })
   payload!: Record<string, unknown> | null;
-
   @Column({ type: 'varchar', nullable: true })
   state!: WebhookOutboxState | null;
 

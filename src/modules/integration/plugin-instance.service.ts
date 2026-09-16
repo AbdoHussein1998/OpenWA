@@ -20,6 +20,17 @@ function normalizeSecret(supplied?: string): string {
   return s;
 }
 
+/**
+ * Canonical persisted representation of an unscoped/inherited plugin scope.
+ *
+ * Older/runtime paths accept '*' as an explicit wildcard while the entity/API contract already uses
+ * NULL for the unscoped/inherited form. Persisting only NULL lets `sessionScope` be a real nullable FK to sessions.id
+ * without breaking wildcard behavior at the service boundary.
+ */
+function normalizeSessionScope(scope?: string | null): string | null {
+  return !scope || scope === '*' ? null : scope;
+}
+
 export class InstanceExistsError extends Error {
   constructor(pluginId: string, instanceId: string) {
     super(`instance ${instanceId} already exists for plugin ${pluginId}`);
@@ -43,7 +54,7 @@ export class PluginInstanceService implements PluginInstancePort {
       id,
       pluginId,
       instanceId,
-      sessionScope: opts.sessionScope || null,
+      sessionScope: normalizeSessionScope(opts.sessionScope),
       secret: normalizeSecret(opts.secret),
       verifyToken: opts.verifyToken ?? null,
       config: opts.config ?? null,
@@ -78,7 +89,7 @@ export class PluginInstanceService implements PluginInstancePort {
       id,
       pluginId,
       instanceId,
-      sessionScope: opts.sessionScope || null,
+      sessionScope: normalizeSessionScope(opts.sessionScope),
       secret: normalizeSecret(opts.secret),
       verifyToken: opts.verifyToken ?? null,
       config: opts.config ?? null,
@@ -118,7 +129,7 @@ export class PluginInstanceService implements PluginInstancePort {
   ): Promise<PluginInstance | null> {
     const inst = await this.resolve(pluginId, instanceId);
     if (!inst) return null;
-    if (patch.sessionScope !== undefined) inst.sessionScope = patch.sessionScope || null;
+    if (patch.sessionScope !== undefined) inst.sessionScope = normalizeSessionScope(patch.sessionScope);
     if (patch.config !== undefined) {
       // The operator view masks secrets as the sentinel, so a round-tripped config carries '***' for
       // unchanged secrets. Restore the stored values instead of persisting the mask (which would corrupt

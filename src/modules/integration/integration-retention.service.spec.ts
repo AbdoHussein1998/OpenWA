@@ -1,6 +1,8 @@
 import { DataSource, Repository } from 'typeorm';
+import { Session } from '../session/entities/session.entity';
 import { IngressEvent } from './entities/ingress-event.entity';
 import { IntegrationDeliveryFailure } from './entities/integration-delivery-failure.entity';
+import { PluginInstance } from './entities/plugin-instance.entity';
 import { IntegrationRetentionService } from './integration-retention.service';
 
 const daysAgo = (d: number): Date => {
@@ -17,15 +19,39 @@ describe('IntegrationRetentionService.pruneOlderThan', () => {
     ds = new DataSource({
       type: 'better-sqlite3',
       database: ':memory:',
-      entities: [IngressEvent, IntegrationDeliveryFailure],
+      // The operational entities now carry real FK metadata. Register their parents so TypeORM can
+      // build relation metadata even though these retention fixtures use no concrete Session id.
+      entities: [
+        IngressEvent,
+        IntegrationDeliveryFailure,
+        PluginInstance,
+        Session,
+      ],
       synchronize: true,
     });
     await ds.initialize();
+
+    // Both retained tables are children of the configured PluginInstance. Seed the parent first so
+    // the test exercises the same referential-integrity contract as production instead of bypassing
+    // it with orphan rows.
+    const pluginInstances = ds.getRepository(PluginInstance);
+    await pluginInstances.save(
+      pluginInstances.create({
+        id: 'p:i',
+        pluginId: 'p',
+        instanceId: 'i',
+        sessionScope: null,
+        secret: 'retention-test-secret',
+        verifyToken: null,
+        config: null,
+        enabled: true,
+      }),
+    );
+
     service = new IntegrationRetentionService(
       ds.getRepository(IngressEvent),
       ds.getRepository(IntegrationDeliveryFailure),
     );
-
     const events = ds.getRepository(IngressEvent);
     const failures = ds.getRepository(IntegrationDeliveryFailure);
     // Two old + two recent rows in each table. createdAt is set explicitly so the test controls the
@@ -124,9 +150,10 @@ describe('IntegrationRetentionService.pruneOlderThan', () => {
     const result = await service.pruneOlderThan(10);
 
     expect(result).toEqual({ events: 2, failures: 2 });
-
     const remainingEvents = await ds.getRepository(IngressEvent).find({ order: { id: 'ASC' } });
-    const remainingFailures = await ds.getRepository(IntegrationDeliveryFailure).find({ order: { createdAt: 'ASC' } });
+    const remainingFailures = await ds
+      .getRepository(IntegrationDeliveryFailure)
+      .find({ order: { createdAt: 'ASC' } });
     expect(remainingEvents.map(e => e.id)).toEqual(['ev-new-1', 'ev-new-2']);
     expect(remainingFailures).toHaveLength(2);
     expect(remainingFailures.every(f => f.createdAt > daysAgo(10))).toBe(true);
@@ -137,7 +164,9 @@ describe('IntegrationRetentionService.pruneOlderThan', () => {
     const result = await service.pruneOlderThan(2, 10);
 
     expect(result).toEqual({ events: 3, failures: 2 });
-    expect((await ds.getRepository(IngressEvent).find({ order: { id: 'ASC' } })).map(e => e.id)).toEqual(['ev-new-2']);
+    expect((await ds.getRepository(IngressEvent).find({ order: { id: 'ASC' } })).map(e => e.id)).toEqual([
+      'ev-new-2',
+    ]);
     expect(await ds.getRepository(IntegrationDeliveryFailure).count()).toBe(2);
   });
 
@@ -194,7 +223,6 @@ describe('IntegrationRetentionService.onModuleInit (retention scheduling)', () =
     delete process.env.INGRESS_DEDUP_RETENTION_DAYS;
     const repos = mockRepos();
     const svc = new IntegrationRetentionService(repos.events, repos.failures);
-
     svc.onModuleInit();
     // Let the startup prune promise settle (the method runs before the log .then()).
     await Promise.resolve();
@@ -209,7 +237,6 @@ describe('IntegrationRetentionService.onModuleInit (retention scheduling)', () =
     delete process.env.INGRESS_DEDUP_RETENTION_DAYS;
     const repos = mockRepos();
     const svc = new IntegrationRetentionService(repos.events, repos.failures);
-
     jest.useFakeTimers();
     try {
       const pruneSpy = jest.spyOn(svc, 'pruneOlderThan');
@@ -247,7 +274,6 @@ describe('IntegrationRetentionService.onModuleInit (retention scheduling)', () =
     process.env.INGRESS_DEDUP_RETENTION_DAYS = '0';
     const repos = mockRepos();
     const svc = new IntegrationRetentionService(repos.events, repos.failures);
-
     const pruneSpy = jest.spyOn(svc, 'pruneOlderThan');
     svc.onModuleInit();
     // <=0 would mean an unbounded dedup table — the trap this knob exists to avoid.
