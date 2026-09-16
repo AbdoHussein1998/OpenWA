@@ -40,9 +40,17 @@ export enum ApiCapability {
   TEAM_MANAGE = 'team_manage',
 
   /**
+   * Global read-only access to Team Leader / Agent principal inventories.
+   *
+   * ADMIN, OPERATOR, and VIEWER receive this capability. It must be used only
+   * for non-mutating global principal endpoints.
+   */
+  PRINCIPAL_READ = 'principal_read',
+
+  /**
    * Global Team Leader / Agent principal administration.
    *
-   * ADMIN and OPERATOR receive this capability. TEAM_LEADER does not.
+   * ADMIN and OPERATOR receive this capability. VIEWER and TEAM_LEADER do not.
    */
   PRINCIPAL_MANAGE = 'principal_manage',
 

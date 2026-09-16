@@ -23,6 +23,9 @@ export type UserRole =
  * authorize global `/admin/*` principal-management pages because Team Leaders
  * legitimately have this capability for their own team.
  *
+ * `canReadPrincipals` represents global read-only Team Leader/Agent inventory
+ * access and mirrors the backend PRINCIPAL_READ capability.
+ *
  * `canManagePrincipals` represents global Team Leader/Agent administration and
  * mirrors the backend PRINCIPAL_MANAGE capability intended for ADMIN/OPERATOR.
  */
@@ -44,6 +47,9 @@ export interface RoleCapabilities {
 
   /** Team Leader/Agent domain-management capability, including self-service. */
   canManageTeam: boolean;
+
+  /** Global read-only Team Leader/Agent principal inventory access. */
+  canReadPrincipals: boolean;
 
   /** Global Team Leader/Agent principal administration. */
   canManagePrincipals: boolean;

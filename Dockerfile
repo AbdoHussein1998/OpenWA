@@ -57,14 +57,21 @@ ENV NODE_ENV=production
 #
 # Brave is the primary browser used by whatsapp-web.js + Puppeteer.
 #
-# Official Brave installation method for Debian:
-#   /usr/share/keyrings/brave-browser-archive-keyring.gpg
-#   /etc/apt/sources.list.d/brave-browser-release.sources
+# IMPORTANT: this version is deliberately fixed. A Docker rebuild must never
+# silently move whatsapp-web.js/Puppeteer onto a newer browser. When the pinned
+# package eventually disappears from Brave's stable APT repository, the image
+# build should fail rather than silently upgrading; bump this value only after
+# compatibility testing.
+#
+# Pinned stable release (2026-09-11):
+#   Brave 1.95.101 / Chromium 153.0.8010.37
 #
 # Brave executable:
 #   /usr/bin/brave
 #
 # Brave officially supports amd64 and arm64.
+ENV BRAVE_BROWSER_VERSION=1.95.101
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -99,7 +106,11 @@ RUN apt-get update \
         /etc/apt/sources.list.d/brave-browser-release.sources \
         https://brave-browser-apt-release.s3.brave.com/brave-browser.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends brave-browser \
+    && apt-get install -y --no-install-recommends \
+        "brave-browser=${BRAVE_BROWSER_VERSION}" \
+    && installed_brave_version="$(dpkg-query -W -f='${Version}' brave-browser)" \
+    && test "${installed_brave_version}" = "${BRAVE_BROWSER_VERSION}" \
+    && brave-browser --version \
     && ln -sf /opt/brave.com/brave/brave /usr/bin/brave \
     && ln -sf /opt/brave.com/brave/brave-browser /usr/bin/brave-browser \
     && rm -rf /var/lib/apt/lists/*

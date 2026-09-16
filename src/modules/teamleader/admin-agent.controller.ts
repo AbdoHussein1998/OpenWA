@@ -41,9 +41,10 @@ export type { AdminAgentOverview } from './teamleader.service';
 /**
  * Global Agent administration.
  *
- * These routes require PRINCIPAL_MANAGE, which is granted to ADMIN and
- * OPERATOR but not to Team Leaders. TEAM_MANAGE remains reserved for the
- * Team Leader self-service surface.
+ * Read-only inventory endpoints require PRINCIPAL_READ, which is granted to
+ * ADMIN, OPERATOR, and VIEWER. Mutating endpoints require PRINCIPAL_MANAGE,
+ * which remains limited to ADMIN and OPERATOR. TEAM_MANAGE remains reserved
+ * for the Team Leader self-service surface.
  *
  * Session-scoped API keys are also rejected because these operations can span
  * multiple Sessions and Team Leaders and therefore have no single Session
@@ -51,7 +52,6 @@ export type { AdminAgentOverview } from './teamleader.service';
  */
 @ApiTags('admin/agents')
 @Controller('admin/agents')
-@RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
 @RequireUnscopedKey()
 export class AdminAgentController {
   constructor(
@@ -60,6 +60,7 @@ export class AdminAgentController {
 
   /** List every Agent with Team Leader and assigned Session metadata. */
   @Get()
+  @RequireCapability(ApiCapability.PRINCIPAL_READ)
   @ApiOperation({
     summary: 'List all Agents for administration',
     description:
@@ -72,7 +73,8 @@ export class AdminAgentController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
+    description:
+      'Caller lacks global principal-read permission or is using a session-scoped API key.',
   })
   async findAll(): Promise<AdminAgentOverview[]> {
     return this.teamLeaderService.getAdminAgents();
@@ -83,6 +85,7 @@ export class AdminAgentController {
    * exactly which Team Leader and Session relationship will be affected.
    */
   @Get(':id')
+  @RequireCapability(ApiCapability.PRINCIPAL_READ)
   @ApiOperation({
     summary: 'Get an Agent for administration',
   })
@@ -101,7 +104,8 @@ export class AdminAgentController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
+    description:
+      'Caller lacks global principal-read permission or is using a session-scoped API key.',
   })
   async findOne(
     @Param('id', ParseUUIDPipe)
@@ -123,6 +127,7 @@ export class AdminAgentController {
    * effective Session owner.
    */
   @Patch(':id/assignment')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @ApiOperation({
     summary: 'Assign or unassign a Session for an Agent',
     description:
@@ -168,6 +173,7 @@ export class AdminAgentController {
 
   /** Move one Agent to another Team Leader. */
   @Patch(':id/team-leader')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @ApiOperation({
     summary: 'Reassign an Agent to another Team Leader',
     description:
@@ -210,6 +216,7 @@ export class AdminAgentController {
 
   /** Bulk-move Agents to one Team Leader. */
   @Post('bulk-reassign')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Bulk reassign Agents to another Team Leader',
@@ -249,6 +256,7 @@ export class AdminAgentController {
    * by its Team Leader, not by the Agent.
    */
   @Delete(':id')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete an Agent',

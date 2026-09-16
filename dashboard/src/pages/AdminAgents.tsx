@@ -54,6 +54,10 @@ import {
   useToast,
 } from '../hooks/useToast';
 
+import {
+  useRole,
+} from '../hooks/useRole';
+
 import type {
   AdminAgentOverview,
 } from '../services/api';
@@ -201,6 +205,10 @@ export function AdminAgents() {
 
   const toast =
     useToast();
+
+  const {
+    canManagePrincipals,
+  } = useRole();
 
   const agentsQuery =
     useAdminAgentsQuery();
@@ -397,6 +405,26 @@ export function AdminAgents() {
     teamLeaders,
   ]);
 
+  /**
+   * Fail closed in the UI if the authenticated role changes while this page
+   * remains mounted. Backend authorization is still authoritative, but stale
+   * mutation state must not remain interactable after losing permission.
+   */
+  useEffect(() => {
+    if (canManagePrincipals) {
+      return;
+    }
+
+    setShowCreateModal(false);
+    setCreateError(null);
+    setCreatedAgentCredential(null);
+    setRetiringAgentId(null);
+    setSelectedAgentIds(new Set());
+    setBulkTargetTeamLeaderId('');
+    setManagedAgentId('');
+    setIndividualTargetTeamLeaderId('');
+  }, [canManagePrincipals]);
+
   const normalizedSearch =
     search
       .trim()
@@ -485,6 +513,10 @@ export function AdminAgents() {
 
   const openCreateAgent =
     () => {
+      if (!canManagePrincipals) {
+        return;
+      }
+
       setCreateName('');
       setCreateEmail('');
       setCreateTeamLeaderId(
@@ -511,7 +543,10 @@ export function AdminAgents() {
 
   const createAgent =
     async () => {
-      if (!canCreateAgent) {
+      if (
+        !canManagePrincipals ||
+        !canCreateAgent
+      ) {
         return;
       }
 
@@ -591,6 +626,10 @@ export function AdminAgents() {
       agentId: string,
       checked: boolean,
     ) => {
+      if (!canManagePrincipals) {
+        return;
+      }
+
       setSelectedAgentIds(
         previous => {
           const next =
@@ -611,6 +650,10 @@ export function AdminAgents() {
     (
       checked: boolean,
     ) => {
+      if (!canManagePrincipals) {
+        return;
+      }
+
       setSelectedAgentIds(
         previous => {
           const next =
@@ -635,6 +678,7 @@ export function AdminAgents() {
   const bulkMoveAgents =
     async () => {
       if (
+        !canManagePrincipals ||
         selectedAgentIds.size === 0 ||
         !bulkTargetTeamLeaderId
       ) {
@@ -678,6 +722,7 @@ export function AdminAgents() {
   const moveManagedAgent =
     async () => {
       if (
+        !canManagePrincipals ||
         !managedAgent ||
         !individualTargetTeamLeaderId
       ) {
@@ -733,23 +778,29 @@ export function AdminAgents() {
     <div className="admin-agents-page">
       <PageHeader
         title="Agents"
-        subtitle="Move Agents between Team Leaders, resolve Session assignment conflicts, and delete Agent principals safely."
+        subtitle={
+          canManagePrincipals
+            ? 'Move Agents between Team Leaders, resolve Session assignment conflicts, and delete Agent principals safely.'
+            : 'View Agents, their Team Leaders, Session assignments, status, and quota information.'
+        }
         actions={
           <div className="admin-agents-header-actions">
-            <button
-              type="button"
-              className="admin-agents-create-btn"
-              onClick={
-                openCreateAgent
-              }
-              disabled={
-                teamLeaders.length === 0 ||
-                createAgentMutation.isPending
-              }
-            >
-              <Plus size={17} />
-              New Agent
-            </button>
+            {canManagePrincipals && (
+              <button
+                type="button"
+                className="admin-agents-create-btn"
+                onClick={
+                  openCreateAgent
+                }
+                disabled={
+                  teamLeaders.length === 0 ||
+                  createAgentMutation.isPending
+                }
+              >
+                <Plus size={17} />
+                New Agent
+              </button>
+            )}
 
             <button
               type="button"
@@ -907,7 +958,9 @@ export function AdminAgents() {
             </h2>
 
             <p>
-              Select Agents for a bulk Team Leader move, or use the row actions for an individual reassignment or deletion.
+              {canManagePrincipals
+                ? 'Select Agents for a bulk Team Leader move, or use the row actions for an individual reassignment or deletion.'
+                : 'View Agent identity, Team Leader ownership, Session assignment, connection status, and template quota.'}
             </p>
           </div>
 
@@ -939,7 +992,7 @@ export function AdminAgents() {
           </label>
         </div>
 
-        {agents.length > 0 && (
+        {canManagePrincipals && agents.length > 0 && (
           <div className="admin-agents-bulk-bar">
             <div className="admin-agents-bulk-selection">
               <strong>
@@ -1075,19 +1128,21 @@ export function AdminAgents() {
             <table className="admin-agents-table">
               <thead>
                 <tr>
-                  <th className="admin-agents-select-column">
-                    <input
-                      type="checkbox"
-                      checked={allFilteredSelected}
-                      onChange={event =>
-                        toggleAllFiltered(
-                          event.target.checked,
-                        )
-                      }
-                      aria-label="Select all visible Agents"
-                      disabled={isMutating}
-                    />
-                  </th>
+                  {canManagePrincipals && (
+                    <th className="admin-agents-select-column">
+                      <input
+                        type="checkbox"
+                        checked={allFilteredSelected}
+                        onChange={event =>
+                          toggleAllFiltered(
+                            event.target.checked,
+                          )
+                        }
+                        aria-label="Select all visible Agents"
+                        disabled={isMutating}
+                      />
+                    </th>
+                  )}
                   <th>Agent</th>
                   <th>Team Leader</th>
                   <th>Session</th>
@@ -1110,24 +1165,26 @@ export function AdminAgents() {
 
                     return (
                       <tr key={agent.id}>
-                        <td className="admin-agents-select-cell">
-                          <input
-                            type="checkbox"
-                            checked={
-                              selectedAgentIds.has(
-                                agent.id,
-                              )
-                            }
-                            onChange={event =>
-                              toggleAgentSelection(
-                                agent.id,
-                                event.target.checked,
-                              )
-                            }
-                            aria-label={`Select ${agent.name}`}
-                            disabled={isMutating}
-                          />
-                        </td>
+                        {canManagePrincipals && (
+                          <td className="admin-agents-select-cell">
+                            <input
+                              type="checkbox"
+                              checked={
+                                selectedAgentIds.has(
+                                  agent.id,
+                                )
+                              }
+                              onChange={event =>
+                                toggleAgentSelection(
+                                  agent.id,
+                                  event.target.checked,
+                                )
+                              }
+                              aria-label={`Select ${agent.name}`}
+                              disabled={isMutating}
+                            />
+                          </td>
+                        )}
 
                         <td>
                           <div className="admin-agents-identity-cell">
@@ -1244,19 +1301,21 @@ export function AdminAgents() {
 
                         <td>
                           <div className="admin-agents-row-actions">
-                            <button
-                              type="button"
-                              className="admin-agents-action-btn"
-                              onClick={() =>
-                                setManagedAgentId(
-                                  agent.id,
-                                )
-                              }
-                              disabled={isMutating}
-                            >
-                              <ArrowRightLeft size={16} />
-                              Move
-                            </button>
+                            {canManagePrincipals && (
+                              <button
+                                type="button"
+                                className="admin-agents-action-btn"
+                                onClick={() =>
+                                  setManagedAgentId(
+                                    agent.id,
+                                  )
+                                }
+                                disabled={isMutating}
+                              >
+                                <ArrowRightLeft size={16} />
+                                Move
+                              </button>
+                            )}
 
                             {session ? (
                               <>
@@ -1295,19 +1354,21 @@ export function AdminAgents() {
                               </button>
                             )}
 
-                            <button
-                              type="button"
-                              className="admin-agents-action-btn admin-agents-action-btn--danger"
-                              onClick={() =>
-                                setRetiringAgentId(
-                                  agent.id,
-                                )
-                              }
-                              disabled={isMutating}
-                            >
-                              <Trash2 size={16} />
-                              Delete
-                            </button>
+                            {canManagePrincipals && (
+                              <button
+                                type="button"
+                                className="admin-agents-action-btn admin-agents-action-btn--danger"
+                                onClick={() =>
+                                  setRetiringAgentId(
+                                    agent.id,
+                                  )
+                                }
+                                disabled={isMutating}
+                              >
+                                <Trash2 size={16} />
+                                Delete
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1320,428 +1381,434 @@ export function AdminAgents() {
         )}
       </section>
 
-      <Modal
-        open={showCreateModal}
-        onClose={
-          closeCreateAgent
-        }
-        title={
-          createdAgentCredential
-            ? 'Agent created'
-            : 'Create Agent'
-        }
-        className="admin-agents-create-modal"
-        hideCloseButton={
-          createAgentMutation.isPending
-        }
-        closeLabel="Close"
-        footer={
-          createdAgentCredential ? (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={
-                closeCreateAgent
-              }
-            >
-              Close
-            </button>
-          ) : (
-            <div className="admin-agents-create-modal-actions">
+      {canManagePrincipals && (
+        <Modal
+          open={showCreateModal}
+          onClose={
+            closeCreateAgent
+          }
+          title={
+            createdAgentCredential
+              ? 'Agent created'
+              : 'Create Agent'
+          }
+          className="admin-agents-create-modal"
+          hideCloseButton={
+            createAgentMutation.isPending
+          }
+          closeLabel="Close"
+          footer={
+            createdAgentCredential ? (
               <button
                 type="button"
                 className="btn-secondary"
                 onClick={
                   closeCreateAgent
                 }
-                disabled={
-                  createAgentMutation.isPending
-                }
               >
-                Cancel
+                Close
               </button>
-
-              <button
-                type="button"
-                className="admin-agents-create-btn"
-                onClick={() =>
-                  void createAgent()
-                }
-                disabled={
-                  !canCreateAgent ||
-                  createAgentMutation.isPending
-                }
-              >
-                {createAgentMutation.isPending ? (
-                  <Loader2
-                    size={16}
-                    className="animate-spin"
-                  />
-                ) : (
-                  <Plus size={16} />
-                )}
-                Create Agent
-              </button>
-            </div>
-          )
-        }
-      >
-        {createdAgentCredential ? (
-          <div className="admin-agents-created-credential">
-            <div>
-              <strong>
-                {createdAgentCredential.name}
-              </strong>
-              <span>
-                The Agent principal and its AGENT credential were created together.
-              </span>
-            </div>
-
-            <GeneratedKeyField
-              value={
-                createdAgentCredential.apiKey
-              }
-              label="Agent API key"
-              description="This plaintext key is returned only once. Copy and store it securely before closing this dialog."
-            />
-          </div>
-        ) : (
-          <div className="admin-agents-create-form">
-            <label htmlFor="admin-agent-team-leader">
-              <span>
-                Team Leader
-              </span>
-              <select
-                id="admin-agent-team-leader"
-                value={
-                  createTeamLeaderId
-                }
-                onChange={
-                  event =>
-                    setCreateTeamLeaderId(
-                      event.target.value,
-                    )
-                }
-                disabled={
-                  createAgentMutation.isPending
-                }
-              >
-                <option value="">
-                  Select Team Leader
-                </option>
-
-                {teamLeaders.map(
-                  teamLeader => (
-                    <option
-                      key={
-                        teamLeader.id
-                      }
-                      value={
-                        teamLeader.id
-                      }
-                    >
-                      {teamLeader.name}
-                    </option>
-                  ),
-                )}
-              </select>
-            </label>
-
-            <label htmlFor="admin-agent-name">
-              <span>
-                Agent name
-              </span>
-              <input
-                id="admin-agent-name"
-                type="text"
-                maxLength={100}
-                value={createName}
-                placeholder="Mohamed Ali"
-                autoComplete="off"
-                disabled={
-                  createAgentMutation.isPending
-                }
-                onChange={
-                  event => {
-                    setCreateName(
-                      event.target.value,
-                    );
-                    setCreateError(null);
+            ) : (
+              <div className="admin-agents-create-modal-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={
+                    closeCreateAgent
                   }
-                }
-              />
-            </label>
-
-            <label htmlFor="admin-agent-email">
-              <span>
-                Email
-                <small>
-                  Optional
-                </small>
-              </span>
-              <input
-                id="admin-agent-email"
-                type="email"
-                maxLength={255}
-                value={createEmail}
-                placeholder="mohamed.ali@example.com"
-                autoComplete="email"
-                disabled={
-                  createAgentMutation.isPending
-                }
-                onChange={
-                  event => {
-                    setCreateEmail(
-                      event.target.value,
-                    );
-                    setCreateError(null);
+                  disabled={
+                    createAgentMutation.isPending
                   }
-                }
-              />
-            </label>
+                >
+                  Cancel
+                </button>
 
-            <label htmlFor="admin-agent-template-limit">
-              <span>
-                Template send limit / 24h
-                <small>
-                  Blank = unlimited
-                </small>
-              </span>
-              <input
-                id="admin-agent-template-limit"
-                type="number"
-                min={0}
-                step={1}
-                value={
-                  createTemplateLimit
-                }
-                placeholder="Unlimited"
-                disabled={
-                  createAgentMutation.isPending
-                }
-                onChange={
-                  event => {
-                    setCreateTemplateLimit(
-                      event.target.value,
-                    );
-                    setCreateError(null);
+                <button
+                  type="button"
+                  className="admin-agents-create-btn"
+                  onClick={() =>
+                    void createAgent()
                   }
-                }
-                onKeyDown={
-                  event => {
-                    if (
-                      event.key === 'Enter' &&
-                      canCreateAgent &&
-                      !createAgentMutation.isPending
-                    ) {
-                      void createAgent();
-                    }
+                  disabled={
+                    !canCreateAgent ||
+                    createAgentMutation.isPending
                   }
-                }
-              />
-            </label>
-
-            {trimmedCreateEmail &&
-              !isValidEmail(
-                trimmedCreateEmail,
-              ) && (
-                <p className="admin-agents-field-error">
-                  Enter a valid email address or leave it blank.
-                </p>
-              )}
-
-            {!createTemplateLimitValid && (
-              <p className="admin-agents-field-error">
-                Template limit must be a whole number greater than or equal to 0.
-              </p>
-            )}
-
-            {createError && (
-              <div
-                className="admin-agents-alert admin-agents-alert--error"
-                role="alert"
-              >
-                <AlertCircle size={18} />
-                <div>
-                  <strong>
-                    Agent could not be created.
-                  </strong>
-                  <span>
-                    {createError}
-                  </span>
-                </div>
+                >
+                  {createAgentMutation.isPending ? (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
+                  ) : (
+                    <Plus size={16} />
+                  )}
+                  Create Agent
+                </button>
               </div>
-            )}
-          </div>
-        )}
-      </Modal>
-
-      <AgentRetirementModal
-        open={
-          retiringAgentId !== null
-        }
-        agentId={
-          retiringAgentId
-        }
-        onClose={() =>
-          setRetiringAgentId(
-            null,
-          )
-        }
-        onRetired={
-          retiredAgentId => {
-            setSelectedAgentIds(
-              previous => {
-                const next =
-                  new Set(previous);
-                next.delete(
-                  retiredAgentId,
-                );
-                return next;
-              },
-            );
-
-            if (
-              managedAgentId ===
-              retiredAgentId
-            ) {
-              setManagedAgentId('');
-            }
-
-            setRetiringAgentId(
-              null,
-            );
+            )
           }
-        }
-      />
+        >
+          {createdAgentCredential ? (
+            <div className="admin-agents-created-credential">
+              <div>
+                <strong>
+                  {createdAgentCredential.name}
+                </strong>
+                <span>
+                  The Agent principal and its AGENT credential were created together.
+                </span>
+              </div>
 
-      <Modal
-        open={Boolean(managedAgent)}
-        onClose={() => {
-          if (!isMutating) {
-            setManagedAgentId('');
-          }
-        }}
-        title={
-          managedAgent
-            ? `Move ${managedAgent.name}`
-            : 'Move Agent'
-        }
-        className="admin-agents-move-modal"
-        hideCloseButton={isMutating}
-        footer={
-          managedAgent ? (
-            <div className="admin-agents-modal-actions">
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() =>
-                  setManagedAgentId('')
+              <GeneratedKeyField
+                value={
+                  createdAgentCredential.apiKey
                 }
-                disabled={isMutating}
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={() =>
-                  void moveManagedAgent()
-                }
-                disabled={
-                  !individualTargetTeamLeaderId ||
-                  isMutating
-                }
-              >
-                {reassignAgentMutation.isPending ? (
-                  <Loader2
-                    size={16}
-                    className="animate-spin"
-                  />
-                ) : (
-                  <ArrowRightLeft size={16} />
-                )}
-                Move Agent
-              </button>
+                label="Agent API key"
+                description="This plaintext key is returned only once. Copy and store it securely before closing this dialog."
+              />
             </div>
-          ) : undefined
-        }
-      >
-        {managedAgent && (
-          <div className="admin-agents-move-form">
-            <div className="admin-agents-current-owner">
-              <span>
-                Current Team Leader
-              </span>
-              <strong>
-                {managedAgent.teamLeader.name}
-              </strong>
-              <code>
-                {managedAgent.teamLeaderId}
-              </code>
-            </div>
+          ) : (
+            <div className="admin-agents-create-form">
+              <label htmlFor="admin-agent-team-leader">
+                <span>
+                  Team Leader
+                </span>
+                <select
+                  id="admin-agent-team-leader"
+                  value={
+                    createTeamLeaderId
+                  }
+                  onChange={
+                    event =>
+                      setCreateTeamLeaderId(
+                        event.target.value,
+                      )
+                  }
+                  disabled={
+                    createAgentMutation.isPending
+                  }
+                >
+                  <option value="">
+                    Select Team Leader
+                  </option>
 
-            <label className="admin-agents-form-field">
-              <span>
-                New Team Leader
-              </span>
-              <select
-                value={individualTargetTeamLeaderId}
-                onChange={event =>
-                  setIndividualTargetTeamLeaderId(
-                    event.target.value,
-                  )
-                }
-                disabled={isMutating}
-              >
-                <option value="">
-                  Select Team Leader
-                </option>
-                {teamLeaders
-                  .filter(
-                    teamLeader =>
-                      teamLeader.id !==
-                      managedAgent.teamLeaderId,
-                  )
-                  .map(
+                  {teamLeaders.map(
                     teamLeader => (
                       <option
-                        key={teamLeader.id}
-                        value={teamLeader.id}
+                        key={
+                          teamLeader.id
+                        }
+                        value={
+                          teamLeader.id
+                        }
                       >
                         {teamLeader.name}
                       </option>
                     ),
                   )}
-              </select>
-            </label>
+                </select>
+              </label>
 
-            <label className="admin-agents-move-checkbox">
-              <input
-                type="checkbox"
-                checked={individualUnassignSession}
-                onChange={event =>
-                  setIndividualUnassignSession(
-                    event.target.checked,
-                  )
-                }
-                disabled={isMutating}
-              />
-              <span>
+              <label htmlFor="admin-agent-name">
+                <span>
+                  Agent name
+                </span>
+                <input
+                  id="admin-agent-name"
+                  type="text"
+                  maxLength={100}
+                  value={createName}
+                  placeholder="Mohamed Ali"
+                  autoComplete="off"
+                  disabled={
+                    createAgentMutation.isPending
+                  }
+                  onChange={
+                    event => {
+                      setCreateName(
+                        event.target.value,
+                      );
+                      setCreateError(null);
+                    }
+                  }
+                />
+              </label>
+
+              <label htmlFor="admin-agent-email">
+                <span>
+                  Email
+                  <small>
+                    Optional
+                  </small>
+                </span>
+                <input
+                  id="admin-agent-email"
+                  type="email"
+                  maxLength={255}
+                  value={createEmail}
+                  placeholder="mohamed.ali@example.com"
+                  autoComplete="email"
+                  disabled={
+                    createAgentMutation.isPending
+                  }
+                  onChange={
+                    event => {
+                      setCreateEmail(
+                        event.target.value,
+                      );
+                      setCreateError(null);
+                    }
+                  }
+                />
+              </label>
+
+              <label htmlFor="admin-agent-template-limit">
+                <span>
+                  Template send limit / 24h
+                  <small>
+                    Blank = unlimited
+                  </small>
+                </span>
+                <input
+                  id="admin-agent-template-limit"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={
+                    createTemplateLimit
+                  }
+                  placeholder="Unlimited"
+                  disabled={
+                    createAgentMutation.isPending
+                  }
+                  onChange={
+                    event => {
+                      setCreateTemplateLimit(
+                        event.target.value,
+                      );
+                      setCreateError(null);
+                    }
+                  }
+                  onKeyDown={
+                    event => {
+                      if (
+                        event.key === 'Enter' &&
+                        canCreateAgent &&
+                        !createAgentMutation.isPending
+                      ) {
+                        void createAgent();
+                      }
+                    }
+                  }
+                />
+              </label>
+
+              {trimmedCreateEmail &&
+                !isValidEmail(
+                  trimmedCreateEmail,
+                ) && (
+                  <p className="admin-agents-field-error">
+                    Enter a valid email address or leave it blank.
+                  </p>
+                )}
+
+              {!createTemplateLimitValid && (
+                <p className="admin-agents-field-error">
+                  Template limit must be a whole number greater than or equal to 0.
+                </p>
+              )}
+
+              {createError && (
+                <div
+                  className="admin-agents-alert admin-agents-alert--error"
+                  role="alert"
+                >
+                  <AlertCircle size={18} />
+                  <div>
+                    <strong>
+                      Agent could not be created.
+                    </strong>
+                    <span>
+                      {createError}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {canManagePrincipals && (
+        <AgentRetirementModal
+          open={
+            retiringAgentId !== null
+          }
+          agentId={
+            retiringAgentId
+          }
+          onClose={() =>
+            setRetiringAgentId(
+              null,
+            )
+          }
+          onRetired={
+            retiredAgentId => {
+              setSelectedAgentIds(
+                previous => {
+                  const next =
+                    new Set(previous);
+                  next.delete(
+                    retiredAgentId,
+                  );
+                  return next;
+                },
+              );
+
+              if (
+                managedAgentId ===
+                retiredAgentId
+              ) {
+                setManagedAgentId('');
+              }
+
+              setRetiringAgentId(
+                null,
+              );
+            }
+          }
+        />
+      )}
+
+      {canManagePrincipals && (
+        <Modal
+          open={Boolean(managedAgent)}
+          onClose={() => {
+            if (!isMutating) {
+              setManagedAgentId('');
+            }
+          }}
+          title={
+            managedAgent
+              ? `Move ${managedAgent.name}`
+              : 'Move Agent'
+          }
+          className="admin-agents-move-modal"
+          hideCloseButton={isMutating}
+          footer={
+            managedAgent ? (
+              <div className="admin-agents-modal-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() =>
+                    setManagedAgentId('')
+                  }
+                  disabled={isMutating}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() =>
+                    void moveManagedAgent()
+                  }
+                  disabled={
+                    !individualTargetTeamLeaderId ||
+                    isMutating
+                  }
+                >
+                  {reassignAgentMutation.isPending ? (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
+                  ) : (
+                    <ArrowRightLeft size={16} />
+                  )}
+                  Move Agent
+                </button>
+              </div>
+            ) : undefined
+          }
+        >
+          {managedAgent && (
+            <div className="admin-agents-move-form">
+              <div className="admin-agents-current-owner">
+                <span>
+                  Current Team Leader
+                </span>
                 <strong>
-                  Clear current Session assignment
+                  {managedAgent.teamLeader.name}
                 </strong>
-                <small>
-                  {managedAgent.assignedSessionId
-                    ? `Currently assigned to ${managedAgent.assignedSessionId}. Keep this enabled unless that Session is already owned by the destination Team Leader.`
-                    : 'This Agent currently has no Session assignment.'}
-                </small>
-              </span>
-            </label>
-          </div>
-        )}
-      </Modal>
+                <code>
+                  {managedAgent.teamLeaderId}
+                </code>
+              </div>
+
+              <label className="admin-agents-form-field">
+                <span>
+                  New Team Leader
+                </span>
+                <select
+                  value={individualTargetTeamLeaderId}
+                  onChange={event =>
+                    setIndividualTargetTeamLeaderId(
+                      event.target.value,
+                    )
+                  }
+                  disabled={isMutating}
+                >
+                  <option value="">
+                    Select Team Leader
+                  </option>
+                  {teamLeaders
+                    .filter(
+                      teamLeader =>
+                        teamLeader.id !==
+                        managedAgent.teamLeaderId,
+                    )
+                    .map(
+                      teamLeader => (
+                        <option
+                          key={teamLeader.id}
+                          value={teamLeader.id}
+                        >
+                          {teamLeader.name}
+                        </option>
+                      ),
+                    )}
+                </select>
+              </label>
+
+              <label className="admin-agents-move-checkbox">
+                <input
+                  type="checkbox"
+                  checked={individualUnassignSession}
+                  onChange={event =>
+                    setIndividualUnassignSession(
+                      event.target.checked,
+                    )
+                  }
+                  disabled={isMutating}
+                />
+                <span>
+                  <strong>
+                    Clear current Session assignment
+                  </strong>
+                  <small>
+                    {managedAgent.assignedSessionId
+                      ? `Currently assigned to ${managedAgent.assignedSessionId}. Keep this enabled unless that Session is already owned by the destination Team Leader.`
+                      : 'This Agent currently has no Session assignment.'}
+                  </small>
+                </span>
+              </label>
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

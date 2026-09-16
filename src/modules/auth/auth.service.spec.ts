@@ -1602,6 +1602,33 @@ describe('AuthService', () => {
         agentId: role === ApiKeyRole.AGENT ? 'agent-1' : null,
       });
 
+    it.each([
+      [ApiKeyRole.ADMIN, true, true],
+      [ApiKeyRole.OPERATOR, true, true],
+      [ApiKeyRole.VIEWER, true, false],
+      [ApiKeyRole.TEAM_LEADER, false, false],
+      [ApiKeyRole.AGENT, false, false],
+    ] as const)(
+      'maps %s to principal read=%s and manage=%s',
+      (role, canReadPrincipals, canManagePrincipals) => {
+        const key = keyFor(role);
+
+        expect(
+          service.hasCapability(
+            key,
+            ApiCapability.PRINCIPAL_READ,
+          ),
+        ).toBe(canReadPrincipals);
+
+        expect(
+          service.hasCapability(
+            key,
+            ApiCapability.PRINCIPAL_MANAGE,
+          ),
+        ).toBe(canManagePrincipals);
+      },
+    );
+
     it('grants Agent only the intended assigned-session operational capabilities', () => {
       const key = keyFor(ApiKeyRole.AGENT);
 
@@ -1625,6 +1652,8 @@ describe('AuthService', () => {
         ApiCapability.TEMPLATE_MANAGE,
         ApiCapability.SEARCH_MESSAGES,
         ApiCapability.TEAM_MANAGE,
+        ApiCapability.PRINCIPAL_READ,
+        ApiCapability.PRINCIPAL_MANAGE,
         ApiCapability.API_KEY_MANAGE,
       ];
 
@@ -1649,6 +1678,7 @@ describe('AuthService', () => {
       expect(service.hasCapability(key, ApiCapability.TEAM_MANAGE)).toBe(true);
 
       expect(service.hasCapability(key, ApiCapability.WEBHOOK_MANAGE)).toBe(false);
+      expect(service.hasCapability(key, ApiCapability.PRINCIPAL_READ)).toBe(false);
       expect(service.hasCapability(key, ApiCapability.PRINCIPAL_MANAGE)).toBe(false);
       expect(service.hasCapability(key, ApiCapability.API_KEY_MANAGE)).toBe(false);
       expect(service.hasCapability(key, ApiCapability.AUDIT_READ)).toBe(false);
@@ -1662,6 +1692,8 @@ describe('AuthService', () => {
 
       expect(service.hasCapability(key, ApiCapability.SESSION_READ)).toBe(true);
       expect(service.hasCapability(key, ApiCapability.CHAT_READ)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.PRINCIPAL_READ)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.PRINCIPAL_MANAGE)).toBe(false);
       expect(service.hasCapability(key, ApiCapability.SESSION_START)).toBe(false);
       expect(service.hasCapability(key, ApiCapability.MESSAGE_SEND)).toBe(false);
       expect(service.hasCapability(key, ApiCapability.TEMPLATE_READ)).toBe(false);
@@ -1677,6 +1709,7 @@ describe('AuthService', () => {
       expect(service.hasCapability(key, ApiCapability.TEMPLATE_MANAGE)).toBe(true);
 
       expect(service.hasCapability(key, ApiCapability.TEAM_MANAGE)).toBe(true);
+      expect(service.hasCapability(key, ApiCapability.PRINCIPAL_READ)).toBe(true);
       expect(service.hasCapability(key, ApiCapability.PRINCIPAL_MANAGE)).toBe(true);
       expect(service.hasCapability(key, ApiCapability.API_KEY_MANAGE)).toBe(true);
       expect(service.hasCapability(key, ApiCapability.AUDIT_READ)).toBe(true);
@@ -1690,6 +1723,7 @@ describe('AuthService', () => {
     it('grants Admin every administrative capability including Infrastructure', () => {
       const key = keyFor(ApiKeyRole.ADMIN);
 
+      expect(service.hasCapability(key, ApiCapability.PRINCIPAL_READ)).toBe(true);
       expect(service.hasCapability(key, ApiCapability.PRINCIPAL_MANAGE)).toBe(true);
       expect(service.hasCapability(key, ApiCapability.API_KEY_MANAGE)).toBe(true);
       expect(service.hasCapability(key, ApiCapability.AUDIT_READ)).toBe(true);

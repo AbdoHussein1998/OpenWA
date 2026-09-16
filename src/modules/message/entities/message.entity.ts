@@ -1,5 +1,16 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index, ValueTransformer } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  ValueTransformer,
+} from 'typeorm';
+
 import { jsonColumnType } from '../../../common/utils/column-types';
+import { Session } from '../../session/entities/session.entity';
 
 /**
  * A `bigint` column reads back as a string on PostgreSQL (pg avoids >2^53 precision loss) but as a
@@ -43,8 +54,23 @@ export class Message {
 
   // No standalone @Index here: sessionId-only lookups are already served by the composite indexes
   // that lead with sessionId — (sessionId, createdAt) above and the unique (sessionId, waMessageId).
-  @Column()
+  // varchar matches sessions.id in the migration-managed data database on both SQLite/PostgreSQL.
+  @Column({ type: 'varchar' })
   sessionId!: string;
+
+  /**
+   * A Message has no valid lifecycle independent of its Session.
+   *
+   * `sessionId` remains an explicit scalar because the hot message paths already read/write by id.
+   * The relation exists to make the ownership contract part of TypeORM metadata and to let
+   * synchronize-enabled SQLite deployments create the same FK as the migration-managed schema.
+   */
+  @ManyToOne(() => Session, {
+    nullable: false,
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'sessionId' })
+  session!: Session;
 
   @Column({ nullable: true })
   waMessageId!: string;

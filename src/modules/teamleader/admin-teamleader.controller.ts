@@ -46,14 +46,16 @@ import {
 /**
  * Administrative Team Leader management.
  *
- * These routes require the global PRINCIPAL_MANAGE capability. ADMIN and OPERATOR receive it; Team Leaders do not, even though they retain TEAM_MANAGE for their own self-service surface.
+ * Read-only inventory endpoints require PRINCIPAL_READ, which is granted to
+ * ADMIN, OPERATOR, and VIEWER. Mutating endpoints require PRINCIPAL_MANAGE,
+ * which remains limited to ADMIN and OPERATOR. Team Leaders retain
+ * TEAM_MANAGE only for their own self-service surface.
  *
- * Session-scoped API keys are rejected because these operations can span
+ * Session-scoped API keys are rejected because these global routes can span
  * multiple Team Leaders and Sessions.
  */
 @ApiTags('admin/team-leaders')
 @Controller('admin/team-leaders')
-@RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
 @RequireUnscopedKey()
 export class AdminTeamLeaderController {
   constructor(
@@ -62,6 +64,7 @@ export class AdminTeamLeaderController {
 
   /** Create a Team Leader principal together with its API key. */
   @Post()
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @ApiOperation({
     summary: 'Create a Team Leader',
     description:
@@ -121,6 +124,7 @@ export class AdminTeamLeaderController {
 
   /** Create an Agent under a specific Team Leader. */
   @Post(':teamLeaderId/agents')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @ApiOperation({
     summary: 'Create an Agent for a Team Leader',
     description:
@@ -158,6 +162,7 @@ export class AdminTeamLeaderController {
 
   /** List all Team Leaders. */
   @Get()
+  @RequireCapability(ApiCapability.PRINCIPAL_READ)
   @ApiOperation({
     summary: 'List Team Leaders',
   })
@@ -167,7 +172,7 @@ export class AdminTeamLeaderController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
+    description: 'Caller lacks global principal-read permission or is using a session-scoped API key.',
   })
   async findAll(): Promise<TeamLeader[]> {
     return this.teamLeaderService.listTeamLeaders();
@@ -175,6 +180,7 @@ export class AdminTeamLeaderController {
 
   /** Return aggregate and per-Team-Leader resource counts. */
   @Get('resource-summary')
+  @RequireCapability(ApiCapability.PRINCIPAL_READ)
   @ApiOperation({
     summary: 'Get Team Leader resource counts',
     description:
@@ -186,7 +192,7 @@ export class AdminTeamLeaderController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
+    description: 'Caller lacks global principal-read permission or is using a session-scoped API key.',
   })
   async resourceSummary(): Promise<AdminTeamLeaderResourceSummary> {
     return this.teamLeaderService.getAdminTeamLeaderResourceSummary();
@@ -204,6 +210,7 @@ export class AdminTeamLeaderController {
    * Session ownership remain consistent.
    */
   @Patch('sessions/:sessionId/owner')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @ApiOperation({
     summary: 'Assign or change Session Team Leader ownership',
     description:
@@ -248,6 +255,7 @@ export class AdminTeamLeaderController {
    * be deleted.
    */
   @Get(':id/resources')
+  @RequireCapability(ApiCapability.PRINCIPAL_READ)
   @ApiOperation({
     summary: 'Inspect Team Leader resources before reassignment or deletion',
     description:
@@ -268,7 +276,7 @@ export class AdminTeamLeaderController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
+    description: 'Caller lacks global principal-read permission or is using a session-scoped API key.',
   })
   async resources(
     @Param('id', ParseUUIDPipe)
@@ -279,6 +287,7 @@ export class AdminTeamLeaderController {
 
   /** Transfer one unassigned Session to another Team Leader. */
   @Patch(':id/sessions/:sessionId/owner')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @ApiOperation({
     summary: 'Reassign Session ownership from a known Team Leader',
     description:
@@ -329,6 +338,7 @@ export class AdminTeamLeaderController {
 
   /** Bulk-transfer unassigned Sessions to another Team Leader. */
   @Post(':id/sessions/bulk-reassign')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Bulk reassign Session ownership',
@@ -373,6 +383,7 @@ export class AdminTeamLeaderController {
 
   /** Get one Team Leader by UUID. */
   @Get(':id')
+  @RequireCapability(ApiCapability.PRINCIPAL_READ)
   @ApiOperation({
     summary: 'Get a Team Leader',
   })
@@ -391,7 +402,7 @@ export class AdminTeamLeaderController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Caller is not an unscoped ADMIN/OPERATOR.',
+    description: 'Caller lacks global principal-read permission or is using a session-scoped API key.',
   })
   async findOne(
     @Param('id', ParseUUIDPipe)
@@ -408,6 +419,7 @@ export class AdminTeamLeaderController {
    * the API Keys page with delegation instead of destructive force deletion.
    */
   @Post(':id/retire')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Delegate all Team Leader resources and retire the principal',
@@ -453,6 +465,7 @@ export class AdminTeamLeaderController {
    * the safe deletion path and refuses non-empty principals.
    */
   @Delete(':id/force')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Force delete a Team Leader and all owned resources',
@@ -496,6 +509,7 @@ export class AdminTeamLeaderController {
    * Agents and prevents orphaned Session ownership.
    */
   @Delete(':id')
+  @RequireCapability(ApiCapability.PRINCIPAL_MANAGE)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete an empty Team Leader',

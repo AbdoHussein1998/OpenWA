@@ -79,15 +79,59 @@ describe('AdminAgentController', () => {
   });
 
   describe('authorization metadata', () => {
-    it('requires PRINCIPAL_MANAGE at the controller level', () => {
+    it('keeps the controller capability-neutral so handlers can split read and write access', () => {
       expect(
         Reflect.getMetadata(
           REQUIRED_CAPABILITY_KEY,
           AdminAgentController,
         ),
-      ).toBe(
-        ApiCapability.PRINCIPAL_MANAGE,
-      );
+      ).toBeUndefined();
+    });
+
+    it('requires PRINCIPAL_READ for read-only Agent inventory handlers', () => {
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminAgentController.prototype.findAll,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_READ);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminAgentController.prototype.findOne,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_READ);
+    });
+
+    it('requires PRINCIPAL_MANAGE for Agent mutations', () => {
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminAgentController.prototype.assignSession,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminAgentController.prototype.reassign,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminAgentController.prototype.bulkReassign,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminAgentController.prototype.delete,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
     });
 
     it('requires an unscoped API key at the controller level', () => {

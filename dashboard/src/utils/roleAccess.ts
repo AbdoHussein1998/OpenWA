@@ -15,6 +15,7 @@ import type {
  * model:
  *
  * - TEAM_MANAGE -> Team Leader/Agent domain self-service.
+ * - PRINCIPAL_READ -> global read-only Team Leader/Agent inventory access.
  * - PRINCIPAL_MANAGE -> global Team Leader/Agent administration.
  * - API_KEY_MANAGE -> API-key lifecycle administration.
  * - AUDIT_READ -> global audit-log access.
@@ -48,6 +49,7 @@ export const ROLE_CAPABILITIES: Readonly<
     canManageWebhooks: true,
 
     canManageTeam: true,
+    canReadPrincipals: true,
     canManagePrincipals: true,
 
     canManageApiKeys: true,
@@ -77,6 +79,7 @@ export const ROLE_CAPABILITIES: Readonly<
     canManageWebhooks: true,
 
     canManageTeam: true,
+    canReadPrincipals: true,
     canManagePrincipals: true,
 
     canManageApiKeys: true,
@@ -110,6 +113,7 @@ export const ROLE_CAPABILITIES: Readonly<
     canManageWebhooks: false,
 
     canManageTeam: false,
+    canReadPrincipals: true,
     canManagePrincipals: false,
 
     canManageApiKeys: false,
@@ -151,6 +155,7 @@ export const ROLE_CAPABILITIES: Readonly<
      * management.
      */
     canManageTeam: true,
+    canReadPrincipals: false,
     canManagePrincipals: false,
 
     canManageApiKeys: false,
@@ -183,11 +188,12 @@ export const ROLE_CAPABILITIES: Readonly<
     canSendMessages: true,
 
     canReadTemplates: true,
-    canManageTemplates: true,
+    canManageTemplates: false,
 
     canManageWebhooks: false,
 
     canManageTeam: false,
+    canReadPrincipals: false,
     canManagePrincipals: false,
 
     canManageApiKeys: false,
@@ -222,6 +228,7 @@ const NO_CAPABILITIES: Readonly<RoleCapabilities> = {
   canManageWebhooks: false,
 
   canManageTeam: false,
+  canReadPrincipals: false,
   canManagePrincipals: false,
 
   canManageApiKeys: false,
@@ -354,15 +361,17 @@ export function canAccessRoute(
   /**
    * Global Team Leader and Agent inventories.
    *
-   * This must use canManagePrincipals rather than canManageTeam. Team Leaders
-   * legitimately have canManageTeam for their own self-service surface but
-   * must never gain access to global `/admin/*` principal administration.
+   * Route visibility uses canReadPrincipals so VIEWER can inspect the global
+   * inventory without receiving mutation rights. Mutating controls use
+   * canManagePrincipals separately. Team Leaders legitimately have
+   * canManageTeam for self-service but do not receive either global principal
+   * capability.
    */
   if (
     matchesRoute(pathname, '/admin/team-leaders') ||
     matchesRoute(pathname, '/admin/agents')
   ) {
-    return capabilities.canManagePrincipals;
+    return capabilities.canReadPrincipals;
   }
 
   /**

@@ -176,6 +176,7 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.SEARCH_MESSAGES,
 
     ApiCapability.TEAM_MANAGE,
+    ApiCapability.PRINCIPAL_READ,
     ApiCapability.PRINCIPAL_MANAGE,
 
     ApiCapability.API_KEY_MANAGE,
@@ -214,6 +215,7 @@ const ROLE_CAPABILITIES: Readonly<
     ApiCapability.SEARCH_MESSAGES,
 
     ApiCapability.TEAM_MANAGE,
+    ApiCapability.PRINCIPAL_READ,
     ApiCapability.PRINCIPAL_MANAGE,
 
     ApiCapability.API_KEY_MANAGE,
@@ -228,6 +230,9 @@ const ROLE_CAPABILITIES: Readonly<
   [ApiKeyRole.VIEWER]: new Set([
     ApiCapability.SESSION_READ,
     ApiCapability.CHAT_READ,
+
+    // Global Team Leader / Agent inventory is visible read-only.
+    ApiCapability.PRINCIPAL_READ,
   ]),
 
   [ApiKeyRole.TEAM_LEADER]: new Set([
@@ -251,8 +256,9 @@ const ROLE_CAPABILITIES: Readonly<
     /**
      * Self-service Team Leader management only.
      *
-     * Global Team Leader / Agent administration uses PRINCIPAL_MANAGE,
-     * which TEAM_LEADER credentials do not receive.
+     * Global Team Leader / Agent inventory and administration use
+     * PRINCIPAL_READ / PRINCIPAL_MANAGE respectively. TEAM_LEADER
+     * credentials receive neither global capability.
      */
     ApiCapability.TEAM_MANAGE,
   ]),

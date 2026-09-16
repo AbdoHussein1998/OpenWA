@@ -94,15 +94,101 @@ describe('AdminTeamLeaderController', () => {
   });
 
   describe('authorization metadata', () => {
-    it('requires PRINCIPAL_MANAGE at the controller level', () => {
+    it('keeps the controller capability-neutral so handlers can split read and write access', () => {
       expect(
         Reflect.getMetadata(
           REQUIRED_CAPABILITY_KEY,
           AdminTeamLeaderController,
         ),
-      ).toBe(
-        ApiCapability.PRINCIPAL_MANAGE,
-      );
+      ).toBeUndefined();
+    });
+
+    it('requires PRINCIPAL_READ for every read-only inventory handler', () => {
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.findAll,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_READ);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.resourceSummary,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_READ);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.resources,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_READ);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.findOne,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_READ);
+    });
+
+    it('requires PRINCIPAL_MANAGE for every mutating handler', () => {
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.create,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.createAgent,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.setSessionOwner,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.reassignSession,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.bulkReassignSessions,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.retire,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.forceDelete,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
+
+      expect(
+        Reflect.getMetadata(
+          REQUIRED_CAPABILITY_KEY,
+          AdminTeamLeaderController.prototype.delete,
+        ),
+      ).toBe(ApiCapability.PRINCIPAL_MANAGE);
     });
 
     it('requires an unscoped API key at the controller level', () => {

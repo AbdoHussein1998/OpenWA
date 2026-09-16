@@ -1,5 +1,14 @@
-import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
+
 import { bigintToNumberTransformer } from '../../message/entities/message.entity';
+import { Session } from '../../session/entities/session.entity';
 
 @Entity('status_updates')
 @Index(['sessionId', 'contactJid'])
@@ -8,8 +17,17 @@ export class StatusUpdate {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column()
+  // varchar matches sessions.id in the data database on both supported dialects.
+  @Column({ type: 'varchar' })
   sessionId!: string;
+
+  /** Status/Story rows are Session-owned TTL data and cascade with the Session. */
+  @ManyToOne(() => Session, {
+    nullable: false,
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'sessionId' })
+  session!: Session;
 
   /** Neutral @c.us / @lid JID of the contact who posted. */
   @Column()
