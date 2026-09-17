@@ -2,6 +2,9 @@
 
 
 
+
+
+
 import { Client, MessageMedia, WAState } from 'whatsapp-web.js';
 import { EventEmitter } from 'events';
 import {
@@ -2006,8 +2009,12 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     jest.useFakeTimers();
 
     const adapter = newAdapter();
-    // Runtime never reports the WWebJS global, so the probe never promotes and ticks to the deadline.
+    // Keep the runtime explicitly pre-CONNECTED for the whole probe window. The shared fake-client
+    // default is CONNECTED, which intentionally takes the non-destructive FAILED path at the deadline
+    // (pairing already succeeded). This test exercises the separate never-CONNECTED recovery branch so
+    // crossing the original deadline is observable as profile-clear + disconnect.
     const { client, onReady, onStateChanged } = attachFakeClient(adapter, {
+      getState: jest.fn().mockResolvedValue(WAState.OPENING),
       pupPage: { evaluate: jest.fn().mockResolvedValue(false) },
       destroy: jest.fn().mockResolvedValue(undefined),
     });
@@ -5606,7 +5613,6 @@ describe('WhatsAppWebJsAdapter page transport error detection (wedged page fast-
     'Protocol error: Target closed',
     'Protocol error (Runtime.callFunctionOn): Target closed.',
     'TargetClosedError: page closed',
-    'Attempted to use detached Frame',
     'Session closed',
     'Connection closed',
   ])('reports a failed send carrying "%s" as a disconnect', async message => {
@@ -5618,6 +5624,37 @@ describe('WhatsAppWebJsAdapter page transport error detection (wedged page fast-
     expect(onDisconnected).toHaveBeenCalledTimes(1);
     expect(onDisconnected).toHaveBeenCalledWith('Page transport error during sendMessage');
     expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+  });
+
+  it('confirms a detached-frame send failure before disconnecting', async () => {
+    jest.useFakeTimers();
+
+    try {
+      const message = 'Attempted to use detached Frame';
+      const sendMessage = jest.fn().mockRejectedValue(new Error(message));
+      const pupPage = {
+        evaluate: jest.fn().mockRejectedValue(new Error(message)),
+        isClosed: jest.fn().mockReturnValue(false),
+      };
+      const { adapter, onDisconnected } = readyAdapter({ sendMessage, pupPage });
+
+      await expect(adapter.sendTextMessage('628111@c.us', 'hi')).rejects.toThrow(message);
+
+      // A detached frame can be produced by an ordinary navigation/re-inject, so it is ambiguous:
+      // the operation still rejects immediately, but Session death waits for the bounded health check.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onDisconnected).not.toHaveBeenCalled();
+      expect(adapter.getStatus()).toBe(EngineStatus.READY);
+
+      await jest.advanceTimersByTimeAsync(PAGE_TRANSPORT_CONFIRMATION_MS + 1);
+
+      expect(onDisconnected).toHaveBeenCalledTimes(1);
+      expect(onDisconnected).toHaveBeenCalledWith('Confirmed page transport failure during sendMessage');
+      expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   // Ordinary operation failures must NOT trip the death path — the error only propagates to the caller.
@@ -7522,6 +7559,9 @@ describe('WhatsAppWebJsAdapter raw-id extraction hardening', () => {
     expect(info.participantCount).toBe(3);
   });
 });
+
+
+
 
 
 

@@ -1,5 +1,9 @@
 
 
+
+
+
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -101,6 +105,11 @@ describe('SessionService logout() name-scoped teardown fence', () => {
     };
 
     const manager = {
+      create: jest.fn((_target: unknown, entity: unknown) => entity),
+      find: jest.fn().mockResolvedValue([]),
+      save: jest.fn().mockImplementation((targetOrEntity: unknown, entity?: unknown) =>
+        Promise.resolve(entity ?? targetOrEntity),
+      ),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       remove: jest.fn(),
     };
@@ -399,6 +408,11 @@ describe('SessionService logout() name-scoped teardown fence', () => {
 
   it('old-name teardown still pending past 10s: delete rejects 409, transaction parent removal and purgeSessionData not called (unique name still reserved)', async () => {
     const manager = {
+      create: jest.fn((_target: unknown, entity: unknown) => entity),
+      find: jest.fn().mockResolvedValue([]),
+      save: jest.fn().mockImplementation((targetOrEntity: unknown, entity?: unknown) =>
+        Promise.resolve(entity ?? targetOrEntity),
+      ),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       remove: jest.fn(),
     };
@@ -811,4 +825,7 @@ describe('SessionService logout() name-scoped teardown fence', () => {
     expect(stoppingOf().has(SESSION_UUID)).toBe(true);
   });
 });
+
+
+
 
