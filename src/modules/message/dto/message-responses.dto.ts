@@ -74,6 +74,22 @@ export class MessageListItemDto {
   @ApiProperty({ example: '628987654321@c.us' })
   to!: string;
 
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Resolved phone digits of the actual sender, when WhatsApp exposes or resolves them.',
+    example: '628123456789',
+  })
+  sentByPhone?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Resolved phone digits of the actual recipient, when WhatsApp exposes or resolves them.',
+    example: '628987654321',
+  })
+  sentToPhone?: string | null;
+
   @ApiPropertyOptional({ type: String, nullable: true, description: 'Message text body.', example: 'hi' })
   body?: string | null;
 

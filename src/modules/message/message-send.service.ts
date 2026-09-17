@@ -18,6 +18,7 @@ import { SsrfBlockedError, SSRF_BLOCKED_CLIENT_MESSAGE } from '../../common/secu
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { isUniqueViolation } from '../../common/utils/db-errors';
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
+import { phoneFromWhatsAppIdentity } from './message-phone.util';
 
 /** Default cap on a rendered template's final text; overridable via TEMPLATE_RENDER_MAX_CHARS. */
 export const DEFAULT_TEMPLATE_RENDER_MAX_CHARS = 64 * 1024;
@@ -565,6 +566,8 @@ export class MessageSendService {
       chatId: data.chatId,
       from: session?.phone || 'me',
       to: data.chatId,
+      sentByPhone: phoneFromWhatsAppIdentity(session?.phone),
+      sentToPhone: phoneFromWhatsAppIdentity(data.chatId),
       body: data.body,
       type: data.type,
       direction: MessageDirection.OUTGOING,
@@ -580,6 +583,8 @@ export class MessageSendService {
       const patch: QueryDeepPartialEntity<Message> = {
         status: message.status,
         timestamp: message.timestamp,
+        sentByPhone: message.sentByPhone,
+        sentToPhone: message.sentToPhone,
       };
       // Only when this write actually carries metadata worth merging: a text item must not blank
       // the echo's, and a URL pointer must not replace bytes the engine already downloaded.
@@ -673,7 +678,12 @@ export class MessageSendService {
             messageId: message.id,
           },
         );
-        const patch: QueryDeepPartialEntity<Message> = { status: MessageStatus.SENT, timestamp: result.timestamp };
+        const patch: QueryDeepPartialEntity<Message> = {
+          status: MessageStatus.SENT,
+          timestamp: result.timestamp,
+          sentByPhone: message.sentByPhone,
+          sentToPhone: message.sentToPhone,
+        };
         if (message.metadata && !isUrlPointerMetadata(message.metadata)) {
           patch.metadata = message.metadata as QueryDeepPartialEntity<Record<string, unknown>>;
         }

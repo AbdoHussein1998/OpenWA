@@ -40,7 +40,7 @@ describe('wa-id', () => {
   describe('isChannelJid', () => {
     it('is true only for a @newsletter (channel) JID', () => {
       expect(isChannelJid('120363401234567890@newsletter')).toBe(true);
-      expect(isChannelJid('ABC@NEWSLETTER')).toBe(true); // case-insensitive
+      expect(isChannelJid('ABC@NEWSLETTER')).toBe(true);
     });
 
     it('is false for user, group, lid, broadcast and status JIDs (they resolve to a real Chat)', () => {
@@ -70,8 +70,8 @@ describe('wa-id', () => {
     it('resolves a lid to <phone>@c.us when the resolver knows it, else keeps the raw lid', () => {
       const resolve = (jid: string) => (jid === '111@lid' ? '628999' : null);
       expect(toNeutralJid('111@lid', resolve)).toBe('628999@c.us');
-      expect(toNeutralJid('222@lid', resolve)).toBe('222@lid'); // unresolved: kept as a privacy id
-      expect(toNeutralJid('111@lid')).toBe('111@lid'); // no resolver supplied
+      expect(toNeutralJid('222@lid', resolve)).toBe('222@lid');
+      expect(toNeutralJid('111@lid')).toBe('111@lid');
     });
 
     it('keeps newsletter and broadcast channels in their own dialect', () => {
@@ -116,9 +116,6 @@ describe('wa-id', () => {
       ['status@broadcast', false],
       ['abc@newsletter', false],
       ['abc@weird', false],
-      // A recognised domain is not enough: the user-part has to look like a WhatsApp id, or the
-      // string still reaches the page-side createWid and throws there — the very failure the guard
-      // exists to prevent. Reproduced against a live session before this row was added.
       ['NOT A USER@c.us', false],
       ['abc@c.us', false],
       ['abc@s.whatsapp.net', false],
@@ -147,24 +144,11 @@ describe('wa-id', () => {
     it.each([['abc@weird'], ['abc'], ['NOT A USER'], ['']])(
       'leaves %s alone rather than minting a nonsense id from it',
       value => {
-        // The old rule was `p.includes('@') ? p : p + '@c.us'`, which turned every un-domained
-        // string into one — `abc` became `abc@c.us`, a well-formed id naming nobody. Keying on the
-        // bare-number shape instead means only a number is ever qualified. (`abc@weird` alone would
-        // NOT show this: the old rule passed it through too, so it discriminates nothing.)
         expect(toParticipantWid(value)).toBe(value);
       },
     );
   });
 
-  /**
-   * WhatsApp issues Meta-hosted dialects of a phone id and a lid, and Baileys decodes them off the
-   * wire (`WAJIDDomains.HOSTED` = 128, `HOSTED_LID` = 129). They used to parse as `unknown` here, so
-   * an id we had emitted on GET /chats was refused with a 400 when it was handed back to us.
-   *
-   * They fold into `user` and `lid` rather than becoming kinds of their own, because the user-part
-   * names the SAME account: Baileys rewrites `<n>@hosted` to `<n>@s.whatsapp.net` on every inbound
-   * message (`cleanMessage`). A separate kind would split one person's history in two.
-   */
   describe('Meta-hosted dialects', () => {
     it('folds each hosted dialect into the entity it names', () => {
       expect(parseWaId('628111@hosted')).toMatchObject({ kind: 'user', userPart: '628111' });
@@ -174,7 +158,6 @@ describe('wa-id', () => {
     });
 
     it('does not confuse @hosted.lid with @hosted: the domain is the whole suffix', () => {
-      // Same user-part, different entity: one is a phone number, the other a privacy id.
       expect(parseWaId('4707@hosted.lid').kind).toBe('lid');
       expect(parseWaId('4707@hosted').kind).toBe('user');
     });
@@ -183,7 +166,6 @@ describe('wa-id', () => {
       expect(isIndividualWid('628123456789@hosted')).toBe(true);
       expect(isIndividualWid('12345678901234567890@hosted.lid')).toBe(true);
       expect(isAddressableParticipant('628123456789@hosted')).toBe(true);
-      // The user-part still has to look like an id: the domain alone was never enough.
       expect(isIndividualWid('NOT A USER@hosted')).toBe(false);
       expect(isIndividualWid('1234@hosted.lid')).toBe(false);
     });
@@ -191,7 +173,6 @@ describe('wa-id', () => {
     it('normalizes to the neutral dialect of the same account, so history stays in one place', () => {
       expect(toNeutralJid('628111@hosted')).toBe('628111@c.us');
       expect(toNeutralJid('628111:3@hosted')).toBe('628111@c.us');
-      // An unresolved hosted lid keeps the lid dialect, exactly like a plain @lid.
       expect(toNeutralJid('4707@hosted.lid')).toBe('4707@lid');
       expect(toNeutralJid('4707@hosted.lid', () => '628111')).toBe('628111@c.us');
     });

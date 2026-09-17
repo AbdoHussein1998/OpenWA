@@ -301,7 +301,10 @@ describe('MessageProjector (inbound projection)', () => {
   const SESSION_ID = 'session-1';
 
   /** A distinct object per test: EngineRegistry compares engine IDENTITY, not shape. */
-  const makeEngine = (): IWhatsAppEngine => ({}) as IWhatsAppEngine;
+  const makeEngine = (): IWhatsAppEngine =>
+    ({
+      getPhoneNumber: jest.fn().mockReturnValue('15559990000'),
+    }) as unknown as IWhatsAppEngine;
 
   const makeIncoming = (overrides: Partial<IncomingMessage> = {}): IncomingMessage => ({
     id: 'wamid.1',
@@ -401,7 +404,11 @@ describe('MessageProjector (inbound projection)', () => {
 
       expect(messageRepository.insert).toHaveBeenCalledTimes(1);
       expect(messageRepository.create).toHaveBeenCalledWith(
-        expect.objectContaining({ direction: MessageDirection.OUTGOING }),
+        expect.objectContaining({
+          direction: MessageDirection.OUTGOING,
+          sentByPhone: '15559990000',
+          sentToPhone: '15550001111',
+        }),
       );
       expect(eventsGateway.emitMessage).toHaveBeenCalledTimes(1);
     });
@@ -425,7 +432,107 @@ describe('MessageProjector (inbound projection)', () => {
       // Pins the ternary at message-projector.service.ts:255: a genuinely inbound message (fromMe:
       // false) must be tagged INCOMING, not just "not OUTGOING".
       expect(messageRepository.create).toHaveBeenCalledWith(
-        expect.objectContaining({ direction: MessageDirection.INCOMING }),
+        expect.objectContaining({
+          direction: MessageDirection.INCOMING,
+          sentByPhone: '15550001111',
+          sentToPhone: '15559990000',
+        }),
+      );
+    });
+
+    it('resolves an inbound LID to a real sender phone before storing it', async () => {
+      const engine = makeEngine();
+      engines.set(SESSION_ID, engine);
+      lidResolver.resolveSenderPhone.mockResolvedValueOnce('15558887777');
+
+      projector.handleInboundMessage(
+        SESSION_ID,
+        engine,
+        makeIncoming({
+          chatId: '123456789012345@lid',
+          from: '123456789012345@lid',
+          isLidSender: true,
+        }),
+      );
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(lidResolver.resolveSenderPhone).toHaveBeenCalledWith(SESSION_ID, '123456789012345@lid');
+      expect(messageRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sentByPhone: '15558887777',
+          sentToPhone: '15559990000',
+        }),
+      );
+    });
+
+    it('normalizes a Meta-hosted LID before resolving and never stores its privacy-id digits as a phone', async () => {
+      const engine = makeEngine();
+      engines.set(SESSION_ID, engine);
+      lidResolver.resolveSenderPhone.mockResolvedValueOnce('15556665555');
+
+      projector.handleInboundMessage(
+        SESSION_ID,
+        engine,
+        makeIncoming({
+          chatId: '123456789012345@hosted.lid',
+          from: '123456789012345@hosted.lid',
+          isLidSender: true,
+        }),
+      );
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(lidResolver.resolveSenderPhone).toHaveBeenCalledWith(SESSION_ID, '123456789012345@lid');
+      expect(messageRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sentByPhone: '15556665555',
+          sentToPhone: '15559990000',
+        }),
+      );
+    });
+
+    it('stores an unresolved LID sender as unknown instead of copying the LID digits into sentByPhone', async () => {
+      const engine = makeEngine();
+      engines.set(SESSION_ID, engine);
+      lidResolver.resolveSenderPhone.mockResolvedValueOnce(null);
+
+      projector.handleInboundMessage(
+        SESSION_ID,
+        engine,
+        makeIncoming({
+          chatId: '123456789012345@lid',
+          from: '123456789012345@lid',
+          isLidSender: true,
+        }),
+      );
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(messageRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ sentByPhone: undefined, sentToPhone: '15559990000' }),
+      );
+    });
+
+    it('stores the participant phone, not the group id, for an inbound group message', async () => {
+      const engine = makeEngine();
+      engines.set(SESSION_ID, engine);
+
+      projector.handleInboundMessage(
+        SESSION_ID,
+        engine,
+        makeIncoming({
+          chatId: '120363012345678901@g.us',
+          from: '120363012345678901@g.us',
+          author: '15557776666@c.us',
+          isGroup: true,
+          kind: 'group',
+        }),
+      );
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(messageRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sentByPhone: '15557776666',
+          sentToPhone: '15559990000',
+        }),
       );
     });
 

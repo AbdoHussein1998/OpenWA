@@ -82,6 +82,14 @@ export class Message {
   @Column()
   to!: string;
 
+  /** Resolved phone number of the actual sender (digits only), when WhatsApp exposes one. */
+  @Column({ nullable: true })
+  sentByPhone?: string | null;
+
+  /** Resolved phone number of the actual recipient (digits only), when WhatsApp exposes one. */
+  @Column({ nullable: true })
+  sentToPhone?: string | null;
+
   @Column({ type: 'text', nullable: true })
   body!: string;
 

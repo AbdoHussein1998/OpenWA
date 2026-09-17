@@ -5,6 +5,8 @@ import { Repository, In } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm';
 import { Session } from './entities/session.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
+import { phoneFromWhatsAppIdentity } from '../message/message-phone.util';
+import { parseWaId, toNeutralJid } from '../../engine/identity/wa-id';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { KeyedMutationQueue } from '../../common/utils/keyed-mutation-queue';
 import { SessionLidResolver } from './session-lid-resolver.service';
@@ -119,6 +121,45 @@ export class MessageProjector {
     );
   }
 
+  /** Resolve the connected account's own phone without ever treating a non-phone JID as a number. */
+  private ownPhone(engine: IWhatsAppEngine, fallbackIdentity?: string): string | undefined {
+    let enginePhone: string | null = null;
+    try {
+      enginePhone = engine.getPhoneNumber();
+    } catch {
+      // Defensive for a partially initialized/tearing-down engine; the persisted ids remain intact.
+    }
+    return phoneFromWhatsAppIdentity(enginePhone) ?? phoneFromWhatsAppIdentity(fallbackIdentity);
+  }
+
+  /**
+   * Resolve the actual inbound sender. For a group this is `author`, not the group-valued `from`.
+   * An unresolved privacy id stays undefined unless the existing LID resolver can map it to a real
+   * phone; a numeric-looking LID is never copied into a phone column.
+   */
+  private async inboundSenderPhone(sessionId: string, incoming: IncomingMessage): Promise<string | undefined> {
+    const senderIdentity = incoming.author ?? incoming.from;
+    const direct =
+      phoneFromWhatsAppIdentity(incoming.senderPhone) ?? phoneFromWhatsAppIdentity(senderIdentity);
+    if (direct) return direct;
+
+    if (parseWaId(senderIdentity).kind !== 'lid') return undefined;
+
+    try {
+      // The resolver works on the neutral LID dialect. This also folds Meta-hosted `@hosted.lid`
+      // into `<lid>@lid` without ever treating the privacy-id digits as a phone number.
+      const resolved = await this.lidResolver.resolveSenderPhone(sessionId, toNeutralJid(senderIdentity));
+      return phoneFromWhatsAppIdentity(resolved);
+    } catch (error) {
+      this.logger.warn('Failed to resolve LID while persisting message phone participants', {
+        sessionId,
+        senderIdentity,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
   /** Engine callback body, lifted out of initializeEngine so the wiring table stays readable. */
   handleInboundMessage(id: string, engine: IWhatsAppEngine, message: IncomingMessage): void {
     if (!this.engines.isLive(id, engine)) return;
@@ -228,7 +269,10 @@ export class MessageProjector {
     // attaches senderPhone (digits or null) before persist/dispatch so webhook/ws consumers
     // get it in a single pass. Only for privacy-id senders, so no lookup for normal numbers.
     if (resolveFeatureFlags(this.configService).resolveLidToPhone && incoming.isLidSender && !incoming.fromMe) {
-      incoming.senderPhone = await this.lidResolver.resolveSenderPhone(id, incoming.author ?? incoming.from);
+      incoming.senderPhone = await this.lidResolver.resolveSenderPhone(
+        id,
+        toNeutralJid(incoming.author ?? incoming.from),
+      );
     }
 
     const outcome = await this.persistInboundMessage(id, engine, incoming);
@@ -248,6 +292,12 @@ export class MessageProjector {
     const metadata = buildMessageMetadata(incoming);
 
     const chatName = incoming.contact?.pushName ?? incoming.contact?.name ?? undefined;
+    const sentByPhone = incoming.fromMe
+      ? this.ownPhone(engine, incoming.from)
+      : await this.inboundSenderPhone(id, incoming);
+    const sentToPhone = incoming.fromMe
+      ? phoneFromWhatsAppIdentity(incoming.to) ?? phoneFromWhatsAppIdentity(incoming.chatId)
+      : this.ownPhone(engine, incoming.to);
 
     const dbMessage = this.messageRepository.create({
       sessionId: id,
@@ -259,6 +309,8 @@ export class MessageProjector {
       author: incoming.author,
       from: incoming.from,
       to: incoming.to,
+      sentByPhone,
+      sentToPhone,
       body: incoming.body,
       type: incoming.type,
       direction: incoming.fromMe ? MessageDirection.OUTGOING : MessageDirection.INCOMING,
@@ -387,6 +439,9 @@ export class MessageProjector {
         // message.sent contract is unchanged.
         const outgoing: IncomingMessage = finalMessage;
         const metadata = buildMessageMetadata(outgoing, true);
+        const sentByPhone = this.ownPhone(engine, outgoing.from);
+        const sentToPhone =
+          phoneFromWhatsAppIdentity(outgoing.to) ?? phoneFromWhatsAppIdentity(outgoing.chatId);
 
         // The ephemeral opt-out gates STORAGE only (mirrors onMessage); the live dispatch below
         // is today's contract and stays.
@@ -401,6 +456,8 @@ export class MessageProjector {
             chatId: outgoing.chatId,
             from: outgoing.from,
             to: outgoing.to,
+            sentByPhone,
+            sentToPhone,
             body: outgoing.body,
             type: outgoing.type,
             direction: MessageDirection.OUTGOING,

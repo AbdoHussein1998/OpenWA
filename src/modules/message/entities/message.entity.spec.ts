@@ -78,3 +78,17 @@ describe('Session ownership relation metadata', () => {
     }
   });
 });
+
+describe('Message phone participant columns', () => {
+  it('keeps resolved phone endpoints nullable for groups, channels, unresolved LIDs, and legacy rows', () => {
+    for (const propertyName of ['sentByPhone', 'sentToPhone']) {
+      const column = getMetadataArgsStorage().columns.find(
+        candidate => candidate.target === Message && candidate.propertyName === propertyName,
+      );
+
+      expect(column).toBeDefined();
+      expect(column?.options.nullable).toBe(true);
+    }
+  });
+});
+

@@ -6,7 +6,7 @@
     }
   },
   "common": {
-    "appName": "OpenWA",
+    "appName": "SPGroup",
     "loading": "Loading...",
     "cancel": "Cancel",
     "delete": "Delete",
