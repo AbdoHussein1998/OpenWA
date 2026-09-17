@@ -112,6 +112,32 @@ const roleFallbackLabels:
     agent: 'Agent',
   };
 
+/**
+ * Keep backend/API role identifiers unchanged while presenting human-friendly
+ * labels in the UI. Real translated labels are preserved; machine-style
+ * tokens such as `team_leader` are normalized to their proper display form.
+ */
+function normalizeRoleDisplayLabel(
+  role: ApiKey['role'],
+  label: string,
+): string {
+  const normalized =
+    label
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_-]+/g, '');
+
+  const normalizedRole =
+    role.replace(
+      /_/g,
+      '',
+    );
+
+  return normalized === normalizedRole
+    ? roleFallbackLabels[role]
+    : label;
+}
+
 const roleFallbackDescriptions:
   Record<ApiKey['role'], string> = {
     admin:
@@ -468,14 +494,17 @@ export function ApiKeys() {
       role:
         ApiKey['role'],
     ) =>
-      t(
-        `apiKeys.roles.${role}`,
-        {
-          defaultValue:
-            roleFallbackLabels[
-              role
-            ],
-        },
+      normalizeRoleDisplayLabel(
+        role,
+        t(
+          `apiKeys.roles.${role}`,
+          {
+            defaultValue:
+              roleFallbackLabels[
+                role
+              ],
+          },
+        ),
       );
 
   const roleDescription =
@@ -2153,9 +2182,9 @@ export function ApiKeys() {
                   className="perm-item"
                 >
                   <code>
-                    {
-                      role
-                    }
+                    {roleLabel(
+                      role,
+                    )}
                   </code>
 
                   <span>

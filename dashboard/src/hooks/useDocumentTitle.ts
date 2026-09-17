@@ -7,7 +7,7 @@ import { useEffect } from 'react';
 export function useDocumentTitle(title: string) {
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = `${title} | OpenWA`;
+    document.title = `${title} | Al.Hakim`;
 
     return () => {
       document.title = previousTitle;
