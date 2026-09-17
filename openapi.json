@@ -13599,6 +13599,12 @@
               "type": "object"
             }
           },
+          "sessionTombstones": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
           "webhooks": {
             "type": "array",
             "items": {
@@ -13686,6 +13692,7 @@
         },
         "required": [
           "sessions",
+          "sessionTombstones",
           "webhooks",
           "messages",
           "messageBatches",
@@ -13708,6 +13715,10 @@
           "sessions": {
             "type": "number",
             "example": 2
+          },
+          "sessionTombstones": {
+            "type": "number",
+            "example": 0
           },
           "webhooks": {
             "type": "number",
@@ -13768,6 +13779,7 @@
         },
         "required": [
           "sessions",
+          "sessionTombstones",
           "webhooks",
           "messages",
           "messageBatches",
@@ -13858,9 +13870,12 @@
         "properties": {
           "tables": {
             "type": "object",
-            "description": "Every one of the 14 migration tables is emptied before the restore runs, so a key omitted here is restored EMPTY rather than left untouched. Post the whole GET /api/infra/export-data payload, not a hand-built subset.",
+            "description": "Every migration table is emptied before the restore runs, so a key omitted here is restored EMPTY rather than left untouched. Post the whole GET /api/infra/export-data payload, not a hand-built subset.",
             "properties": {
               "sessions": {
+                "type": "array"
+              },
+              "sessionTombstones": {
                 "type": "array"
               },
               "webhooks": {

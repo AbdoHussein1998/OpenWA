@@ -1,6 +1,9 @@
 
 
 
+
+
+
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { DockerService, MANAGED_DOCKER_PROFILES } from './docker.service';
@@ -363,8 +366,14 @@ describe('DockerService managed specs ↔ docker-compose.yml parity', () => {
       'utf8',
     );
 
+    // Brave is intentionally version-pinned in the Dockerfile. Keep this assertion aligned with the
+    // multiline apt stanza rather than requiring the package name to sit on the same line as
+    // `apt-get install` — the latter broke as soon as the image started pinning the package version.
+    expect(dockerfile).toMatch(
+      /^ENV BRAVE_BROWSER_VERSION=\S+$/m,
+    );
     expect(dockerfile).toContain(
-      'apt-get install -y --no-install-recommends brave-browser',
+      '"brave-browser=${BRAVE_BROWSER_VERSION}"',
     );
     expect(dockerfile).toContain(
       'ln -sf /opt/brave.com/brave/brave /usr/bin/brave',
@@ -477,5 +486,8 @@ describe('PostgreSQL client is not older than the servers the stack ships', () =
     }).toEqual({ client, composeServerCovered: true, managedServerCovered: true });
   });
 });
+
+
+
 
 
