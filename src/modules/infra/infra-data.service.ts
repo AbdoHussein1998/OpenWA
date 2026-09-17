@@ -611,6 +611,9 @@ export class InfraDataService {
         await clearTable('integration_delivery_failures');
         // status_updates has no FK to sessions; clear it explicitly so the replace is complete.
         await clearTable('status_updates');
+        // session_tombstones is independent historical identity, so deleting live sessions does not
+        // clear it. Replace it explicitly so restore semantics remain truly replace-all.
+        await clearTable('session_tombstones');
         // Session ownership is CLUSTER RUNTIME STATE, not backup payload: which process currently holds
         // a session's engine, and until when. The replace below deletes it along with everything else,
         // and the sessions importer does not restore it (deliberately — see below), so without this the

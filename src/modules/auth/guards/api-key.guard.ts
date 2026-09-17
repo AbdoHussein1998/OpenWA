@@ -25,6 +25,7 @@ import {
   PUBLIC_KEY,
   SESSION_SCOPED_KEY,
   UNSCOPED_KEY,
+  HISTORICAL_SESSION_READ_KEY,
 } from '../decorators/auth.decorators';
 
 import {
@@ -120,7 +121,7 @@ export class ApiKeyGuard
        * 403:
        *   authenticated but insufficient role/capability
        *
-       * Tenant 404s are audited closer to assertSessionAccess() below as
+       * Tenant 404s are audited closer to the concrete live/historical session assertion below as
        * TENANT_ACCESS_DENIED.
        */
       if (
@@ -238,6 +239,23 @@ export class ApiKeyGuard
             context.getClass(),
           ],
         );
+
+    /*
+     * Persisted-history routes explicitly opt into tombstone-aware authorization.
+     *
+     * This flag changes only the tenant lookup used below. Capability/role checks remain identical,
+     * and undecorated runtime/configuration routes still require a live Session row.
+     */
+    const historicalSessionRead =
+      this.reflector
+        .getAllAndOverride<boolean>(
+          HISTORICAL_SESSION_READ_KEY,
+          [
+            context.getHandler(),
+            context.getClass(),
+          ],
+        ) ??
+      false;
 
     const sessionId =
       (
@@ -387,20 +405,29 @@ export class ApiKeyGuard
      */
     if (sessionId) {
       try {
-        await this
-          .sessionTenantAccessService
-          .assertSessionAccess(
-            apiKey,
-            sessionId,
-          );
+        if (historicalSessionRead) {
+          await this
+            .sessionTenantAccessService
+            .assertHistoricalSessionAccess(
+              apiKey,
+              sessionId,
+            );
+        } else {
+          await this
+            .sessionTenantAccessService
+            .assertSessionAccess(
+              apiKey,
+              sessionId,
+            );
+        }
       } catch (err) {
         /*
          * Phase K — tenant-denial audit.
          *
          * SessionTenantAccessService intentionally uses 404 semantics for:
          *
-         * - nonexistent session
-         * - foreign Team Leader session
+         * - nonexistent live session / historical identity
+         * - foreign Team Leader session or tombstone
          * - Agent accessing an unassigned session
          * - Agent accessing another session
          * - Agent whose assignment/owner relationship is stale or invalid

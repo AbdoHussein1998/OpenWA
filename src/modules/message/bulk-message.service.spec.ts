@@ -736,6 +736,26 @@ describe('BulkMessageService.processBatch', () => {
     }
   });
 
+  it('stops after the in-flight item when Session deletion retires the engine from the registry', async () => {
+    const batch = makeBatch(3);
+    repo.findOne
+      .mockResolvedValueOnce(batch)
+      .mockResolvedValueOnce({ status: BatchStatus.CANCELLED });
+
+    engine.sendTextMessage.mockImplementationOnce(() => {
+      // SessionEngineControls.delete() evicts the exact engine before its DB transaction cancels the
+      // durable batch row. The runner must observe that identity loss before attempting item 2.
+      engines.delete('s1');
+      return Promise.resolve({ id: 'wa1', timestamp: 111 });
+    });
+
+    await runProcessBatch();
+
+    expect(engine.sendTextMessage).toHaveBeenCalledTimes(1);
+    expect(batch.status).toBe(BatchStatus.CANCELLED);
+    expect(inFlightMarkers().has('b1')).toBe(false);
+  });
+
   it('does not clobber a CANCELLED that landed after the last guarded write (final write is guarded too)', async () => {
     const batch = makeBatch(1);
     repo.findOne

@@ -9,6 +9,7 @@ jest.mock('archiver', () => ({ default: jest.fn() }));
 import { StorageService } from '../../common/storage/storage.service';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { userPart } from '../../engine/identity/wa-id';
+import { Session, SessionStatus } from '../session/entities/session.entity';
 import { StatusUpdate } from './entities/status-update.entity';
 import { StatusStoreService } from './status-store.service';
 
@@ -23,6 +24,31 @@ function makeStorageService(localPath: string): StorageService {
   return new StorageService(fakeConfigService({ 'storage.type': 'local', 'storage.localPath': localPath }));
 }
 
+async function makeStatusDataSource(): Promise<DataSource> {
+  const dataSource = new DataSource({
+    type: 'better-sqlite3',
+    database: ':memory:',
+    entities: [Session, StatusUpdate],
+    synchronize: true,
+  });
+
+  await dataSource.initialize();
+
+  // StatusUpdate owns a real FK to Session in production. Keep the in-memory test schema faithful
+  // to that graph and seed the parent row used by every test instead of disabling FK enforcement.
+  const sessionRepository = dataSource.getRepository(Session);
+  await sessionRepository.save(
+    sessionRepository.create({
+      id: 'sess',
+      name: 'status-store-test-session',
+      status: SessionStatus.CREATED,
+      config: {},
+    }),
+  );
+
+  return dataSource;
+}
+
 describe('StatusStoreService (ingest / list / getMedia)', () => {
   let baseDir: string;
   let ds: DataSource;
@@ -32,8 +58,7 @@ describe('StatusStoreService (ingest / list / getMedia)', () => {
 
   beforeAll(async () => {
     baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'owa-status-store-'));
-    ds = new DataSource({ type: 'better-sqlite3', database: ':memory:', entities: [StatusUpdate], synchronize: true });
-    await ds.initialize();
+    ds = await makeStatusDataSource();
     repository = ds.getRepository(StatusUpdate);
     storageService = makeStorageService(path.join(baseDir, 'media'));
     service = new StatusStoreService(repository, storageService, fakeConfigService());
@@ -398,8 +423,7 @@ describe('StatusStoreService contact identity (read-time lid resolution)', () =>
 
   beforeEach(async () => {
     baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'owa-status-lid-'));
-    ds = new DataSource({ type: 'better-sqlite3', database: ':memory:', entities: [StatusUpdate], synchronize: true });
-    await ds.initialize();
+    ds = await makeStatusDataSource();
     repository = ds.getRepository(StatusUpdate);
     storageService = makeStorageService(path.join(baseDir, 'media'));
   });
@@ -484,8 +508,7 @@ describe('StatusStoreService.purgeExpired', () => {
 
   beforeEach(async () => {
     baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'owa-status-purge-'));
-    ds = new DataSource({ type: 'better-sqlite3', database: ':memory:', entities: [StatusUpdate], synchronize: true });
-    await ds.initialize();
+    ds = await makeStatusDataSource();
     repository = ds.getRepository(StatusUpdate);
     storageService = makeStorageService(path.join(baseDir, 'media'));
     service = new StatusStoreService(repository, storageService, fakeConfigService());
@@ -600,8 +623,7 @@ describe('StatusStoreService.sweepOrphanedMedia', () => {
 
   beforeEach(async () => {
     baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'owa-status-sweep-'));
-    ds = new DataSource({ type: 'better-sqlite3', database: ':memory:', entities: [StatusUpdate], synchronize: true });
-    await ds.initialize();
+    ds = await makeStatusDataSource();
     repository = ds.getRepository(StatusUpdate);
     storageService = makeStorageService(path.join(baseDir, 'media'));
     service = new StatusStoreService(repository, storageService, fakeConfigService());

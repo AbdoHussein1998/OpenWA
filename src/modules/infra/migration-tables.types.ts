@@ -14,6 +14,17 @@ export interface SessionRow {
   updatedAt: string;
 }
 
+/**
+ * Durable identity retained after physical Session deletion so historical messages and message
+ * batches keep tenant ownership + a human-readable Session name without keeping the runtime row.
+ */
+export interface SessionTombstoneRow {
+  sessionId: string;
+  name: string;
+  ownerTeamLeaderId: string | null;
+  deletedAt: string | Date;
+}
+
 export interface WebhookRow {
   id: string;
   sessionId: string;
@@ -244,6 +255,7 @@ export interface AutomationRuleRow {
 
 export interface MigrationTables {
   sessions: SessionRow[];
+  sessionTombstones: SessionTombstoneRow[];
   webhooks: WebhookRow[];
   messages: MessageRow[];
   messageBatches: MessageBatchRow[];

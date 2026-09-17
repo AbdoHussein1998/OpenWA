@@ -2,8 +2,6 @@ import {
   Column,
   CreateDateColumn,
   Entity,
-  JoinColumn,
-  ManyToOne,
   PrimaryGeneratedColumn,
   Unique,
   UpdateDateColumn,
@@ -11,7 +9,6 @@ import {
 
 import { DateTransformer } from '../../../common/transformers/date.transformer';
 import { jsonColumnType, dateColumnType } from '../../../common/utils/column-types';
-import { Session } from '../../session/entities/session.entity';
 
 export enum BatchStatus {
   PENDING = 'pending',
@@ -58,17 +55,15 @@ export class MessageBatch {
   @Column({ name: 'batch_id' })
   batchId!: string;
 
-  // Keep the historical snake_case physical column name used by this table.
+  /**
+   * Historical Session provenance, deliberately NOT a TypeORM relation/FK. Batch execution history
+   * must survive physical Session deletion, while the original Session UUID remains useful for
+   * lookup, uniqueness, archive authorization, backup/restore, and operator audit history.
+   *
+   * Keep the historical snake_case physical column name used by this table.
+   */
   @Column({ name: 'session_id', type: 'varchar' })
   sessionId!: string;
-
-  /** Message batches are Session-owned and are removed with their parent Session. */
-  @ManyToOne(() => Session, {
-    nullable: false,
-    onDelete: 'CASCADE',
-  })
-  @JoinColumn({ name: 'session_id' })
-  session!: Session;
 
   @Column({ type: 'varchar', default: BatchStatus.PENDING })
   status!: BatchStatus;

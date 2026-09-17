@@ -2,6 +2,7 @@ import { isSafeSessionName } from '../../common/utils/path-safety';
 import type {
   MigrationTables,
   SessionRow,
+  SessionTombstoneRow,
   WebhookRow,
   MessageRow,
   MessageBatchRow,
@@ -53,8 +54,8 @@ function defineTableImporter<K extends keyof MigrationTables>(importer: TableImp
   return importer;
 }
 
-// Restore order is FK order: sessions first (webhooks/messages/templates/etc. reference it), the
-// standalone cache/DLQ tables after. The per-block comments from the former inline import blocks
+// Restore order keeps live sessions first, then durable deleted-session identity, followed by the
+// Session-owned and standalone cache/DLQ tables. The per-block comments from the former inline import blocks
 // live on their descriptor entries.
 export const TABLE_IMPORTERS: AnyTableImporter[] = [
   // Import sessions first
@@ -84,6 +85,22 @@ export const TABLE_IMPORTERS: AnyTableImporter[] = [
       session.lastActiveAt,
       session.createdAt,
       session.updatedAt,
+    ],
+  }),
+
+  // Import durable deleted-Session identity. No FK to sessions: these rows deliberately survive
+  // physical Session deletion so preserved messages/batches keep tenant ownership + display identity.
+  defineTableImporter({
+    key: 'sessionTombstones',
+    label: 'session tombstone',
+    sql: `INSERT INTO session_tombstones ("sessionId", name, "ownerTeamLeaderId", "deletedAt")
+               VALUES ($1, $2, $3, $4)`,
+    id: (row: SessionTombstoneRow) => row.sessionId,
+    map: (row: SessionTombstoneRow) => [
+      row.sessionId,
+      row.name,
+      row.ownerTeamLeaderId ?? null,
+      row.deletedAt,
     ],
   }),
 
@@ -413,6 +430,7 @@ export const TABLE_IMPORTERS: AnyTableImporter[] = [
 // that guards against wiping a database with an empty payload. Assert the set at module load.
 const EXPECTED_TABLE_KEYS: ReadonlyArray<keyof MigrationTables> = [
   'sessions',
+  'sessionTombstones',
   'webhooks',
   'messages',
   'messageBatches',

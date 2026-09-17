@@ -429,9 +429,22 @@ export class BulkMessageService implements OnApplicationBootstrap {
     state: BatchExecutionState,
   ): Promise<boolean> {
     const { results } = state;
-    // Check for cancellation
+    // Check for same-process cancellation first.
     if (!this.processingBatches.get(batch.id)) {
       this.logger.log(`Batch ${batch.batchId} cancelled at index ${i}`);
+      return false;
+    }
+
+    /*
+     * Session deletion evicts the live engine before it commits the durable batch cancellation.
+     * Never keep sending through a stale engine reference captured before that eviction. Identity,
+     * not just existence, matters: a replacement engine for the same Session id must not let this
+     * old batch runner continue against a connection it did not start with.
+     */
+    if (this.engines.get(batch.sessionId) !== engine) {
+      state.cancelledByDb = true;
+      this.processingBatches.set(batch.id, false);
+      this.logger.log(`Batch ${batch.batchId} stopped at index ${i}: session engine was retired`);
       return false;
     }
 

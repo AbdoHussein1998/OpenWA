@@ -7,6 +7,7 @@ export const REQUIRED_ROLE_KEY = 'requiredRole';
 export const PUBLIC_KEY = 'isPublic';
 export const SESSION_SCOPED_KEY = 'sessionScoped';
 export const UNSCOPED_KEY = 'requireUnscopedKey';
+export const HISTORICAL_SESSION_READ_KEY = 'historicalSessionRead';
 
 /**
  * Mark a route as requiring a specific role
@@ -22,6 +23,16 @@ export const RequireRole = (role: ApiKeyRole) => SetMetadata(REQUIRED_ROLE_KEY, 
  * @example @SessionScoped() @Controller('sessions')
  */
 export const SessionScoped = () => SetMetadata(SESSION_SCOPED_KEY, true);
+
+/**
+ * Mark a persisted-history GET route as safe to authorize against either the live Session row or,
+ * after physical Session deletion, its durable session_tombstones ownership record.
+ *
+ * This decorator MUST NOT be placed on engine-backed actions, mutations, configuration routes, or
+ * any endpoint that requires a live WhatsApp Session. Those routes continue to use the ordinary
+ * assertSessionAccess() path even if historical rows for the same sessionId still exist.
+ */
+export const HistoricalSessionRead = () => SetMetadata(HISTORICAL_SESSION_READ_KEY, true);
 
 /**
  * Mark a route as public (no API key required)

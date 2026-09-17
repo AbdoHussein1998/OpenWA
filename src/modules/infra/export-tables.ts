@@ -164,15 +164,16 @@ function defineExportTable<K extends keyof MigrationTables>(table: ExportTable<K
 
 /**
  * Every data-DB table a backup must carry, in the SAME FK-safe order TABLE_IMPORTERS restores them:
- * sessions first (everything else references it or cascades from it), then the standalone
+ * sessions first, then durable Session tombstones and the remaining standalone/owned tables. The
  * cache/DLQ tables. The export-tables parity spec pins this order to TABLE_IMPORTERS, the table set
  * to the data connection's entity metadata, and the keys to the published counts DTO — so a new
  * entity table cannot silently miss a backup: it must be registered here (with its import descriptor
  * and DTO keys) or excluded below with a reason.
  */
 export const EXPORT_TABLES: AnyExportTable[] = [
-  // sessions first: webhooks/messages/templates/etc. all reference it (some via FK, all by sessionId).
+  // sessions first: live runtime/configuration identity. Tombstones follow as standalone historical identity.
   defineExportTable({ key: 'sessions', table: 'sessions' }),
+  defineExportTable({ key: 'sessionTombstones', table: 'session_tombstones', optional: true }),
   defineExportTable({ key: 'webhooks', table: 'webhooks', afterRead: redactWebhookCredentials }),
 
   // Both carry a full inline base64 payload, so they share ONE budget: messages are served first

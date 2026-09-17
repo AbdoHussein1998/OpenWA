@@ -28,6 +28,7 @@ import { InfraDataController } from './infra-data.controller';
 import { InfraDataService, restoreSessionOwnership } from './infra-data.service';
 import { EXPORT_TABLES } from './export-tables';
 import { Session, SessionStatus } from '../session/entities/session.entity';
+import { SessionTombstone } from '../session/entities/session-tombstone.entity';
 import { Webhook } from '../webhook/entities/webhook.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
 import { MessageBatch, BatchStatus } from '../message/entities/message-batch.entity';
@@ -65,6 +66,7 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
       database: ':memory:',
       entities: [
         Session,
+        SessionTombstone,
         Webhook,
         Message,
         MessageBatch,
@@ -895,6 +897,26 @@ describe('InfraDataController.importData round-trips export-data (no silent mess
   // a distinct value so a swap of any two adjacent params is guaranteed to flip an assertion.
   it('round-trips conversation mappings (handover state survives a restore)', async () => {
     await seedSession('s1');
+
+    // conversation_mappings belongs to an installed integration instance. Keep the fixture faithful
+    // to the production FK instead of relying on a child row whose parent does not exist.
+    await ds.getRepository(PluginInstance).save(
+      ds.getRepository(PluginInstance).create({
+        id: 'chatwoot:acct1',
+        pluginId: 'chatwoot',
+        instanceId: 'acct1',
+        // This test only needs the plugin-instance identity parent for the mapping FK.
+        // `sessionScope` is configuration scope, not relational Session ownership; leave it
+        // unscoped here so a synchronize-built test schema cannot reintroduce the obsolete
+        // sessionScope -> sessions FK that the corrective migration removes in real databases.
+        sessionScope: null,
+        secret: 'mapping-test-secret',
+        verifyToken: null,
+        config: {},
+        enabled: true,
+      }),
+    );
+
     const cmRepo = ds.getRepository(ConversationMapping);
     await cmRepo.save(
       cmRepo.create({
@@ -1205,6 +1227,7 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
       // registry against the DataSource's entity metadata, so a subset would read as registry drift.
       entities: [
         Session,
+        SessionTombstone,
         Webhook,
         Message,
         MessageBatch,
@@ -1246,6 +1269,39 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
       }),
     );
 
+  it('restores session_tombstones so deleted-session ownership provenance survives a backup round-trip', async () => {
+    const tombstoneRepo = ds.getRepository(SessionTombstone);
+    const deletedAt = new Date('2026-06-01T12:34:56.000Z');
+
+    await tombstoneRepo.save(
+      tombstoneRepo.create({
+        sessionId: 'deleted-s1',
+        name: 'deleted-session',
+        ownerTeamLeaderId: 'team-leader-1',
+        deletedAt,
+      }),
+    );
+
+    const dump = await controller.exportData();
+    expect(dump.counts.sessionTombstones).toBe(1);
+    expect(dump.tables.sessionTombstones).toHaveLength(1);
+
+    // Simulate restoring into a clean data DB. Tombstones are deliberately standalone historical
+    // identity rows, so clearing them does not require or affect a live Session row.
+    await tombstoneRepo.clear();
+
+    const res = await controller.importData({ tables: dump.tables });
+
+    expect(res.warnings).toEqual([]);
+    expect(res.imported).toBe(true);
+    expect(res.counts.sessionTombstones).toBe(1);
+
+    const restored = await tombstoneRepo.findOneByOrFail({ sessionId: 'deleted-s1' });
+    expect(restored.name).toBe('deleted-session');
+    expect(restored.ownerTeamLeaderId).toBe('team-leader-1');
+    expect(restored.deletedAt).toEqual(deletedAt);
+  });
+
   // lid_mappings is the persisted lid->phone cache; it is NOT a FK to sessions, so the sessions DELETE
   // never touches it — but export omitted it, so a backup→restore into a fresh DB dropped it entirely.
   it('restores lid_mappings instead of dropping them on a backup→restore', async () => {
@@ -1269,12 +1325,24 @@ describe('InfraDataController.import/export preserves every data-DB table', () =
   });
 
   // Restoring ONTO the instance that produced the archive is the rollback flow, and it is the one the
-  // outbox broke. The table carries no FK to sessions, so the sessions DELETE never reached it, and
-  // UNIQUE(webhookId, idempotencyKey) then collided on every row until the all-or-nothing gate rolled
-  // the entire import back. Every other table's test clears first, which is why nothing caught it;
-  // this one deliberately does not.
+  // outbox broke. The outbox is owned by a Webhook, so seed that required parent first; the outbox row
+  // itself is what deliberately remains present across the export/import round-trip below.
   it('restores webhook_outbox_events onto an instance that already holds them', async () => {
     await seedSession('s1');
+
+    await ds.getRepository(Webhook).save(
+      ds.getRepository(Webhook).create({
+        id: 'wh-1',
+        sessionId: 's1',
+        url: 'https://example.com/hook',
+        events: ['message.received'],
+        secret: null,
+        headers: {},
+        active: true,
+        retryCount: 3,
+      }),
+    );
+
     const outboxRepo = ds.getRepository(WebhookOutboxEvent);
     await outboxRepo.save(
       outboxRepo.create({
@@ -1469,6 +1537,7 @@ describe('InfraDataController audit trail — import emits only on a committed r
       // DataSource's entity metadata, so a subset would read as registry drift.
       entities: [
         Session,
+        SessionTombstone,
         Webhook,
         Message,
         MessageBatch,
@@ -1614,6 +1683,7 @@ describe('InfraDataController.importData status_updates + runtime reconciliation
       database: ':memory:',
       entities: [
         Session,
+        SessionTombstone,
         Webhook,
         Message,
         MessageBatch,

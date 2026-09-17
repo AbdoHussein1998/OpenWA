@@ -1,9 +1,9 @@
 import { BadGatewayException, BadRequestException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { Session, SessionStatus } from './entities/session.entity';
-import { Message } from '../message/entities/message.entity';
-import { MessageBatch } from '../message/entities/message-batch.entity';
+import { SessionTombstone } from './entities/session-tombstone.entity';
+import { MessageBatch, BatchStatus } from '../message/entities/message-batch.entity';
 import { Webhook } from '../webhook/entities/webhook.entity';
 import { Template } from '../template/entities/template.entity';
 import { BaileysStoredMessage } from '../../engine';
@@ -514,17 +514,68 @@ export class SessionEngineControls {
       );
 
       // DB removal is NOT best-effort: a genuine failure must surface (500) rather than be swallowed.
-      // Delete every child row explicitly, in one transaction, children before the parent. For
-      // messages/message_batches this is load-bearing: they carry a plain sessionId with no FK, so
-      // nothing else would ever remove them. webhooks/templates/baileys_stored_messages (and
-      // automation_rules) DO declare an ON DELETE CASCADE FK that fires on BOTH engines —
-      // better-sqlite3 defaults `foreign_keys` ON and TypeORM's driver re-asserts it at connection
-      // creation — so their explicit deletes are belt-and-braces rather than required; they stay
-      // because depending on a pragma neither this file nor a test pins is a thinner guarantee than
-      // an explicit delete, and the ordering mirrors the restore path's explicit-clear.
+      // Delete only true Session-owned configuration/runtime rows explicitly, in one transaction,
+      // children before the parent. Message and MessageBatch are intentionally NOT deleted here:
+      // both are durable historical records whose scalar sessionId remains provenance after the live
+      // Session row is gone. Their database FKs are removed by the corresponding corrective migration.
+      //
+      // webhooks/templates/baileys_stored_messages (and automation_rules) DO declare an ON DELETE
+      // CASCADE FK that fires on BOTH engines — better-sqlite3 defaults `foreign_keys` ON and TypeORM's
+      // driver re-asserts it at connection creation — so their explicit deletes are belt-and-braces
+      // rather than required; they stay because depending on a pragma neither this file nor a test pins
+      // is a thinner guarantee than an explicit delete, and the ordering mirrors the restore path's
+      // explicit-clear.
       await this.host.dataSource().transaction(async manager => {
-        await manager.delete(Message, { sessionId: id });
-        await manager.delete(MessageBatch, { sessionId: id });
+        /*
+         * Snapshot the durable identity BEFORE removing the live Session row. `save` intentionally
+         * behaves as an upsert on the sessionId primary key: if an old tombstone exists after a
+         * restore/re-import cycle, the newest deletion replaces its owner/name/deletedAt atomically.
+         */
+        await manager.save(
+          SessionTombstone,
+          manager.create(SessionTombstone, {
+            sessionId: session.id,
+            name: session.name,
+            ownerTeamLeaderId: session.ownerTeamLeaderId ?? null,
+            deletedAt: new Date(),
+          }),
+        );
+
+        /*
+         * A batch is durable history, but an in-flight batch cannot remain actionable after its
+         * engine/session is retired. Preserve the row while transitioning only non-terminal batches
+         * to CANCELLED. Reconcile the progress counters and strip inline base64 payloads now that the
+         * batch can never resume. BulkMessageService also checks EngineRegistry identity between
+         * items, closing the concurrent runner window after the engine was evicted above.
+         */
+        const activeBatches = await manager.find(MessageBatch, {
+          where: {
+            sessionId: id,
+            status: In([BatchStatus.PENDING, BatchStatus.PROCESSING]),
+          },
+        });
+
+        for (const batch of activeBatches) {
+          batch.status = BatchStatus.CANCELLED;
+          batch.completedAt = new Date();
+
+          if (batch.progress) {
+            batch.progress.cancelled = (batch.progress.cancelled ?? 0) + (batch.progress.pending ?? 0);
+            batch.progress.pending = 0;
+          }
+
+          for (const message of batch.messages ?? []) {
+            for (const key of ['image', 'video', 'audio', 'document']) {
+              const media = message.content[key] as { base64?: unknown } | undefined;
+              if (media && typeof media === 'object' && 'base64' in media) {
+                delete media.base64;
+              }
+            }
+          }
+
+          await manager.save(batch);
+        }
+
         await manager.delete(Webhook, { sessionId: id });
         await manager.delete(Template, { sessionId: id });
         await manager.delete(BaileysStoredMessage, { sessionId: id });

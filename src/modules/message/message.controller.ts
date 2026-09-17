@@ -88,6 +88,7 @@ import {
 
 import {
   CurrentApiKey,
+  HistoricalSessionRead,
 } from '../auth/decorators/auth.decorators';
 
 import {
@@ -121,6 +122,7 @@ export class MessageController {
   // ===========================================================================
 
   @Get()
+  @HistoricalSessionRead()
   @RequireCapability(
     ApiCapability.CHAT_READ,
   )
@@ -1097,6 +1099,7 @@ export class MessageController {
   // Three path segments, so it never collides with `:chatId/history` (two) regardless of
   // declaration order — Nest/Express match on segment count first.
   @Get(':chatId/:messageId/media')
+  @HistoricalSessionRead()
   @RequireCapability(
     ApiCapability.CHAT_READ,
   )
@@ -1604,6 +1607,7 @@ export class MessageController {
   }
 
   @Get('batch/:batchId')
+  @HistoricalSessionRead()
   @RequireCapability(
     ApiCapability.MESSAGE_BULK,
   )

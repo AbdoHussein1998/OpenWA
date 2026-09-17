@@ -1,12 +1,12 @@
-
-
-
 import {
   Injectable,
   NotImplementedException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import {
+  DataSource,
+  In,
+} from 'typeorm';
 
 import { SearchProviderRegistry } from './search-provider.registry';
 import {
@@ -26,6 +26,7 @@ import {
 } from '../access-control/session-scope';
 
 import { Session } from '../session/entities/session.entity';
+import { SessionTombstone } from '../session/entities/session-tombstone.entity';
 
 @Injectable()
 export class SearchService {
@@ -50,11 +51,12 @@ export class SearchService {
     }
 
     /*
-     * Phase H — aggregate/global route tenancy.
+     * Aggregate/global route tenancy.
      *
      * Resolve the authenticated principal's effective SessionScope
      * into concrete session IDs BEFORE crossing the provider
-     * boundary.
+     * boundary. Historical message rows whose live Session has been
+     * deleted remain eligible through session_tombstones.
      *
      * undefined:
      *   unrestricted / ALL
@@ -156,11 +158,6 @@ export class SearchService {
   private async resolveSessionScope(
     scope: SessionScope,
   ): Promise<string[] | undefined> {
-    const sessionRepository =
-      this.dataSource.getRepository(
-        Session,
-      );
-
     switch (scope.type) {
       /*
        * ADMIN / unrestricted legacy scope.
@@ -173,6 +170,9 @@ export class SearchService {
 
       /*
        * Legacy allowedSessions ceiling.
+       *
+       * The ceiling is already authoritative and may legitimately
+       * refer to a deleted Session whose historical rows still exist.
        */
       case SessionScopeType.IDS:
         return [
@@ -182,26 +182,14 @@ export class SearchService {
       /*
        * Team Leader ownership scope.
        *
-       * Only sessions owned by this Team Leader are visible.
+       * Include live Sessions owned by the Team Leader plus deleted
+       * Session identities retained in session_tombstones. A live
+       * Session always wins over a stale tombstone with the same id.
        */
-      case SessionScopeType.OWNER: {
-        const sessions =
-          await sessionRepository.find({
-            select: {
-              id: true,
-            },
-
-            where: {
-              ownerTeamLeaderId:
-                scope.ownerTeamLeaderId,
-            },
-          });
-
-        return sessions.map(
-          sessionEntity =>
-            sessionEntity.id,
+      case SessionScopeType.OWNER:
+        return this.resolveOwnedSessionIds(
+          scope.ownerTeamLeaderId,
         );
-      }
 
       /*
        * OWNER_AND_IDS is an INTERSECTION.
@@ -229,36 +217,9 @@ export class SearchService {
           return [];
         }
 
-        const rows =
-          await sessionRepository
-            .createQueryBuilder(
-              'session',
-            )
-            .select(
-              'session.id',
-              'id',
-            )
-            .where(
-              'session.ownerTeamLeaderId = :ownerTeamLeaderId',
-              {
-                ownerTeamLeaderId:
-                  scope
-                    .ownerTeamLeaderId,
-              },
-            )
-            .andWhere(
-              'session.id IN (:...sessionIds)',
-              {
-                sessionIds:
-                  scope.sessionIds,
-              },
-            )
-            .getRawMany<{
-              id: string;
-            }>();
-
-        return rows.map(
-          row => row.id,
+        return this.resolveOwnedSessionIds(
+          scope.ownerTeamLeaderId,
+          scope.sessionIds,
         );
       }
 
@@ -282,6 +243,126 @@ export class SearchService {
         return exhaustiveCheck;
       }
     }
+  }
+
+  /**
+   * Resolve Team Leader ownership across both the live Session table and the durable deleted-session
+   * identity table.
+   *
+   * Live Session ownership is authoritative. A tombstone is admitted only when no live Session with
+   * the same UUID exists, which prevents an old owner from regaining search access after a restore or
+   * re-import recreates that UUID under a different Team Leader.
+   */
+  private async resolveOwnedSessionIds(
+    ownerTeamLeaderId: string,
+    ceiling?: readonly string[],
+  ): Promise<string[]> {
+    const sessionRepository =
+      this.dataSource.getRepository(
+        Session,
+      );
+
+    const tombstoneRepository =
+      this.dataSource.getRepository(
+        SessionTombstone,
+      );
+
+    const liveWhere = ceiling
+      ? {
+          ownerTeamLeaderId,
+          id: In([...ceiling]),
+        }
+      : {
+          ownerTeamLeaderId,
+        };
+
+    const tombstoneWhere = ceiling
+      ? {
+          ownerTeamLeaderId,
+          sessionId: In([...ceiling]),
+        }
+      : {
+          ownerTeamLeaderId,
+        };
+
+    const [ownedLiveSessions, ownedTombstones] =
+      await Promise.all([
+        sessionRepository.find({
+          select: {
+            id: true,
+          },
+          where: liveWhere,
+        }),
+        tombstoneRepository.find({
+          select: {
+            sessionId: true,
+          },
+          where: tombstoneWhere,
+        }),
+      ]);
+
+    const ownedLiveIds =
+      new Set(
+        ownedLiveSessions.map(
+          sessionEntity =>
+            sessionEntity.id,
+        ),
+      );
+
+    if (
+      ownedTombstones.length === 0
+    ) {
+      return [
+        ...ownedLiveIds,
+      ];
+    }
+
+    const tombstoneIds = [
+      ...new Set(
+        ownedTombstones.map(
+          tombstone =>
+            tombstone.sessionId,
+        ),
+      ),
+    ];
+
+    /*
+     * Query live existence irrespective of owner. These rows are excluded from tombstone ownership
+     * even when the current live owner is different from ownerTeamLeaderId.
+     */
+    const liveRowsForTombstones =
+      await sessionRepository.find({
+        select: {
+          id: true,
+        },
+        where: {
+          id: In(tombstoneIds),
+        },
+      });
+
+    const allLiveTombstoneIds =
+      new Set(
+        liveRowsForTombstones.map(
+          sessionEntity =>
+            sessionEntity.id,
+        ),
+      );
+
+    for (const tombstoneId of tombstoneIds) {
+      if (
+        !allLiveTombstoneIds.has(
+          tombstoneId,
+        )
+      ) {
+        ownedLiveIds.add(
+          tombstoneId,
+        );
+      }
+    }
+
+    return [
+      ...ownedLiveIds,
+    ];
   }
 
   /**
@@ -354,5 +435,3 @@ export class SearchService {
     return provider.health();
   }
 }
-
-

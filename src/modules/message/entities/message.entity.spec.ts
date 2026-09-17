@@ -33,30 +33,48 @@ describe('bigintToNumberTransformer (message.timestamp)', () => {
   });
 });
 
-describe('Session-owned entity relations', () => {
-  const cases: ReadonlyArray<[Function, string]> = [
-    [Message, 'sessionId'],
-    [MessageBatch, 'session_id'],
-    [StatusUpdate, 'sessionId'],
-  ];
+describe('Session ownership relation metadata', () => {
+  it('keeps status updates as a required cascading Session-owned relation', () => {
+    const relation = getMetadataArgsStorage().relations.find(
+      candidate => candidate.target === StatusUpdate && candidate.propertyName === 'session',
+    );
 
-  it('maps every Session-owned entity as a required cascading many-to-one relation', () => {
-    for (const [target, joinColumnName] of cases) {
+    expect(relation).toBeDefined();
+    expect(relation?.relationType).toBe('many-to-one');
+    expect(relation?.options.nullable).toBe(false);
+    expect(relation?.options.onDelete).toBe('CASCADE');
+    expect(relation?.type()).toBe(Session);
+
+    const joinColumn = getMetadataArgsStorage().joinColumns.find(
+      candidate => candidate.target === StatusUpdate && candidate.propertyName === 'session',
+    );
+
+    expect(joinColumn?.name).toBe('sessionId');
+  });
+
+  it('keeps messages and message batches as non-null historical Session provenance, not ownership relations', () => {
+    const historicalCases: ReadonlyArray<[Function, string, string]> = [
+      [Message, 'sessionId', 'sessionId'],
+      [MessageBatch, 'sessionId', 'session_id'],
+    ];
+
+    for (const [target, propertyName, physicalColumnName] of historicalCases) {
       const relation = getMetadataArgsStorage().relations.find(
         candidate => candidate.target === target && candidate.propertyName === 'session',
       );
-
-      expect(relation).toBeDefined();
-      expect(relation?.relationType).toBe('many-to-one');
-      expect(relation?.options.nullable).toBe(false);
-      expect(relation?.options.onDelete).toBe('CASCADE');
-      expect(relation?.type()).toBe(Session);
+      expect(relation).toBeUndefined();
 
       const joinColumn = getMetadataArgsStorage().joinColumns.find(
         candidate => candidate.target === target && candidate.propertyName === 'session',
       );
+      expect(joinColumn).toBeUndefined();
 
-      expect(joinColumn?.name).toBe(joinColumnName);
+      const column = getMetadataArgsStorage().columns.find(
+        candidate => candidate.target === target && candidate.propertyName === propertyName,
+      );
+      expect(column).toBeDefined();
+      expect(column?.options.nullable).not.toBe(true);
+      expect(column?.options.name ?? propertyName).toBe(physicalColumnName);
     }
   });
 });

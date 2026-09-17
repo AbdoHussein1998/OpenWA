@@ -9,7 +9,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 
 import {
   SessionTenantAccessService,
@@ -246,6 +246,17 @@ describe(
       findOne: jest.Mock;
     };
 
+    let dataSource: {
+      createQueryBuilder: jest.Mock;
+    };
+
+    let tombstoneQuery: {
+      select: jest.Mock;
+      from: jest.Mock;
+      where: jest.Mock;
+      getRawOne: jest.Mock;
+    };
+
     beforeEach(() => {
       agentRepository = {
         findOne:
@@ -257,11 +268,36 @@ describe(
           jest.fn(),
       };
 
+      tombstoneQuery = {
+        select:
+          jest.fn(),
+
+        from:
+          jest.fn(),
+
+        where:
+          jest.fn(),
+
+        getRawOne:
+          jest.fn(),
+      };
+
+      tombstoneQuery.select.mockReturnValue(tombstoneQuery);
+      tombstoneQuery.from.mockReturnValue(tombstoneQuery);
+      tombstoneQuery.where.mockReturnValue(tombstoneQuery);
+
+      dataSource = {
+        createQueryBuilder:
+          jest.fn().mockReturnValue(tombstoneQuery),
+      };
+
       service =
         new SessionTenantAccessService(
           agentRepository as unknown as Repository<Agent>,
 
           sessionRepository as unknown as Repository<Session>,
+
+          dataSource as unknown as DataSource,
         );
     });
 
@@ -1708,6 +1744,260 @@ describe(
               message:
                 'Session not found',
             });
+          },
+        );
+      },
+    );
+
+    // -------------------------------------------------------------------------
+    // assertHistoricalSessionAccess
+    // -------------------------------------------------------------------------
+
+    describe(
+      'assertHistoricalSessionAccess',
+      () => {
+        it(
+          'uses the live Session as the authoritative ownership record when it exists',
+          async () => {
+            const apiKey =
+              createApiKey({
+                role:
+                  ApiKeyRole.TEAM_LEADER,
+
+                teamLeaderId:
+                  'team-leader-a',
+              });
+
+            sessionRepository.findOne
+              .mockResolvedValue(
+                createSession({
+                  id:
+                    'session-a',
+
+                  ownerTeamLeaderId:
+                    'team-leader-a',
+                }),
+              );
+
+            await expect(
+              service.assertHistoricalSessionAccess(
+                apiKey,
+                'session-a',
+              ),
+            ).resolves.toBeUndefined();
+
+            expect(
+              dataSource.createQueryBuilder,
+            ).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          'falls back to the Session tombstone after a live-session miss',
+          async () => {
+            sessionRepository.findOne
+              .mockResolvedValue(
+                null,
+              );
+
+            tombstoneQuery.getRawOne
+              .mockResolvedValue({
+                ownerTeamLeaderId:
+                  'team-leader-a',
+              });
+
+            const apiKey =
+              createApiKey({
+                role:
+                  ApiKeyRole.TEAM_LEADER,
+
+                teamLeaderId:
+                  'team-leader-a',
+              });
+
+            await expect(
+              service.assertHistoricalSessionAccess(
+                apiKey,
+                'deleted-session',
+              ),
+            ).resolves.toBeUndefined();
+
+            expect(
+              tombstoneQuery.where,
+            ).toHaveBeenCalledWith(
+              'tombstone."sessionId" = :sessionId',
+              {
+                sessionId:
+                  'deleted-session',
+              },
+            );
+          },
+        );
+
+        it(
+          'returns 404 when neither a live Session nor a tombstone exists',
+          async () => {
+            sessionRepository.findOne
+              .mockResolvedValue(
+                null,
+              );
+
+            tombstoneQuery.getRawOne
+              .mockResolvedValue(
+                undefined,
+              );
+
+            await expect(
+              service.assertHistoricalSessionAccess(
+                createApiKey({
+                  role:
+                    ApiKeyRole.ADMIN,
+                }),
+                'missing-session',
+              ),
+            ).rejects.toBeInstanceOf(
+              NotFoundException,
+            );
+          },
+        );
+
+        it(
+          'does not let a stale tombstone override a restored live Session owner',
+          async () => {
+            sessionRepository.findOne
+              .mockResolvedValue(
+                createSession({
+                  id:
+                    'session-restored',
+
+                  ownerTeamLeaderId:
+                    'team-leader-b',
+                }),
+              );
+
+            tombstoneQuery.getRawOne
+              .mockResolvedValue({
+                ownerTeamLeaderId:
+                  'team-leader-a',
+              });
+
+            await expect(
+              service.assertHistoricalSessionAccess(
+                createApiKey({
+                  role:
+                    ApiKeyRole.TEAM_LEADER,
+
+                  teamLeaderId:
+                    'team-leader-a',
+                }),
+                'session-restored',
+              ),
+            ).rejects.toBeInstanceOf(
+              NotFoundException,
+            );
+
+            expect(
+              dataSource.createQueryBuilder,
+            ).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          'keeps allowedSessions as a hard ceiling before tombstone lookup',
+          async () => {
+            const apiKey =
+              createApiKey({
+                role:
+                  ApiKeyRole.OPERATOR,
+
+                allowedSessions: [
+                  'session-a',
+                ],
+              });
+
+            await expect(
+              service.assertHistoricalSessionAccess(
+                apiKey,
+                'session-b',
+              ),
+            ).rejects.toBeInstanceOf(
+              NotFoundException,
+            );
+
+            expect(
+              sessionRepository.findOne,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              dataSource.createQueryBuilder,
+            ).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          'denies a Team Leader when the tombstone belongs to another tenant',
+          async () => {
+            sessionRepository.findOne
+              .mockResolvedValue(
+                null,
+              );
+
+            tombstoneQuery.getRawOne
+              .mockResolvedValue({
+                ownerTeamLeaderId:
+                  'team-leader-b',
+              });
+
+            await expect(
+              service.assertHistoricalSessionAccess(
+                createApiKey({
+                  role:
+                    ApiKeyRole.TEAM_LEADER,
+
+                  teamLeaderId:
+                    'team-leader-a',
+                }),
+                'deleted-session-b',
+              ),
+            ).rejects.toBeInstanceOf(
+              NotFoundException,
+            );
+          },
+        );
+
+        it(
+          'fails closed for an unassigned Agent without reading live or historical identity',
+          async () => {
+            agentRepository.findOne
+              .mockResolvedValue(
+                createAgent({
+                  assignedSessionId:
+                    null,
+                }),
+              );
+
+            await expect(
+              service.assertHistoricalSessionAccess(
+                createApiKey({
+                  role:
+                    ApiKeyRole.AGENT,
+
+                  agentId:
+                    'agent-1',
+                }),
+                'deleted-session',
+              ),
+            ).rejects.toBeInstanceOf(
+              NotFoundException,
+            );
+
+            expect(
+              sessionRepository.findOne,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              dataSource.createQueryBuilder,
+            ).not.toHaveBeenCalled();
           },
         );
       },

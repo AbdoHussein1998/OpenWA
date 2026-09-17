@@ -21,6 +21,7 @@ import { AuthService } from '../auth.service';
 import { ApiCapability } from '../capabilities/api-capability';
 import { REQUIRED_CAPABILITY_KEY } from '../decorators/capability.decorator';
 import {
+  HISTORICAL_SESSION_READ_KEY,
   PUBLIC_KEY,
   REQUIRED_ROLE_KEY,
   SESSION_SCOPED_KEY,
@@ -109,6 +110,7 @@ describe('ApiKeyGuard', () => {
 
     sessionTenantAccessService = {
       assertSessionAccess: jest.fn().mockResolvedValue(undefined),
+      assertHistoricalSessionAccess: jest.fn().mockResolvedValue(undefined),
     };
 
     reflector = {
@@ -403,6 +405,69 @@ describe('ApiKeyGuard', () => {
     expect(sessionTenantAccessService.assertSessionAccess).toHaveBeenCalledWith(
       apiKey,
       'sess-123',
+    );
+  });
+
+  it('uses tombstone-aware authorization only on @HistoricalSessionRead() routes', async () => {
+    metadata.set(HISTORICAL_SESSION_READ_KEY, true);
+
+    const apiKey = createMockApiKey();
+    (authService.validateApiKey as jest.Mock).mockResolvedValue(apiKey);
+
+    await guard.canActivate(
+      createMockContext(
+        { 'x-api-key': 'key' },
+        { sessionId: 'deleted-session' },
+      ),
+    );
+
+    expect(
+      sessionTenantAccessService.assertHistoricalSessionAccess,
+    ).toHaveBeenCalledWith(
+      apiKey,
+      'deleted-session',
+    );
+    expect(
+      sessionTenantAccessService.assertSessionAccess,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('preserves tenant 404 auditing for denied historical-session reads', async () => {
+    metadata.set(HISTORICAL_SESSION_READ_KEY, true);
+
+    const apiKey = createMockApiKey({
+      role: ApiKeyRole.TEAM_LEADER,
+      teamLeaderId: 'tl-1',
+    });
+    (authService.validateApiKey as jest.Mock).mockResolvedValue(apiKey);
+    (
+      sessionTenantAccessService.assertHistoricalSessionAccess as jest.Mock
+    ).mockRejectedValue(
+      new NotFoundException('Session not found'),
+    );
+
+    const context = createMockContext(
+      { 'x-api-key': 'tl-key' },
+      { sessionId: 'deleted-foreign-session' },
+      '203.0.113.10',
+    );
+
+    await expect(
+      guard.canActivate(context),
+    ).rejects.toThrow(NotFoundException);
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(auditService.logWarn).toHaveBeenCalledWith(
+      AuditAction.TENANT_ACCESS_DENIED,
+      expect.objectContaining({
+        ipAddress: '203.0.113.10',
+        statusCode: 404,
+        metadata: expect.objectContaining({
+          surface: 'rest',
+          attemptedSessionId: 'deleted-foreign-session',
+          teamLeaderId: 'tl-1',
+        }),
+      }),
     );
   });
 
