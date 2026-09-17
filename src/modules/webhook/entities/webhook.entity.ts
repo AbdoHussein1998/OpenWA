@@ -14,9 +14,9 @@ import { jsonColumnType, dateColumnType } from '../../../common/utils/column-typ
 import { WebhookFilters } from '../filters/filter-types';
 
 @Entity('webhooks')
-// `id` is already globally unique, but this composite unique key is intentional: durable delivery
-// rows carry both webhookId and sessionId, and their composite FK uses this key to make it impossible
-// to persist a delivery under the wrong Session while still referencing a real Webhook.
+// Parent candidate key for webhook_outbox_events(webhookId, sessionId). id is already globally unique,
+// so this adds no new business restriction; it merely lets both migration-managed and synchronize
+// schemas enforce that an outbox row cannot carry a sessionId different from its Webhook's Session.
 @Index('UQ_webhooks_id_sessionId', ['id', 'sessionId'], { unique: true })
 export class Webhook {
   @PrimaryGeneratedColumn('uuid')
@@ -30,7 +30,7 @@ export class Webhook {
   @Column({ type: 'varchar' })
   sessionId!: string;
 
-  @ManyToOne(() => Session, { nullable: false, onDelete: 'CASCADE' })
+  @ManyToOne(() => Session, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'sessionId' })
   session!: Session;
 

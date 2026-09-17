@@ -67,10 +67,13 @@ export class ConversationMappingService implements PluginConversationMappingPort
     patch?: Partial<ConversationMapping>,
   ): Promise<void> {
     try {
-      await this.repo.update({ id }, {
-        providerConversationId,
-        ...patch,
-      } as QueryDeepPartialEntity<ConversationMapping>);
+      await this.repo.update(
+        { id },
+        {
+          providerConversationId,
+          ...patch,
+        } as QueryDeepPartialEntity<ConversationMapping>,
+      );
     } catch (err) {
       if (isUniqueViolation(err)) throw new ConversationMappingConflict(key, providerConversationId);
       throw err;
@@ -116,13 +119,10 @@ export class ConversationMappingService implements PluginConversationMappingPort
   }
 
   /**
-   * Rebind an existing mapping to another live Session while the mapping row still exists.
-   *
-   * With the OLTP foreign-key graph, deleting a Session cascades its conversation mappings, so a
-   * mapping no longer survives as a stale orphan that can be repaired after deletion. This method is
-   * retained for explicit pre-deletion migration/rebinding flows and compatibility with existing
-   * callers. If the destination Session already has the same forward key, that row is authoritative
-   * and this superseded mapping is deleted.
+   * Rebind a mapping whose Session was deleted (and re-paired under a new id) onto the caller's
+   * current Session. sessionId is deliberately provenance rather than an FK, so the stale row remains
+   * available for this repair path. If the destination already owns the same forward key, that row is
+   * authoritative and the stale mapping is superseded by deleting it.
    */
   async rebindSession(id: string, sessionId: string): Promise<void> {
     try {

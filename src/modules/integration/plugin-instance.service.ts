@@ -21,14 +21,14 @@ function normalizeSecret(supplied?: string): string {
 }
 
 /**
- * Canonical persisted representation of an unscoped/inherited plugin scope.
+ * Preserve the existing scope contract while canonicalizing only an absent/empty value to NULL.
  *
- * Older/runtime paths accept '*' as an explicit wildcard while the entity/API contract already uses
- * NULL for the unscoped/inherited form. Persisting only NULL lets `sessionScope` be a real nullable FK to sessions.id
- * without breaking wildcard behavior at the service boundary.
+ * '*' is an explicit runtime wildcard understood by ScopeBindingService and PluginLoaderService; it
+ * remains '*' in persistence so the provisioning/API representation is not silently rewritten. NULL
+ * remains the existing empty/unset form, and ScopeBindingService already accepts both on its wildcard path.
  */
 function normalizeSessionScope(scope?: string | null): string | null {
-  return !scope || scope === '*' ? null : scope;
+  return scope || null;
 }
 
 export class InstanceExistsError extends Error {

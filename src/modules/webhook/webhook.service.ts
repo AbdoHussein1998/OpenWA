@@ -897,6 +897,13 @@ export class WebhookService
     );
   }
 
+  /**
+   * Delete the Webhook configuration itself.
+   *
+   * webhook_outbox_events is Webhook-owned and follows the database cascade because it cannot be
+   * replayed without the Webhook's URL/headers/secret. webhook_delivery_failures is independent
+   * retained history and is intentionally NOT deleted here; its existing retention job owns cleanup.
+   */
   async delete(
     sessionId: string,
     id: string,

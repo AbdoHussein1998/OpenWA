@@ -1250,7 +1250,6 @@ describe('WebhookDeliveryService', () => {
           { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
           { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
           { provide: WebhookOutboxService, useValue: outboxService },
-          { provide: WebhookOutboxService, useValue: outboxService },
           { provide: ConfigService, useValue: { get: jest.fn().mockImplementation(configGet) } },
           { provide: HookManager, useValue: hookManager },
           { provide: getQueueToken(QUEUE_NAMES.WEBHOOK), useValue: webhookQueue },

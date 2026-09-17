@@ -410,6 +410,9 @@ describe('WebhookService', () => {
       await service.delete('sess-1', 'wh-uuid-1');
 
       expect(repository.remove).toHaveBeenCalledWith(webhook);
+      // Delivery failures are independently-retained history. Deleting current Webhook configuration
+      // must not bypass WEBHOOK_FAILURE_RETENTION_DAYS by deleting those rows in application code.
+      expect(failureRepository.delete).not.toHaveBeenCalled();
     });
   });
 

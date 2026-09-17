@@ -1,21 +1,21 @@
 import { DataSource } from 'typeorm';
 import { IngressEvent } from './entities/ingress-event.entity';
-import { PluginInstance } from './entities/plugin-instance.entity';
 import { IngressEventService } from './ingress-event.service';
 import { AddIntegrationFabric1781900000000 } from '../../database/migrations/1781900000000-AddIntegrationFabric';
 import { WidenIngressDedupKey1782100000000 } from '../../database/migrations/1782100000000-WidenIngressDedupKey';
 import { AddIngressEventDispatchState1785112230000 } from '../../database/migrations/1785112230000-AddIngressEventDispatchState';
 import { SlimIngressEventPayload1785600000000 } from '../../database/migrations/1785600000000-SlimIngressEventPayload';
-import { Session } from '../session/entities/session.entity';
 
 describe('IngressEventService.recordOrSkip', () => {
   let ds: DataSource;
   let service: IngressEventService;
+
   beforeEach(async () => {
     ds = new DataSource({
       type: 'better-sqlite3',
       database: ':memory:',
-      entities: [IngressEvent, PluginInstance, Session],
+      // No parent entity is needed: plugin/session identifiers are durable provenance/dedup dimensions.
+      entities: [IngressEvent],
       migrations: [],
     });
     await ds.initialize();
@@ -27,9 +27,11 @@ describe('IngressEventService.recordOrSkip', () => {
     await runner.release();
     service = new IngressEventService(ds.getRepository(IngressEvent));
   });
+
   afterEach(async () => {
     if (ds.isInitialized) await ds.destroy();
   });
+
   const row = () => ({
     instanceId: 'inst',
     pluginId: 'plug',
@@ -41,6 +43,7 @@ describe('IngressEventService.recordOrSkip', () => {
   });
   const key = { pluginId: 'plug', instanceId: 'inst', providerDeliveryId: 'd1' };
   const stored = () => ds.getRepository(IngressEvent).findOneByOrFail(key);
+
   it('returns true for a first delivery and false for a replay of the same delivery id', async () => {
     expect(await service.recordOrSkip(row())).toBe(true);
     expect(await service.recordOrSkip(row())).toBe(false);
@@ -50,10 +53,18 @@ describe('IngressEventService.recordOrSkip', () => {
     expect(await service.recordOrSkip(row())).toBe(true);
     expect(await service.recordOrSkip({ ...row(), instanceId: 'inst2' })).toBe(true);
   });
+
   it('treats the same instance+delivery id under a different plugin as new (dedup key includes pluginId)', async () => {
     expect(await service.recordOrSkip(row())).toBe(true);
     expect(await service.recordOrSkip({ ...row(), pluginId: 'other-plug' })).toBe(true);
   });
+
+  it('accepts provenance for a removed/missing Session and PluginInstance', async () => {
+    expect(
+      await service.recordOrSkip({ ...row(), pluginId: 'deleted-plugin', instanceId: 'deleted-instance', sessionId: 'gone-sess' }),
+    ).toBe(true);
+  });
+
   it('writes new events as dispatchState pending with zero attempts (watched by the reconciler)', async () => {
     await service.recordOrSkip(row());
     const event = await stored();
@@ -61,23 +72,23 @@ describe('IngressEventService.recordOrSkip', () => {
     expect(event.dispatchAttempts).toBe(0);
     expect(event.lastDispatchAt).toBeNull();
   });
+
   it('keeps the full payload (the reconciler replay source) plus its hash while pending', async () => {
     await service.recordOrSkip(row());
     const event = await stored();
     expect(event.payload).toEqual({ headers: {}, query: {}, body: '{}', rawBody: '{}' });
     expect(event.payloadHash).toBe('hash-of-{}');
   });
-  it.each(['queued', 'dispatched'] as const)(
-    'marks outcome %s as dispatched with a dispatch timestamp',
-    async outcome => {
-      await service.recordOrSkip(row());
-      await service.markDispatchOutcome(key, outcome);
-      const event = await stored();
-      expect(event.dispatchState).toBe('dispatched');
-      expect(event.lastDispatchAt).toBeInstanceOf(Date);
-      expect(event.dispatchAttempts).toBe(0);
-    },
-  );
+
+  it.each(['queued', 'dispatched'] as const)('marks outcome %s as dispatched with a dispatch timestamp', async outcome => {
+    await service.recordOrSkip(row());
+    await service.markDispatchOutcome(key, outcome);
+    const event = await stored();
+    expect(event.dispatchState).toBe('dispatched');
+    expect(event.lastDispatchAt).toBeInstanceOf(Date);
+    expect(event.dispatchAttempts).toBe(0);
+  });
+
   it.each(['queued', 'dispatched'] as const)(
     'retires the full payload on outcome %s but keeps the hash and the dedup oracle',
     async outcome => {
@@ -89,6 +100,7 @@ describe('IngressEventService.recordOrSkip', () => {
       expect(await service.recordOrSkip(row())).toBe(false);
     },
   );
+
   it('marks outcome failed as still-pending with the attempt counted AND the payload kept (reconciler replays from it)', async () => {
     await service.recordOrSkip(row());
     await service.markDispatchOutcome(key, 'failed');

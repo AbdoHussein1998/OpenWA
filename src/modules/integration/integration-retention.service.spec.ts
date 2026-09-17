@@ -1,8 +1,6 @@
 import { DataSource, Repository } from 'typeorm';
-import { Session } from '../session/entities/session.entity';
 import { IngressEvent } from './entities/ingress-event.entity';
 import { IntegrationDeliveryFailure } from './entities/integration-delivery-failure.entity';
-import { PluginInstance } from './entities/plugin-instance.entity';
 import { IntegrationRetentionService } from './integration-retention.service';
 
 const daysAgo = (d: number): Date => {
@@ -19,34 +17,15 @@ describe('IntegrationRetentionService.pruneOlderThan', () => {
     ds = new DataSource({
       type: 'better-sqlite3',
       database: ':memory:',
-      // The operational entities now carry real FK metadata. Register their parents so TypeORM can
-      // build relation metadata even though these retention fixtures use no concrete Session id.
-      entities: [
-        IngressEvent,
-        IntegrationDeliveryFailure,
-        PluginInstance,
-        Session,
-      ],
+      // These are independently-retained operational records. Their plugin/session identifiers are
+      // provenance, so the retention test deliberately registers no parent entities.
+      entities: [IngressEvent, IntegrationDeliveryFailure],
       synchronize: true,
     });
     await ds.initialize();
 
-    // Both retained tables are children of the configured PluginInstance. Seed the parent first so
-    // the test exercises the same referential-integrity contract as production instead of bypassing
-    // it with orphan rows.
-    const pluginInstances = ds.getRepository(PluginInstance);
-    await pluginInstances.save(
-      pluginInstances.create({
-        id: 'p:i',
-        pluginId: 'p',
-        instanceId: 'i',
-        sessionScope: null,
-        secret: 'retention-test-secret',
-        verifyToken: null,
-        config: null,
-        enabled: true,
-      }),
-    );
+    // No PluginInstance/Session seed is required: deleting current configuration must not make
+    // durable dedup/DLQ rows invalid before these retention windows expire.
 
     service = new IntegrationRetentionService(
       ds.getRepository(IngressEvent),

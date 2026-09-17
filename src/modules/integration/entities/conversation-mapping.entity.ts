@@ -8,24 +8,28 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { jsonColumnType } from '../../../common/utils/column-types';
-import { Session } from '../../session/entities/session.entity';
 import { PluginInstance } from './plugin-instance.entity';
 
 export type HandoverState = 'bot' | 'human' | 'closed';
-// Maps a WA chat to a provider conversation, both directions. This is active OLTP state: a mapping
-// is valid only while both its Session and PluginInstance exist, so both parent references are real FKs.
+
+// Maps a WA chat to a provider conversation, both directions.
+//
+// sessionId is repairable provenance, not Session ownership: a mapping may outlive a Session and
+// ConversationMappingService.rebindSession() deliberately moves the stale row when that Session is
+// recreated/re-paired under another id. Enforcing sessions(id) here would delete the row that the
+// recovery path needs.
+//
+// pluginId + instanceId, however, identify the configured integration instance that owns this active
+// mapping. Retiring that exact PluginInstance retires its mappings as well.
 @Entity('conversation_mappings')
 @Index('UQ_conversation_mappings_forward', ['sessionId', 'chatId', 'pluginId', 'instanceId'], { unique: true })
 @Index('UQ_conversation_mappings_reverse', ['pluginId', 'instanceId', 'providerConversationId'], { unique: true })
 export class ConversationMapping {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
+
   @Column({ type: 'varchar' })
   sessionId!: string;
-
-  @ManyToOne(() => Session, { nullable: false, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'sessionId' })
-  session?: Session;
 
   @Column()
   chatId!: string;

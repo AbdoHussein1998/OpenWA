@@ -10,6 +10,7 @@ import {
 import { dateColumnType, jsonColumnType } from '../../../common/utils/column-types';
 import { DateTransformer } from '../../../common/transformers/date.transformer';
 import { Webhook } from './webhook.entity';
+
 // The dispatch lifecycle of one outbound delivery, mirroring ingress_events on the inbound side:
 //  - 'pending'    - the row was written before the attempt; nothing durable owns the delivery yet.
 //                   The reconciler sweeps these.
@@ -23,20 +24,18 @@ import { Webhook } from './webhook.entity';
 // NULL marks rows that predate these columns on a synchronize-bootstrapped database. NULL reads as
 // "not watched", so an upgrade can never mass-replay history.
 export type WebhookOutboxState = 'pending' | 'dispatched' | 'failed';
+
 /**
  * Durable record of an outbound webhook delivery, written before the attempt.
  *
- * Fan-out is fire-and-forget from the projector (`void dispatch(...)`), so until this row existed a
- * hard crash between persisting a message and completing its POST lost the delivery with nothing
- * left behind in either mode. The in-memory `inFlightDeliveries` map already tracked exactly this
- * set; the row is its durable twin.
+ * This IS Webhook-owned operational state: replay needs the Webhook's URL/headers/secret/retry
+ * configuration, so once that Webhook is intentionally deleted there is no valid delivery target to
+ * replay. The composite relation also guarantees the stored sessionId agrees with the parent Webhook.
+ * Terminal failure history is stored separately in webhook_delivery_failures and intentionally survives.
  *
  * UNIQUE(webhookId, idempotencyKey): the key is already salted per webhook at dispatch, so the pair
  * names one delivery attempt-set exactly, and a replay reuses the STORED key rather than deriving a
  * new one, which is what keeps a redelivery deduplicable at the receiver.
- *
- * The (`webhookId`, `sessionId`) pair is a real FK to Webhook. That both prevents an orphan outbox
- * row and guarantees that its duplicated sessionId agrees with the parent Webhook's Session.
  */
 @Entity('webhook_outbox_events')
 @Index('UQ_webhook_outbox_events_webhook_key', ['webhookId', 'idempotencyKey'], { unique: true })
@@ -44,6 +43,7 @@ export type WebhookOutboxState = 'pending' | 'dispatched' | 'failed';
 export class WebhookOutboxEvent {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
+
   @Column({ type: 'varchar' })
   webhookId!: string;
 
@@ -70,6 +70,7 @@ export class WebhookOutboxEvent {
   // dispatched or failed row has no reason to keep a payload that can carry a whole message body.
   @Column({ type: jsonColumnType(), nullable: true })
   payload!: Record<string, unknown> | null;
+
   @Column({ type: 'varchar', nullable: true })
   state!: WebhookOutboxState | null;
 
