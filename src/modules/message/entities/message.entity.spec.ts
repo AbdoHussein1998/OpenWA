@@ -88,6 +88,9 @@ describe('Message phone participant columns', () => {
 
       expect(column).toBeDefined();
       expect(column?.options.nullable).toBe(true);
+      // `string | null` reflects as Object at runtime, so these columns MUST declare an explicit
+      // database type. Without this PostgreSQL rejects the entity metadata before migrations run.
+      expect(column?.options.type).toBe('varchar');
     }
   });
 });

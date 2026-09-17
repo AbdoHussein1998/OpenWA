@@ -83,11 +83,11 @@ export class Message {
   to!: string;
 
   /** Resolved phone number of the actual sender (digits only), when WhatsApp exposes one. */
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   sentByPhone?: string | null;
 
   /** Resolved phone number of the actual recipient (digits only), when WhatsApp exposes one. */
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   sentToPhone?: string | null;
 
   @Column({ type: 'text', nullable: true })
