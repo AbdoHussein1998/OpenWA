@@ -103,7 +103,7 @@ interface SessionRestrictionEvent {
   timestamp: string;
 }
 /** Ack frame answering a client `subscribe` request (`{type: 'subscribed'}`). */
-interface SubscribedEvent {
+export interface SubscribedEvent {
   sessionId: string;
   events: string[];
 }

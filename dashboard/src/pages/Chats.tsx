@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } fr
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
-import { nextReconnectState } from '../utils/reconnectState';
 import { applyIncomingToChatList } from '../utils/chatList';
 import { filterChats, filterChannels, groupStatusesByContact } from '../utils/chatFilters';
 import { ArrowLeft, Loader2, Megaphone, CircleDashed, AlertCircle, MessageSquare } from 'lucide-react';
@@ -32,7 +31,7 @@ import {
   type ChatMessageView,
   type MessageMedia,
 } from '../utils/chatMessages';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useWebSocket, type SubscribedEvent } from '../hooks/useWebSocket';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useToast } from '../hooks/useToast';
 import { RoleContext, useRole } from '../hooks/useRole';
@@ -217,7 +216,7 @@ export function Chats() {
     isLoading: loadingMessages,
     isError: messagesError,
   } = useChatMessages(selectedSessionId, activeChat?.id ?? null);
-  const { appendMessage, updateMessage } = useChatMessagesActions();
+  const { appendMessage, updateMessage, invalidateSessionMessages } = useChatMessagesActions();
   const queryClient = useQueryClient();
 
   const { markChatRead } = useMarkChatRead(
@@ -688,6 +687,21 @@ export function Chats() {
     [queryClient],
   );
 
+  // The page owns its WebSocket, so navigating away can leave existing message caches alive while
+  // no realtime subscriber is present. Reconcile only after the gateway confirms this session's
+  // subscription: anything missed before that acknowledgement is then recovered from REST/history,
+  // while subsequent events are delivered live on the newly active subscription.
+  const handleSubscriptionConfirmed = useCallback(
+    (event: SubscribedEvent) => {
+      if (event.sessionId !== selectedSessionId) return;
+
+      void invalidateSessionMessages(event.sessionId);
+      void queryClient.invalidateQueries({ queryKey: ['contact-statuses', event.sessionId] });
+      void loadChats(event.sessionId);
+    },
+    [invalidateSessionMessages, loadChats, queryClient, selectedSessionId],
+  );
+
   // The events object must be referentially stable: useWebSocket re-registers its socket handler
   // on every identity change, so an inline literal would tear down and re-attach per render.
   const wsEvents = useMemo(
@@ -698,6 +712,7 @@ export function Chats() {
       onMessageRevoked: handleIncomingMessageRevoked,
       onMessageEdited: handleIncomingMessageEdited,
       onStatusReceived: handleStatusReceived,
+      onSubscribed: handleSubscriptionConfirmed,
     }),
     [
       handleIncomingMessage,
@@ -706,31 +721,10 @@ export function Chats() {
       handleIncomingMessageRevoked,
       handleIncomingMessageEdited,
       handleStatusReceived,
+      handleSubscriptionConfirmed,
     ],
   );
   const { isConnected, connectionFailed, reconnect, subscribe, unsubscribe } = useWebSocket(wsEvents);
-
-  // A transient WebSocket gap means message.received/ack/revoke events were missed, and the chat
-  // cache uses staleTime: Infinity so it won't refetch on its own. On a reconnect (isConnected
-  // false→true after a prior connect), invalidate the active session's messages so the thread the
-  // gap left stale refreshes. The transition logic is unit-tested in utils/reconnectState.
-  const reconnectHadConnected = useRef(false);
-  const reconnectWasDisconnected = useRef(false);
-  useEffect(() => {
-    const decision = nextReconnectState({
-      isConnected,
-      hadConnected: reconnectHadConnected.current,
-      wasDisconnected: reconnectWasDisconnected.current,
-    });
-    reconnectHadConnected.current = decision.hadConnected;
-    reconnectWasDisconnected.current = decision.wasDisconnected;
-    if (decision.invalidate) {
-      queryClient.invalidateQueries({ queryKey: ['messages', selectedSessionId] });
-      // Statuses are live now (status.received): a story posted during the socket gap would
-      // otherwise stay invisible until a focus refetch.
-      queryClient.invalidateQueries({ queryKey: ['contact-statuses', selectedSessionId] });
-    }
-  }, [isConnected, selectedSessionId, queryClient]);
 
   useEffect(() => {
     if (selectedSessionId && isConnected) {

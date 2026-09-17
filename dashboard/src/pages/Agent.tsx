@@ -106,9 +106,11 @@ import {
 
 import {
   useWebSocket,
+  type SubscribedEvent,
 } from '../hooks/useWebSocket';
 
 import {
+  MESSAGE_QUERY_PREFIX,
   useChatMessages,
   useChatMessagesActions,
   messagesQueryKey,
@@ -163,9 +165,6 @@ import './AgentQrModal.css';
 /* ================================================================
    CONSTANTS
    ================================================================ */
-
-const MESSAGE_QUERY_PREFIX =
-  'messages';
 
 const AGENT_WS_EVENTS = [
   'session.status',
@@ -710,13 +709,6 @@ export function Agent() {
       null,
     );
 
-  const wasConnectedRef =
-    useRef<
-      boolean | null
-    >(
-      null,
-    );
-
   const failedActiveAvatarUrlRef =
     useRef<
       string | null
@@ -1036,6 +1028,7 @@ export function Agent() {
   const {
     appendMessage,
     updateMessage,
+    invalidateSessionMessages,
   } =
     useChatMessagesActions();
 
@@ -2838,6 +2831,40 @@ export function Agent() {
       ],
     );
 
+  // This route owns its WebSocket. A message can therefore be persisted while Agent is on another
+  // page, leaving an Infinity-stale React Query slice behind. The subscription acknowledgement is
+  // the reliable recovery boundary: everything before it is reconciled from REST/history, while
+  // everything after it arrives through the active realtime subscription.
+  const handleSubscriptionConfirmed =
+    useCallback(
+      (
+        event:
+          SubscribedEvent,
+      ) => {
+        if (
+          event.sessionId !==
+          selectedSessionIdRef.current
+        ) {
+          return;
+        }
+
+        void invalidateSessionMessages(
+          event.sessionId,
+        );
+
+        if (sessionReady) {
+          void loadChats(
+            event.sessionId,
+          );
+        }
+      },
+      [
+        invalidateSessionMessages,
+        loadChats,
+        sessionReady,
+      ],
+    );
+
   const wsEvents =
     useMemo(
       () => ({
@@ -2857,6 +2884,8 @@ export function Agent() {
           handleIncomingMessageRevoked,
         onMessageEdited:
           handleIncomingMessageEdited,
+        onSubscribed:
+          handleSubscriptionConfirmed,
       }),
       [
         handleIncomingMessage,
@@ -2867,6 +2896,7 @@ export function Agent() {
         handleIncomingQRCode,
         handleIncomingSessionRestriction,
         handleIncomingSessionStatus,
+        handleSubscriptionConfirmed,
       ],
     );
 
@@ -2906,43 +2936,6 @@ export function Agent() {
     selectedSessionId,
     subscribe,
     unsubscribe,
-  ]);
-
-  useEffect(() => {
-    if (
-      !selectedSessionId
-    ) {
-      wasConnectedRef.current =
-        null;
-      return;
-    }
-
-    if (
-      wasConnectedRef.current ===
-        false &&
-      isConnected
-    ) {
-      void queryClient.invalidateQueries(
-        {
-          queryKey: [
-            MESSAGE_QUERY_PREFIX,
-            selectedSessionId,
-          ],
-        },
-      );
-
-      void loadChats(
-        selectedSessionId,
-      );
-    }
-
-    wasConnectedRef.current =
-      isConnected;
-  }, [
-    isConnected,
-    loadChats,
-    queryClient,
-    selectedSessionId,
   ]);
 
   /* ================================================================

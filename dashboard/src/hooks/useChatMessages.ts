@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import {
   mergeChatMessages,
@@ -9,16 +10,19 @@ import {
 } from '../utils/chatMessages';
 import { sessionApi } from '../services/api';
 
-export type MessagesQueryKey = readonly ['messages', string, string];
+export const MESSAGE_QUERY_PREFIX = 'messages' as const;
+
+export type MessagesQueryKey = readonly [typeof MESSAGE_QUERY_PREFIX, string, string];
 
 export function messagesQueryKey(sessionId: string, chatId: string): MessagesQueryKey {
-  return ['messages', sessionId, chatId] as const;
+  return [MESSAGE_QUERY_PREFIX, sessionId, chatId] as const;
 }
 
 /**
- * Fetch messages for one (sessionId, chatId) and keep them cached (staleTime: Infinity); realtime
- * updates flow through useChatMessagesActions, not refetches. Engine history is fetched WITHOUT media
- * to keep the cache small — a single 50 MiB message would otherwise sit in heap as base64 (held twice
+ * Fetch messages for one (sessionId, chatId) and keep them cached (staleTime: Infinity). Realtime
+ * updates normally flow through useChatMessagesActions; a confirmed WebSocket re-subscription can
+ * invalidate a session's cached slices so events missed while the route was unmounted are recovered.
+ * Engine history is fetched WITHOUT media to keep the cache small — a single 50 MiB message would otherwise sit in heap as base64 (held twice
  * as a `data:` URI). Recent media still renders from the DB copy (which wins in mergeChatMessages);
  * older history media shows the omitted placeholder. Live/DB payloads that do arrive are additionally
  * bounded per slice: mergeChatMessages/mergeOrAppend run the result through capMediaPayloads, which
@@ -53,8 +57,8 @@ export function useChatMessages(sessionId: string, chatId: string | null): UseQu
 export function useChatMessagesActions() {
   const qc = useQueryClient();
 
-  return {
-    appendMessage(sessionId: string, chatId: string, msg: ChatMessageView) {
+  const appendMessage = useCallback(
+    (sessionId: string, chatId: string, msg: ChatMessageView) => {
       // Only append to a slice that already exists (a chat that has been opened). Do NOT seed a slice
       // for a never-opened chat: with staleTime: Infinity that phantom slice would be "fresh", so
       // opening the chat would skip the full-history queryFn and show only this one message (truncated
@@ -63,13 +67,44 @@ export function useChatMessagesActions() {
         old === undefined ? undefined : mergeOrAppend(old, msg),
       );
     },
-    updateMessage(sessionId: string, chatId: string, id: string, patch: Partial<ChatMessageView>) {
+    [qc],
+  );
+
+  const updateMessage = useCallback(
+    (sessionId: string, chatId: string, id: string, patch: Partial<ChatMessageView>) => {
       qc.setQueryData<ChatMessageView[]>(messagesQueryKey(sessionId, chatId), (old = []) =>
         updateMessageById(old, id, patch),
       );
     },
-    removeMessage(sessionId: string, chatId: string, id: string) {
-      qc.setQueryData<ChatMessageView[]>(messagesQueryKey(sessionId, chatId), (old = []) => removeMessageById(old, id));
+    [qc],
+  );
+
+  const removeMessage = useCallback(
+    (sessionId: string, chatId: string, id: string) => {
+      qc.setQueryData<ChatMessageView[]>(messagesQueryKey(sessionId, chatId), (old = []) =>
+        removeMessageById(old, id),
+      );
     },
+    [qc],
+  );
+
+  /**
+   * A page-scoped WebSocket can miss events while its route is unmounted. Once the server confirms
+   * that the current session subscription is active again, mark every cached chat slice for that
+   * session stale. Active slices refetch immediately; inactive slices refetch when next observed.
+   */
+  const invalidateSessionMessages = useCallback(
+    (sessionId: string): Promise<void> => {
+      if (!sessionId) return Promise.resolve();
+      return qc.invalidateQueries({ queryKey: [MESSAGE_QUERY_PREFIX, sessionId] });
+    },
+    [qc],
+  );
+
+  return {
+    appendMessage,
+    updateMessage,
+    removeMessage,
+    invalidateSessionMessages,
   };
 }
