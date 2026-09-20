@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { getMetadataArgsStorage, type EntityTarget } from 'typeorm';
+import { getMetadataArgsStorage } from 'typeorm';
 
 /**
  * The DATA connection owns only entities under these directories. Keep this list
@@ -48,7 +48,7 @@ function collectEntityFiles(directory: string, extension: string, files: string[
   }
 }
 
-export function loadDataEntities(): EntityTarget<unknown>[] {
+export function loadDataEntities(): Function[] {
   // ts-node / the dev CLI load .ts; compiled NestJS / the production CLI load .js.
   // Never load BOTH variants: that could register different constructors for the
   // same entity when a development checkout also contains compiled files.
@@ -75,19 +75,19 @@ export function loadDataEntities(): EntityTarget<unknown>[] {
     getMetadataArgsStorage().tables.map(table => table.target),
   );
 
-  const entities: EntityTarget<unknown>[] = [];
+  const entities: Function[] = [];
   const seen = new Set<unknown>();
   for (const moduleExports of exportsByFile) {
     for (const candidate of Object.values(moduleExports)) {
       if (typeof candidate === 'function' && decoratedTargets.has(candidate) && !seen.has(candidate)) {
         seen.add(candidate);
-        entities.push(candidate as EntityTarget<unknown>);
+        entities.push(candidate);
       }
     }
   }
 
   const registeredNames = new Set(
-    entities.map(entity => (entity as { name?: string }).name),
+    entities.map(entity => entity.name),
   );
   const missing = REQUIRED_ENTITY_NAMES.filter(name => !registeredNames.has(name));
   if (missing.length > 0) {
