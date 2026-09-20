@@ -10,6 +10,7 @@ import { createThrottlerRedisClient } from './common/throttler/throttler-redis.c
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { createBootDataSource } from './database/pg-boot-migrations';
+import { loadDataEntities } from './database/data-entities';
 import { SessionModule } from './modules/session/session.module';
 import { MessageModule } from './modules/message/message.module';
 import { TemplateModule } from './modules/template/template.module';
@@ -48,6 +49,16 @@ import { SearchModule } from './modules/search/search.module';
 import { SqlitePermissionsBoot } from './database/sqlite-file-permissions';
 
 import { TeamLeaderModule } from './modules/teamleader/teamleader.module';
+import { ApiKey } from './modules/auth/entities/api-key.entity';
+import { AuditLog } from './modules/audit/entities/audit-log.entity';
+import { TeamLeader } from './modules/teamleader/entities/team-leader.entity';
+import { Agent } from './modules/teamleader/entities/agent.entity';
+import { AgentTemplateSendUsage } from './modules/teamleader/entities/agent-template-send-usage.entity';
+
+// Normalize migration glob paths for TypeORM on Windows and Linux.
+// The data entities themselves are registered by class in loadDataEntities().
+const sourceGlob = (...segments: string[]): string =>
+  path.join(__dirname, ...segments).replace(/\\/g, '/');
 
 
 
@@ -122,7 +133,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
 @Module({
   imports: [
 
-    
+
     // Configuration
     ConfigModule.forRoot({
       isGlobal: true,
@@ -145,13 +156,15 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
           type: 'better-sqlite3' as const,
           database: configService.get<string>('database.database', './data/main.sqlite'),
           entities: [
-            __dirname + '/modules/auth/**/*.entity{.ts,.js}',
-            __dirname + '/modules/audit/**/*.entity{.ts,.js}',
-            __dirname + '/modules/teamleader/**/*.entity{.ts,.js}',
+            ApiKey,
+            AuditLog,
+            TeamLeader,
+            Agent,
+            AgentTemplateSendUsage,
           ],
           // Dedicated migrations dir for the main connection only (must NOT run the
           // data-connection migrations, which target session/webhook/message tables).
-          migrations: [__dirname + '/database/migrations-main/*{.ts,.js}'],
+          migrations: [sourceGlob('database', 'migrations-main', '*{.ts,.js}')],
           synchronize,
           migrationsRun: !synchronize,
           logging: configService.get<boolean>('database.logging', false),
@@ -171,17 +184,8 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
       useFactory: (configService: ConfigService) => {
         const dbType = configService.get<'sqlite' | 'postgres'>('dataDatabase.type', 'sqlite');
         const baseConfig = {
-          entities: [
-            __dirname + '/modules/session/**/*.entity{.ts,.js}',
-            __dirname + '/modules/webhook/**/*.entity{.ts,.js}',
-            __dirname + '/modules/message/**/*.entity{.ts,.js}',
-            __dirname + '/modules/template/**/*.entity{.ts,.js}',
-            __dirname + '/engine/**/*.entity{.ts,.js}',
-            __dirname + '/modules/integration/**/*.entity{.ts,.js}',
-            __dirname + '/modules/status-store/**/*.entity{.ts,.js}',
-            __dirname + '/modules/automation/**/*.entity{.ts,.js}',
-          ],
-          migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
+          entities: loadDataEntities(),
+          migrations: [sourceGlob('database', 'migrations', '*{.ts,.js}')],
           logging: configService.get<boolean>('dataDatabase.logging', false),
         };
 
@@ -207,8 +211,8 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
 
             ssl: configService.get<boolean>('dataDatabase.ssl', false)
               ? {
-                  rejectUnauthorized: configService.get<boolean>('dataDatabase.sslRejectUnauthorized', true),
-                }
+                rejectUnauthorized: configService.get<boolean>('dataDatabase.sslRejectUnauthorized', true),
+              }
               : false,
 
             // Never auto-sync Postgres in production; rely on migrations. Boot migrations execute
@@ -333,4 +337,4 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
   // files that better-sqlite3 created with umask permissions back to owner-only.
   providers: [SqlitePermissionsBoot],
 })
-export class AppModule {}
+export class AppModule { }

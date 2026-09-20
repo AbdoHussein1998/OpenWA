@@ -1,45 +1,44 @@
 import { DataSource } from 'typeorm';
+import * as path from 'path';
 import { loadCliEnv } from './load-cli-env';
 import { sqliteDataMainPathCollision } from '../config/env.validation';
+import { ApiKey } from '../modules/auth/entities/api-key.entity';
+import { AuditLog } from '../modules/audit/entities/audit-log.entity';
+import { TeamLeader } from '../modules/teamleader/entities/team-leader.entity';
+import { Agent } from '../modules/teamleader/entities/agent.entity';
+import { AgentTemplateSendUsage } from '../modules/teamleader/entities/agent-template-send-usage.entity';
 
 // Load environment variables with the app's precedence (mirrors data-source.ts / main.ts).
 loadCliEnv();
 
-// Same guard as data-source.ts: the TypeORM CLI never runs ConfigModule's validate(), so the
-// SQLite main/data file collision check from env.validation is re-applied here — a shared broken
-// env (DATABASE_NAME resolving to the main file) must refuse BOTH migration entry points, not just
-// the data one.
+// The TypeORM CLI does not run ConfigModule's validate(). Reject a SQLite data/main
+// database path collision for either migration entry point.
 const sqlitePathCollision = sqliteDataMainPathCollision(process.env);
 if (sqlitePathCollision) {
   throw new Error(sqlitePathCollision);
 }
 
 /**
- * Standalone TypeORM CLI DataSource for the MAIN connection (auth + audit).
+ * Standalone TypeORM CLI DataSource for the MAIN connection (auth, audit, team leader/agents).
  *
- * The app runs the main connection as a separate, ALWAYS-SQLite connection (app.module.ts), distinct
- * from the pluggable data connection. The default data-source.ts CLI only manages the data
- * connection's migrations, so without this the CLI could not run/generate the main-owned migrations
- * (migrations-main) — which matters the moment boot auto-migration is turned off
- * (MAIN_DATABASE_SYNCHRONIZE=false), where the schema must be managed via the CLI instead.
+ * Mirrors the runtime main connection in app.module.ts: SQLite database path,
+ * entity classes, and the dedicated main migrations. The CLI always disables
+ * synchronize because schema changes are managed through migrations.
  *
- * Mirrors the runtime main connection exactly: SQLite at ./data/main.sqlite, auth/audit entities,
- * migrations-main. synchronize is always false here — the CLI manages schema via migrations.
- *
- * Usage: `npm run migration:run:main` (dev) / `migration:run:main:prod` (compiled).
+ * Usage: npm run migration:run:main (dev) / migration:run:main:prod (compiled).
  */
 const mainDataSource = new DataSource({
   type: 'better-sqlite3',
-  // Mirrors the runtime main path (configuration.ts) — MAIN_DATABASE_NAME overrides the default
-  // ./data/main.sqlite (e.g. e2e points it at a temp file), so the CLI and the app never target
-  // different main databases.
+  // MAIN_DATABASE_NAME must match the runtime main database path.
   database: process.env.MAIN_DATABASE_NAME || './data/main.sqlite',
   entities: [
-  __dirname + '/../modules/auth/**/*.entity{.ts,.js}',
-  __dirname + '/../modules/audit/**/*.entity{.ts,.js}',
-  __dirname + '/../modules/teamleader/**/*.entity{.ts,.js}',
+    ApiKey,
+    AuditLog,
+    TeamLeader,
+    Agent,
+    AgentTemplateSendUsage,
   ],
-  migrations: [__dirname + '/migrations-main/*{.ts,.js}'],
+  migrations: [path.join(__dirname, 'migrations-main', '*{.ts,.js}').replace(/\\/g, '/')],
   synchronize: false,
   logging: process.env.DATABASE_LOGGING === 'true',
 });

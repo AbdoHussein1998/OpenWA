@@ -1,66 +1,58 @@
 import mainDataSource from './data-source-main';
+import { ApiKey } from '../modules/auth/entities/api-key.entity';
+import { AuditLog } from '../modules/audit/entities/audit-log.entity';
+import { TeamLeader } from '../modules/teamleader/entities/team-leader.entity';
+import { Agent } from '../modules/teamleader/entities/agent.entity';
+import { AgentTemplateSendUsage } from '../modules/teamleader/entities/agent-template-send-usage.entity';
 
-// The app runs the MAIN connection (auth/audit) as a separate always-SQLite connection. The
-// default data-source.ts CLI only manages the DATA connection's migrations, so this standalone
-// DataSource exists so the CLI can run/generate the main-owned migrations too.
 describe('main CLI DataSource', () => {
   it('targets the always-SQLite main connection', () => {
     expect(mainDataSource.options.type).toBe('better-sqlite3');
   });
 
-  it('uses the main-owned migrations dir, not the data migrations dir', () => {
+  it('uses the main-owned migrations, not the data migrations', () => {
     const migrations = (mainDataSource.options.migrations as string[]).join(' ');
     expect(migrations).toContain('migrations-main');
   });
 
-  it('covers the auth and audit entities (the main connection owns them)', () => {
-    const entities = (mainDataSource.options.entities as string[]).join(' ');
-    expect(entities).toContain('auth');
-    expect(entities).toContain('audit');
+  it('registers main-owned entity classes rather than glob strings', () => {
+    const entities = mainDataSource.options.entities;
+    expect(entities).toEqual([
+      ApiKey, AuditLog, TeamLeader, Agent, AgentTemplateSendUsage,
+    ]);
   });
 
-  // jest.resetModules() + a typed require forces a fresh evaluation of the module with the env var
-  // we set, proving MAIN_DATABASE_NAME flows into the DataSource options (not just the cached
-  // top-level import, which was evaluated with whatever env existed at spec load).
   it("defaults to './data/main.sqlite' when MAIN_DATABASE_NAME is unset", () => {
     const previous = process.env.MAIN_DATABASE_NAME;
     delete process.env.MAIN_DATABASE_NAME;
     jest.resetModules();
     try {
-      // require() (not dynamic import()) — the relative specifier trips TS2835 under
-      // moduleResolution:nodenext; jest.resetModules() above still forces a fresh evaluation.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const mod = require('./data-source-main') as typeof import('./data-source-main');
       expect(String(mod.default.options.database)).toBe('./data/main.sqlite');
     } finally {
       if (previous !== undefined) process.env.MAIN_DATABASE_NAME = previous;
+      else delete process.env.MAIN_DATABASE_NAME;
+      jest.resetModules();
     }
   });
 
-  it('honors MAIN_DATABASE_NAME when set (mirrors configuration.ts)', () => {
+  it('honors MAIN_DATABASE_NAME when configured', () => {
     const previous = process.env.MAIN_DATABASE_NAME;
     process.env.MAIN_DATABASE_NAME = '/tmp/test-main.sqlite';
     jest.resetModules();
     try {
-      // require() (not dynamic import()) — the relative specifier trips TS2835 under
-      // moduleResolution:nodenext; jest.resetModules() above still forces a fresh evaluation.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const mod = require('./data-source-main') as typeof import('./data-source-main');
       expect(String(mod.default.options.database)).toBe('/tmp/test-main.sqlite');
     } finally {
       if (previous !== undefined) process.env.MAIN_DATABASE_NAME = previous;
       else delete process.env.MAIN_DATABASE_NAME;
+      jest.resetModules();
     }
   });
 
-  it('refuses to load when DATABASE_NAME resolves to the main DB file (CLI collision guard)', () => {
-    // The migration CLI never runs ConfigModule's validate(), so the SQLite main/data collision
-    // guard is applied at module load instead — a shared broken env must fail the CLI too, before
-    // any migration runs against the wrong file.
-    //
-    // Pin DATABASE_TYPE explicitly because loadCliEnv() preserves existing process.env values.
-    // A developer/CI shell configured for Postgres must not silently turn this SQLite-specific
-    // regression test into the intentionally non-colliding Postgres branch.
+  it('rejects a DATA SQLite path that points to the MAIN SQLite database', () => {
     const prevType = process.env.DATABASE_TYPE;
     const prevMain = process.env.MAIN_DATABASE_NAME;
     const prevData = process.env.DATABASE_NAME;
@@ -68,9 +60,7 @@ describe('main CLI DataSource', () => {
     process.env.DATABASE_TYPE = 'sqlite';
     process.env.MAIN_DATABASE_NAME = '/tmp/cli-guard-main.sqlite';
     process.env.DATABASE_NAME = '/tmp/cli-guard-main.sqlite';
-
     jest.resetModules();
-
     try {
       expect(() => {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -79,13 +69,10 @@ describe('main CLI DataSource', () => {
     } finally {
       if (prevType !== undefined) process.env.DATABASE_TYPE = prevType;
       else delete process.env.DATABASE_TYPE;
-
       if (prevMain !== undefined) process.env.MAIN_DATABASE_NAME = prevMain;
       else delete process.env.MAIN_DATABASE_NAME;
-
       if (prevData !== undefined) process.env.DATABASE_NAME = prevData;
       else delete process.env.DATABASE_NAME;
-
       jest.resetModules();
     }
   });

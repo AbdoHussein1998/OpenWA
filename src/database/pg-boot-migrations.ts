@@ -1,27 +1,17 @@
 import { Client, ClientConfig } from 'pg';
 import { DataSource, DataSourceOptions } from 'typeorm';
 
-// The postgres data connection runs its boot migrations while holding a session-scoped Postgres
-// advisory lock, so replicas that boot at the same time serialize instead of racing DDL against
-// the shared migrations ledger: the lock holder applies the chain while every other process waits
-// inside pg_advisory_lock, then sees a filled ledger and applies nothing. This replaces TypeORM's
-// built-in migrationsRun for that connection only (it has no cross-process serialization); the
-// sqlite connections keep @nestjs/typeorm's default construction + initialize path unchanged.
-//
-// Lock key in the two-int4 form — exact in JavaScript (a single bigint key would exceed
-// Number.MAX_SAFE_INTEGER). The values are fixed so every process and version agrees:
-//   0x4f5741 = "OWA" in ASCII bytes   0x626f6f74 = "boot" in ASCII bytes
+// Replicas serialize boot migrations using a session-scoped two-int4 advisory
+// lock. These keys are exactly representable in JavaScript and must remain
+// stable across app versions and replicas.
 export const POSTGRES_BOOT_MIGRATION_LOCK_KEYS: readonly [number, number] = [0x4f5741, 0x626f6f74];
 
-// Just the pg client surface used here; doubles as the mock seam for the unit spec. Function
-// properties (not method signatures) — these are callback holders, nothing binds `this`.
 export interface AdvisoryLockClient {
   connect: () => Promise<unknown>;
   query: (text: string, values?: unknown[]) => Promise<unknown>;
   end: () => Promise<unknown>;
 }
 
-// Test seams over the two constructions this module performs.
 export interface BootDataSourceDeps {
   createDataSource?: (options: DataSourceOptions) => DataSource;
   createLockClient?: (config: ClientConfig) => AdvisoryLockClient;
@@ -30,12 +20,9 @@ export interface BootDataSourceDeps {
 type PostgresOptions = Extract<DataSourceOptions, { type: 'postgres' }>;
 
 /**
- * dataSourceFactory for the 'data' connection. Postgres boot migrations execute here, under the
- * advisory lock, BEFORE the DataSource is handed to any provider — same ordering the built-in
- * migrationsRun gave (it finished inside DataSource.initialize()). Non-postgres options take
- * @nestjs/typeorm's default path: construct only, let the wrapper initialize as before. The
- * wrapper also skips its own initialize() for the postgres branch because the DataSource comes
- * back already initialized, and keeps applying retryAttempts/retryDelay to this whole factory.
+ * Called by TypeOrmModule's dataSourceFactory for the DATA connection only.
+ * SQLite keeps Nest's default construction/initialization/migration path.
+ * PostgreSQL runs migrations while holding a cross-replica advisory lock.
  */
 export async function createBootDataSource(
   options: DataSourceOptions | undefined,
@@ -45,13 +32,14 @@ export async function createBootDataSource(
   const createLockClient = deps.createLockClient ?? (config => new Client(config));
 
   if (options?.type !== 'postgres') {
-    // useFactory always resolves a full options object; the optional parameter is the library's
-    // defensive typing, not a state this connection can actually boot in.
+    // The app supplies an options object; the optional signature comes from
+    // @nestjs/typeorm's dataSourceFactory contract.
     return createDataSource(options as DataSourceOptions);
   }
 
-  // This connection's migrations run HERE, under the lock — neutralize migrationsRun so the
-  // DataSource itself never starts them unsynchronized inside initialize().
+  // Preserve *all* entities, migration paths, schema, and driver settings.
+  // Disable the built-in migration runner only on PostgreSQL: migration execution
+  // below is serialized across replicas while the lock is held.
   const dataSource = createDataSource({ ...options, migrationsRun: false });
   try {
     await dataSource.initialize();
@@ -60,11 +48,9 @@ export async function createBootDataSource(
       await lockClient.connect();
       await lockClient.query('SELECT pg_advisory_lock($1, $2)', [...POSTGRES_BOOT_MIGRATION_LOCK_KEYS]);
       try {
-        // Same transaction mode DataSource.initialize() passes for the built-in migrationsRun.
         await dataSource.runMigrations({ transaction: options.migrationsTransactionMode });
       } finally {
-        // Session-scoped lock: even when the unlock call itself fails, end() below tears the
-        // session — and with it the lock — down, so no crashed boot can leave it held.
+        // Closing the session also releases its lock if explicit unlock fails.
         await lockClient
           .query('SELECT pg_advisory_unlock($1, $2)', [...POSTGRES_BOOT_MIGRATION_LOCK_KEYS])
           .catch(() => undefined);
@@ -73,9 +59,7 @@ export async function createBootDataSource(
       await lockClient.end().catch(() => undefined);
     }
   } catch (error) {
-    // Same failure handling as DataSource.initialize()'s own migrate step: never leave a
-    // half-open DataSource behind (the boot retry loop would stack their pools). The error still
-    // fails boot via the factory's rejection.
+    // Do not leave an initialized pool behind if a boot migration fails.
     await dataSource.destroy().catch(() => undefined);
     throw error;
   }
@@ -90,17 +74,10 @@ function lockClientConfig(options: PostgresOptions): ClientConfig {
     user: options.username,
     password: options.password,
     database: options.database,
-    // Same ssl shape TypeORM's postgres driver forwards to pg; cast only because the two
-    // packages type their TLS options independently.
     ssl: options.ssl as ClientConfig['ssl'],
-    // Bound a stuck connect like the pool does (app.module's extra carries the same setting).
     connectionTimeoutMillis: extra.connectionTimeoutMillis ?? 10000,
-    // This client's only statements are pg_advisory_lock/unlock, and statement_timeout applies to
-    // ANY command — including the wait inside pg_advisory_lock — so it must be OFF here. A config
-    // `statement_timeout: 0` would NOT do it: pg drops falsy values from the startup packet, so
-    // disable it via the startup `options` string instead, which also overrides any role- or
-    // database-level default the server may carry. (lock_timeout never applies to advisory locks,
-    // so it needs no override.)
+    // Waiting for another replica's migration lock must not be cut short by
+    // the server-side statement_timeout configured for normal API queries.
     options: '-c statement_timeout=0',
   };
 }
