@@ -1,5 +1,13 @@
 # 05 - Database Design
 
+> **Branch scope:** `SunProject`. This chapter distinguishes the *live session* from
+> its *historical tombstone*, describes the two named TypeORM connections, and identifies
+> cross-connection business identifiers that **cannot** be enforced by a database FK.
+> SQL blocks below are architectural illustrations unless marked as exact existing SQL:
+> entity decorators and applied migration files in the checked-out commit are the
+> authoritative column definitions and constraints. Do not apply illustrative DDL
+> directly to a production database.
+
 ## 5.1 Overview
 
 OpenWA uses a database to store:
@@ -9,73 +17,65 @@ OpenWA uses a database to store:
 - Message history (optional)
 - API keys & authentication
 - Audit logs
+- Team Leaders, Agents, Agent assignments and Agent template-send usage
+- Deleted-session tombstones for historical authorization
+- Session ownership / lease metadata and tenant-aware message history
 
 ### Database Support
 
-OpenWA supports two database backends that can be selected at deployment time:
+The `main` connection is **always SQLite**. The independently configured `data`
+connection uses SQLite (`better-sqlite3`) or PostgreSQL. The choice of PostgreSQL
+improves concurrent-write capacity; it does **not** make multi-API-replica production
+deployment supported. Live engines and some workflow state remain process-local.
 
-| Database       | Use Case                                    | Sessions | Horizontal Scaling |
-| -------------- | ------------------------------------------- | -------- | ------------------ |
-| **SQLite**     | Development, personal bot, low-resource VPS | 1-5      | ❌                 |
-| **PostgreSQL** | Production, multi-session, high volume      | 5+       | ✅                 |
+| Database / connection | Primary responsibility | Deployment qualification |
+| --- | --- | --- |
+| Main SQLite | Authentication, teams, Agent quotas and audit | Separate connection even when `data` also uses SQLite |
+| Data SQLite | Sessions, tombstones, messages, webhooks and integration data | Single-writer concurrency; do not infer a fixed maximum session count |
+| Data PostgreSQL | The same data model with stronger concurrent-write capacity | Ownership leases/forwarding do not by themselves make multi-replica deployment safe |
 
-> [!NOTE]
-> **SQLite as a Production Option**
->
-> SQLite can be used in production with limitations:
->
-> - Maximum ~5 concurrent sessions (due to single-writer limitation)
-> - Single-file storage — back up `./data/*.sqlite` rather than relying on a dump tool
-> - No horizontal scaling support
-> - Ideal for: personal bots, small businesses with 1-3 WhatsApp numbers
->
-> For configuration, see [03 - System Architecture: Pluggable Adapters](./03-system-architecture.md#313-pluggable-adapters)
+Back up **both** databases and the engine-auth directories. Database rows do not
+contain the WhatsApp authentication credentials. See §5.8 for a full-system backup.
+
 
 ### Dual-Database Architecture
 
-OpenWA v0.2+ implements a **dual-database architecture** that separates boot configuration from user data:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        OpenWA Application                        │
-├─────────────────────────────┬───────────────────────────────────┤
-│      Main DB (SQLite)       │        Data DB (Pluggable)        │
-│  Default ./data/main.sqlite │   SQLite or PostgreSQL (config)   │
-├─────────────────────────────┼───────────────────────────────────┤
-│ • api_keys                  │ • sessions                        │
-│ • audit_logs                │ • webhooks                        │
-│                             │ • messages                        │
-│                             │ • message_batches                 │
-│                             │ • templates                       │
-│                             │ • status_updates                  │
-│                             │ • webhook_delivery_failures       │
-│                             │ • plugin_instances                │
-│                             │ • ingress_events                  │
-│                             │ • conversation_mappings           │
-│                             │ • integration_delivery_failures   │
-│                             │ • baileys_stored_messages (engine)│
-│                             │ • lid_mappings (engine)           │
-│                             │ • automation_rules                │
-└─────────────────────────────┴───────────────────────────────────┘
+```mermaid
+flowchart LR
+    API[NestJS API] --> MAIN[(main: SQLite)]
+    API --> DATA[(data: SQLite or PostgreSQL)]
+    MAIN --> AUTH[api_keys / audit_logs]
+    MAIN --> TEAMS[Team Leaders / Agents / template usage]
+    DATA --> LIVE[sessions / webhooks / templates]
+    DATA --> HIST[session_tombstones / messages]
+    DATA --> MORE[batches / integration / engine stores]
+    LIVE -.->|business identifier, not DB FK| TEAMS
+    HIST -.->|historical authorization| TEAMS
 ```
 
-| Component   | Database             | Location                       | Purpose                                    |
-| ----------- | -------------------- | ------------------------------ | ------------------------------------------ |
-| **Main DB** | SQLite (always)      | `./data/main.sqlite` (default) | Boot-critical config, API keys, audit logs |
-| **Data DB** | SQLite or PostgreSQL | Configurable                   | User data, sessions, messages, webhooks    |
+| Connection | Default / configuration | Principal stored records |
+| --- | --- | --- |
+| `main` | SQLite, default `./data/main.sqlite`; path overridable via `MAIN_DATABASE_NAME` | `api_keys`, `audit_logs`, Team Leader and Agent records, Agent template-send usage |
+| `data` | `DATABASE_TYPE=sqlite` or `postgres` | `sessions`, `session_tombstones`, `webhooks`, `messages`, `message_batches`, `templates`, engine stores, integration and automation records |
 
-The main DB is unconditionally SQLite, but its _path_ is not fixed: `MAIN_DATABASE_NAME` overrides the
-`./data/main.sqlite` default, and is honoured by both the runtime connection factory
-(`src/config/configuration.ts`) and the CLI DataSource (`src/database/data-source-main.ts`).
+**Cross-connection identifiers are not foreign keys.** `Session.ownerTeamLeaderId`
+(on `data`) and `Agent.assignedSessionId` (on `main`) link business entities in
+separate databases. Application services validate ownership and assignment; a
+PostgreSQL foreign key cannot point into the application's separate SQLite database.
+Within `main`, API-key-to-Team-Leader/Agent relations can use the ordinary TypeORM
+relations defined by their actual entities.
 
-> [!IMPORTANT]
-> **Why Dual-Database?**
->
-> The Main DB is always SQLite to ensure the application can bootstrap without external dependencies:
->
-> - API keys needed for authentication before any external DB connection
-> - Audit logs must persist even if Data DB fails
-> - Enables switching Data DB type without losing authentication
+**Historical provenance is intentionally separate from a live session.**
+`messages.sessionId` is a scalar identifier with **no FK to `sessions.id`** so
+retained message history can outlive a deleted live session. A corresponding
+`session_tombstones` record preserves the information needed to make an explicit
+historical access decision. The tombstone is not a running engine or a route to
+start/send again. See §§5.2, 5.3.1 and 5.5.
+
+The main connection stays SQLite to allow local authentication and audit data to
+remain separate from a replaceable data database. Switching the `data` connection
+does **not** migrate `main` records or their cross-database identifiers.
+
 
 #### Built-in PostgreSQL Orchestration
 
@@ -172,99 +172,58 @@ connectedAt: Date | null;
 
 ## 5.2 Entity Relationship Diagram
 
+The two diagrams below separate **database-enforced relations** (solid lines)
+from **logical ownership / historical associations** (dotted lines). A scalar
+identifier is *not* a TypeORM relation just because it has the same value as a
+primary key elsewhere.
+
+### Data connection — live and historical records
+
 ```mermaid
-erDiagram
-    SESSION ||--o{ WEBHOOK : has
-    SESSION ||--o{ MESSAGE : contains
-
-    SESSION {
-        uuid id PK
-        varchar name UK
-        varchar status
-        varchar phone
-        varchar pushName
-        json config
-        varchar proxyUrl
-        varchar proxyType
-        timestamp connectedAt
-        timestamp lastActiveAt
-        varchar nodeId
-        timestamp claimedAt
-        varchar nodeUrl
-        timestamp leaseExpiresAt
-        timestamp createdAt
-        timestamp updatedAt
-    }
-
-    WEBHOOK {
-        uuid id PK
-        uuid sessionId FK
-        varchar url
-        json events
-        varchar secret
-        json headers
-        json filters
-        boolean active
-        int retryCount
-        timestamp lastTriggeredAt
-        timestamp createdAt
-        timestamp updatedAt
-    }
-
-    MESSAGE {
-        uuid id PK
-        uuid sessionId FK
-        varchar waMessageId
-        varchar chatId
-        varchar chatName
-        varchar author
-        varchar from
-        varchar to
-        text body
-        varchar type
-        varchar direction
-        bigint timestamp
-        json metadata
-        varchar status
-        timestamp createdAt
-        varchar mediaPath
-        varchar mediaMimetype
-    }
-
-    API_KEY {
-        uuid id PK
-        varchar name
-        varchar keyHash UK
-        varchar keyPrefix
-        varchar role
-        simple_array allowedIps
-        simple_array allowedSessions
-        boolean isActive
-        timestamp expiresAt
-        timestamp lastUsedAt
-        int usageCount
-        timestamp createdAt
-        timestamp updatedAt
-    }
-
-    AUDIT_LOG {
-        uuid id PK
-        varchar action
-        varchar severity
-        varchar apiKeyId
-        varchar apiKeyName
-        varchar sessionId
-        varchar sessionName
-        varchar ipAddress
-        varchar userAgent
-        varchar method
-        varchar path
-        int statusCode
-        json metadata
-        text errorMessage
-        timestamp createdAt
-    }
+flowchart TD
+    Session["sessions (live session UUID, ownerTeamLeaderId)"]
+    Webhook["webhooks (sessionId FK)"]
+    Automation["automation_rules (sessionId FK)"]
+    Message["messages (scalar sessionId, no Session FK)"]
+    Tombstone["session_tombstones (historical session identity / ownership)"]
+    Batch["message_batches (session_id)"]
+    Session -->|DB relation / delete policy in entity| Webhook
+    Session -->|DB relation / delete policy in entity| Automation
+    Session -.->|historical provenance only| Message
+    Tombstone -.->|authorize eligible deleted-session history| Message
+    Session -.->|logical session identity| Batch
+    Session -.->|deletion records historical identity| Tombstone
 ```
+
+The `session_tombstones` shape and which other session-scoped tables carry an FK must
+be taken from `src/modules/session/` entities and the migrations in the checked-out
+branch. Do **not** infer that every table with a `sessionId` column cascades on
+session deletion. In particular, `messages.sessionId` intentionally does not.
+
+### Main connection and cross-connection boundaries
+
+```mermaid
+flowchart LR
+    API["main.api_keys"]
+    TL["main: Team Leader"]
+    Agent["main: Agent"]
+    Usage["main: Agent template-send usage"]
+    Session["data.sessions"]
+    Tombstone["data.session_tombstones"]
+    API -->|main-DB entity relation| TL
+    API -->|main-DB entity relation| Agent
+    TL -->|main-DB entity relation where declared| Agent
+    Agent -->|main-DB reference where declared| Usage
+    TL -.->|ownerTeamLeaderId: application-enforced| Session
+    Agent -.->|assignedSessionId: application-enforced| Session
+    TL -.->|historical owner: application-enforced| Tombstone
+```
+
+An Agent's session access is the intersection of authenticated role/capability,
+Team Leader ownership, current assignment, and any `allowedSessions` ceiling.
+Historical access is a **separate** permission check; it must not resurrect a
+deleted session or grant access to another tenant's messages.
+
 
 ## 5.3 Table Specifications
 
@@ -280,9 +239,16 @@ erDiagram
 > any doubt. The **types** in these blocks stay illustrative (they are dialect-portable and defined
 > by the TypeORM entities), but every identifier is literal.
 
-### 5.3.1 sessions
+### 5.3.1 sessions and session_tombstones
 
-Stores WhatsApp session configuration and state.
+`sessions` stores **live** WhatsApp session configuration, process ownership and
+connection state. Deletion is not an extra engine state such as `status='deleted'`:
+a historical record is kept separately and the live session is retired through the
+lifecycle controls. Do not query tombstones when looking for engines to auto-start,
+adopt or reconnect.
+
+The following SQL is a *schematic* representation of the live table. Check the
+current entity and migrations for any branch-specific additions and exact types.
 
 ```sql
 CREATE TABLE sessions (
@@ -302,6 +268,7 @@ CREATE TABLE sessions (
     "claimedAt" TIMESTAMP WITH TIME ZONE,
     "nodeUrl" VARCHAR(2048),
     "leaseExpiresAt" TIMESTAMP WITH TIME ZONE,
+    "ownerTeamLeaderId" VARCHAR,           -- logical reference to main DB, NOT a DB FK
     "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
@@ -312,6 +279,47 @@ CREATE TABLE sessions (
 
 > [!NOTE]
 > Auth state is **not** stored in this table. Both engines persist credentials on the **filesystem** (`whatsapp-web.js` LocalAuth; Baileys `useMultiFileAuthState`). The `baileys_stored_messages` table holds only Baileys' serialized message store (the library ships none), not credentials.
+
+#### Session tombstones and deletion invariants
+
+`session_tombstones` is the **historical session-identity / tenant-authorization
+record** used when a live session row has been removed but retained records such
+as `messages` still refer to its UUID. It must preserve the identifying and
+ownership context required by `SessionTenantAccessService.assertHistoricalSessionAccess`
+for authorized history reads. Its exact columns, uniqueness policy and physical
+retention are migration-specific; do **not** assume a `deletedAt` column on
+`sessions`, a fixed expiry interval, or a particular `session_tombstones` DDL
+without inspecting the branch's entity and migration.
+
+```mermaid
+flowchart TD
+    Delete[Authorized DELETE session] --> Mark[Establish deletion / tombstone protection]
+    Mark --> Retire[Retire current engine and release local resources]
+    Retire --> Purge[Remove both engines' auth directories]
+    Purge --> Remove[Retire live session row and its live-only children]
+    Remove --> History[Keep historical identity and retained messages]
+    History --> Read[Explicit history-aware access check]
+    Read -->|Authorized| Messages[Read persisted messages]
+    Read -->|Other tenant / not entitled| Deny[Deny without session enumeration]
+```
+
+**Race safety:** an in-flight `start()` can finish after deletion has begun. The
+session lifecycle must recheck the deletion marker after initialization, tear
+down any newly initialized engine, and re-purge auth files. Never implement
+user-facing deletion as `repository.delete(id)` alone: that bypasses engine
+teardown, reservation/ownership fencing and filesystem cleanup. See
+[`31-session-lifecycle-design.md`](./31-session-lifecycle-design.md) INV-5.
+
+**Lease/takeover safety:** an expired ownership lease can permit an eligible live
+session to be adopted; a deleted session is **not eligible**. A stale engine
+callback or losing node must not recreate a live row, clobber the tombstone, or
+restore a deleted session to `ready`. A lease-loss cleanup destroys local engines
+without writing a competing status row. See the lifecycle invariant catalog,
+INV-3/INV-5/INV-6/INV-7.
+
+**Authorization safety:** only explicitly history-aware endpoints may call
+`assertHistoricalSessionAccess`. Live-session methods must use
+`assertSessionAccess` and must not treat a tombstone as a usable session.
 
 **Session Status Values:**
 
@@ -327,8 +335,8 @@ stateDiagram-v2
     ready --> action_required: Needs an operator
     action_required --> disconnected: stop() / logout()
     disconnected --> initializing: reconnect()
-    ready --> [*]: DELETE
-    failed --> [*]: DELETE
+    ready --> [*]: lifecycle-controlled DELETE
+    failed --> [*]: lifecycle-controlled DELETE
 ```
 
 | Status            | Description                                                       |
@@ -462,16 +470,20 @@ CREATE TABLE automation_rules (
 
 ### 5.3.3 messages
 
-Stores message history (optional, can be disabled). This is a **plain (non-partitioned)** table — the same schema on SQLite and PostgreSQL.
+Stores message history (optional, can be disabled). This is a **plain (non-partitioned)** table — the same schema on SQLite and PostgreSQL. `sessionId` deliberately has **no FK to the live `sessions` table**: deleting a session must not automatically erase historical provenance. Access to persisted records for a deleted UUID uses a historical session tombstone and an explicit historical authorization check, not a live engine lookup.
+
+`sentByPhone` / `sentToPhone` are nullable resolved phone numbers, **not WhatsApp JIDs**. Keep `from`, `to`, `chatId` and optional group `author` as the authoritative identity fields. An unresolved `@lid` cannot be converted into a phone by treating its numeric identifier as a telephone number. For an inbound group message, resolve the actual sender from `author` rather than the group JID; group/non-phone recipients may have no recipient phone.
 
 ```sql
 CREATE TABLE messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "sessionId" UUID NOT NULL,
+    "sessionId" UUID NOT NULL,           -- intentionally NO REFERENCES sessions(id)
     "waMessageId" VARCHAR,                -- nullable; transient outgoing rows have none yet
     "chatId" VARCHAR NOT NULL,
     "chatName" VARCHAR,                   -- nullable; contact pushName / group name when known
-    author VARCHAR,                       -- nullable; participant JID for a group message ("from" is the group)
+    author VARCHAR,                       -- nullable; participant JID for group message ("from" may be group)
+    "sentByPhone" VARCHAR,                -- nullable: resolved sender phone, not a fabricated LID
+    "sentToPhone" VARCHAR,                -- nullable: resolved recipient phone; group/non-phone IDs may have no number
     "from" VARCHAR NOT NULL,
     "to" VARCHAR NOT NULL,
     body TEXT,
@@ -515,34 +527,58 @@ CREATE UNIQUE INDEX "UQ_messages_sessionId_waMessageId"
 
 ---
 
-### 5.3.5 api_keys
+### 5.3.5 api_keys, Team Leaders and Agents (main connection)
 
-Stores API keys for authentication. Lives on the **main** (always-SQLite) connection.
+These records are held in the **always-SQLite `main` connection**. Their actual
+entity decorators and `migrations-main/` files define the live DDL. The short
+SQL below retains the original `api_keys` example and documents its changed
+business relationships; it is not a complete migration for all three entities.
 
 ```sql
+-- Illustrative shape: check ApiKey entity and the applied main migrations.
 CREATE TABLE api_keys (
     id VARCHAR PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    "keyHash" VARCHAR(64) NOT NULL,                -- UNIQUE index
-    "keyPrefix" VARCHAR(12) NOT NULL,              -- shown in the UI; the full key is never stored
-    role VARCHAR(20) NOT NULL DEFAULT 'operator',  -- admin | operator | viewer
-    "allowedIps" TEXT,                             -- simple-array (comma-joined), null = any IP
-    "allowedSessions" TEXT,                        -- simple-array, null = all sessions
+    "keyHash" VARCHAR(64) NOT NULL UNIQUE,
+    "keyPrefix" VARCHAR(12) NOT NULL,
+    role VARCHAR(20) NOT NULL DEFAULT 'operator',
+    "allowedIps" TEXT,
+    "allowedSessions" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT 1,
     "expiresAt" DATETIME,
     "lastUsedAt" DATETIME,
     "usageCount" INTEGER NOT NULL DEFAULT 0,
     "createdAt" DATETIME NOT NULL DEFAULT (datetime('now')),
     "updatedAt" DATETIME NOT NULL DEFAULT (datetime('now'))
+    -- Main-DB Team Leader / Agent links: exact column names and FK actions
+    -- must be read from the current ApiKey entity and main migrations.
 );
-
-CREATE UNIQUE INDEX "IDX_df3b25181df0b4b59bd93f16e1" ON api_keys("keyHash");
 ```
 
-> [!NOTE]
-> Access control is **role-based** (`admin` / `operator` / `viewer`), optionally scoped by `allowedIps` and `allowedSessions`. There is no granular `permissions` string array — see [04 - Security Design](./04-security-design.md) for what each role can do.
+`ApiKeyRole` contains **`ADMIN`, `OPERATOR`, `VIEWER`, `TEAM_LEADER` and `AGENT`**.
+A role/capability check and a session-level ownership/assignment check are
+separate. A nonempty `allowedSessions` list further **restricts** the effective
+session scope; it does not grant an Agent access to an unassigned session or a
+Team Leader access to another Team Leader's session.
 
----
+**Team Leader / Agent relationship:** the Team Leader and Agent entities, their
+API-key bindings and Agent stored-template usage records live in `main`. Agent
+assignment (`assignedSessionId`) points logically to a `data.sessions` UUID;
+`data.sessions.ownerTeamLeaderId` points logically back to an owner in `main`.
+Neither is a cross-database SQL FK. Changes to ownership, assignment or team
+records require service-layer consistency checks and relevant permissions.
+
+**Template quota records:** `AgentTemplateQuotaService` uses the `main` connection
+to account for an authenticated Agent's rolling 24-hour **stored-template send**
+quota. These records are not a generic WhatsApp send-rate limit and do not replace
+session authorization. Check the actual `AgentTemplateSendUsage` entity for its
+column names, indexes and deletion policy; do not guess an unverified DDL.
+
+**Deletion and retained history:** reassignment or deletion of a live session
+must not silently transfer its tombstone-backed historical messages to another
+Agent or Team Leader. Historical access is checked against the stored historical
+identity and the authenticated caller's permitted scope.
+
 
 ### 5.3.6 audit_logs
 
@@ -644,11 +680,12 @@ The data connection also owns:
 - **`integration_delivery_failures`** — DLQ-of-record for both inbound (ingress) and outbound (provider egress) delivery failures (`src/modules/integration/entities/integration-delivery-failure.entity.ts`).
 - **`baileys_stored_messages`** — Baileys engine message store — the serialized WAMessage proto (`src/engine/adapters/baileys-stored-message.entity.ts`); present only when the Baileys engine is used. (Credentials live on the filesystem, not here.)
 - **`lid_mappings`** — LID↔phone-number identity mappings (`src/engine/identity/lid-mapping.entity.ts`).
+- **`session_tombstones`** — historical session identity / ownership retained after the live session is removed, for explicit tenant-scoped history authorization. This does **not** represent an engine, a reconnect candidate or a normal live-session route target. Verify the exact entity/migration fields before adding SQL or import/export assumptions.
 
 Additionally, the `AddMessagesFts` migration creates the full-text-search structures over `messages` (a FTS5 virtual table on SQLite, a generated `body_ts` `tsvector` column plus GIN index on PostgreSQL) that back the `/search` endpoint.
 
 > [!NOTE]
-> **Tables that do _not_ exist.** Earlier drafts referenced `contacts`, `session_logs`, `webhook_logs`, `api_key_logs`, `webhook_idempotency`, and `ip_whitelist`. None of these are implemented. Contacts are read live from the engine; auditing is the single `audit_logs` table; webhook idempotency is not a persisted table; and per-key IP restrictions are stored inline on `api_keys.allowed_ips` (a `simple-array`), not in a separate `ip_whitelist` table.
+> **Do not invent tables or physical constraints.** The supplied baseline did not implement `contacts`, `session_logs`, `webhook_logs`, `api_key_logs`, `webhook_idempotency`, or `ip_whitelist`. The SunProject Team Leader/Agent and session-tombstone additions do not by themselves imply that any of those unrelated tables exist. Check the checked-out entities and migrations; `api_keys.allowedIps` is inline rather than a separate IP-whitelist table.
 
 ---
 
@@ -656,7 +693,10 @@ Additionally, the `AddMessagesFts` migration creates the full-text-search struct
 
 ### Query Pattern Analysis
 
-These indexes are the ones declared on the entities (see §5.3); the rows below map them to the hot query paths.
+These indexes are the ones shown in the supplied baseline entity-backed design;
+additional SunProject indexes on tombstones, ownership and team/Agent records
+must be checked in the corresponding entity decorators and applied migrations.
+Do not assert that a new index exists solely because a query would benefit from it.
 
 | Query Pattern                    | Index Used                                                  | Frequency |
 | -------------------------------- | ----------------------------------------------------------- | --------- |
@@ -668,6 +708,8 @@ These indexes are the ones declared on the entities (see §5.3); the rows below 
 | Message stats over a date range  | `IDX_messages_createdAt`                                    | Medium    |
 | Find a session's webhooks        | `IDX_webhooks_sessionId`                                    | Very High |
 | Authenticate API key             | UNIQUE on `api_keys("keyHash")`, main DB                    | Very High |
+| Historical message access        | `session_tombstones` lookup and tenant check; inspect entity/migration for physical index | Depends on history use |
+| Tenant-scoped live sessions      | `sessions.ownerTeamLeaderId` / Agent assignment; inspect entity/migration for physical indexes | Depends on team activity |
 | Filter audit logs                | `audit_logs` indexes on `action` / `apiKeyId` / `sessionId` | Medium    |
 
 ### Composite & Unique Indexes (as implemented)
@@ -728,141 +770,156 @@ REINDEX TABLE messages;
 ### Message Storage Flow
 
 ```mermaid
-flowchart TB
-    subgraph Inbound["Inbound Message"]
-        E[Engine Event] --> P[Process]
-        P --> S{Store Enabled?}
-        S -->|Yes| DB[(Database)]
-        S -->|No| W[Webhook Only]
-        DB --> W
-    end
-
-    subgraph Outbound["Outbound Message"]
-        A[API Request] --> V[Validate]
-        V --> Q[Queue]
-        Q --> EN[Engine Send]
-        EN --> SR{Store Enabled?}
-        SR -->|Yes| DBO[(Database)]
-        SR -->|No| R[Response]
-        DBO --> R
-    end
+flowchart TD
+    In[Engine inbound event] --> Project[MessageProjector]
+    Project --> Store{Message persistence enabled?}
+    Store -->|Yes| Hist[(data.messages: deduplicated history)]
+    Store -->|No| Event[Live event/webhook path]
+    Hist --> Event
+    API[Authenticated outbound API request] --> Scope[Capability + live session/tenant scope]
+    Scope --> Send[MessageSendService]
+    Send --> Engine[Live WhatsApp engine send]
+    Engine --> Result[Persist send result when enabled]
+    Result --> Response[HTTP result / live event]
+    Hist --> History[Explicitly history-aware DB read]
+    Tomb[(data.session_tombstones)] --> HAuth[Historical tenant-access check]
+    HAuth --> History
 ```
 
-### Session State Flow
+An ordinary outbound send is not required to pass through BullMQ. Webhook delivery
+and bulk-send orchestration have their own queues/workers or process-local state;
+do not merge them into a fictitious mandatory send queue. The persisted-message
+endpoint, live WhatsApp history endpoint, socket events and React Query thread
+cache are distinct data paths.
+
+### Live Session, Tombstone and Ownership Flow
 
 ```mermaid
-flowchart LR
-    subgraph Memory["In-Memory State"]
-        WA[WhatsApp Client]
-        QR[QR Code]
-        CONN[Connection Status]
-    end
-
-    subgraph Persistent["Database State (sessions row)"]
-        CONFIG[Session Config]
-        META[status / phone / pushName]
-        TS[connectedAt / lastActiveAt]
-    end
-
-    subgraph FS["Engine Auth (not in sessions table)"]
-        FSAUTH[whatsapp-web.js: filesystem LocalAuth]
-        BAUTH[Baileys: filesystem useMultiFileAuthState]
-    end
-
-    Memory -->|Sync| Persistent
-    Persistent -->|Restore| Memory
+flowchart TD
+    Created[(data.sessions)] --> Claim[Local engine start / ownership claim]
+    Claim --> Registry[In-process EngineRegistry]
+    Registry --> Status[Ownership-fenced status persistence]
+    Status --> Created
+    Created --> Delete[Authorized lifecycle-controlled delete]
+    Delete --> Guard[Deletion reservation / tombstone guard]
+    Guard --> Tear[Destroy live engine and purge both auth directories]
+    Tear --> Retired[Live session retired]
+    Retired --> Tomb[(data.session_tombstones)]
+    Created -.->|session UUID remains provenance| Messages[(data.messages)]
+    Tomb --> Historical[Explicit historical authorization]
+    Messages --> Historical
+    Historical -->|allowed| Read[Read stored messages]
+    Historical -->|denied| Deny[404 non-disclosing denial]
 ```
+
+The filesystem holds engine credentials; an in-memory registry holds active
+engine objects; `sessions` holds live connection/ownership metadata;
+`session_tombstones` holds the historical authorization context. These are not
+interchangeable stores. In particular, a tombstone cannot be used by takeover,
+boot restoration or sending to manufacture a running engine.
+
 
 ## 5.6 Migration Strategy
 
-OpenWA runs **two separate TypeORM connections**, each with its own migrations directory and CLI DataSource:
+OpenWA uses two named TypeORM connections, separate entity registrations and
+separate migration ledgers. `main` is always SQLite; `data` is SQLite or
+PostgreSQL. The baseline migration examples in the supplied document predate
+some SunProject features and are **not** a complete branch migration inventory.
 
-| Connection | DataSource            | Migrations dir                  | Owns                                                                                                                                                                                                                                                                                                     |
-| ---------- | --------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **main**   | `data-source-main.ts` | `src/database/migrations-main/` | `api_keys`, `audit_logs` — always SQLite (`./data/main.sqlite` by default)                                                                                                                                                                                                                               |
-| **data**   | `data-source.ts`      | `src/database/migrations/`      | `sessions`, `webhooks`, `messages`, `message_batches`, `templates`, `status_updates`, `automation_rules`, `webhook_delivery_failures`, the integration tables (`plugin_instances`, `ingress_events`, `conversation_mappings`, `integration_delivery_failures`), engine tables — SQLite **or** PostgreSQL |
+| Connection | CLI DataSource | Migrations | Responsibility |
+| --- | --- | --- | --- |
+| `main` | `src/database/data-source-main.ts` | `src/database/migrations-main/` | `api_keys`, `audit_logs`, Team Leader, Agent, Agent template-send usage |
+| `data` | `src/database/data-source.ts` | `src/database/migrations/` | Live sessions and ownership, historical tombstones, messages/phone attribution, webhooks, templates, batches, integrations and engine stores |
 
-Migrations are hand-authored and idempotent (`IF NOT EXISTS`) so they are safe to adopt on a database originally created by `synchronize`. The two connections differ in how schema is managed:
+**Schema change rules:** add columns/constraints to the proper entity and an
+additive migration on the **same** connection. Cross-database Team Leader/Agent
+↔ session relationships must remain application-validated scalar references;
+do not introduce an impossible SQL FK across `main` and `data`. Do not add a
+`messages.sessionId → sessions.id` FK; it would conflict with deliberately
+retained history after live-session deletion.
 
-- **data** — `synchronize` defaults **off**, so this connection is migration-managed by default. On PostgreSQL `migrationsRun` is hardcoded on, and `DATABASE_SYNCHRONIZE=true` is rejected outright at boot validation (it would drop the migration-created `body_ts` tsvector column that `/search` depends on). On SQLite there is no such rejection and `migrationsRun` is the inverse of `synchronize` — so an opted-in `DATABASE_SYNCHRONIZE=true` switches the data connection to entity-synchronized schema and turns its migrations **off**.
-- **main** — `synchronize` defaults **on** (zero-config first boot) regardless of `NODE_ENV`; set `MAIN_DATABASE_SYNCHRONIZE=false` to manage `api_keys` / `audit_logs` via `migrations-main/` instead. Never both at once — `migrationsRun` on this connection is the inverse of `synchronize`.
+### Tombstone migration and data-preservation checklist
 
-### Migration Files
+When changing session deletion or historical access, inspect the current
+`Session` and tombstone entities, `SessionTenantAccessService`,
+`session-engine-controls.ts`, `SessionOwnershipService`, and the migration(s)
+that introduced `session_tombstones`. The exact migration **filename and
+schema are intentionally not guessed here** because the live SunProject source
+could not be retrieved in this documentation pass.
 
+1. Ensure the historical record contains the session UUID and the ownership
+   information required to enforce deleted-session history access.
+2. Define the intended uniqueness, replacement and retention policy for that
+   record in the actual entity/migration; document any dialect differences.
+3. Ensure deletion leaves retained historical messages addressable by their
+   original `sessionId` while removing or deactivating live-session resources.
+4. Confirm that another tenant cannot gain access by recreating a session with
+   the same display name, changing an Agent assignment or presenting a guessed UUID.
+5. Cover concurrent `start`/`delete`, stale engine callbacks, lease-loss cleanup,
+   takeover scans and repeated deletes. Tests should verify that a completed
+   asynchronous initialization cannot resurrect a deleted session.
+6. Test migration and rollback on **both** `better-sqlite3` and PostgreSQL;
+   review any SQLite table-rebuild and PostgreSQL index/constraint differences.
+7. Extend export/import only according to the current implementation's real
+   table manifest. A `session_tombstones` export/import contract must be
+   verified rather than silently assumed.
+
+### Running and validating migrations
+
+```bash
+# Data DB: SQLite or PostgreSQL
+npm run migration:show
+npm run migration:run
+
+# Main DB: always SQLite
+npm run migration:show:main
+npm run migration:run:main
+
+# Confirm entity/migration consistency using the checked-out branch's scripts
+npx tsc --noEmit -p tsconfig.json
+npm test -- --runInBand
 ```
-src/database/migrations-main/      # main connection (auth + audit, SQLite)
-└── 1779900000000-CreateAuthAuditTables.ts   # creates api_keys + audit_logs
 
-src/database/migrations/           # data connection (pluggable)
-├── 1770108659848-AddMessageStatus.ts
-├── 1770200000000-NormalizeSynchronizeUuidColumns.ts
-├── 1779235200000-AddUuidDefaultsForPostgres.ts   # Postgres-only: gen_random_uuid() id DEFAULTs
-├── 1779840000000-AddTemplates.ts
-├── 1779900100000-AddMessageSessionWaIndex.ts
-├── 1781000000000-AddBaileysStoredMessages.ts
-├── 1781100000000-AddTemplateNameUnique.ts
-├── 1781200000000-AddLidMappings.ts
-├── 1781300000000-AddMessagesWaMessageIdUnique.ts  # UNIQUE(sessionId, waMessageId) inbound dedup (#464)
-├── 1781500000000-AddWebhookFilters.ts
-├── 1781600000000-DropRedundantMessagesSessionIdIndex.ts
-├── 1781700000000-AddWebhookDeliveryFailures.ts
-├── 1781800000000-ScopeBatchIdUniqueToSession.ts
-├── 1781900000000-AddIntegrationFabric.ts
-├── 1782000000000-AddMessageChatName.ts
-├── 1782100000000-WidenIngressDedupKey.ts
-├── 1782200000000-AddWebhooksSessionIdIndex.ts
-├── 1782300000000-AddIntegrationUuidDefaults.ts
-├── 1782400000000-AddMessagesFts.ts               # FTS5 (SQLite) / body_ts tsvector + GIN (Postgres)
-├── 1784822470680-CreateStatusUpdates.ts
-├── 1784908800000-AddMessageAuthor.ts
-├── 1785112230000-AddIngressEventDispatchState.ts
-├── 1785123853000-AddMessagesCreatedAtIndex.ts
-├── 1785600000000-SlimIngressEventPayload.ts
-├── 1785700000000-AddMessageMediaArchive.ts
-├── 1785800000000-AddSessionOwnership.ts
-├── 1785900000000-AddAutomationRules.ts            # 14th migration table; FKs sessions ON DELETE CASCADE
-├── 1786000000000-AddSessionNodeUrl.ts
-└── 1786100000000-AddMessageMediaPathIndex.ts   # partial index on messages.mediaPath (orphan sweep)
-```
+The `migration:show:main` command is illustrative: confirm it exists in the
+checked-out `package.json` before using it. `DATABASE_SYNCHRONIZE=true` is not
+a substitute for reviewed production migrations. Match the current runtime
+`AppModule` flags and main/data migration configuration; do not apply the main
+migrations to the data connection or vice versa.
 
-> [!NOTE]
-> Run with `npm run migration:run` (data connection) and `npm run migration:run:main` (main connection). The `AddUuidDefaultsForPostgres` migration is dialect-guarded — it is a no-op on SQLite (TypeORM generates UUIDs in the driver layer) and only adds `DEFAULT gen_random_uuid()::varchar` on PostgreSQL.
+### Production migration and backup safety
 
-### Sample Migration (TypeORM)
+Back up **both databases and engine-auth directories** before a migration. For
+cross-database operations, TypeORM does not provide a single atomic transaction
+spanning SQLite `main` and PostgreSQL/SQLite `data`. Handle partial completion
+through the existing service's validation/compensation strategy, not by assuming
+one repository transaction spans both connections. The Data DB JSON
+export/import endpoints are *not* a full-system backup of `main` or auth state.
 
-```typescript
-import { MigrationInterface, QueryRunner } from 'typeorm';
-
-// Real migration: enforces inbound dedup on the data connection.
-export class AddMessagesWaMessageIdUnique1781300000000 implements MigrationInterface {
-  name = 'AddMessagesWaMessageIdUnique1781300000000';
-
-  public async up(queryRunner: QueryRunner): Promise<void> {
-    if (!(await queryRunner.hasTable('messages'))) return;
-    // ... losslessly de-duplicate existing rows (keep earliest per sessionId+waMessageId) ...
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_messages_sessionId_waMessageId"`);
-    await queryRunner.query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS "UQ_messages_sessionId_waMessageId" ` +
-        `ON "messages" ("sessionId", "waMessageId")`,
-    );
-  }
-
-  public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS "UQ_messages_sessionId_waMessageId"`);
-  }
-}
-```
 
 ## 5.7 Data Retention
 
 ### Retention Policies
 
-Five tables have an automated _time-based_ retention job, across four services: **`audit_logs`**, **`status_updates`**, **`webhook_delivery_failures`**, **`ingress_events`** and **`integration_delivery_failures`**. Separately, **`baileys_stored_messages`** is capped per session rather than by age — each write keeps the newest `BAILEYS_MESSAGE_STORE_LIMIT` rows (default 5000) for that session and deletes the rest. Everything else is kept indefinitely (api keys, sessions, webhooks, batches, templates, conversation mappings, plugin instances, lid mappings, automation rules) and is removed only by user action (e.g. deleting a session) or operational backup/restore — the `messages` history table in particular has no auto-purge and grows without bound.
+The supplied baseline documents five automated _time-based_ retention jobs:
+`audit_logs`, `status_updates`, `webhook_delivery_failures`, `ingress_events` and
+`integration_delivery_failures`. Separately, `baileys_stored_messages` is
+capped per session rather than by age. Verify the current SunProject retention
+jobs before treating this list as exhaustive; **`session_tombstones` retention
+must not be invented** or implemented as a generic session purge.
+
+Persisted `messages` deliberately may outlive the corresponding **live**
+`sessions` row. A deleted-session history API needs both retained messages and
+sufficient historical tenant-authorization context. Expiring tombstones while
+retaining messages without an alternate authorization mechanism can make the
+history inaccessible; dropping tombstones without checking tenant scope can
+expose it. Treat tombstones and history as a joint retention/security decision.
 
 | Data Type                     | Default Retention | Configurable                                                    |
 | ----------------------------- | ----------------- | --------------------------------------------------------------- |
-| Sessions / Webhooks           | Indefinite        | No                                                              |
-| Messages / Batches            | Indefinite        | No (delete a session to drop its data)                          |
+| Live sessions / Webhooks      | Until lifecycle-controlled deletion / configured cleanup | Do not conflate session row deletion with historical message erasure |
+| Messages / Batches            | See current lifecycle and retention implementation | Live-session delete is **not** a blanket message-history cascade; batches may have different cleanup |
+| Session tombstones              | Check current entity and retention job | Historical authorization must remain coherent with retained messages |
+| Team Leaders / Agents / quotas | Check current main-DB policies | Deleting a team or assignment must not reassign historical session access |
 | Status updates                | 24 hours          | No (fixed, matches WhatsApp's own story expiry)                 |
 | Audit logs                    | 90 days           | Yes — `AUDIT_RETENTION_DAYS` (≤ 0 disables)                     |
 | Webhook delivery failures     | 90 days           | Yes — `WEBHOOK_FAILURE_RETENTION_DAYS` (≤ 0 disables)           |
@@ -913,50 +970,39 @@ The 24-hour TTL itself is a fixed constant (`STATUS_TTL_MS`) and is not configur
 ## 5.8 Backup Strategy
 
 > [!NOTE]
-> This section is **operational guidance**, not a built-in feature. OpenWA ships no scheduler, encryption step, or S3 uploader for backups — the diagram and script below are a recommended setup you wire up externally (cron, your host's backup tooling, etc.). For SQLite, back up the `./data/*.sqlite` files (including `./data/main.sqlite`); for PostgreSQL, use `pg_dump`. The JSON export/import endpoints in §5.1 are a portability path, not a backup mechanism.
+> This section is **operational guidance**, not a guarantee of a built-in scheduler, encryption or cloud upload. Back up the **main** SQLite connection (Team Leaders, Agents, API keys, audit and quotas), the **data** connection (including live sessions, tombstones and retained messages), and the auth directories for **both** WhatsApp engines. For PostgreSQL, use `pg_dump`; for SQLite, use a consistent SQLite backup/snapshot procedure rather than copying an actively written database file indiscriminately. The Data DB JSON export/import endpoints in §5.1 are a portability path, **not** a complete backup of main DB and filesystem auth state.
 > The authoritative full-system backup is [`scripts/backup.sh`](../scripts/backup.sh), documented in the [operational runbook](./11-operational-runbooks.md#runbook-database-backup); it also captures engine auth state, including `BAILEYS_AUTH_DIR` for Baileys.
 
 ### Backup Components
 
 ```mermaid
-flowchart TB
-    subgraph Backup["Backup Strategy"]
-        DB[(Database)] --> DUMP[pg_dump]
-        DUMP --> COMPRESS[Compress]
-        COMPRESS --> ENCRYPT[Encrypt]
-        ENCRYPT --> S3[S3/Cloud Storage]
-    end
-
-    subgraph Schedule["Schedule (external, e.g. cron)"]
-        FULL[Full Backup<br/>Daily]
-        INCR[Incremental<br/>Hourly]
-    end
-
-    Schedule --> Backup
+flowchart TD
+    MAIN[(main SQLite: keys / teams / audit / quotas)] --> SNAP[Consistent backup / snapshot]
+    DATA[(data SQLite or PostgreSQL: sessions / tombstones / history)] --> SNAP
+    AUTH[Both engines' auth directories] --> SNAP
+    SNAP --> VERIFY[Verify restore and tenant history access]
+    VERIFY --> ENCRYPT[Protect off-host encrypted backup]
 ```
+
+For an already-deleted session, restoring only its message rows without its
+historical authorization context may make history inaccessible or unsafe.
+Restoring only auth directories without the relevant live session metadata is
+not a supported session-restoration strategy.
+
 
 ### Backup Script Example
 
-```bash
-#!/bin/bash
-# backup.sh
+Use the repository's [`scripts/backup.sh`](../scripts/backup.sh) and the
+[operational runbook](./11-operational-runbooks.md#runbook-database-backup)
+for the supported full-system backup procedure in the checked-out commit.
+Do not use a PostgreSQL-only `pg_dump` example as if it captured `main.sqlite`,
+auth directories or deleted-session tombstones on a different data backend.
 
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/backups"
-DB_NAME="openwa"
+Before a restore, confirm the backup contains the expected tombstone and
+message rows, Team Leader/Agent identities, session ownership/assignment
+context, both DB migration ledgers, and matching engine-auth files for live
+sessions. Validate historical authorization in a nonproduction environment.
 
-# Create backup
-pg_dump -Fc $DB_NAME > $BACKUP_DIR/openwa_$DATE.dump
-
-# Compress
-gzip $BACKUP_DIR/openwa_$DATE.dump
-
-# Upload to S3 (optional)
-aws s3 cp $BACKUP_DIR/openwa_$DATE.dump.gz s3://backups/openwa/
-
-# Cleanup old backups (keep last 7 days)
-find $BACKUP_DIR -name "*.dump.gz" -mtime +7 -delete
-```
 
 ---
 

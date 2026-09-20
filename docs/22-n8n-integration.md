@@ -1,11 +1,31 @@
 # 22 - n8n Integration
 
+> **Branch scope:** OpenWA `SunProject`. This document describes the OpenWA REST/webhook
+contract and the separately maintained community n8n package. The package's published
+resource list and version may differ from the `SunProject` API; verify an operation in the
+installed node before relying on branch-only role, Team Leader, or Agent features.
+
 ## Overview
 
-OpenWA provides official n8n community nodes for integrating WhatsApp automation into n8n workflows. This enables users to build powerful automations combining WhatsApp messaging with hundreds of other services available in n8n.
+OpenWA can be integrated with n8n through its community nodes or directly through n8n HTTP Request and Webhook nodes. The community package is maintained separately from the `SunProject` branch; the HTTP/webhook approach is useful for an API operation that the installed node version has not exposed.
 
 **Repository:** https://github.com/rmyndharis/OpenWA-n8n
 **npm Package:** `@rmyndharis/n8n-nodes-openwa`
+
+### SunProject authentication and session access
+
+OpenWA accepts an API key in the `X-API-Key` HTTP header. The branch defines `ADMIN`,
+`OPERATOR`, `VIEWER`, `TEAM_LEADER`, and `AGENT` roles; route capabilities and access to a
+particular session are **independent** checks. Team Leaders can access their own sessions;
+Agents can access only an appropriately assigned session; a nonempty `allowedSessions`
+list additionally narrows access. A valid key may therefore receive `403` on an operation
+it cannot perform or `404` for a session it cannot access. The ordinary legacy
+`OPERATOR` role is not interchangeable with Team Leader/Agent permissions.
+
+Create a dedicated credential with only the required operation and session scope. An
+Agent's stored-template sends are subject to a rolling 24-hour template quota; this is
+**not** a universal rate limit for every WhatsApp send. Do not use an Admin key solely to
+work around a missing node operation or a tenant-scope error.
 
 ## Architecture
 
@@ -50,9 +70,15 @@ Execute operations on your OpenWA server.
 | Field      | Description                      | Example                  |
 | ---------- | -------------------------------- | ------------------------ |
 | Server URL | OpenWA server URL (without /api) | `https://wa.example.com` |
-| API Key    | API key from OpenWA dashboard    | `owa_xxxxxxxx...`        |
+| API Key    | OpenWA API key whose capability **and session scope** authorize this workflow | `owa_k1_...` |
 
 #### Resources & Operations
+
+The table below lists operations documented for the **community node**. It is not a
+complete inventory of `SunProject` REST routes. To use an unlisted operation, check the
+branch's `openapi.json` and invoke the exact documented endpoint with an n8n HTTP Request
+node and `X-API-Key` header; do not assume that a community-node release automatically
+implements Team Leader/Agent provisioning or all role-specific operations.
 
 | Resource | Operation     | Description                 | Endpoint                                        |
 | -------- | ------------- | --------------------------- | ----------------------------------------------- |
@@ -76,7 +102,7 @@ Start workflows when WhatsApp events occur.
 | Event                                             | Description                                   | Use Case                                     |
 | ------------------------------------------------- | --------------------------------------------- | -------------------------------------------- |
 | `message.received`                                | New incoming message                          | Auto-reply, lead capture                     |
-| `message.sent`                                    | Message sent successfully                     | Delivery confirmation                        |
+| `message.sent`                                    | OpenWA emitted an outbound-send event         | Sent-message tracking; **not** recipient delivery proof |
 | `message.ack`                                     | Delivery/read status advanced                 | Read receipts                                |
 | `message.failed`                                  | Outgoing message failed                       | Failure alerting                             |
 | `message.revoked`                                 | Message deleted for everyone                  | Deletion tracking                            |
@@ -105,6 +131,12 @@ Start workflows when WhatsApp events occur.
 
 #### How It Works
 
+The trigger node creates a webhook for the session used in its configuration. That
+registration also needs webhook-management capability and access to the target session;
+using a key that can send messages does not automatically mean it can create webhooks.
+A general `message.received` event is distinct from the dashboard's live thread cache;
+workflows receive webhook deliveries, not React state updates.
+
 1. When workflow is activated, the trigger creates a webhook in OpenWA
 2. OpenWA sends events to n8n's webhook URL
 3. When workflow is deactivated, the webhook is automatically deleted
@@ -129,6 +161,13 @@ Start workflows when WhatsApp events occur.
 }
 ```
 
+> **Identity and phone fields.** `sessionId` is the OpenWA session UUID, not its display name.
+> In the message payload, `from`/`chatId` are WhatsApp identifiers, not guaranteed phone
+> numbers. An unresolved privacy identifier (`@lid`) is not a phone number. Where message
+> attribution fields such as `author`, `sentByPhone`, and `sentToPhone` are included,
+> phone fields may legitimately be `null`; do not derive a number by stripping a suffix
+> from an LID or a group ID.
+>
 > **Deduplication.** Every delivery includes `idempotencyKey` and `deliveryId` in the body **and** as the
 > `X-OpenWA-Idempotency-Key` / `X-OpenWA-Delivery-Id` headers. `idempotencyKey` is **stable across retries**
 > of the same event; `deliveryId` identifies one delivery to one webhook and is stable across that
@@ -235,6 +274,11 @@ Always add error handling in your workflows:
 
 ### 2. Rate Limiting
 
+Use backoff after `429` and inspect which limit applied: an Agent's rolling stored-template
+quota, an API request limit, and WhatsApp send pacing are different mechanisms. A generic
+retry loop should not immediately resend a quota-rejected template or an outbound send whose
+result is ambiguous after a network timeout.
+
 WhatsApp has rate limits. Add delays between messages:
 
 ```
@@ -251,6 +295,10 @@ Use WhatsApp formatting in your messages:
 - Monospace: `` `text` ``
 
 ### 4. Phone Number Format
+
+Use the engine-neutral chat identifier returned by OpenWA. The normal personal-chat form
+contains a phone number, but an unresolved `@lid` remains a privacy ID. Resolve it through
+the contact/identity API when possible; never present the LID digits as a phone number.
 
 Always use the correct format for chat IDs:
 
@@ -279,16 +327,43 @@ Always use the correct format for chat IDs:
 5. Ensure session is connected and active
 6. For a call-outcome trigger, confirm the session runs Baileys — see the note under the trigger
    event table above
-7. Ask OpenWA which side dropped the event:
-   `GET /api/webhooks/delivery-failures?sessionId={sessionId}` (ADMIN key). A row means OpenWA
-   delivered and n8n rejected it; an empty list means the event never reached delivery at all
+7. Inspect `GET /api/webhooks/delivery-failures?sessionId={sessionId}` with an appropriately
+   authorized Admin key. A failure row indicates **exhausted delivery retries**; it may be
+   caused by n8n returning a non-2xx status **or** a network, timeout, or SSRF failure.
+   An empty list does **not** prove the event reached n8n: also inspect webhook registration,
+   event filters, event projection, dispatch, and job processing.
 
 ### Message Not Sending
+
+First distinguish a missing/invalid key (`401`), an operation disallowed for the role
+(`403`), an inaccessible or missing target session (`404`), and an Agent stored-template
+quota rejection (`429`) from a WhatsApp send failure. A session shown as `ready` by a
+chat preview does not by itself establish that its engine is available on the node
+handling the API request.
 
 1. Verify session status is `ready` (the API returns lowercase status values)
 2. Check chat ID format is correct
 3. Ensure recipient number exists on WhatsApp
 4. Check message content isn't empty
+
+## SunProject workflow examples beyond the packaged node
+
+**Send a stored template through an HTTP Request node:** use the documented
+`POST /api/sessions/:sessionId/messages/send-template` route with JSON fields
+`chatId`, `templateName`, and `vars`. Bind `sessionId` to the **session UUID** and use a
+credential authorized for both that session and the template-send capability. For an
+Agent credential, treat a `429` template-quota response as a terminal outcome for that
+attempt rather than converting it to an immediate retry.
+
+**Read persisted history:** use `GET /api/sessions/:sessionId/messages?chatId=...&limit=...`.
+Persisted messages and a live WhatsApp history request are different reads; webhook
+retries do not make an n8n workflow a complete message archive. Use the `idempotencyKey`
+to deduplicate event processing, and use the session UUID plus WhatsApp message ID as a
+separate business-level identity when reconciling history.
+
+**Call role-specific management APIs:** locate their current routes in the branch's
+`openapi.json` or Swagger schema. This guide intentionally does not invent new
+Team Leader/Agent paths or assert that the upstream community node provides them.
 
 ## Development
 

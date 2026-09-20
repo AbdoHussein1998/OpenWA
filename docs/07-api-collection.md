@@ -1,5 +1,12 @@
 # 07 - API Collection
 
+> **Branch scope:** `SunProject`. These cURL examples retain the existing REST and Socket.IO
+> collection while documenting the branch's Team Leader/Agent access model, historical
+> messaging, phone-attribution fields, and session-ownership constraints. The **generated
+> `openapi.json` for the checked-out commit and the actual controller decorators** are the
+> authority for exact routes and request/response DTOs. This collection is not a promise
+> that every route below is available to every authenticated role.
+
 ## 07.1 Overview
 
 This collection gives a runnable cURL for the primary OpenWA REST endpoints; the complete route list lives in `openapi.json` at the repository root. The Swagger UI at `/api/docs` serves the same schema, but it defaults off under `NODE_ENV=production` — set `ENABLE_SWAGGER=true` to serve it there. The examples assume two environment variables — set them once and reuse them:
@@ -13,26 +20,68 @@ export API_KEY=owa_k1_your-api-key-here
 
 ### Authentication
 
-Every request carries the key in the `X-API-Key` header — REST auth is **header-only**, an `?apiKey=` query value is not accepted. Routes that mutate state need an `operator` key; API-key and settings management need an `admin` key. Most read-only routes accept any valid key, but template and webhook reads need `operator`, plugin reads and infra reads need `admin` (except `GET /api/infra/health`, which is public), and the cross-session stats reads — `/api/stats/overview` and `/api/stats/messages` — need `admin` while per-session stats accept any role. Each section states its own requirement. The metrics endpoint uses `Authorization: Bearer $METRICS_TOKEN` instead.
+REST API-key authentication uses the `X-API-Key` header; `?apiKey=` is **not** a supported
+REST credential. `SunProject` defines `ADMIN`, `OPERATOR`, `VIEWER`, `TEAM_LEADER`, and
+`AGENT` roles. The legacy OPERATOR/ADMIN annotations beside many examples describe the
+operation's conventional minimum for the original three-role API; **do not interpret them
+as a single five-role rank hierarchy**. Team Leader and Agent requests are checked against
+the route's declared capability *and* the specific session's tenant ownership/assignment.
+Admin-level settings, API-key lifecycle and cross-session operations require their explicit
+administrative capability; a Team Leader/Agent is not made an administrator by owning or
+being assigned a session. A nonempty `allowedSessions` restriction further **intersects**
+the caller's effective scope; it never grants access outside that scope.
+
+For a missing or invalid key expect `401`; for an authenticated key lacking the operation's
+capability expect `403`; for a nonexistent **or inaccessible** session expect a tenant-aware
+`404` (do not use response differences to enumerate another tenant's sessions). Some
+session-history endpoints explicitly support deleted-session history through separate
+historical authorization; normal start/send/configuration routes do not gain access through
+that historical path. Consult the actual controller guards for route-specific requirements. The metrics endpoint uses `Authorization: Bearer $METRICS_TOKEN` instead.
 
 ```bash
 # the auth header that prefixes nearly every call below
 -H "X-API-Key: $API_KEY"
 ```
 
+### Quick role/scope diagnostic
+
+```bash
+# First check whether the credential itself is valid; this does not authorize every route.
+curl -X POST "$BASE/api/auth/validate" -H "X-API-Key: $API_KEY"
+
+# Then test visibility of the actual session UUID (404 may mean absent OR out of scope).
+curl "$BASE/api/sessions/$SESSION_ID" -H "X-API-Key: $API_KEY"
+```
+
+The branch's Team Leader and Agent administration surfaces live in
+`src/modules/teamleader/`; their exact paths and DTOs should be read from the generated
+`openapi.json` for the selected commit. To list candidate paths without guessing a route:
+
+```bash
+jq -r '.paths | keys[] | select(test("team|agent"; "i"))' openapi.json
+```
+
+Do **not** treat the presence of a path in OpenAPI as evidence your key has permission to
+invoke it. Verify the controller capability and ownership/assignment policy as well.
+
 ### Responses
 
-Responses are the **raw payload** — no `{ success, data }` envelope. A resource route returns the object directly; a list route returns a bare JSON array. Errors return the NestJS default shape `{ "statusCode", "message", "error" }`. Add `Content-Type: application/json` only when sending a body.
+Responses are the **raw handler payloads** — there is no global `{ success, data }`
+envelope. Many resource routes return an object and many list routes return bare JSON
+arrays; **endpoint-specific shapes still apply** (for example, audit pagination returns
+`{ data, total }`). Ordinary errors use NestJS's HTTP-exception fields, often
+`{ "statusCode", "message", "error" }`; specific endpoints may provide additional
+error details/codes. Add `Content-Type: application/json` when sending JSON.
 
 ### Sections
 
-Sessions · Messages · Webhooks · Groups · Contacts · Chats · Labels · Channels · Catalog · Templates · Plugins · Settings · Auth (API Keys) · Health · Infrastructure · Stats · Audit · Metrics · Profile · Search · Media conversion · Events (WebSocket).
+Sessions · Messages · Webhooks · Groups · Contacts · Chats · Labels · Channels · Catalog · Templates · Plugins · Settings · Auth (API Keys) · Health · Infrastructure · Stats · Audit · Metrics · Profile · Search · Media conversion · Events (WebSocket) · Team Leader/Agent role and tenant policy (see Authentication above and §07.18 below).
 
 ## 07.2 Endpoints
 
 All examples assume `BASE` and `API_KEY` are exported (see 07.1). Paths are prefixed with `/api`.
 
-The `:sessionId` path segment is always the session **UUID** returned by `POST /api/sessions` — never the session name. Session routes (07.3) use `:id` for that same UUID; everywhere else `:id` is a different resource's id — a template, webhook, API key or plugin — and never a session. Export the session UUID once alongside the other variables:
+The `:sessionId` path segment is always the session **UUID** returned by `POST /api/sessions` — never the session name. A session UUID is not a permission token: a scoped caller also needs the required route capability and effective session access. Session routes (07.3) use `:id` for that same UUID; everywhere else `:id` is a different resource's id — a template, webhook, API key or plugin — and never a session. Export the session UUID once alongside the other variables:
 
 ```bash
 export SESSION_ID=8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a
@@ -40,7 +89,7 @@ export SESSION_ID=8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a
 
 ### 07.3 Sessions
 
-All routes are under `$BASE/api/sessions` and require `X-API-Key: $API_KEY` (some require an OPERATOR-role key). Reads come first, then writes.
+All routes are under `$BASE/api/sessions` and require `X-API-Key: $API_KEY` (except explicitly public routes). Reads come first, then writes. The actual route capability and the caller’s session scope both determine access; the legacy `OPERATOR` annotations below are not a universal five-role hierarchy.
 
 #### GET /api/sessions
 
@@ -52,6 +101,10 @@ curl -X GET "$BASE/api/sessions?limit=100&offset=0" \
 ```
 
 #### GET /api/sessions/:sessionId
+
+`sessionId` is the session UUID. A Team Leader must own the session; an Agent must be
+assigned to that session through the expected Team Leader relationship. A foreign or
+inaccessible UUID is not exposed merely because the caller knows its value.
 
 Get a single session by ID.
 
@@ -303,11 +356,17 @@ curl -X DELETE "$BASE/api/sessions/8f3c2b1a-9d4e-4c7a-8b2f-1e6d5a4c3b2a" \
 
 ### 07.4 Messages
 
-All routes are under `/api/sessions/:sessionId/messages`. Reads accept any API key; send/write routes need an OPERATOR (or higher) key.
+All routes are under `/api/sessions/:sessionId/messages`. A read requires a valid key **and access to the requested session**; sends and other writes also require the route-specific capability. For legacy keys this often corresponds to `OPERATOR` or `ADMIN`, but `TEAM_LEADER` and `AGENT` have separate capability and tenant rules.
 
 #### GET /api/sessions/:sessionId/messages
 
-Get persisted message history from the local DB (paginated, filterable).
+Get persisted message history from the `data` database (paginated, filterable).
+It is a distinct data source from the engine's live chat history and the dashboard's
+React Query cache. The message's `sessionId` is intentionally scalar rather than a
+foreign key to the live `Session` row so stored history may outlive session deletion;
+access after deletion requires an endpoint's **explicit historical-access authorization**.
+Messages may include `author`, `sentByPhone`, and `sentToPhone`; phone-attribution fields
+are nullable, and an unresolved WhatsApp `@lid` is **not** a phone number.
 
 ```bash
 curl "$BASE/api/sessions/$SESSION_ID/messages?chatId=628123456789@c.us&limit=20&offset=0" \
@@ -316,7 +375,11 @@ curl "$BASE/api/sessions/$SESSION_ID/messages?chatId=628123456789@c.us&limit=20&
 
 #### GET /api/sessions/:sessionId/messages/:chatId/history
 
-Fetch chat history live from WhatsApp, bypassing the DB.
+Fetch history from the live WhatsApp engine, rather than treating the persisted database
+as its source of truth. The available engine history can be bounded or absent after
+restart; opening a chat or changing the dashboard's cache is not a guarantee of a
+complete historical backfill. This route requires a reachable live session as well as
+session access; an old persisted row is not sufficient to initialize a deleted engine.
 
 ```bash
 curl "$BASE/api/sessions/$SESSION_ID/messages/628123456789@c.us/history?limit=100&deep=true" \
@@ -403,7 +466,11 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/send-text" \
 
 #### POST /api/sessions/:sessionId/messages/send-template
 
-Render a stored template (`{{vars}}` substituted) and send it as text.
+Render a stored template (`{{vars}}` substituted) and send it as text. A valid API key
+must have both the template-send capability and access to this session. For an `AGENT`,
+`AgentTemplateQuotaService` applies a rolling **24-hour stored-template quota**;
+exhaustion can return `429`. That quota is not a generic limit on ordinary text/media
+send endpoints and should not be bypassed by retrying the same template immediately.
 
 ```bash
 curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/send-template" \
@@ -557,7 +624,12 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/edit" \
 
 #### POST /api/sessions/:sessionId/messages/send-bulk
 
-Send to multiple recipients as an async batch (max 100 messages; exact duplicate entries — same `chatId`, `type`, `content` and `variables` — are collapsed, first occurrence wins).
+Send to multiple recipients as an asynchronous batch (max 100 messages; exact
+duplicate entries — same `chatId`, `type`, `content` and `variables` — are collapsed,
+first occurrence wins). The running batch state and send outcomes are not made
+distributed-safe merely by the existence of session-owner leases. If a node loses
+ownership partway through a batch, do **not** automatically replay its ambiguous sends;
+inspect batch status and reconcile with recipients before manual recovery.
 
 ```bash
 curl -X POST "$BASE/api/sessions/$SESSION_ID/messages/send-bulk" \
@@ -620,6 +692,10 @@ curl -X GET "$BASE/api/sessions/$SESSION_ID/contacts/6281234567890@c.us/profile-
 ```
 
 #### GET /api/sessions/:sessionId/contacts/:contactId/phone
+
+This is a resolution request, not a guarantee that every WhatsApp privacy ID can be
+mapped to a public phone number. When a mapping is not known, preserve the `@lid`
+identity; never infer a phone number by removing its suffix.
 
 Resolve a contact id (e.g. an @lid) to a phone number.
 
@@ -849,7 +925,7 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/groups/120363021234567890@g.us/memb
 
 ### 07.7 Message Templates
 
-All template routes are nested under a session and require an OPERATOR-level key.
+All template routes are nested under a session and require the declared template-management capability **and** access to that session. Historical OPERATOR-level wording applies to the legacy roles; a `TEAM_LEADER` or `AGENT` follows its own capability and tenant policy.
 
 #### GET /api/sessions/:sessionId/templates
 
@@ -1085,7 +1161,7 @@ curl -X DELETE "$BASE/api/sessions/$SESSION_ID/status/false_status@broadcast_3A1
 
 ### 07.10 Webhooks (management)
 
-All routes require an API key with OPERATOR role or higher. `secret` and `headers` are write-only (never returned by these routes; `GET /api/infra/export-data` omits them from webhook rows too). The per-session routes live under `/api/sessions/:sessionId/webhooks`; the cross-session list is `/api/webhooks`.
+All routes require the relevant webhook-management capability and access to the session; for legacy roles this commonly means OPERATOR/ADMIN. `secret` and `headers` are write-only (never returned by these routes; `GET /api/infra/export-data` omits them from webhook rows too). The per-session routes live under `/api/sessions/:sessionId/webhooks`; the cross-session list is `/api/webhooks`.
 
 #### GET /api/sessions/:sessionId/webhooks
 
@@ -1206,6 +1282,12 @@ curl -X GET "$BASE/api/auth/api-keys/3f2a1c9e-1b2d-4a5f-9c8e-aa11bb22cc33" \
 
 #### POST /api/auth/api-keys
 
+Only an appropriately authorized Admin can mint keys. `SunProject` also supports
+Team Leader and Agent identities/bindings; do not create a purported Team Leader or
+Agent by changing only the `role` field of a generic API key. Use the actual branch
+management flow and DTOs to establish the principal and its authorized session
+ownership/assignment. The example below creates a legacy Operator key.
+
 Create a key; the response includes the full plaintext key once.
 
 ```bash
@@ -1321,6 +1403,10 @@ curl "$BASE/api/stats/messages?period=7d" \
 ```
 
 #### GET /api/stats/sessions/:sessionId
+
+A `TEAM_LEADER` or `AGENT` key must pass the same session-ownership or assignment
+policy that protects other session-scoped reads; a broadly worded `any role` annotation
+should not be read as `any session`.
 
 Per-session stats. Any role; a session-restricted key can only read stats for its allowed sessions.
 
@@ -1755,7 +1841,15 @@ curl -X POST "$BASE/api/sessions/$SESSION_ID/media/convert/video" \
 
 ### 07.17 Real-time (WebSocket)
 
-Events are delivered over **Socket.IO** on the `/events` namespace (not a raw WebSocket). Use the `socket.io-client` package. Set `BASE_WS` (e.g. `ws://localhost:2785`) and `API_KEY`.
+Events are delivered over **Socket.IO** on the `/events` namespace (not a raw WebSocket).
+Use the `socket.io-client` package. Set `BASE_WS` (e.g. `ws://localhost:2785`) and
+`API_KEY`. Authentication occurs on connection, and session subscriptions require
+server-side authorization: a Team Leader/Agent must not gain another tenant's events by
+requesting an arbitrary UUID or a wildcard room. Use a concrete session UUID for
+restricted keys. A `message.received` socket event, persisted history row, and dashboard
+message-cache update are different stages; verify each when investigating chat-sync
+issues. Redis broadcast fan-out, when configured, does not imply globally synchronized
+WebSocket credential-revocation or rate-limit state.
 
 ```bash
 npm install socket.io-client
@@ -1767,7 +1861,7 @@ import { io } from 'socket.io-client';
 
 const BASE_WS = process.env.BASE_WS || 'ws://localhost:2785';
 const API_KEY = process.env.API_KEY;
-const SESSION_ID = process.env.SESSION_ID; // the session UUID, or '*' (unrestricted keys only)
+const SESSION_ID = process.env.SESSION_ID; // concrete session UUID for restricted/tenant keys; '*' only if authorized
 
 const socket = io(`${BASE_WS}/events`, {
   auth: { apiKey: API_KEY }, // or the x-api-key header
@@ -1794,3 +1888,44 @@ socket.on('message', msg => {
 socket.on('connect_error', err => console.error('connect_error:', err.message));
 socket.on('disconnect', reason => console.log('disconnected:', reason));
 ```
+
+### 07.18 SunProject session ownership, tenant access, and response verification
+
+**Current deployment requirement:** use one API replica per session-data volume.
+`SessionOwnershipService` maintains renewable ownership leases for process-local
+WhatsApp engines, and the takeover module can adopt eligible expired leases through
+the normal lifecycle. Optional `NODE_URL` forwarding and Redis Socket.IO fan-out exist,
+but they do **not** make all lifecycle, live bulk-send, MCP/agent-tool and WebSocket
+security paths uniformly distributed-safe. Do not use these features as a rationale for
+an undocumented multi-replica deployment.
+
+**Role-aware endpoints:** the Admin/Team Leader/Agent feature implementation is in
+`src/modules/teamleader/`. Obtain exact paths, parameters and DTOs from the
+`SunProject` commit's `openapi.json` and `src/modules/teamleader/*.controller.ts`.
+These newer endpoints are deliberately **not** assigned hypothetical cURL commands
+here: incorrect example routes can appear valid while targeting the wrong API.
+For any such route, validate the credential's capability, Team Leader ownership,
+Agent assignment, and `allowedSessions` intersection independently.
+
+**Deleted-session history:** the `data` connection stores messages with a scalar
+session identifier; deletion of a live session does not automatically erase all
+message provenance. Only explicitly history-aware API routes may authorize a read
+against a historical session/tombstone. A successful historical read does not allow
+a caller to send a message through a deleted engine.
+
+**Message identity and sender/recipient:** compare `(sessionId, WhatsApp message ID)`
+when correlating stored rows and incoming socket events. The `author` may identify a
+group participant distinct from the group `from`/`chatId`. `sentByPhone` and
+`sentToPhone` can be `null` when the phone is unknown, including unresolved `@lid`
+identities; clients must never fabricate a phone number from the privacy-ID digits.
+
+**Cross-connection references:** principals and API keys are in the `main` SQLite
+connection; sessions and messages are in the `data` connection (SQLite or PostgreSQL).
+Owner/assignment identifiers that cross these connections are enforced by the
+application's access-control services, not by a cross-database SQL foreign key.
+
+**Troubleshooting path:** identify whether a failure is authentication (`401`),
+capability (`403`), tenant scope / missing session (`404`), stored-template quota
+(`429`), engine readiness, owner routing, database projection, or Socket.IO
+subscription/cache. The chat-list preview changing does not demonstrate that the
+open thread's persisted-history query or live-event cache update succeeded.

@@ -1,1618 +1,418 @@
 # 03 - System Architecture
 
+> **Scope:** OpenWA `SunProject` branch. This document describes the implemented application and distinguishes implemented multi-node building blocks from the supported deployment topology. The supported deployment remains **one API replica per session-data volume**. See [13 - Horizontal Scaling](./13-horizontal-scaling.md) before changing that topology.
+
 ## 3.1 Architecture Overview
 
-### High-Level Architecture
+OpenWA is a TypeScript/NestJS application with a React/Vite dashboard. It exposes REST, Swagger/OpenAPI, and Socket.IO interfaces to manage WhatsApp sessions, messages, contacts, integrations, and administrative workflows. A running WhatsApp engine is a stateful resource attached to one backend process.
 
 ```mermaid
 flowchart TB
-    subgraph Clients["Clients"]
-        C1[External Apps]
-        C2[Dashboard]
-        C3[n8n/Automation]
-    end
-
-    subgraph OpenWA["OpenWA Platform"]
-        subgraph API["API Layer"]
-            REST[REST API<br/>NestJS]
-            WS[WebSocket<br/>Real-time]
-            SWAGGER[Swagger<br/>Documentation]
-        end
-
-        subgraph Core["Core Services"]
-            SM[Session<br/>Manager]
-            MM[Message<br/>Manager]
-            WH[Webhook<br/>Manager]
-            QM[Queue<br/>Manager]
-        end
-
-        subgraph Engine["WhatsApp Engine (pluggable)"]
-            WW[whatsapp-web.js<br/>Puppeteer/Chromium]
-            BY[Baileys<br/>WebSocket/No browser]
-        end
-
-        subgraph Storage["Storage Layer"]
-            DB[(Database<br/>PostgreSQL/SQLite)]
-            REDIS[(Redis<br/>Cache/Queue)]
-            FS[File Storage<br/>Media Files]
-        end
-    end
-
-    subgraph External["External"]
-        WA[WhatsApp<br/>Servers]
-        WEBHOOK[Webhook<br/>Endpoints]
-    end
-
-    Clients --> API
-    API --> Core
-    Core --> Engine
-    Core --> Storage
-    Engine --> WA
-    Core --> WEBHOOK
+    APIClients[External apps / SDKs / n8n] --> REST[REST API / NestJS]
+    Dashboard[React / Vite dashboard] --> REST
+    Dashboard <-->|Socket.IO| Events[EventsGateway]
+    REST --> Guard[API-key guard + capability and session-scope checks]
+    Guard --> Features[Feature controllers and services]
+    Features --> Registry[EngineRegistry: local live engines]
+    Registry --> Engine[IWhatsAppEngine adapters]
+    Engine <--> WA[WhatsApp]
+    Features --> Main[(main SQLite: auth / teams / agents / audit)]
+    Features --> Data[(data: SQLite or PostgreSQL)]
+    Features --> Files[Local or S3-compatible media storage]
+    Features --> Cache[Redis cache / optional queue]
+    Features --> Events
+    Features --> Webhooks[Webhook delivery]
 ```
 
-### Component Interaction
+**Core boundaries:** HTTP controllers validate and authorize transport requests; capability services implement operations; `SessionService` and `SessionEngineLifecycle` manage engine lifecycle; `EngineRegistry` exposes the process-local engine; engine adapters translate between WhatsApp libraries and engine-neutral application types. The `MessageProjector` handles engine message events, persistence, and downstream notifications.
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant API as REST API
-    participant SM as Session Manager
-    participant Engine as WA Engine
-    participant DB as Database
-    participant WA as WhatsApp
-
-    Client->>API: Create Session
-    API->>SM: createSession()
-    SM->>DB: Save session config
-    SM->>Engine: Initialize
-    Engine->>WA: Connect
-    WA-->>Engine: QR Code
-    Engine-->>SM: QR Ready
-    SM-->>API: QR Code data
-    API-->>Client: QR Code response
-```
+An engine event and an HTTP request may produce related messages, but they are not the same execution path. A dashboard chat preview, a persisted history row, and an open thread's React Query cache may become current at different times; each stage must be traced independently when diagnosing sync problems.
 
 ## 3.2 Pluggable Architecture Philosophy
 
-OpenWA is designed with a **Pluggable Architecture** that allows infrastructure components to be swapped without changing application code. This enables flexible deployments ranging from minimal single-session bots to larger single-node, multi-session installs.
+### Implemented boundaries
 
-> **Note — single-instance:** the live WhatsApp engine layer is stateful and held in-process
-> (an in-memory `Map` in `EngineRegistry`). OpenWA currently runs as **one API instance per
-> session-data volume**; horizontal scaling across multiple API replicas is a future design
-> (not implemented). See [13 - Horizontal Scaling](13-horizontal-scaling.md).
+| Boundary | Implemented mechanism | Configuration / limitation |
+| --- | --- | --- |
+| WhatsApp engine | `IWhatsAppEngine`, plugin loader and `EngineFactory`; `whatsapp-web.js` or Baileys | `ENGINE_TYPE`; changing engines requires restart and compatibility checks for saved auth state. |
+| User-data database | Named TypeORM `data` connection | `DATABASE_TYPE=sqlite` or `postgres`. |
+| Identity/audit database | Named TypeORM `main` connection | Always SQLite, even when `data` uses PostgreSQL. |
+| Media storage | `StorageService` branches between local filesystem and S3-compatible storage | `STORAGE_TYPE=local` or `s3`; regular message media is not automatically archived through this service. |
+| Cache and event fan-out | `CacheService` uses Redis when enabled; Socket.IO Redis adapter can relay broadcasts | `REDIS_ENABLED=true`; without Redis, cache operations fail open and fan-out remains local. |
+| Background jobs | Queue modules and processors handle applicable asynchronous work | A normal outbound message is **not** required to pass through BullMQ. |
 
-### Design Philosophy
+The WhatsApp engine is the formal interchangeable interface. Storage and cache are concrete services with configuration-dependent behavior; the named TypeORM connections are configured in `src/app.module.ts`. There is no generic `IStorageAdapter`, `ICacheAdapter`, or dynamic `AdaptersModule` shared by all these boundaries.
 
-```mermaid
-flowchart TB
-    subgraph Philosophy["Core Design Principles"]
-        P1[Program to Interfaces]
-        P2[Dependency Injection]
-        P3[Configuration-driven]
-        P4[Zero Code Changes]
-    end
+### Engine-neutral identity contract
 
-    subgraph Benefits["Benefits"]
-        B1[Scale Up/Down Freely]
-        B2[Test in Isolation]
-        B3[Swap Implementations]
-        B4[Environment-specific Config]
-    end
+The engine boundary normalizes WhatsApp identities where implemented. The preferred user form is `<phone>@c.us`; group IDs use `<id>@g.us`; an unresolved privacy identifier remains `<lid>@lid`. `@s.whatsapp.net` and hosted number dialects normalize to the user form, but an LID must **never** be treated as a phone number merely because it contains digits. Other special forms include status, broadcast, and newsletter identifiers.
 
-    P1 --> B3
-    P2 --> B2
-    P3 --> B4
-    P4 --> B1
-```
+The shared helpers are in `src/engine/identity/wa-id.ts`; the interface is in `src/engine/interfaces/whatsapp-engine.interface.ts`. Normalization is not proof that every contact, chat listing, and outbound engine method has completed a full engine-neutral migration. Verify each adapter method before extending it.
 
-**Key Principles:**
-
-| Principle                 | Description                                                                                                   | Example                                                 |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| **Program to Interfaces** | Core code depends on the `IWhatsAppEngine` abstraction, never on a concrete library                           | `IWhatsAppEngine` instead of `whatsapp-web.js` `Client` |
-| **Dependency Injection**  | Services are wired via NestJS DI (constructor injection of `EngineFactory`, `StorageService`, `CacheService`) | `constructor(private engineFactory: EngineFactory)`     |
-| **Configuration-driven**  | Backend selection via environment variables                                                                   | `STORAGE_TYPE=s3`, `ENGINE_TYPE=baileys`                |
-| **Zero Code Changes**     | Switch backends without modifying application code                                                            | Change `.env`, restart                                  |
-
-### Adapter Categories
-
-The WhatsApp engine is the one true plug-in interface (`IWhatsAppEngine`, with concrete
-adapters resolved through the plugin loader). The other "pluggable" backends are not behind a
-formal `I*Adapter` interface — they are single services that branch internally on a config value:
-`StorageService` (`storageType` = `local` | `s3`), `CacheService` (Redis or fail-open no-op), and
-the TypeORM `data` connection (`sqlite` | `postgres`).
-
-```mermaid
-flowchart LR
-    subgraph Core["Application Core"]
-        APP[Business Logic]
-    end
-
-    subgraph Boundaries["Swappable Boundaries"]
-        IE[IWhatsAppEngine<br/>interface + plugin loader]
-        SS[StorageService<br/>storageType branch]
-        CS[CacheService<br/>Redis / no-op]
-        DC[TypeORM 'data' conn<br/>sqlite / postgres]
-    end
-
-    subgraph Implementations["Backends"]
-        subgraph Engine
-            E1[whatsapp-web.js]
-            E2[Baileys]
-        end
-        subgraph Database
-            D1[SQLite]
-            D2[PostgreSQL]
-        end
-        subgraph Storage
-            S1[Local FS]
-            S2[S3 / MinIO]
-        end
-        subgraph Cache
-            C1[Redis]
-            C2[Disabled - no-op]
-        end
-    end
-
-    APP --> Boundaries
-    IE -.-> Engine
-    DC -.-> Database
-    SS -.-> Storage
-    CS -.-> Cache
-```
-
-### WhatsApp Identity Contract (engine-neutral ids)
-
-WhatsApp addresses the same entity through several id dialects, and each engine speaks a different one:
-whatsapp-web.js uses `<phone>@c.us`, while Baileys speaks the raw protocol forms `<phone>@s.whatsapp.net`
-and `<lid>@lid` (a privacy id whose number is **not** a phone number). To keep application code, the
-REST/webhook payloads, and plugins free of that, the **engine boundary is an anti-corruption layer**:
-every WhatsApp id an engine emits in a neutral field (`from` / `to` / `chatId` / `author`, contact and
-chat `id`) is reduced to one small **neutral dialect**:
-
-| Neutral form                                            | Meaning                                                                             |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `<phone>@c.us`                                          | a user, by phone (the raw `@s.whatsapp.net` form folds into this)                   |
-| `<id>@g.us`                                             | a group                                                                             |
-| `<lid>@lid`                                             | a user known **only** by privacy id - phone genuinely unknown (a first-class state) |
-| `status@broadcast`, `<id>@newsletter`, `<id>@broadcast` | special channels                                                                    |
-
-Never `@s.whatsapp.net`, never a `:device` suffix. **Resolution rule:** prefer `@c.us` (resolve a lid
-to its phone when the mapping is known), and fall back to `@lid` only when it can't be resolved - an
-unresolved lid is never faked into a phone number. WhatsApp's Meta-hosted dialects fold in here
-too: `<n>@hosted` is the same account as `<n>@c.us` and normalizes to it, and `<lid>@hosted.lid`
-normalizes like any other lid. Baileys makes the same fold itself on every inbound message.
-
-The shared implementation lives in `src/engine/identity/wa-id.ts` (`parseWaId` / `toNeutralJid`); the
-contract is documented on the `IWhatsAppEngine` interface.
-
-> **Rollout status:** the contract is applied per-engine. It currently covers the **Baileys inbound
-> read path** (message / revoked / reaction payloads). Outbound id de-normalization (neutral -> engine
-> dialect on send) and contact/chat list ids are tracked follow-ups.
-
-### Engine Lifecycle State Machine
-
-A WhatsApp engine moves through the `EngineStatus` enum
-(`engine/interfaces/whatsapp-engine.interface.ts`). The adapter reports the current value via
-`getStatus()` and pushes transitions to the host through the `onStateChanged` callback supplied to
-`initialize()`:
+### Engine lifecycle and process ownership
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Disconnected: Create instance
-    Disconnected --> Initializing: initialize(callbacks)
-    Initializing --> QrReady: QR emitted
-    QrReady --> Authenticating: QR scanned
-    Authenticating --> Ready: Auth success
-    Initializing --> Failed: Terminal error (onError)
-    Authenticating --> Failed: Credentials rejected
-    Ready --> Disconnected: disconnect() / dropped link
-    Ready --> Failed: Fatal error
-    Disconnected --> [*]
-    Failed --> [*]
+    [*] --> DISCONNECTED
+    DISCONNECTED --> INITIALIZING: initialize(callbacks)
+    INITIALIZING --> QR_READY: QR emitted
+    QR_READY --> AUTHENTICATING: QR scanned
+    AUTHENTICATING --> READY: authenticated
+    INITIALIZING --> FAILED: terminal error
+    READY --> DISCONNECTED: disconnect / link dropped
+    READY --> ACTION_REQUIRED: operator action needed
+    DISCONNECTED --> INITIALIZING: authorized restart / reconnect
+    READY --> [*]: destroy / logout
+    FAILED --> [*]
 ```
 
-```typescript
-// engine/interfaces/whatsapp-engine.interface.ts
-export enum EngineStatus {
-  DISCONNECTED = 'disconnected',
-  INITIALIZING = 'initializing',
-  QR_READY = 'qr_ready',
-  AUTHENTICATING = 'authenticating',
-  READY = 'ready',
-  ACTION_REQUIRED = 'action_required',
-  FAILED = 'failed',
-}
-```
+`EngineStatus` is an enum; engines are initialized using an `EngineEventCallbacks` object instead of a generic event emitter. Status changes, incoming messages, outgoing echoes, acks, edits, revocations, reactions, QR updates, and history callbacks are routed through that callback contract.
 
-There is no generic `IAdapterLifecycle`/`AdapterState` abstraction — only the engine carries an
-explicit status enum. Storage, cache, and the database connection have no separate lifecycle type;
-they follow the standard NestJS provider lifecycle (`OnModuleInit` / `OnModuleDestroy`).
+`EngineRegistry` contains the actual engine objects **in memory**. `SessionOwnershipService` stores a session's node identity and a renewable lease in the `data` database. Database ownership prevents a second node from legitimately claiming the same live session; it does not serialize or move an engine object between processes. A failed lease-renewal query is not itself proof of lost ownership. Once renewal establishes that a claim was lost, the local engine must be retired.
 
-### Dependency Injection & Module Wiring
+### NestJS module and dependency-injection wiring
 
-OpenWA does **not** use a dynamic `AdaptersModule` or string DI tokens. `AppModule`
-(`src/app.module.ts`) imports concrete feature modules directly and configures two **named TypeORM
-connections**:
-
-- **`main`** — always SQLite (`./data/main.sqlite`); owns the auth (`api_keys`) and audit
-  (`audit_logs`) entities. Fixed boot config, not pluggable.
-- **`data`** — the pluggable user-data connection: `sqlite` (default) or `postgres`, selected by
-  `DATABASE_TYPE`. Owns the session/webhook/message/template/engine entities, plus the
-  integration-fabric (`plugin_instances`, `ingress_events`, `conversation_mappings`,
-  `integration_delivery_failures`), status-store (`status_updates`) and automation
-  (`automation_rules`) entities.
-
-The engine is provided by `EngineModule` as the `EngineFactory` **class** (a normal injectable, not a
-string token). Storage and cache are provided as the `StorageService` and `CacheService` classes by
-their respective modules.
-
-```typescript
-// src/app.module.ts (shape)
-@Module({
-  imports: [
-    ConfigModule.forRoot({ isGlobal: true, load: [configuration], validate: validateEnv }),
-
-    // Auth + audit — always SQLite
-    TypeOrmModule.forRootAsync({ name: 'main' /* ... ./data/main.sqlite ... */ }),
-
-    // Pluggable user data — sqlite | postgres via DATABASE_TYPE
-    TypeOrmModule.forRootAsync({ name: 'data' /* ... */ }),
-
-    CacheModule, // provides CacheService
-    StorageModule, // provides StorageService
-    EngineModule, // provides EngineFactory
-    SessionModule,
-    MessageModule,
-    WebhookModule /* ...other feature modules... */,
-  ],
-})
-export class AppModule {}
-```
-
-### Using the Backends in Services
-
-Services receive the backends by **constructor injection of the concrete class** — there is no
-`@Inject('…_ADAPTER')` token:
-
-```typescript
-@Injectable()
-export class SomeService {
-  constructor(
-    private readonly storage: StorageService, // branches local vs s3 internally
-    private readonly cache: CacheService, // Redis when enabled, else a no-op
-  ) {}
-
-  async saveMedia(filePath: string, data: Buffer) {
-    await this.storage.putFile(filePath, data); // path-safety guarded
-    await this.cache.setSessionStatus('id', 'READY'); // no-op if Redis disabled
-  }
-}
-```
-
-### Runtime Configuration Flow
-
-```mermaid
-sequenceDiagram
-    participant Env as .env File
-    participant Config as ConfigService
-    participant Svc as StorageService
-    participant App as Application
-
-    Note over Env: STORAGE_TYPE=s3
-    Env->>Config: Load + validateEnv
-    Config->>Svc: storage.type = 's3'
-    Svc->>Svc: construct S3Client (forcePathStyle only when S3_ENDPOINT is set)
-    App->>Svc: putFile / getFile (unaware of backend)
-```
-
-### Backend Selection Matrix
-
-| Environment             | Database   | Storage  | Cache    | Engine          | Use Case                  |
-| ----------------------- | ---------- | -------- | -------- | --------------- | ------------------------- |
-| **Development**         | SQLite     | Local    | Disabled | whatsapp-web.js | Fast iteration, testing   |
-| **Testing**             | SQLite     | Local    | Disabled | whatsapp-web.js | CI/CD, unit tests         |
-| **Staging**             | PostgreSQL | Local    | Redis    | whatsapp-web.js | Pre-production validation |
-| **Production (Small)**  | SQLite     | Local    | Disabled | whatsapp-web.js | 1-3 sessions, VPS         |
-| **Production (Medium)** | PostgreSQL | Local    | Redis    | whatsapp-web.js | 5-10 sessions             |
-| **Production (Large)**  | PostgreSQL | S3/MinIO | Redis    | whatsapp-web.js | 10+ sessions, HA          |
-
-### Hot-Swap Considerations
-
-> **Note:** Adapter hot-swap (changing adapter without restart) is **not supported** in v1.0. Changing adapter requires application restart.
-
-Future considerations for hot-swap:
-
-- Graceful connection draining
-- State migration between adapters
-- Zero-downtime switching
-
-```mermaid
-flowchart TD
-    A[Config Change Detected] --> B{Hot-swap Supported?}
-    B -->|v1.0: No| C[Log Warning]
-    C --> D[Require Restart]
-
-    B -->|Future: Yes| E[Drain Connections]
-    E --> F[Initialize New Adapter]
-    F --> G[Migrate State]
-    G --> H[Switch Traffic]
-    H --> I[Shutdown Old Adapter]
-```
+`src/app.module.ts` imports concrete feature modules and creates two named TypeORM connections. Services obtain repositories through `@InjectRepository(Entity, 'main' | 'data')` and engines through injected capability services or `EngineRegistry`; controllers must not import `IWhatsAppEngine` or resolve engines directly. These are standard NestJS providers, analogous to FastAPI dependency injection for service and database dependencies, except NestJS resolves providers through module registration.
 
 ## 3.3 Layered Architecture
 
-### Layered Architecture Pattern
-
 ```mermaid
 flowchart TB
-    subgraph Presentation["Presentation Layer"]
-        direction LR
-        REST[REST Controllers]
-        WS[WebSocket Gateways]
-        SWAGGER[OpenAPI Docs]
-    end
-
-    subgraph Application["Application Layer"]
-        direction LR
-        SESS[Session Service]
-        MSG[Message Service]
-        WH[Webhook Service]
-        AUTH[Auth Service]
-    end
-
-    subgraph Domain["Domain Layer"]
-        direction LR
-        ENT[Entities]
-        REPO[Repository Interfaces]
-        EVT[Domain Events]
-    end
-
-    subgraph Infrastructure["Infrastructure Layer"]
-        direction LR
-        DB[Database]
-        CACHE[Redis]
-        ENGINE[WA Engine]
-        HTTP[HTTP Client]
-    end
-
-    Presentation --> Application
-    Application --> Domain
-    Application --> Infrastructure
-    Domain --> Infrastructure
+    UI[Dashboard / SDKs / REST or Socket.IO clients] --> Transport[Controllers / Gateway / DTO validation]
+    Transport --> Security[API-key authentication / capabilities / tenant session access]
+    Security --> Application[Feature services / session lifecycle / message send and projection]
+    Application --> Domain[TypeORM entities / engine-neutral types / hooks]
+    Application --> Infrastructure[Engine registry and adapters / TypeORM / Redis / media storage]
+    Infrastructure --> External[WhatsApp / webhook consumers / external storage]
 ```
+
+This is a **descriptive layering model**, not a claim that the codebase has separate repository interfaces for every entity. Most services inject TypeORM `Repository<T>` directly. Controllers delegate business logic to services and preserve NestJS's normal raw-response behavior.
 
 ## 3.4 Module Structure
 
-### NestJS Module Organization
+The directories below show responsibility and relevant paths rather than a complete file inventory.
 
-Trimmed to the load-bearing directories — `src/modules/` holds 31 feature modules. Only `*.module.ts`
-is common to all of them; the rest of the shape varies. Most pair a `*.controller.ts` with a
-`*.service.ts`, but `events/` is a WebSocket gateway, `mcp/` an MCP server and `queue/` pure BullMQ
-wiring (none of the three has either); `docker/` and `status-store/` are service-only; `health/` and
-`settings/` are controller-only (`infra/` gained `infra-data.service.ts`); and 9 modules own an `entities/` directory:
-
-```
+```text
 src/
-├── main.ts                     # Application entry point
-├── app.module.ts               # Root module (imports feature modules, both TypeORM connections)
-│
-├── common/                     # Shared, non-feature code
-│   ├── cache/                  # CacheService (ioredis)
-│   ├── storage/                # StorageService (local | s3)
-│   ├── errors/  interceptors/  media/  metrics/  middleware/
-│   ├── security/  services/    # services/ holds logger.service.ts
-│   └── throttler/  transformers/  utils/
-│
-├── config/                     # configuration.ts, env.validation.ts, feature-flags.ts,
-│                               # app-validation.ts, swagger.config.ts, … (no config.module.ts)
-│
-├── core/                       # Host-side extension machinery
-│   ├── plugins/                # Plugin loader + sandbox
-│   ├── hooks/
-│   └── agent-tools/
-│
-├── engine/                     # WhatsApp engine abstraction
+├── main.ts                         # NestJS bootstrap
+├── app.module.ts                   # Feature modules; named main/data connections
+├── common/
+│   ├── cache/                      # Optional Redis CacheService
+│   ├── storage/                    # Local/S3 StorageService
+│   ├── security/ errors/ utils/ services/
+├── config/                         # Configuration, validation, feature flags
+├── core/                           # Plugins, hooks, agent tools
+├── database/
+│   ├── data-source.ts              # data connection
+│   ├── data-source-main.ts         # main connection
+│   ├── migrations/                 # data schema migrations
+│   └── migrations-main/            # main schema migrations
+├── engine/
 │   ├── engine.module.ts
 │   ├── engine.factory.ts
-│   ├── adapters/               # whatsapp-web-js.adapter.ts, baileys.adapter.ts, mappers, stores
-│   ├── builtin/                # Built-in engine plugins: baileys/, whatsapp-web-js/
-│   ├── identity/               # Neutral WhatsApp id helpers + lid-mapping store
-│   ├── interfaces/             # whatsapp-engine.interface.ts
-│   └── types/
-│
-├── modules/                    # Feature modules
-│   ├── session/                # Session management (no separate repository class)
-│   ├── message/  webhook/  contact/  group/  template/  label/  profile/  catalog/
-│   ├── channel/  status/  status-store/  search/  stats/  call/
-│   ├── auth/                   # API-key auth: auth.service.ts, guards/, decorators/, entities/
-│   ├── queue/                  # BullMQ wiring + processors/
-│   ├── integration/            # Integration fabric (plugin instances, ingress, mappings)
-│   ├── automation/            # Autoreply rules (automation_rules, the 14th migration table)
-│   ├── media/  chat-media/    # Inbound media handling + the optional chat-media archive
-│   ├── takeover/
-│   └── plugins/  mcp/  events/  infra/  docker/  settings/  metrics/  audit/  health/
-│
-└── database/                   # data-source.ts / data-source-main.ts
-    ├── migrations/             # 'data' connection
-    └── migrations-main/        # 'main' connection (auth + audit)
+│   ├── engine-registry.service.ts   # Process-local engine map
+│   ├── interfaces/whatsapp-engine.interface.ts
+│   ├── identity/                    # JID and LID mapping helpers
+│   ├── adapters/                    # whatsapp-web.js, Baileys
+│   └── builtin/                     # Built-in engine plugins
+└── modules/
+    ├── auth/                       # Keys, roles, guards, capabilities
+    ├── access-control/             # SessionTenantAccessService, session scopes
+    ├── teamleader/                 # Admin/team-leader/agent APIs and quota
+    ├── session/                    # SessionService, lifecycle, ownership, projector
+    ├── takeover/                   # Expired-owner session recovery
+    ├── message/                    # MessageService, MessageSendService, entities
+    ├── events/                     # Socket.IO gateway and subscriptions
+    ├── webhook/ queue/             # Webhook processing / background work
+    ├── chat-media/ status-store/    # Optional archives and status persistence
+    └── ...                         # Other capability and integration modules
+
+dashboard/src/
+├── App.tsx                          # Application and role-aware routes
+├── services/api.ts                  # REST client and raw API payloads
+├── hooks/                           # React Query hooks, including chat messages
+├── i18n/                            # Locale configuration and catalogs
+└── ...                              # Pages and UI components
 ```
+
+### Ownership of core behaviors
+
+| Component | Responsibility |
+| --- | --- |
+| `SessionService` / `SessionEngineLifecycle` | Create, start, stop, reconnect, retire, restore, and delete sessions through the existing lifecycle. |
+| `SessionOwnershipService` | Claim/renew/release database-backed session ownership; detect lost claims. |
+| `SessionTakeoverService` | Periodically consider eligible sessions whose previous owner's lease expired; use the normal start path. |
+| `EngineRegistry` | Retrieve or require an engine **on the current node**. |
+| `MessageSendService` | Validate, pace, hook, send, and record outbound messages. |
+| `MessageProjector` (`src/modules/session/message-projector.service.ts`) | Persist inbound and own-send events, history, and message mutations; emit events/webhooks as appropriate. |
+| `SessionTenantAccessService` | Resolve effective session scope and check live/historical access consistently across transports. |
+| `EventsGateway` | Authenticated Socket.IO subscriptions and application event delivery. |
 
 ## 3.5 Core Components Design
 
-### 3.5.1 Session Manager
-
-The diagram below is conceptual: `SessionManager` is the role played by `SessionService`
-(`src/modules/session/session.service.ts`), which injects the TypeORM `Repository<Session>` directly —
-there is no `SessionRepository` class in the codebase. The live-engine map itself lives in
-`EngineRegistry` (`src/engine/engine-registry.service.ts`), the narrow port that capability services
-inject when they only need the running engine for a session; `SessionEngineLifecycle` is its only writer.
+### 3.5.1 Session manager, registry, and owner lease
 
 ```mermaid
-classDiagram
-    class SessionManager {
-        -engines: EngineRegistry
-        -sessionRepository: Repository~Session~
-        -engineFactory: EngineFactory
-        +createSession(config): Session
-        +getSession(id): Session
-        +deleteSession(id): void
-        +getAllSessions(): Session[]
-        +restoreSessions(): void
-    }
-
-    class Session {
-        +id: string
-        +name: string
-        +status: SessionStatus
-        +engine: WhatsAppEngine
-        +config: SessionConfig
-        +createdAt: Date
-        +start(): void
-        +stop(): void
-        +getQR(): string
-    }
-
-    class SessionStatus {
-        <<enumeration>>
-        CREATED
-        INITIALIZING
-        QR_READY
-        AUTHENTICATING
-        READY
-        DISCONNECTED
-        FAILED
-    }
-
-    class WhatsAppEngine {
-        <<interface>>
-        +initialize(callbacks): Promise~void~
-        +sendTextMessage(chatId, text): Promise~MessageResult~
-        +getStatus(): EngineStatus
-        +getContacts(): Promise~Contact[]~
-        +disconnect(): Promise~void~
-    }
-
-    SessionManager --> Session
-    Session --> SessionStatus
-    Session --> WhatsAppEngine
+flowchart LR
+    Request[Start session] --> Scope[Capability and tenant checks]
+    Scope --> Lifecycle[SessionService / SessionEngineLifecycle]
+    Lifecycle --> Claim[SessionOwnershipService.claim]
+    Claim -->|Accepted| Factory[EngineFactory]
+    Claim -->|Live foreign owner| Refuse[Refuse or route if supported]
+    Factory --> Adapter[IWhatsAppEngine.initialize]
+    Adapter --> Registry[EngineRegistry]
+    Lifecycle --> Data[(data.sessions: status and owner lease)]
+    Adapter --> Callback[EngineEventCallbacks]
+    Callback --> Projector[MessageProjector]
 ```
 
-### 3.5.2 Message Flow
+A process should not operate on a foreign node's engine by reading the local registry and assuming a missing engine means a disconnected session. Lifecycle operations must respect ownership and use the existing session service instead of directly deleting rows or auth files.
+
+### 3.5.2 Outbound message flow
 
 ```mermaid
-flowchart TB
-    subgraph Outbound["Outbound Message Flow"]
-        A1[API Request] --> V1[Validate]
-        V1 --> Q1[Queue Job]
-        Q1 --> P1[Process]
-        P1 --> E1[Engine Send]
-        E1 --> R1[Response]
-    end
-
-    subgraph Inbound["Inbound Message Flow"]
-        E2[Engine Event] --> P2[Process]
-        P2 --> S2[Store]
-        S2 --> W2[Webhook Queue]
-        W2 --> D2[Deliver]
-    end
+sequenceDiagram
+    participant C as REST client / dashboard
+    participant Ctrl as MessageController
+    participant S as MessageService
+    participant Send as MessageSendService
+    participant E as Local WhatsApp engine
+    participant DB as data.messages
+    C->>Ctrl: Send request + API key
+    Ctrl->>Ctrl: Validate DTO / capability / session scope
+    Ctrl->>S: Send operation
+    S->>Send: Delegate
+    Send->>E: Send through engine (after checks/hooks/pacing)
+    E-->>Send: Message result or error
+    Send->>DB: Persist/update outgoing row as applicable
+    Send-->>S: Result
+    S-->>Ctrl: Result
+    Ctrl-->>C: Raw API response
 ```
 
-### 3.5.3 Webhook System
+Ordinary outbound messages use the engine directly. A queue or worker is **not** an unconditional stage in this path. Linked-device outgoing echoes and delivery acknowledgements can also arrive asynchronously through the `MessageProjector` and reconcile the stored row.
+
+### 3.5.3 Inbound projection and history
 
 ```mermaid
-classDiagram
-    class WebhookManager {
-        -webhooks: Webhook[]
-        -httpClient: HttpService
-        -queue: Queue
-        +registerWebhook(config): Webhook
-        +removeWebhook(id): void
-        +dispatch(event): void
-        -deliverWithRetry(webhook, payload): void
-    }
-
-    class Webhook {
-        +id: string
-        +url: string
-        +events: EventType[]
-        +secret: string
-        +active: boolean
-        +retryCount: number
-        +headers: Record
-    }
-
-    class WebhookPayload {
-        +event: EventType
-        +timestamp: Date
-        +sessionId: string
-        +data: any
-        +signature: string
-    }
-
-    class EventType {
-        <<enumeration>>
-        MESSAGE_RECEIVED
-        MESSAGE_SENT
-        MESSAGE_ACK
-        SESSION_STATUS
-        QR_CODE
-    }
-
-    WebhookManager --> Webhook
-    WebhookManager --> WebhookPayload
-    Webhook --> EventType
+sequenceDiagram
+    participant WA as WhatsApp
+    participant E as Engine adapter
+    participant P as MessageProjector
+    participant DB as data.messages
+    participant WS as EventsGateway
+    participant WH as Webhook service
+    participant UI as Dashboard
+    WA-->>E: Incoming message / ack / mutation
+    E-->>P: Engine callback with captured session + engine
+    P->>P: Check engine generation and node ownership
+    P->>DB: Normalize, deduplicate, persist / mutate
+    P-->>WS: Publish relevant live event
+    P-->>WH: Dispatch relevant webhook
+    WS-->>UI: Authenticated session-scoped event
+    UI->>UI: Update subscribed React Query cache
 ```
+
+Bulk historical sync persists history without treating every historical message as a new live arrival. Database rows, the WebSocket event stream, and the dashboard cache are separate observability points. Message mutation application is keyed by session and WhatsApp message ID to avoid competing edits/reactions, while stored messages use a session-scoped WhatsApp-message-ID uniqueness constraint.
+
+### 3.5.4 Webhooks and queues
+
+Webhook registration and delivery are distinct from sending a WhatsApp message. A relevant event can enqueue a delivery job, retry failed HTTP delivery, and record delivery failure. Redis/BullMQ is used when configured and appropriate; do not redraw the normal WhatsApp send path as necessarily going through a queue.
 
 ## 3.6 Data Flow Diagrams
 
-### 3.6.1 Send Message Flow
+### 3.6.1 Dashboard chat loading and live updates
+
+```mermaid
+flowchart TB
+    ChatList[Chat list / preview] --> ChatOpen[Open a chat]
+    ChatOpen --> Hook[useChatMessages sessionId + chatId]
+    Hook --> API[History REST request]
+    API --> DB[(Persisted message history)]
+    API --> EngineHistory[Available live-engine history]
+    DB --> Merge[Merge and deduplicate]
+    EngineHistory --> Merge
+    Merge --> Cache[React Query key: messages, sessionId, chatId]
+    Socket[Authenticated Socket.IO message event] --> Update[Update existing matching cache entry]
+    Update --> Cache
+    Cache --> Thread[Rendered open thread]
+```
+
+The hook keys messages per session and chat and merges persisted and available engine history. Its long-lived cache and event-driven updates mean a changing **chat preview does not prove that the open thread cache changed**. When investigating missing messages, check persistence, session/chat ID normalization, socket subscription, event shape, cache key, and whether a refetch occurs after connection/reconnection. Do not treat opening the chats page as an acceptable requirement for receiving messages.
+
+### 3.6.2 Webhook delivery
 
 ```mermaid
 flowchart LR
-    subgraph Request["1. Request"]
-        A[Client] -->|POST /messages| B[Controller]
-    end
-
-    subgraph Validation["2. Validation"]
-        B --> C{Valid?}
-        C -->|No| D[400 Error]
-        C -->|Yes| E[Service]
-    end
-
-    subgraph Processing["3. Processing"]
-        E --> F[Get Session]
-        F --> G{Session Ready?}
-        G -->|No| H[400 Error]
-        G -->|Yes| I[Queue Job]
-    end
-
-    subgraph Execution["4. Execution"]
-        I --> J[Worker]
-        J --> K[Engine]
-        K --> L[WhatsApp]
-    end
-
-    subgraph Response["5. Response"]
-        L --> M[Success]
-        M --> N[Store]
-        N --> O[Response]
-    end
+    Event[Eligible application event] --> Match[Match configured webhooks]
+    Match --> Payload[Build/sign delivery payload]
+    Payload --> Delivery[Queue or delivery mechanism]
+    Delivery --> HTTP[HTTP attempt]
+    HTTP -->|Success| Success[Record success]
+    HTTP -->|Retryable failure| Retry[Retry with configured policy]
+    Retry --> HTTP
+    HTTP -->|Exhausted| Failure[Record/log failure]
 ```
 
-### 3.6.2 Webhook Delivery Flow
+### 3.6.3 Message identity and phone attribution
+
+`data.messages` stores WhatsApp IDs (`from`, `to`, `chatId`, and optional group `author`) separately from resolved `sentByPhone` and `sentToPhone` fields. The latter are nullable digit-only phone numbers **when WhatsApp exposes or the configured resolver can establish a number**. For inbound groups, use the real participant (`author`) for sender attribution rather than the group's JID. For an unresolved `@lid`, preserve the identifier and leave the phone column null; never manufacture a number. An outgoing message's recipient phone also may be unknown when it targets a group or another non-phone identity.
+
+The message's `sessionId` is intentionally a scalar identifier with **no TypeORM relation / database foreign key to the live `Session` row**: historical message provenance must survive physical session deletion. The `data` database also has historical session authorization data (`session_tombstones`), allowing applicable history reads after deletion while preventing access to another tenant's history. This is a deliberate exception to adding foreign keys indiscriminately.
+
+## 3.7 Technology and Deployment Architecture
+
+| Layer | Technology / implementation |
+| --- | --- |
+| API | Node.js, NestJS, TypeScript, TypeORM |
+| Dashboard | React, TypeScript, Vite, React Query, Socket.IO client |
+| WhatsApp connectivity | `whatsapp-web.js` with Puppeteer/Chromium, or Baileys without a browser |
+| Persistent authentication/teams/audit | `main` SQLite database |
+| Session and message data | `data`: SQLite (`better-sqlite3`) or PostgreSQL |
+| Cache and optional distributed event fan-out | Redis when enabled; cache is not the source of truth |
+| Media storage | Local filesystem or S3-compatible storage; optional chat-media archive |
 
 ```mermaid
 flowchart TB
-    A[Event Triggered] --> B[Create Payload]
-    B --> C[Sign Payload]
-    C --> D[Queue Delivery Job]
-    D --> E[Worker Process]
-    E --> F{Deliver}
-    F -->|Success| G[Mark Delivered]
-    F -->|Failed| H{Retry < 3?}
-    H -->|Yes| I[Delay & Retry]
-    I --> E
-    H -->|No| J[Mark Failed]
-    J --> K[Log Error]
+    Users[Dashboard / API clients] --> API[ONE OpenWA API replica]
+    API --> LocalAuth[(Session auth-data volume)]
+    API --> Main[(main SQLite: identities / audit)]
+    API --> Data[(data DB: SQLite or PostgreSQL)]
+    API --> Redis[(Optional Redis)]
+    API --> Media[(Local or S3 media storage)]
+    API --> WA[WhatsApp]
 ```
 
-## 3.7 Technology Architecture
-
-### 3.7.1 Runtime Environment
-
-```mermaid
-flowchart TB
-    subgraph Container["Docker Container"]
-        subgraph Node["Node.js Runtime"]
-            NEST[NestJS Application]
-            WW[whatsapp-web.js<br/>or Baileys]
-        end
-
-        subgraph Browser["Headless Browser (wwebjs only)"]
-            CHROME[Chromium]
-        end
-
-        Node -.->|ENGINE_TYPE=whatsapp-web.js| Browser
-    end
-
-    subgraph External["External Services"]
-        PG[(PostgreSQL)]
-        RD[(Redis)]
-    end
-
-    Container --> External
-```
-
-### 3.7.2 Deployment Architecture
-
-```mermaid
-flowchart TB
-    subgraph Production["Production Environment"]
-        API[OpenWA API<br/>single instance]
-        VOL[(Session-data volume<br/>auth dirs)]
-
-        API --- VOL
-        API --> DB[(PostgreSQL)]
-        API --> REDIS[(Redis)]
-    end
-
-    subgraph Storage["External Storage"]
-        S3[S3/MinIO<br/>Media backup / migration]
-    end
-
-    API --> S3
-```
-
-> Multi-replica deployment behind a load balancer is a future design, not the shipped topology — the
-> live engines are held in-process, so one API instance owns a session-data volume. See the
-> single-instance note in §3.2 and [13 - Horizontal Scaling](13-horizontal-scaling.md).
+**Supported topology:** deploy one API replica per session-data volume. PostgreSQL, Redis, and S3 increase backend/storage options but **do not automatically make multi-replica operation supported**. The `main` database, local auth directories, live engine registry, and remaining process-local security/operation state must all be considered before a future distributed deployment.
 
 ## 3.8 API Architecture
 
-### RESTful API Design
+REST controllers expose session-scoped and administrative operations; controller routing is defined by source decorators and the global prefix configured at bootstrap. Common areas include sessions, messages, webhooks, contacts/groups, health, and the Admin/Team Leader/Agent management APIs under `src/modules/teamleader/`. Use the actual decorators and generated OpenAPI schema when documenting exact paths rather than treating a conceptual diagram as an authoritative route list.
 
-```mermaid
-flowchart LR
-    subgraph Endpoints["API Endpoints"]
-        direction TB
-        S["/api/sessions"]
-        M["/api/sessions/:sessionId/messages"]
-        W["/api/sessions/:sessionId/webhooks"]
-        C["/api/sessions/:sessionId/contacts"]
-        G["/api/sessions/:sessionId/groups"]
-        H["/api/health"]
-    end
+**Response contract:** successful handlers return their ordinary payload directly (object or array); the application does not globally wrap it in `{ success, data, meta }`. Input validation uses DTOs and standard NestJS validation behavior. API-key authorization and per-session tenant checks must apply on the server even when the dashboard hides an unauthorized route.
 
-    subgraph Methods["HTTP Methods"]
-        GET
-        POST
-        PUT
-        DELETE
-    end
-
-    subgraph Format["Response Format"]
-        JSON[JSON Response]
-        ERR[Error Format]
-        PAGE[Pagination]
-    end
-```
-
-### API Response Structure
-
-Responses are the **raw handler payload** — there is no `{success, data, meta}` envelope.
-A controller that returns an object sends exactly that object; a list endpoint returns a bare array.
-Errors use the NestJS default shape.
-
-```typescript
-// Success Response — the resource itself
-{
-  "id": "abc",
-  "name": "my-session",
-  "status": "READY"
-}
-
-// List Response — a bare array
-[
-  { "id": "abc", "name": "my-session", "status": "READY" },
-  { "id": "def", "name": "other-session", "status": "DISCONNECTED" }
-]
-
-// Error Response — NestJS default shape
-{
-  "statusCode": 404,
-  "message": "Session with id 'xxx' not found",
-  "error": "Not Found"
-}
-```
+For session-scoped HTTP requests, the optional owner-forwarding path uses configured node URLs to route a request arriving at a non-owner to the live owner. This is not a guarantee that all transports and lifecycle operations are distributed-ready. Without `NODE_URL`, the forwarding path is inert.
 
 ## 3.9 Security Architecture
 
-```mermaid
-flowchart TB
-    subgraph External["External Request"]
-        R[Request]
-    end
+### Authentication, capabilities, and tenant scope
 
-    subgraph Security["Security Layers"]
-        R --> HTTPS[HTTPS/TLS]
-        HTTPS --> CORS[CORS Check]
-        CORS --> RATE[Rate Limiter]
-        RATE --> AUTH[API Key Auth]
-        AUTH --> VAL[Input Validation]
-        VAL --> APP[Application]
-    end
+The API key roles are `ADMIN`, `OPERATOR`, `VIEWER`, `TEAM_LEADER`, and `AGENT`. Role/capability authorization and access to a **particular session** are separate decisions:
 
-    subgraph Internal["Internal Security"]
-        APP --> ENC[Data Encryption]
-        ENC --> LOG[Audit Logging]
-    end
-```
+| Principal | Effective session scope before additional `allowedSessions` restriction |
+| --- | --- |
+| Admin, Operator, Viewer | Legacy role's session scope; capabilities still control operations. |
+| Team Leader | Sessions with matching `ownerTeamLeaderId`. |
+| Agent | Assigned session only, and only within the associated Team Leader's ownership. No assignment means no session access. |
+
+A nonempty `allowedSessions` list is an **intersection / ceiling**, never a grant that bypasses role or owner restrictions. `SessionTenantAccessService` resolves this scope for live sessions and has a separate historical-access method for deleted-session history. A foreign or inaccessible session intentionally returns `404` rather than revealing its existence; insufficient general permission is a separate `403` concern. REST, WebSocket, and MCP entry points should reuse the same service instead of implementing divergent tenant checks.
+
+The team-leader and agent identities and their API key bindings live in `main`; live `Session.ownerTeamLeaderId` and `Agent.assignedSessionId` span the `main`/`data` database boundary. They are not ordinary cross-database foreign keys: ownership and assignments must be validated in application services. Within `main`, the API-key-to-Team-Leader/Agent relations are regular TypeORM relations.
+
+### Agent template quota
+
+`AgentTemplateQuotaService` maintains the rolling 24-hour quota for authenticated Agent **stored-template sends**. This is distinct from general sending pace, per-route HTTP rate limits, or a quota on plain text/media messages. Do not describe it as a universal WhatsApp messaging limit.
+
+### Other safeguards
+
+Maintain API-key authentication, route capability checks, validated DTOs, trusted-proxy/IP policy, SSRF protections on remote media and webhook destinations, constrained storage keys, bounded media processing, and audit logging where implemented. Never log full message bodies, phone numbers, API keys, or full database query parameters in production diagnostic logs.
 
 ## 3.10 Error Handling Architecture
 
-Handlers throw NestJS's own HTTP exceptions; NestJS's built-in `BaseExceptionFilter` renders them.
-There is no custom filter and no custom exception base class — see
-[08 - Development Guidelines](./08-development-guidelines.md) for the domain errors in
-`src/common/errors/` and the status each maps to.
+NestJS built-in HTTP exceptions produce the framework's ordinary error response (for example `{ statusCode, message, error }`); there is no global success-envelope or custom all-errors wrapper. Domain errors from `src/common/errors/` extend built-in exceptions where applicable.
 
-```mermaid
-flowchart TB
-    E[Error Occurs] --> T{Error Type}
+| Situation | Typical status | Interpretation |
+| --- | --- | --- |
+| Missing/invalid API credential | `401` | Authentication failed. |
+| Authenticated key lacks a required capability | `403` | Operation not permitted. |
+| Session does not exist **or is outside effective tenant scope** | `404` | Do not disclose foreign session existence. |
+| Invalid DTO/request argument | `400` | Validation failed. |
+| Engine not ready / ownership conflict | `409` where mapped | Retry or reconcile before a stateful operation. |
+| Engine capability not implemented | `501` where mapped | The selected adapter cannot provide that operation. |
+| Engine transport unavailable | `503` where mapped | Transport/service unavailable. |
+| Agent stored-template quota reached | `429` | Quota/retry policy applies. |
 
-    T -->|Validation fails| V[BadRequestException 400]
-    T -->|Missing resource| N[NotFoundException 404]
-    T -->|Bad/absent key| A[UnauthorizedException 401]
-    T -->|Role or scope refused| FB[ForbiddenException 403]
-    T -->|Engine cannot do this| NI[EngineNotSupportedError → 501]
-    T -->|Engine not ready| C[EngineNotReadyError → 409]
-    T -->|Engine transport down| SU[EngineTransportError → 503]
-    T -->|Unhandled| S[InternalServerErrorException 500]
-
-    V --> F[NestJS BaseExceptionFilter]
-    N --> F
-    A --> F
-    FB --> F
-    NI --> F
-    C --> F
-    SU --> F
-    S --> F
-
-    F --> R["{ statusCode, message, error }"]
-    S --> L[Log with stack]
-```
+The exact status for an endpoint follows its existing exception mapping. Do not replace the underlying exception with a generic `200` response containing an error object.
 
 ## 3.11 Scalability Considerations
 
-> **Future design, not the shipped topology.** Live engines are held in an in-process `Map` in
-> `SessionService`, so a session can only be driven by the instance that started it — there is no
-> session registry, node claim, or affinity router in the codebase. OpenWA runs as one API instance
-> per session-data volume; the two sketches below are retained for planning. See the single-instance
-> note in §3.2 and [13 - Horizontal Scaling](13-horizontal-scaling.md).
+> **Partially implemented, not a supported multi-replica topology.** Keep API replicas at one per session-data volume. See [13 - Horizontal Scaling](./13-horizontal-scaling.md), including its known gaps, before considering more than one.
 
-### Horizontal Scaling Strategy (sketch)
+### Implemented ownership and takeover
 
-```mermaid
-flowchart TB
-    subgraph Scaling["Scaling Strategy"]
-        direction TB
+`SessionOwnershipService` conditionally claims a session using `nodeId`, `nodeUrl`, `claimedAt`, and `leaseExpiresAt` on the `Session` row. Its default lease TTL is 60 seconds, with a 20-second heartbeat. An owner renews eligible live claims and releases them when stopping; another node may claim an unowned or expired claim. A node that confirms it lost ownership retires its local engine. Database clocks across nodes must be synchronized for time-based claims to be meaningful.
 
-        subgraph Stateless["Stateless Components"]
-            API[API Servers]
-            WORKER[Queue Workers]
-        end
+`SessionTakeoverService` periodically scans for eligible sessions previously held by a different node with an expired lease. Its sweep defaults to 30 seconds and is gated by session auto-start configuration. It starts eligible authenticated sessions through the ordinary lifecycle rather than directly instantiating engines. Deliberately stopped, pairing, or operator-failed sessions must not be indiscriminately restarted. Stuck in-flight bulk batches from a dead owner are failed, **not automatically resumed**, because their sent-message outcome may be unknown.
 
-        subgraph Stateful["Stateful Components"]
-            SESSION[Session Instances]
-        end
+### Implemented optional distribution mechanisms
 
-        subgraph Shared["Shared State"]
-            DB[(Database)]
-            REDIS[(Redis)]
-            S3[(Object Storage)]
-        end
-    end
+- **Session-scoped HTTP forwarding:** with a reachable `NODE_URL` configured for every node, an eligible request can be forwarded once to the live owner after authentication; a loop/conflict is rejected. The default proxy timeout is 60 seconds. This is opt-in and does not route every protocol or execution path.
+- **Socket.IO fan-out:** with Redis enabled, broadcasts can reach clients connected to another node. Mid-connection key revocation state and per-key WebSocket throttling remain process-local.
+- **Startup coordination:** PostgreSQL deployments include coordination for startup migrations, but that alone does not make the full application distributed-safe.
 
-    Stateless --> Shared
-    Stateful --> Shared
-```
+### Remaining barriers
 
-### Session Affinity (sketch)
-
-```mermaid
-flowchart LR
-    subgraph Router["Request Router"]
-        R[Request] --> H{Has Session ID?}
-        H -->|Yes| A[Route to Affinity]
-        H -->|No| B[Round Robin]
-    end
-
-    A --> I1[Instance 1<br/>Session A, B]
-    A --> I2[Instance 2<br/>Session C, D]
-    B --> I1
-    B --> I2
-```
-
----
+Some lifecycle watchdog/reconnect paths and bulk-send live state remain process-local; MCP/agent-tool execution is not universally forwarded; WebSocket key eviction and rate-limit state are not globally synchronized. Local auth state and the fixed `main` SQLite database also require deliberate sharing/consistency decisions. Therefore do not present a load balancer with `replicas: 3`, node affinity, or automatic high availability as a currently supported deployment. Those are design targets.
 
 ## 3.12 Engine Abstraction Layer
-
-> [!IMPORTANT]
-> Engine abstraction is critical to mitigate **R001: WhatsApp Protocol Changes** in Risk Management. OpenWA ships two production-ready engines selectable via `ENGINE_TYPE`: `whatsapp-web.js` (default, Chromium/Puppeteer-based) and `baileys` (browser-free, WebSocket/Noise protocol). With the abstraction layer, adding further engines requires no changes to application code.
-
-### Strategy Pattern for Engine
 
 ```mermaid
 classDiagram
     class IWhatsAppEngine {
         <<interface>>
-        +initialize(callbacks): Promise~void~
-        +disconnect(): Promise~void~
-        +logout(): Promise~void~
-        +destroy(): Promise~void~
-        +forceDestroy(): Promise~void~
-        +getStatus(): EngineStatus
-        +getQRCode(): string | null
-        +requestPairingCode(phone): Promise~string~
-        +sendTextMessage(chatId, text): Promise~MessageResult~
-        +sendImageMessage(chatId, media): Promise~MessageResult~
+        +initialize(callbacks)
+        +disconnect()
+        +logout()
+        +destroy()
+        +getStatus()
+        +getQRCode()
+        +sendTextMessage(chatId, text)
+        +getChats()
     }
-
-    class WhatsAppWebJsAdapter {
-        -client: Client
-        +initialize(callbacks): Promise~void~
-        +sendTextMessage(): Promise~MessageResult~
-    }
-
-    class BaileysAdapter {
-        -socket: WASocket
-        +initialize(callbacks): Promise~void~
-        +sendTextMessage(): Promise~MessageResult~
-    }
-
     class EngineFactory {
-        +create(options: EngineCreateOptions): IWhatsAppEngine
+        +create(options)
     }
-
+    class WhatsAppWebJsAdapter
+    class BaileysAdapter
     IWhatsAppEngine <|.. WhatsAppWebJsAdapter
     IWhatsAppEngine <|.. BaileysAdapter
     EngineFactory --> IWhatsAppEngine
 ```
 
-### Engine Interface Definition
+`EngineFactory.create()` accepts an options object including a session **name** (`sessionId`, for the on-disk authentication key) and a separate session **UUID** (`dbSessionId`, for database-bound stores). The factory resolves the configured engine via the plugin loader; the legacy direct fallback constructs only `whatsapp-web.js` and must not silently substitute it for a missing Baileys plugin. Engine initialization registers `EngineEventCallbacks` and starts the underlying connection.
 
-Events are **not** delivered through an `on`/`off`/`once` emitter. Instead, the host passes a single
-`EngineEventCallbacks` object to `initialize()`; the adapter invokes the registered callbacks for the
-lifetime of the engine. Status is an `EngineStatus` **enum** (not a string union), `getQRCode()` is
-**synchronous** (`string | null`), and there is no `connect()` / `isReady()` / `getAuthState()` — the
-adapter connects inside `initialize()`.
+**Adapter distinction:** `whatsapp-web.js` runs WhatsApp Web through Chromium/Puppeteer; Baileys uses a browser-free protocol connection. Both must fulfill the engine interface, but method support and inbound/outbound ID conversions must be checked per adapter. A configured engine switch is a restart/migration operation, not hot-swapping a live engine.
 
-```typescript
-// engine/interfaces/whatsapp-engine.interface.ts
-export enum EngineStatus {
-  DISCONNECTED = 'disconnected',
-  INITIALIZING = 'initializing',
-  QR_READY = 'qr_ready',
-  AUTHENTICATING = 'authenticating',
-  READY = 'ready',
-  ACTION_REQUIRED = 'action_required',
-  FAILED = 'failed',
-}
+## 3.13 Pluggable Infrastructure Backends
 
-// All inbound signals arrive through callbacks supplied once to initialize().
-export interface EngineEventCallbacks {
-  onQRCode?: (qr: string) => void;
-  onReady?: (phone: string, pushName: string) => void;
-  onMessage?: (message: IncomingMessage) => void;
-  onMessageCreate?: (message: IncomingMessage) => void; // outgoing (incl. linked-phone sends)
-  onMessageAck?: (messageId: string, status: DeliveryStatus) => void;
-  onMessageRevoked?: (message: RevokedMessage) => void;
-  onMessageReaction?: (event: ReactionEvent) => void;
-  onMessageEdited?: (message: EditedMessage) => void;
-  onGroupEvent?: (event: GroupEvent) => void; // kind selects group.join / group.leave / group.update / group.join_request
-  onCall?: (event: IncomingCallEvent) => void; // incoming call ringing; rejectCall() while it rings
-  onHistoryMessages?: (messages: IncomingMessage[]) => void; // bulk initial sync; persist, don't dispatch
-  onDisconnected?: (reason: string) => void; // recoverable -> reconnect
-  onStateChanged?: (state: EngineStatus) => void;
-  onActionRequired?: (reason: string) => void; // engine alive, but an operator must act
-  onError?: (reason: string) => void; // terminal init/auth failure
-}
+### 3.13.1 Storage service
 
-export interface IWhatsAppEngine {
-  // Lifecycle — connecting happens inside initialize(); callbacks are registered here.
-  initialize(callbacks: EngineEventCallbacks): Promise<void>;
-  disconnect(): Promise<void>; // close, keep session (reconnect without QR)
-  logout(): Promise<void>; // clear session (requires QR scan again)
-  destroy(): Promise<void>;
-  forceDestroy(): Promise<void>; // kill this engine's own resources, then graceful teardown
+`src/common/storage/storage.service.ts` implements local and S3-compatible operations (`putFile`, `getFile`, `deleteFile`, listing, backup import/export). `STORAGE_TYPE=s3` can target AWS S3 without a custom endpoint or an S3-compatible provider such as MinIO using `S3_ENDPOINT`. Treat `S3_ENDPOINT` and path-style access as endpoint-specific configuration; MinIO is not a separate storage type. Storage-key validation prevents unsafe paths. Optional chat-media archival is a separate, feature-gated behavior; don't imply every incoming attachment is always archived.
 
-  // Status / auth
-  getStatus(): EngineStatus;
-  probeLiveness?(): Promise<boolean>; // optional active round-trip against the live connection
-  getQRCode(): string | null; // synchronous
-  requestPairingCode(phoneNumber: string): Promise<string>;
-  getPhoneNumber(): string | null;
-  getPushName(): string | null;
+### 3.13.2 Database connections and migration policy
 
-  // Messaging (selected)
-  sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult>;
-  sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult>;
-  sendLocationMessage(chatId: string, location: LocationInput): Promise<MessageResult>;
-  sendContactMessage(chatId: string, contact: ContactCard): Promise<MessageResult>;
+| Connection | Backend | Primary entities | Migration location |
+| --- | --- | --- | --- |
+| `main` | SQLite | API keys, Team Leaders, Agents, Agent template usage, audit | `src/database/migrations-main/` |
+| `data` | `better-sqlite3` or PostgreSQL | Sessions, messages, webhooks, templates, integrations, ownership, history/tombstone records | `src/database/migrations/` |
 
-  // Contacts / groups / chats — see the interface file for the full method set.
-  getContacts(): Promise<Contact[]>;
-  getGroups(): Promise<Group[]>;
-  getChats(): Promise<ChatSummary[]>;
-  // ...
-}
-```
+Use the exact repository connection name for every entity. A relation crossing `main` and `data` is **not a database FK**, even if the stored identifiers refer to related business objects. Some data-model exceptions are intentional, notably `Message.sessionId` retaining deleted-session history. For production, use migrations (`DATABASE_SYNCHRONIZE=false`); test both supported data-database dialects for schema changes and avoid assuming that SQL valid on PostgreSQL also runs on `better-sqlite3`.
 
-### Engine Factory
+SQLite has a single-writer concurrency model. PostgreSQL supports more concurrent writes but does not solve WhatsApp engine process ownership or `main` SQLite sharing by itself.
 
-The factory resolves the engine through the **plugin loader**, not a hard-coded `switch`. The
-configured engine (`engine.type`, default `'whatsapp-web.js'`) is read once in the constructor; the
-built-in `whatsapp-web.js` and `baileys` plugins are registered and the configured one is enabled in
-`onModuleInit()`. `create()` takes an **options object** (engine-neutral per-call config —
-`sessionId` / `dbSessionId` / `proxyUrl` / `proxyType`), not a `type` argument. The two ids are
-distinct: `sessionId` is the session **name** (the on-disk auth-directory key), `dbSessionId` is the
-session **UUID** (`Session.id`), needed by FK-bound stores such as `baileys_stored_messages`. There is
-no `EngineType` union, no `switch`, and no `Unknown engine type` throw: if the plugin is unavailable it
-logs a warning and falls back to the legacy direct adapter — but that fallback can only build
-`whatsapp-web.js`. For any other configured engine (e.g. `ENGINE_TYPE=baileys` with its plugin
-missing) `createFallbackEngine` **throws** rather than silently running the wrong engine, so the
-session fails loudly at start. (A typo in `ENGINE_TYPE` is rejected at boot by `validateEnv`, which
-whitelists `whatsapp-web.js` | `baileys`.)
+### 3.13.3 Cache, Redis, and queues
 
-```typescript
-// engine/engine.factory.ts
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { IWhatsAppEngine } from './interfaces/whatsapp-engine.interface';
-import { WhatsAppWebJsAdapter } from './adapters/whatsapp-web-js.adapter';
-import { PluginLoaderService, PluginType, IEnginePlugin } from '../core/plugins';
+`CacheService` uses Redis directly when enabled; when disabled or unreachable, reads return no cache value and writes are no-ops rather than providing a hidden in-memory cache. Redis can also support queue processing and cross-replica Socket.IO event **broadcasts** where configured, but it is not a universal replacement for process-local engine/authorization state.
 
-export interface EngineCreateOptions {
-  /** Session NAME — the on-disk auth-directory key. */
-  sessionId: string;
-  /** Session UUID (Session.id) — the DB-row key for FK-bound stores (e.g. baileys_stored_messages). */
-  dbSessionId: string;
-  proxyUrl?: string;
-  proxyType?: 'http' | 'https' | 'socks4' | 'socks5';
-}
+### 3.13.4 Deployment profiles and limits
 
-@Injectable()
-export class EngineFactory implements OnModuleInit {
-  private readonly engineType: string;
+| Profile | Data DB | Media | Redis | API replicas |
+| --- | --- | --- | --- | --- |
+| Local development | SQLite | Local | Optional / off | One |
+| Larger single-node deployment | PostgreSQL | Local or S3 | Optional / on | One |
 
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly pluginLoader: PluginLoaderService,
-    /* ...message-store + lid-mapping deps... */
-  ) {
-    this.engineType = this.configService.get<string>('engine.type') ?? 'whatsapp-web.js';
-  }
-
-  async onModuleInit(): Promise<void> {
-    // Register the built-in whatsapp-web.js + baileys engine plugins, then enable the configured one.
-    await this.registerBuiltInEngines();
-  }
-
-  create(options: EngineCreateOptions): IWhatsAppEngine {
-    const enginePlugin = this.pluginLoader.getPlugin(this.engineType);
-
-    if (enginePlugin?.instance && this.isEnginePlugin(enginePlugin.instance)) {
-      // Engine-specific config (e.g. Puppeteer) was handed to the plugin as an opaque blob at
-      // registration, so the factory passes only engine-neutral per-call options here.
-      return enginePlugin.instance.createEngine({
-        sessionId: options.sessionId,
-        dbSessionId: options.dbSessionId,
-        proxyUrl: options.proxyUrl,
-        proxyType: options.proxyType,
-      }) as IWhatsAppEngine;
-    }
-
-    // Plugin missing -> warn, then fall back to the direct whatsapp-web.js adapter.
-    return this.createFallbackEngine(options);
-  }
-
-  private createFallbackEngine(options: EngineCreateOptions): IWhatsAppEngine {
-    // The legacy fallback can only construct whatsapp-web.js. Building it for a different configured
-    // engine would silently run the WRONG one — fail loudly instead.
-    if (this.engineType !== 'whatsapp-web.js') {
-      throw new Error(
-        `Engine '${this.engineType}' is unavailable and has no direct fallback; cannot start the session.`,
-      );
-    }
-    return new WhatsAppWebJsAdapter(/* ...sessionDataPath, puppeteer, proxy, lidMappingStore... */);
-  }
-}
-```
-
-### WhatsApp-Web.js Adapter
-
-```typescript
-// engine/adapters/whatsapp-web-js.adapter.ts
-import { Client, LocalAuth } from 'whatsapp-web.js';
-import {
-  IWhatsAppEngine,
-  EngineEventCallbacks,
-  EngineStatus,
-  MessageResult,
-} from '../interfaces/whatsapp-engine.interface';
-
-export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
-  private client: Client | null = null;
-  private status: EngineStatus = EngineStatus.DISCONNECTED;
-  private callbacks: EngineEventCallbacks = {};
-
-  // The host registers all event callbacks here; the adapter also connects inside initialize().
-  async initialize(callbacks: EngineEventCallbacks): Promise<void> {
-    this.callbacks = callbacks;
-    this.setStatus(EngineStatus.INITIALIZING);
-
-    this.client = new Client({
-      authStrategy: new LocalAuth({ clientId: this.sessionId, dataPath: this.sessionDataPath }),
-      puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
-    });
-
-    this.setupEventHandlers();
-    await this.client.initialize();
-  }
-
-  private setupEventHandlers(): void {
-    this.client!.on('qr', qr => {
-      this.setStatus(EngineStatus.QR_READY);
-      this.callbacks.onQRCode?.(qr);
-    });
-    this.client!.on('ready', () => {
-      this.setStatus(EngineStatus.READY);
-      this.callbacks.onReady?.(this.phoneNumber ?? '', this.pushName ?? '');
-    });
-    this.client!.on('disconnected', reason => {
-      this.setStatus(EngineStatus.DISCONNECTED);
-      this.callbacks.onDisconnected?.(String(reason));
-    });
-    this.client!.on('message', message => {
-      this.callbacks.onMessage?.(this.toIncomingMessage(message)); // mapped to the neutral shape
-    });
-  }
-
-  private setStatus(status: EngineStatus): void {
-    this.status = status;
-    this.callbacks.onStateChanged?.(status);
-  }
-
-  async disconnect(): Promise<void> {
-    await this.client?.destroy(); // keep session; logout() clears it
-    this.setStatus(EngineStatus.DISCONNECTED);
-  }
-
-  async sendTextMessage(chatId: string, text: string): Promise<MessageResult> {
-    const message = await this.client!.sendMessage(chatId, text);
-    return { id: message.id._serialized, timestamp: message.timestamp };
-  }
-
-  // ... full method set per the interface
-}
-```
-
-### Baileys Adapter (Alternative Engine)
-
-```typescript
-// engine/adapters/baileys.adapter.ts
-import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
-import {
-  IWhatsAppEngine,
-  EngineEventCallbacks,
-  EngineStatus,
-  MessageResult,
-} from '../interfaces/whatsapp-engine.interface';
-
-export class BaileysAdapter implements IWhatsAppEngine {
-  private socket: ReturnType<typeof makeWASocket> | null = null;
-  private status: EngineStatus = EngineStatus.DISCONNECTED;
-  private callbacks: EngineEventCallbacks = {};
-
-  // Baileys connects during initialize(); callbacks are registered here, same as the wwebjs adapter.
-  async initialize(callbacks: EngineEventCallbacks): Promise<void> {
-    this.callbacks = callbacks;
-    this.setStatus(EngineStatus.INITIALIZING);
-
-    const { state, saveCreds } = await useMultiFileAuthState(`${this.authDir}/${this.sessionId}`);
-    this.socket = makeWASocket({ auth: state });
-    this.socket.ev.on('creds.update', saveCreds);
-    this.setupEventHandlers();
-  }
-
-  private setupEventHandlers(): void {
-    this.socket!.ev.on('connection.update', update => {
-      const { connection, lastDisconnect, qr } = update;
-      if (qr) {
-        this.setStatus(EngineStatus.QR_READY);
-        this.callbacks.onQRCode?.(qr);
-      }
-      if (connection === 'open') {
-        this.setStatus(EngineStatus.READY);
-        this.callbacks.onReady?.(this.phoneNumber ?? '', this.pushName ?? '');
-      }
-      if (connection === 'close') {
-        const loggedOut = (lastDisconnect?.error as any)?.output?.statusCode === DisconnectReason.loggedOut;
-        this.setStatus(loggedOut ? EngineStatus.FAILED : EngineStatus.DISCONNECTED);
-        this.callbacks.onDisconnected?.(loggedOut ? 'logged_out' : 'connection_closed');
-      }
-    });
-
-    this.socket!.ev.on('messages.upsert', ({ messages }) => {
-      for (const msg of messages) {
-        const incoming = this.toIncomingMessage(msg); // neutral ids
-        // Own sends are not dropped: they route to onMessageCreate, which drives `message.sent`.
-        if (msg.key.fromMe) this.callbacks.onMessageCreate?.(incoming);
-        else this.callbacks.onMessage?.(incoming);
-      }
-    });
-  }
-
-  private setStatus(status: EngineStatus): void {
-    this.status = status;
-    this.callbacks.onStateChanged?.(status);
-  }
-
-  async sendTextMessage(chatId: string, text: string): Promise<MessageResult> {
-    const result = await this.socket!.sendMessage(chatId, { text });
-    return { id: result!.key.id!, timestamp: Math.floor(Date.now() / 1000) };
-  }
-
-  // ... full method set per the interface
-}
-```
-
-### Engine Selection Configuration
-
-```bash
-# .env
-ENGINE_TYPE=whatsapp-web.js  # Options: whatsapp-web.js (default), baileys
-
-# Switch to the browser-free engine
-ENGINE_TYPE=baileys
-```
-
-### Migration Strategy
-
-```mermaid
-flowchart TB
-    subgraph Current["Available Engines"]
-        A[whatsapp-web.js\nPuppeteer-based\ndefault]
-        A2[Baileys\nWebSocket-based\nENGINE_TYPE=baileys]
-    end
-
-    subgraph Risk["Risk Detection"]
-        B{Protocol\nBreaking?}
-    end
-
-    subgraph Migration["Migration Path"]
-        C[Update whatsapp-web.js]
-        D[Switch to Baileys]
-        E[Community Fork]
-    end
-
-    subgraph Resolution["Resolution"]
-        F[Service Restored]
-    end
-
-    A --> B
-    B -->|Minor| C --> F
-    B -->|Major wwebjs| D --> F
-    B -->|Major Both| E --> F
-```
-
-### Engine Comparison
-
-| Feature            | whatsapp-web.js       | Baileys             |
-| ------------------ | --------------------- | ------------------- |
-| **Protocol**       | Web (Puppeteer)       | Native WebSocket    |
-| **Resource Usage** | High (~500MB/session) | Low (~50MB/session) |
-| **Stability**      | Good                  | Good                |
-| **Community**      | Large                 | Large               |
-| **Multi-device**   | ✅                    | ✅                  |
-| **QR Code**        | ✅                    | ✅                  |
-| **Phone Link**     | ✅                    | ✅                  |
-| **Maintenance**    | Active                | Active              |
-
-### Benefits of Abstraction
-
-1. **Risk Mitigation** - Swap engines without changing application code
-2. **Testing** - The single `IWhatsAppEngine` boundary makes the engine trivial to stub/mock in unit tests
-3. **Flexibility** - Run different engines per deployment via `ENGINE_TYPE`
-4. **Future-proof** - New engines register as plugins; no changes to application code
-5. **Comparison** - Evaluate engine resource/behavior trade-offs per environment
+Capacity depends on workload, engine, media behavior, and resources; do not interpret a storage or memory profile as a supported session count or a declaration of multi-replica safety. `MAX_CONCURRENT_SESSIONS` may be configured to bound running/initializing sessions. Changes to database/storage/engine backend selection normally require restart and appropriate state or schema migration.
 
 ---
-
-## 3.13 Pluggable Adapters
-
-OpenWA uses the adapter pattern for infrastructure components that can be swapped per deployment needs. This allows users with limited resources to run OpenWA without heavyweight external dependencies.
-
-### Adapter Overview
-
-```mermaid
-flowchart TB
-    subgraph Core["OpenWA Core"]
-        APP[Application Logic]
-    end
-
-    subgraph Adapters["Pluggable Backends"]
-        subgraph Engine["WhatsApp Engine"]
-            E1[whatsapp-web.js]
-            E2[Baileys]
-        end
-
-        subgraph Database["Database"]
-            D1[SQLite]
-            D2[PostgreSQL]
-        end
-
-        subgraph Storage["Media Storage"]
-            S1[Local Filesystem]
-            S2[S3 / MinIO]
-        end
-
-        subgraph Cache["Cache"]
-            C1[Redis]
-            C2[Disabled - no-op]
-        end
-    end
-
-    APP --> Engine
-    APP --> Database
-    APP --> Storage
-    APP --> Cache
-```
-
-### Adapter Options
-
-| Component           | Options (`ENV`)                          | Default         | Notes                                                        |
-| ------------------- | ---------------------------------------- | --------------- | ------------------------------------------------------------ |
-| **WhatsApp Engine** | whatsapp-web.js, Baileys (`ENGINE_TYPE`) | whatsapp-web.js | Baileys is browser-free                                      |
-| **Database**        | SQLite, PostgreSQL (`DATABASE_TYPE`)     | SQLite          | PostgreSQL for large-scale production                        |
-| **Media Storage**   | local, s3 (`STORAGE_TYPE`)               | local           | MinIO is the `s3` backend (`S3_ENDPOINT` enables path-style) |
-| **Cache**           | Redis or disabled (`REDIS_ENABLED`)      | Disabled        | When disabled/unreachable, cache fails open (no-op)          |
-
-### 3.13.1 Storage Service
-
-Media storage is a **single service** (`src/common/storage/storage.service.ts`) that branches
-internally on `storageType` — there is no `I*Adapter` interface, separate adapter classes, or a
-`StorageFactory`. The two backends are `local` (the default; files under `./data/media`) and `s3`.
-The main producer/consumer is the storage export/import migration and backup flow; the status store
-also writes status media through `putFile` (under `statuses/`) and sweeps orphans back out with
-`deleteFile`. Incoming and outgoing message media is returned inline to REST/webhook consumers and is
-**not** automatically written through `StorageService`.
-**MinIO is not a separate type** — it is the `s3` backend. The S3 client is created from credentials
-alone, so plain AWS S3 works with no endpoint (the SDK derives one from the region); `S3_ENDPOINT` is
-for S3-compatible stores (MinIO, R2, …), and setting it is also what enables `forcePathStyle: true`.
-The public method set is `putFile` / `getFile` / `deleteFile` / `listFiles` / `iterateFiles` /
-`createExportStream` (export) / `importFromStream` (import), plus `getFileCount`,
-`getCurrentStorageType` and `refreshS3Availability` (re-probes the bucket; the infra status endpoint
-calls it to report S3 reachability).
-
-```typescript
-// src/common/storage/storage.service.ts
-@Injectable()
-export class StorageService {
-  private readonly storageType: string; // 'local' | 's3'
-  private readonly localPath: string;
-  private s3Client: S3Client | null = null;
-
-  constructor(private readonly configService: ConfigService) {
-    this.storageType = this.configService.get<string>('storage.type') || 'local';
-    this.localPath = this.configService.get<string>('storage.localPath') || './data/media';
-
-    if (this.storageType === 's3') {
-      const endpoint = process.env.S3_ENDPOINT; // optional: S3-compatible stores only
-      const accessKeyId = process.env.S3_ACCESS_KEY_ID; // legacy S3_ACCESS_KEY also read
-      const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
-      // Credentials alone are enough — AWS S3 derives its endpoint from the region.
-      if (accessKeyId && secretAccessKey) {
-        this.s3Client = new S3Client({
-          ...(endpoint ? { endpoint } : {}),
-          region: process.env.S3_REGION || 'us-east-1',
-          credentials: { accessKeyId, secretAccessKey },
-          ...(endpoint ? { forcePathStyle: true } : {}), // path-style is a MinIO/R2 concern
-        });
-        // bucket auto-created if missing (HeadBucket -> CreateBucket)
-      }
-    }
-    if (!fs.existsSync(this.localPath)) fs.mkdirSync(this.localPath, { recursive: true });
-  }
-
-  // Both backends share one path-safety guard (isSafeStorageKey) at this boundary.
-  async putFile(filePath: string, data: Buffer): Promise<void> {
-    if (!isSafeStorageKey(filePath)) throw new Error(`Refusing unsafe storage key: ${filePath}`);
-    return this.storageType === 's3' && this.s3Client
-      ? this.putS3File(filePath, data) // keyed under media/<filePath>
-      : this.putLocalFile(filePath, data);
-  }
-
-  async getFile(filePath: string): Promise<Buffer> {
-    /* mirrors putFile */
-  }
-  async listFiles(): Promise<string[]> {
-    /* local recurse, or S3 ListObjectsV2 under media/ */
-  }
-  // createExportStream(): tar.gz of all files; importFromStream(): extract with zip-bomb caps
-}
-```
-
-### 3.13.2 Database Adapter
-
-OpenWA supports SQLite for lightweight deployments and PostgreSQL for high-volume production.
-
-#### Database Comparison
-
-| Feature                | SQLite             | PostgreSQL      |
-| ---------------------- | ------------------ | --------------- |
-| **Setup**              | Zero config        | Requires server |
-| **Concurrent writes**  | Limited (1 writer) | Excellent       |
-| **Horizontal scaling** | ❌                 | ✅              |
-| **Table partitioning** | ❌                 | ✅              |
-| **Memory footprint**   | ~10MB              | ~100MB+         |
-| **Backup**             | Copy file          | pg_dump         |
-| **Best for**           | 1-5 sessions       | 5+ sessions     |
-
-#### TypeORM Configuration
-
-Database wiring lives inline in `AppModule` (`src/app.module.ts`) as two named
-`TypeOrmModule.forRootAsync` connections — there is no standalone `getDatabaseConfig` helper. The
-`data` connection is the one shown below; the `main` connection is always SQLite (auth + audit). The
-`data` connection's type comes from `DATABASE_TYPE` (`sqlite` default, or `postgres`):
-
-```typescript
-// shape of the 'data' connection useFactory in src/app.module.ts
-const dbType = configService.get<'sqlite' | 'postgres'>('dataDatabase.type', 'sqlite');
-const baseConfig = {
-  entities: [/* session, webhook, message, template, engine, integration, status-store globs */],
-  migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
-  logging: configService.get<boolean>('dataDatabase.logging', false),
-};
-
-if (dbType === 'postgres') {
-  return {
-    ...baseConfig,
-    name: 'data',
-    type: 'postgres',
-    host: configService.get('dataDatabase.host'),
-    port: configService.get('dataDatabase.port'),
-    username: configService.get('dataDatabase.username'),
-    password: configService.get('dataDatabase.password'),
-    database: configService.get('dataDatabase.name', 'openwa'),
-    synchronize: configService.get('dataDatabase.synchronize', false), // migrations in prod
-    migrationsRun: true,
-    extra: { max: configService.get('dataDatabase.poolSize', 10) },
-  };
-}
-
-// SQLite (default): migration-managed unless DATABASE_SYNCHRONIZE=true
-const synchronize = configService.get<boolean>('dataDatabase.synchronize', false);
-return {
-  ...baseConfig,
-  name: 'data',
-  type: 'better-sqlite3' as const, // DATABASE_TYPE=sqlite -> this driver
-  database: configService.get('dataDatabase.database', './data/openwa.sqlite'),
-  synchronize,
-  migrationsRun: !synchronize,
-};
-```
-
-#### SQLite Considerations
-
-> **Note:** OpenWA does not currently apply SQLite-specific concurrency hardening. There is **no**
-> `journal_mode = WAL` PRAGMA, no `SqliteWriteQueueService`, and no application-level write
-> serialization or session cap in the source. SQLite is used with TypeORM's defaults, so its standard
-> single-writer behavior applies. For high write-concurrency or multi-session deployments, use
-> PostgreSQL (`DATABASE_TYPE=postgres`). Cross-dialect schema differences are handled at migration
-> time (see below), not by a runtime optimizations layer.
-
-#### Migration Strategy
-
-There is **no** shared cross-dialect migration base class. Each migration is a plain
-`MigrationInterface` that branches inline on the connection's dialect, and the branch always tests for
-`'postgres'` (never for a SQLite name — the SQLite driver reports `better-sqlite3`, not `sqlite`).
-A Postgres-only migration simply returns early everywhere else:
-
-```typescript
-// src/database/migrations/1779235200000-AddUuidDefaultsForPostgres.ts (shape)
-export class AddUuidDefaultsForPostgres1779235200000 implements MigrationInterface {
-  name = 'AddUuidDefaultsForPostgres1779235200000';
-
-  public async up(queryRunner: QueryRunner): Promise<void> {
-    // No-op on SQLite: TypeORM generates the UUID in the driver layer there, so no DB default
-    // is needed. Only Postgres expects the column to supply it.
-    if (queryRunner.dataSource.options.type !== 'postgres') return;
-    // ... ALTER TABLE ... ALTER COLUMN "id" SET DEFAULT gen_random_uuid()::varchar
-  }
-}
-```
-
-Migrations that must run on both dialects with different SQL take the same check as a branch, e.g.
-`const isPostgres = queryRunner.connection.options.type === 'postgres';`.
-
-### 3.13.3 Cache Service
-
-There is **no** cache-manager / `CacheModuleOptions` / `redisStore` setup and **no** in-memory cache.
-`CacheService` (`src/common/cache/cache.service.ts`) talks to **ioredis directly** and is gated by
-`REDIS_ENABLED` (falling back to the `cache.enabled` config flag). When caching is disabled — or Redis
-is unreachable — the service **fails open**: every read returns `null` and every write is a silent
-no-op, so the app keeps serving from its source of truth. In other words, "no cache configured" means
-**no cache** (recompute), not an in-process LRU. Cache is therefore a pure optimization layer (session
-status/info/QR/list/stats, each with its own short TTL); it is never the source of truth.
-
-```typescript
-// src/common/cache/cache.service.ts
-@Injectable()
-export class CacheService implements OnModuleDestroy {
-  private redis: Redis | null = null;
-  private readonly enabled: boolean;
-
-  constructor(private readonly configService: ConfigService) {
-    // REDIS_ENABLED is the primary switch; cache.enabled is the legacy fallback.
-    this.enabled = process.env.REDIS_ENABLED === 'true' || configService.get<boolean>('cache.enabled', false);
-    // Lazy connect: the first isAvailable() call dials Redis, then ioredis owns reconnection —
-    // it retries forever with capped backoff (times => Math.min(times * 500, 5000)).
-  }
-
-  async isAvailable(): Promise<boolean> {
-    if (!this.enabled) return false; // disabled -> always "no cache"
-    this.ensureClient(); // create on first use; ioredis handles (re)connecting
-    return this.ping(); // reflects live state: false during an outage, true once back
-  }
-
-  // Fail-open reads/writes: unavailable Redis is a no-op, never an error to the caller.
-  async getSessionStatus(id: string): Promise<string | null> {
-    if (!(await this.isAvailable())) return null;
-    try {
-      return await this.redis!.get(`session:${id}:status`);
-    } catch {
-      return null;
-    }
-  }
-
-  async setSessionStatus(id: string, status: string): Promise<void> {
-    if (!(await this.isAvailable())) return; // no-op when disabled/unreachable
-    try {
-      await this.redis!.setex(`session:${id}:status`, /* TTL */ 300, status);
-    } catch {
-      /* logged + swallowed */
-    }
-  }
-}
-```
-
-### 3.13.4 Deployment Profiles
-
-OpenWA provides several deployment profiles for different needs:
-
-```mermaid
-flowchart LR
-    subgraph Minimal["🪶 Minimal Profile"]
-        M1[SQLite]
-        M2[Local Storage]
-        M3[No Cache]
-        M4[Single Session]
-    end
-
-    subgraph Standard["⚡ Standard Profile"]
-        S1[PostgreSQL]
-        S2[Local Storage]
-        S3[Redis]
-        S4[Multi Session]
-    end
-
-    subgraph Enterprise["🏢 Enterprise Profile"]
-        E1[PostgreSQL Cluster]
-        E2[S3/MinIO]
-        E3[Redis Cluster]
-        E4[Vertical Headroom]
-    end
-```
-
-| Profile        | Database   | Storage  | Cache | Sessions | RAM   | Use Case              |
-| -------------- | ---------- | -------- | ----- | -------- | ----- | --------------------- |
-| **Minimal**    | SQLite     | Local    | None  | 1-3      | 512MB | Personal bot, testing |
-| **Standard**   | PostgreSQL | Local    | Redis | 5-10     | 2GB   | Small business        |
-| **Enterprise** | PostgreSQL | S3/MinIO | Redis | 10+      | 4GB+  | Agency, high volume   |
-
-> Session counts are guidance only by default. Set `MAX_CONCURRENT_SESSIONS` to a positive integer
-> to cap concurrently running or initializing engines; the default `0` keeps the historical
-> unlimited behavior.
-
-### Configuration Examples
-
-#### Minimal Profile (.env)
-
-```bash
-# Database
-DATABASE_TYPE=sqlite
-DATABASE_NAME=./data/openwa.sqlite
-
-# Storage
-STORAGE_TYPE=local
-STORAGE_LOCAL_PATH=./data/media
-
-# Cache: omit / leave Redis disabled -> the cache layer no-ops (no in-memory cache)
-REDIS_ENABLED=false
-```
-
-#### Standard Profile (.env)
-
-```bash
-# Database (Postgres uses discrete host/port/credentials, not a single URL)
-DATABASE_TYPE=postgres
-DATABASE_HOST=localhost
-DATABASE_PORT=5432
-DATABASE_NAME=openwa
-DATABASE_USERNAME=openwa
-DATABASE_PASSWORD=password
-
-# Storage
-STORAGE_TYPE=local
-STORAGE_LOCAL_PATH=./data/media
-
-# Cache
-REDIS_ENABLED=true
-REDIS_HOST=localhost
-REDIS_PORT=6379
-```
-
-#### Enterprise Profile (.env)
-
-```bash
-# Database
-DATABASE_TYPE=postgres
-DATABASE_HOST=db-cluster
-DATABASE_PORT=5432
-DATABASE_NAME=openwa
-DATABASE_USERNAME=openwa
-DATABASE_PASSWORD=password
-DATABASE_POOL_SIZE=50
-
-# Storage (S3 or any S3-compatible endpoint; MinIO uses the same vars)
-STORAGE_TYPE=s3
-S3_BUCKET=openwa-media
-S3_REGION=ap-southeast-1
-S3_ACCESS_KEY_ID=xxx
-S3_SECRET_ACCESS_KEY=xxx
-# AWS S3 needs NO endpoint (one is derived from the region) — leave S3_ENDPOINT unset for it. An
-# endpoint is only for S3-compatible stores (MinIO, R2, …), where setting it also enables path-style:
-# S3_ENDPOINT=http://minio:9000
-
-# Cache
-REDIS_ENABLED=true
-REDIS_HOST=redis-cluster
-REDIS_PORT=6379
-```
-
-> OpenWA runs as a single API instance per session-data volume; there is no cluster-mode flag.
-> "Enterprise" here describes vertical headroom (RAM, Postgres, S3, Redis), not multi-replica
-> horizontal scaling — see the single-instance note in §3.2.
-
-### Choosing a Profile
-
-OpenWA does not auto-detect a profile at runtime; pick one by available resources and expected load:
-
-| Available RAM | Suggested profile | Backends                                          |
-| ------------- | ----------------- | ------------------------------------------------- |
-| < ~1 GB       | Minimal           | SQLite + Local Storage, Redis disabled (no cache) |
-| ~1–4 GB       | Standard          | PostgreSQL + Local Storage + Redis                |
-| > ~4 GB       | Enterprise        | PostgreSQL + S3/MinIO + Redis                     |
-
-All profiles still run as a single API instance per session-data volume (see §3.2). Enterprise here
-means more vertical headroom and external backends, not multi-replica clustering.
-
----
-
-<div align="center">
 
 [← 02 - Requirements Specification](./02-requirements-specification.md) · [Documentation Index](./README.md) · [Next: 04 - Security Design →](./04-security-design.md)
-
-</div>
