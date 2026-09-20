@@ -1,0 +1,255 @@
+diff --git a/dashboard/src/utils/authStorage.ts b/dashboard/src/utils/authStorage.ts
+new file mode 100644
+--- /dev/null
++++ b/dashboard/src/utils/authStorage.ts
+@@ -0,0 +1,27 @@
++/** One credential source for startup, HTTP requests, and WebSocket connections. */
++const API_KEY_STORAGE_KEY = 'openwa_api_key';
++
++/** Prefer the current tab's credential; otherwise restore a remembered login. */
++export function getStoredApiKey(): string | null {
++  return (
++    sessionStorage.getItem(API_KEY_STORAGE_KEY) ??
++    localStorage.getItem(API_KEY_STORAGE_KEY)
++  );
++}
++
++/** Only persist a credential across browser sessions when explicitly requested. */
++export function saveApiKey(apiKey: string, rememberMe: boolean): void {
++  if (rememberMe) {
++    localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
++    sessionStorage.removeItem(API_KEY_STORAGE_KEY);
++  } else {
++    sessionStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
++    localStorage.removeItem(API_KEY_STORAGE_KEY);
++  }
++}
++
++/** Logout and revoked credentials must never leave a persistent copy behind. */
++export function clearStoredApiKey(): void {
++  sessionStorage.removeItem(API_KEY_STORAGE_KEY);
++  localStorage.removeItem(API_KEY_STORAGE_KEY);
++}
+diff --git a/dashboard/src/App.tsx b/dashboard/src/App.tsx
+--- a/dashboard/src/App.tsx
++++ b/dashboard/src/App.tsx
+@@ -40,6 +40,12 @@
+ import {
+   API_BASE_URL,
+ } from './services/api';
++
++import {
++  clearStoredApiKey,
++  getStoredApiKey,
++  saveApiKey,
++} from './utils/authStorage';
+ 
+ import {
+   clearActorState,
+@@ -184,11 +190,7 @@
+     * previously-saved key, not for the fresh login transition.
+     */
+   const [savedKey] =
+-    useState(() =>
+-      sessionStorage.getItem(
+-        'openwa_api_key',
+-      ),
+-    );
++    useState(getStoredApiKey);
+ 
+   const [
+     isAuthenticated,
+@@ -217,11 +219,9 @@
+   const handleLogin = (
+     key: string,
+     validatedRole?: string,
++    rememberMe = false,
+   ) => {
+-    sessionStorage.setItem(
+-      'openwa_api_key',
+-      key,
+-    );
++    saveApiKey(key, rememberMe);
+ 
+     setRole(
+       isUserRole(validatedRole)
+@@ -238,9 +237,7 @@
+       setStartupRoleResolved(true);
+       setIsAuthenticated(false);
+       setRole(null);
+-      sessionStorage.removeItem(
+-        'openwa_api_key',
+-      );
++      clearStoredApiKey();
+ 
+       clearActorState(
+         queryClient,
+diff --git a/dashboard/src/services/api.ts b/dashboard/src/services/api.ts
+--- a/dashboard/src/services/api.ts
++++ b/dashboard/src/services/api.ts
+@@ -1,4 +1,5 @@
+ // Centralized API client with TypeScript types
+ 
+ import { warnIfInsecureHttpUrl } from '../utils/urlSecurity';
++import { clearStoredApiKey, getStoredApiKey } from '../utils/authStorage';
+ import type { UserRole } from '../types/role';
+@@ -896,6 +897,6 @@
+ async function handleErrorResponse<T>(response: Response): Promise<T> {
+   if (response.status === 401) {
+-    sessionStorage.removeItem('openwa_api_key');
++    clearStoredApiKey();
+     if (typeof window !== 'undefined') {
+       window.location.assign('/');
+       return new Promise<T>(() => {});
+@@ -945,6 +946,6 @@
+ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+   const url = `${API_BASE_URL}${endpoint}`;
+ 
+-  // Get API key from sessionStorage for authentication
+-  const apiKey = sessionStorage.getItem('openwa_api_key');
++  // HTTP and WebSocket authentication must use the same active credential.
++  const apiKey = getStoredApiKey();
+   // For FormData (file uploads) let the browser set multipart/form-data + boundary itself.
+@@ -969,4 +970,4 @@
+ /** Like {@link request} but returns the raw response text — e.g. a plugin's HTML config-UI bundle. */
+ async function requestText(endpoint: string): Promise<string> {
+-  const apiKey = sessionStorage.getItem('openwa_api_key');
++  const apiKey = getStoredApiKey();
+   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+@@ -984,7 +985,7 @@
+ async function requestBlob(endpoint: string): Promise<Blob> {
+   const url = `${API_BASE_URL}${endpoint}`;
+ 
+-  // Get API key from sessionStorage for authentication
+-  const apiKey = sessionStorage.getItem('openwa_api_key');
++  // Use the same active credential for media downloads.
++  const apiKey = getStoredApiKey();
+ 
+   const headers: HeadersInit = {
+diff --git a/dashboard/src/hooks/useWebSocket.ts b/dashboard/src/hooks/useWebSocket.ts
+--- a/dashboard/src/hooks/useWebSocket.ts
++++ b/dashboard/src/hooks/useWebSocket.ts
+@@ -1,5 +1,6 @@
+ import { useEffect, useRef, useCallback, useState } from 'react';
+ import { io, Socket } from 'socket.io-client';
+ import { warnIfInsecureHttpUrl } from '../utils/urlSecurity';
++import { getStoredApiKey } from '../utils/authStorage';
+ 
+ interface SessionStatusEvent {
+@@ -172,7 +173,7 @@
+   const [socketEpoch, setSocketEpoch] = useState(0);
+   const connect = useCallback(() => {
+     if (socketRef.current?.connected) return;
+-    // Get API key from sessionStorage (same as api.ts)
+-    const apiKey = sessionStorage.getItem('openwa_api_key');
++    // Authenticate with the same active credential as the HTTP API client.
++    const apiKey = getStoredApiKey();
+     if (!apiKey) {
+       console.warn('[WebSocket] No API key found, skipping connection');
+diff --git a/dashboard/src/pages/Login.tsx b/dashboard/src/pages/Login.tsx
+--- a/dashboard/src/pages/Login.tsx
++++ b/dashboard/src/pages/Login.tsx
+@@ -7,7 +7,7 @@
+ import { API_BASE_URL } from '../services/api';
+ import './Login.css';
+ interface LoginProps {
+-  onLogin: (apiKey: string, role?: string) => void;
++  onLogin: (apiKey: string, role: string | undefined, rememberMe: boolean) => void;
+ }
+ 
+ export function Login({ onLogin }: LoginProps) {
+@@ -16,3 +17,4 @@
+   const [apiKey, setApiKey] = useState('');
+   const [showKey, setShowKey] = useState(false);
++  const [rememberMe, setRememberMe] = useState(false);
+   const [isLoading, setIsLoading] = useState(false);
+@@ -42,5 +44,5 @@
+         // The validate body already carries the key's role — hand it up so the app can set it
+         // directly instead of re-validating the same key a second time.
+         const data: { role?: string } = await response.json().catch(() => ({}));
+-        onLogin(apiKey, data.role);
++        onLogin(apiKey, data.role, rememberMe);
+       } else {
+@@ -99,5 +101,19 @@
+             </div>
+             {error && <span className="error-message">{error}</span>}
+           </div>
++          <label
++            style={{
++              display: 'flex',
++              alignItems: 'center',
++              gap: '0.5rem',
++              marginBottom: '1.25rem',
++              cursor: 'pointer',
++              fontSize: '0.875rem',
++              color: 'var(--text-secondary)',
++            }}
++          >
++            <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} />
++            {t('login.rememberMe', { defaultValue: 'Remember me on this device' })}
++          </label>
+           <button type="submit" className="connect-btn" disabled={isLoading}>
+             {isLoading ? t('login.connecting') : t('login.connect')}
+diff --git a/dashboard/src/utils/authStorage.test.ts b/dashboard/src/utils/authStorage.test.ts
+new file mode 100644
+--- /dev/null
++++ b/dashboard/src/utils/authStorage.test.ts
+@@ -0,0 +1,58 @@
++import { beforeEach, test } from 'node:test';
++import assert from 'node:assert/strict';
++import { clearStoredApiKey, getStoredApiKey, saveApiKey } from './authStorage.ts';
++
++function createStorage(): Storage {
++  const values = new Map<string, string>();
++  return {
++    get length() { return values.size; },
++    clear() { values.clear(); },
++    getItem(key: string) { return values.get(key) ?? null; },
++    key(index: number) { return Array.from(values.keys())[index] ?? null; },
++    removeItem(key: string) { values.delete(key); },
++    setItem(key: string, value: string) { values.set(key, value); },
++  };
++}
++
++beforeEach(() => {
++  Object.assign(globalThis, {
++    sessionStorage: createStorage(),
++    localStorage: createStorage(),
++  });
++});
++
++test('Remember me persists only in localStorage', () => {
++  saveApiKey('remembered', true);
++  assert.equal(localStorage.getItem('openwa_api_key'), 'remembered');
++  assert.equal(sessionStorage.getItem('openwa_api_key'), null);
++  assert.equal(getStoredApiKey(), 'remembered');
++});
++
++test('unselected Remember me keeps the key in sessionStorage', () => {
++  saveApiKey('tab-only', false);
++  assert.equal(sessionStorage.getItem('openwa_api_key'), 'tab-only');
++  assert.equal(localStorage.getItem('openwa_api_key'), null);
++  assert.equal(getStoredApiKey(), 'tab-only');
++});
++
++test('switching to tab-only login removes an older remembered key', () => {
++  saveApiKey('old', true);
++  saveApiKey('new', false);
++  assert.equal(getStoredApiKey(), 'new');
++  assert.equal(localStorage.getItem('openwa_api_key'), null);
++});
++
++test('the tab-specific key takes priority when both storages contain keys', () => {
++  sessionStorage.setItem('openwa_api_key', 'tab');
++  localStorage.setItem('openwa_api_key', 'remembered');
++  assert.equal(getStoredApiKey(), 'tab');
++});
++
++test('logout clears both storage locations', () => {
++  sessionStorage.setItem('openwa_api_key', 'tab');
++  localStorage.setItem('openwa_api_key', 'remembered');
++  clearStoredApiKey();
++  assert.equal(getStoredApiKey(), null);
++  assert.equal(localStorage.getItem('openwa_api_key'), null);
++  assert.equal(sessionStorage.getItem('openwa_api_key'), null);
++});

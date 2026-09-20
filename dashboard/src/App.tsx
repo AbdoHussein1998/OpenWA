@@ -51,6 +51,11 @@ import {
 import {
   API_BASE_URL,
 } from './services/api';
+import {
+  clearStoredApiKey,
+  getStoredApiKey,
+  saveApiKey,
+} from './utils/authStorage';
 
 import {
   clearActorState,
@@ -201,11 +206,7 @@ function AppContent() {
    * previously-saved key, not for the fresh login transition.
    */
   const [savedKey] =
-    useState(() =>
-      sessionStorage.getItem(
-        'openwa_api_key',
-      ),
-    );
+    useState(getStoredApiKey);
 
   const [
     isAuthenticated,
@@ -236,11 +237,9 @@ function AppContent() {
   const handleLogin = (
     key: string,
     validatedRole?: string,
+    rememberMe = false,
   ) => {
-    sessionStorage.setItem(
-      'openwa_api_key',
-      key,
-    );
+    saveApiKey(key, rememberMe);
 
     setRole(
       isUserRole(validatedRole)
@@ -258,9 +257,7 @@ function AppContent() {
       setIsAuthenticated(false);
       setRole(null);
 
-      sessionStorage.removeItem(
-        'openwa_api_key',
-      );
+      clearStoredApiKey();
 
       clearActorState(
         queryClient,

@@ -9,7 +9,7 @@ import { API_BASE_URL } from '../services/api';
 import './Login.css';
 
 interface LoginProps {
-  onLogin: (apiKey: string, role?: string) => void;
+  onLogin: (apiKey: string, role?: string, rememberMe?: boolean) => void;
 }
 
 export function Login({ onLogin }: LoginProps) {
@@ -17,6 +17,7 @@ export function Login({ onLogin }: LoginProps) {
   const version = useAppVersion();
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const currentLang = resolveSupportedLanguage(i18n.resolvedLanguage || i18n.language);
@@ -47,7 +48,7 @@ export function Login({ onLogin }: LoginProps) {
         // The validate body already carries the key's role — hand it up so the app can set it
         // directly instead of re-validating the same key a second time.
         const data: { role?: string } = await response.json().catch(() => ({}));
-        onLogin(apiKey, data.role);
+        onLogin(apiKey, data.role, rememberMe);
       } else {
         const errorData = await response.json().catch(() => ({}));
         setError(errorData.message || t('login.invalidKey'));
@@ -107,6 +108,15 @@ export function Login({ onLogin }: LoginProps) {
             </div>
             {error && <span className="error-message">{error}</span>}
           </div>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={e => setRememberMe(e.target.checked)}
+            />
+            {t('login.rememberMe', { defaultValue: 'Remember me on this device' })}
+          </label>
 
           <button type="submit" className="connect-btn" disabled={isLoading}>
             {isLoading ? t('login.connecting') : t('login.connect')}
