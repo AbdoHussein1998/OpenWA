@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { warnIfInsecureHttpUrl } from '../utils/urlSecurity';
-
+import { getStoredApiKey } from '../utils/authStorage';
 interface SessionStatusEvent {
   sessionId: string;
   status: string;
@@ -184,7 +184,7 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     if (socketRef.current?.connected) return;
 
     // Get API key from sessionStorage (same as api.ts)
-    const apiKey = sessionStorage.getItem('openwa_api_key');
+    const apiKey = getStoredApiKey();;
 
     if (!apiKey) {
       console.warn('[WebSocket] No API key found, skipping connection');
