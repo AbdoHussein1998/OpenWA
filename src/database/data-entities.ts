@@ -1,6 +1,7 @@
+
 import * as fs from 'fs';
 import * as path from 'path';
-import { getMetadataArgsStorage, type EntityTarget } from 'typeorm';
+import { getMetadataArgsStorage } from 'typeorm';
 
 /**
  * The DATA connection owns only entities under these directories. Keep this list
@@ -22,9 +23,8 @@ const DATA_ENTITY_DIRECTORIES = [
   'modules/automation',
 ] as const;
 
-// These targets have already been observed in the failing application logs.
-// Fail at database setup if any of them is not registered, rather than allowing
-// individual cleanup jobs to fail later with EntityMetadataNotFoundError.
+// Fail during database setup if any of these required entities is not registered,
+// rather than allowing individual jobs to fail with EntityMetadataNotFoundError.
 const REQUIRED_ENTITY_NAMES = [
   'Session',
   'WebhookDeliveryFailure',
@@ -48,9 +48,14 @@ function collectEntityFiles(directory: string, extension: string, files: string[
   }
 }
 
-export function loadDataEntities(): EntityTarget<unknown>[] {
-  // ts-node / the dev CLI load .ts; compiled NestJS / the production CLI load .js.
-  // Never load BOTH variants: that could register different constructors for the
+/**
+ * Return only decorated entity constructors. TypeORM's `entities` configuration
+ * accepts constructors, paths and EntitySchema objects, but not every kind of
+ * EntityTarget (which also includes object-shaped lookup targets).
+ */
+export function loadDataEntities(): Function[] {
+  // ts-node / the development CLI load .ts; compiled NestJS / the production CLI load .js.
+  // Never load both variants: that could register different constructors for the
   // same entity when a development checkout also contains compiled files.
   const extension = path.extname(__filename) === '.ts' ? '.ts' : '.js';
   const srcOrDistRoot = path.resolve(__dirname, '..');
@@ -65,7 +70,7 @@ export function loadDataEntities(): EntityTarget<unknown>[] {
     throw new Error(`No OpenWA data entity files found under ${srcOrDistRoot} (${extension}).`);
   }
 
-  // Require every module first, so that its @Entity decorator has had a chance
+  // Require every module first, so each @Entity decorator has had a chance
   // to register its class with TypeORM's decorator metadata storage.
   const exportsByFile = files.map(file => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -75,20 +80,18 @@ export function loadDataEntities(): EntityTarget<unknown>[] {
     getMetadataArgsStorage().tables.map(table => table.target),
   );
 
-  const entities: EntityTarget<unknown>[] = [];
-  const seen = new Set<unknown>();
+  const entities: Function[] = [];
+  const seen = new Set<Function>();
   for (const moduleExports of exportsByFile) {
     for (const candidate of Object.values(moduleExports)) {
       if (typeof candidate === 'function' && decoratedTargets.has(candidate) && !seen.has(candidate)) {
         seen.add(candidate);
-        entities.push(candidate as EntityTarget<unknown>);
+        entities.push(candidate);
       }
     }
   }
 
-  const registeredNames = new Set(
-    entities.map(entity => (entity as { name?: string }).name),
-  );
+  const registeredNames = new Set(entities.map(entity => entity.name));
   const missing = REQUIRED_ENTITY_NAMES.filter(name => !registeredNames.has(name));
   if (missing.length > 0) {
     throw new Error(
