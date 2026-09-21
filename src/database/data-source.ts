@@ -1,8 +1,8 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
-import * as path from 'path';
 import { loadCliEnv } from './load-cli-env';
 import { sqliteDataMainPathCollision } from '../config/env.validation';
 import { loadDataEntities } from './data-entities';
+import { loadDataMigrations } from './data-migrations';
 
 // The standalone CLI must use the same env-file precedence as the running app.
 loadCliEnv();
@@ -14,14 +14,12 @@ if (sqlitePathCollision) {
 }
 
 const dbType = process.env.DATABASE_TYPE || 'sqlite';
-const sourceGlob = (...segments: string[]): string =>
-  path.join(__dirname, ...segments).replace(/\\/g, '/');
 
-// Register the very same data-owned entity classes as AppModule. This excludes
-// the main-owned auth/audit/teamleader entities and is independent of Windows
-// glob handling and the TypeORM version's entity file-discovery implementation.
+// Reuse the exact entity and migration constructors registered by AppModule.
+// TypeORM's internal filesystem glob loader returns zero migrations on some
+// Windows installations, even when globSync() finds the files correctly.
 const dataEntities = loadDataEntities();
-const dataMigrations = [sourceGlob('migrations', '*{.ts,.js}')];
+const dataMigrations = loadDataMigrations();
 
 const sqliteDataSourceOptions: DataSourceOptions = {
   type: 'better-sqlite3',

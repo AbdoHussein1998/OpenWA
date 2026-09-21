@@ -11,6 +11,7 @@ import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { createBootDataSource } from './database/pg-boot-migrations';
 import { loadDataEntities } from './database/data-entities';
+import { loadDataMigrations } from './database/data-migrations';
 import { SessionModule } from './modules/session/session.module';
 import { MessageModule } from './modules/message/message.module';
 import { TemplateModule } from './modules/template/template.module';
@@ -55,8 +56,8 @@ import { TeamLeader } from './modules/teamleader/entities/team-leader.entity';
 import { Agent } from './modules/teamleader/entities/agent.entity';
 import { AgentTemplateSendUsage } from './modules/teamleader/entities/agent-template-send-usage.entity';
 
-// Normalize migration glob paths for TypeORM on Windows and Linux.
-// The data entities themselves are registered by class in loadDataEntities().
+// The MAIN connection still uses its dedicated migrations directory.
+// DATA migrations are registered by class through loadDataMigrations().
 const sourceGlob = (...segments: string[]): string =>
   path.join(__dirname, ...segments).replace(/\\/g, '/');
 
@@ -185,7 +186,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
         const dbType = configService.get<'sqlite' | 'postgres'>('dataDatabase.type', 'sqlite');
         const baseConfig = {
           entities: loadDataEntities(),
-          migrations: [sourceGlob('database', 'migrations', '*{.ts,.js}')],
+          migrations: loadDataMigrations(),
           logging: configService.get<boolean>('dataDatabase.logging', false),
         };
 

@@ -1,6 +1,7 @@
 import { getMetadataArgsStorage, type EntityTarget } from 'typeorm';
 import dataDataSource, { postgresDataSourceOptions, buildPostgresDataSourceOptions } from './data-source';
 import { loadDataEntities } from './data-entities';
+import { loadDataMigrations } from './data-migrations';
 
 const entityNames = (entities: readonly EntityTarget<unknown>[]): string[] =>
   entities.map(entity => (entity as { name?: string }).name ?? '');
@@ -29,6 +30,29 @@ describe('data CLI DataSource', () => {
     for (const name of ['ApiKey', 'AuditLog', 'TeamLeader', 'Agent', 'AgentTemplateSendUsage']) {
       expect(names).not.toContain(name);
     }
+  });
+
+  it('registers the same migration constructors as the runtime loader', () => {
+    const migrations = dataDataSource.options.migrations as Function[];
+    expect(migrations).toEqual(loadDataMigrations());
+    expect(new Set(migrations).size).toBe(migrations.length);
+    expect(migrations.length).toBeGreaterThan(0);
+    expect(migrations.every(migration => typeof migration === 'function')).toBe(true);
+  });
+
+  it('includes the migrations creating all five reported missing tables', () => {
+    const names = (dataDataSource.options.migrations as Function[]).map(migration => migration.name);
+    expect(names).toEqual(expect.arrayContaining([
+      'AddMessageStatus1770108659848',
+      'AddLidMappings1781200000000',
+      'AddWebhookDeliveryFailures1781700000000',
+      'CreateStatusUpdates1784822470680',
+      'AddWebhookOutboxEvents1786200000000',
+    ]));
+  });
+
+  it('uses the same migration classes in PostgreSQL and SQLite CLI configurations', () => {
+    expect(postgresDataSourceOptions.migrations).toEqual(dataDataSource.options.migrations);
   });
 
   it('refuses a DATA SQLite path that resolves to the MAIN SQLite file', () => {
