@@ -1,0 +1,1830 @@
+
+
+
+
+
+// Spread the real fs so every method passes through, but as configurable props the test can spy on
+// (the bare `import * as fs` namespace is non-configurable, so jest.spyOn can't redefine its methods).
+jest.mock('fs', () => ({ __esModule: true, ...jest.requireActual<typeof import('fs')>('fs') }));
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { createHash, createHmac } from 'crypto';
+import * as fs from 'fs';
+import { ApiKeyManagementService } from './api-key-management.service';
+import { ApiKeyProvisioningService } from './api-key-provisioning.service';
+import { ApiKeyAdminSafetyService } from './api-key-admin-safety.service';
+import { ApiKeySocketEvictionService } from './api-key-socket-eviction.service';
+import { ACTIVE_CREDENTIAL_CONNECTION_EVICTOR } from './active-credential-connection-evictor';
+import { ApiKeyBootstrapService } from '../bootstrap/api-key-bootstrap.service';
+import { resolveSeedApiKey, bannerKeyLine } from '../bootstrap/bootstrap-key-policy';
+import { ApiKeyAuthenticator } from '../authentication/api-key-authenticator.service';
+import { RoleCapabilityPolicy } from '../../access-control/policies/role-capability.policy';
+import { ApiKeyUsageTracker } from '../api-key-usage-tracker.service';
+import { ApiCapability } from '../capabilities/api-capability';
+import { ApiKey } from '../entities/api-key.entity';
+import  {ApiKeyRole } from '../auth.levels.constants'
+// Helpers
+const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
+
+function createMockApiKey(overrides: Partial<ApiKey> = {}): ApiKey {
+  return {
+    id: 'uuid-1',
+    name: 'Test Key',
+    keyHash: hashKey('test-key'),
+    keyPrefix: 'test-key-pre',
+    role: ApiKeyRole.OPERATOR,
+    isPrimaryAdminKey: false,
+    teamLeaderId: null,
+    teamLeader: null,
+    agentId: null,
+    agent: null,
+    allowedIps: null,
+    allowedSessions: null,
+    isActive: true,
+    expiresAt: null,
+    lastUsedAt: null,
+    usageCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
+
+function createAdminActor(
+  overrides: Partial<ApiKey> = {},
+): ApiKey {
+  return createMockApiKey({
+    id: 'actor-admin',
+    name: 'Admin Actor',
+    role: ApiKeyRole.ADMIN,
+    isPrimaryAdminKey: false,
+    allowedSessions: null,
+    ...overrides,
+  });
+}
+
+function createOperatorActor(
+  overrides: Partial<ApiKey> = {},
+): ApiKey {
+  return createMockApiKey({
+    id: 'actor-operator',
+    name: 'Operator Actor',
+    role: ApiKeyRole.OPERATOR,
+    isPrimaryAdminKey: false,
+    allowedSessions: null,
+    ...overrides,
+  });
+}
+
+describe('resolveSeedApiKey (first-boot default admin key)', () => {
+  const ORIGINAL_ENV = process.env;
+
+  beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    delete process.env.API_MASTER_KEY;
+    delete process.env.ALLOW_DEV_API_KEY;
+  });
+
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+  });
+
+  it('uses API_MASTER_KEY verbatim when set', () => {
+    process.env.API_MASTER_KEY = 'my-explicit-master-key';
+    expect(resolveSeedApiKey()).toBe('my-explicit-master-key');
+  });
+
+  it('generates a random owa_k1_ key by default (no opt-in)', () => {
+    expect(resolveSeedApiKey()).toMatch(/^owa_k1_[a-f0-9]{64}$/);
+  });
+
+  it('returns the fixed dev-admin-key only when ALLOW_DEV_API_KEY=true', () => {
+    process.env.ALLOW_DEV_API_KEY = 'true';
+    expect(resolveSeedApiKey()).toBe('dev-admin-key');
+  });
+
+  it('prefers API_MASTER_KEY over the dev opt-in', () => {
+    process.env.API_MASTER_KEY = 'master-wins';
+    process.env.ALLOW_DEV_API_KEY = 'true';
+    expect(resolveSeedApiKey()).toBe('master-wins');
+  });
+});
+
+describe('bannerKeyLine (startup banner key masking)', () => {
+  const FULL = 'owa_k1_0123456789abcdef0123456789abcdef';
+
+  it('prints the full key only when it was just created', () => {
+    expect(bannerKeyLine(FULL, true)).toBe(FULL);
+  });
+
+  it('masks the key on subsequent boots — the full secret is never re-logged', () => {
+    const line = bannerKeyLine(FULL, false);
+    expect(line).not.toContain('0123456789abcdef'); // the secret tail must not appear
+    expect(line.startsWith('owa_k1_0')).toBe(true); // a short fingerprint is fine
+    expect(line).toMatch(/data\/\.api-key|dashboard/); // points the operator to the real source
+  });
+
+  it('passes a placeholder through unchanged', () => {
+    expect(bannerKeyLine('(check dashboard for keys)', false)).toBe('(check dashboard for keys)');
+  });
+});
+
+describe('API key management, provisioning and bootstrap', () => {
+  let service: ApiKeyManagementService;
+  let provisioning: ApiKeyProvisioningService;
+  let authenticator: ApiKeyAuthenticator;
+  let bootstrap: ApiKeyBootstrapService;
+  let usageTracker: ApiKeyUsageTracker;
+  let eviction: ApiKeySocketEvictionService;
+  let socketPort: { evictApiKey: jest.Mock };
+  let repository: jest.Mocked<Partial<Repository<ApiKey>>>;
+  /** In-memory stand-in for the api_keys table, shared by the findOne/remove mocks and the
+   * statement double below. */
+  let keys: Map<string, ApiKey>;
+  /** Statements whose write committed (affected = 1), newest last, with whether the last-admin
+   * guard clause was bound — for assertions on what actually landed, and how. */
+  let committedWrites: Array<{ mode: 'update' | 'delete'; patch?: Record<string, unknown>; guarded: boolean }>;
+
+  beforeEach(async () => {
+    socketPort = { evictApiKey: jest.fn() };
+    repository = {
+      count: jest.fn(),
+      find: jest.fn(),
+      findOne: jest.fn(),
+      create: jest.fn(),
+      save: jest.fn(),
+      update: jest.fn(),
+      remove: jest.fn(),
+      increment: jest.fn(),
+      createQueryBuilder: jest.fn(),
+    };
+    setupKeys([]);
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ApiKeyManagementService,
+        ApiKeyProvisioningService,
+        ApiKeyAdminSafetyService,
+        ApiKeySocketEvictionService,
+        { provide: ACTIVE_CREDENTIAL_CONNECTION_EVICTOR, useValue: socketPort },
+        ApiKeyBootstrapService,
+        ApiKeyAuthenticator,
+        ApiKeyUsageTracker,
+        {
+          provide: getRepositoryToken(ApiKey, 'main'),
+          useValue: repository,
+        },
+      ],
+    }).compile();
+
+    service = module.get(ApiKeyManagementService);
+    provisioning = module.get(ApiKeyProvisioningService);
+    authenticator = module.get(ApiKeyAuthenticator);
+    bootstrap = module.get(ApiKeyBootstrapService);
+    usageTracker = module.get(ApiKeyUsageTracker);
+    eviction = module.get(ApiKeySocketEvictionService);
+  });
+
+  // ── last-admin guard test double ──────────────────────────────────
+
+  /**
+   * In-memory stand-in for the api_keys table: findOne()/save()/remove() and the query-builder
+   * double below are all backed by the same Map. The last-admin guard lives inside the guarded
+   * SQL statement itself, so the double's execute() evaluates the guard and performs the write as
+   * ONE synchronous step — mirroring the single atomic statement, so concurrency scenarios stay
+   * deterministic (statements interleave only before or after that step, never inside it). Only
+   * statements built through withLastAdminGuard carry the guard (the double mirrors the clause
+   * onto the andWhere call); an unguarded statement always touches an existing row.
+   */
+  function setupKeys(seed: ApiKey[]): void {
+    keys = new Map(seed.map(k => [k.id, k]));
+    committedWrites = [];
+    (repository.findOne as jest.Mock).mockImplementation(
+      (options: {
+        where: {
+          id?: string;
+          keyHash?: string;
+          keyPrefix?: string;
+          role?: ApiKeyRole;
+        };
+        order?: {
+          createdAt?: 'ASC' | 'DESC';
+        };
+      }) => {
+        const {
+          id,
+          keyHash,
+          keyPrefix,
+          role,
+        } = options.where;
+
+        if (id !== undefined) {
+          return Promise.resolve(
+            keys.get(id) ?? null,
+          );
+        }
+
+        if (keyHash !== undefined) {
+          return Promise.resolve(
+            [...keys.values()].find(
+              key => key.keyHash === keyHash,
+            ) ?? null,
+          );
+        }
+
+        if (keyPrefix !== undefined) {
+          return Promise.resolve(
+            [...keys.values()].find(
+              key => key.keyPrefix === keyPrefix,
+            ) ?? null,
+          );
+        }
+
+        if (role !== undefined) {
+          const matches = [...keys.values()]
+            .filter(key => key.role === role)
+            .sort(
+              (a, b) =>
+                a.createdAt.getTime() -
+                b.createdAt.getTime(),
+            );
+
+          return Promise.resolve(
+            matches[0] ?? null,
+          );
+        }
+
+        return Promise.resolve(null);
+      },
+    );
+
+    (repository.find as jest.Mock).mockImplementation(
+      (options?: {
+        where?: {
+          isPrimaryAdminKey?: boolean;
+        };
+        order?: {
+          createdAt?: 'ASC' | 'DESC';
+        };
+      }) => {
+        let result = [...keys.values()];
+
+        if (
+          options?.where?.isPrimaryAdminKey !== undefined
+        ) {
+          result = result.filter(
+            key =>
+              key.isPrimaryAdminKey ===
+              options.where?.isPrimaryAdminKey,
+          );
+        }
+
+        if (options?.order?.createdAt === 'ASC') {
+          result.sort(
+            (a, b) =>
+              a.createdAt.getTime() -
+              b.createdAt.getTime(),
+          );
+        } else if (
+          options?.order?.createdAt === 'DESC'
+        ) {
+          result.sort(
+            (a, b) =>
+              b.createdAt.getTime() -
+              a.createdAt.getTime(),
+          );
+        }
+
+        return Promise.resolve(result);
+      },
+    );
+    (repository.remove as jest.Mock).mockImplementation((key: ApiKey) => {
+      keys.delete(key.id);
+      return Promise.resolve(key);
+    });
+    (repository.save as jest.Mock).mockImplementation((key: ApiKey) => {
+      keys.set(key.id, key);
+      return Promise.resolve(key);
+    });
+    (repository.createQueryBuilder as jest.Mock).mockImplementation(() => {
+      const qb = {
+        mode: 'update' as 'update' | 'delete',
+        patch: undefined as Record<string, unknown> | undefined,
+        targetId: undefined as string | undefined,
+        guarded: false,
+        update() {
+          this.mode = 'update';
+          return this;
+        },
+        delete() {
+          this.mode = 'delete';
+          return this;
+        },
+        from() {
+          return this;
+        },
+        set(patch: Record<string, unknown>) {
+          this.patch = patch;
+          return this;
+        },
+        where(_fragment: string, params: { id: string }) {
+          this.targetId = params.id;
+          return this;
+        },
+        andWhere() {
+          this.guarded = true;
+          return this;
+        },
+        setParameters() {
+          return this;
+        },
+        execute(): Promise<{ affected: number }> {
+          const target = keys.get(this.targetId as string);
+          if (!target) return Promise.resolve({ affected: 0 });
+          const guardPasses =
+            !this.guarded ||
+            !isUsableAdminRow(target) ||
+            [...keys.values()].some(k => k.id !== target.id && isUsableAdminRow(k));
+          if (!guardPasses) return Promise.resolve({ affected: 0 });
+          if (this.mode === 'delete') keys.delete(this.targetId as string);
+          else Object.assign(target, this.patch ?? {});
+          committedWrites.push({ mode: this.mode, patch: this.patch, guarded: this.guarded });
+          return Promise.resolve({ affected: 1 });
+        },
+      };
+      return qb;
+    });
+  }
+
+  /** JS mirror of the guard's "usable admin" row predicate (the SQL definition lives in the
+   * service): an active, unexpired ADMIN key with no session scope. */
+  function isUsableAdminRow(key: ApiKey): boolean {
+    return (
+      key.role === ApiKeyRole.ADMIN &&
+      key.isActive &&
+      (!key.expiresAt || key.expiresAt.getTime() > Date.now()) &&
+      (!key.allowedSessions || key.allowedSessions.length === 0)
+    );
+  }
+
+  function setupLiveAdmins(...ids: string[]): void {
+    setupKeys(ids.map(id => createMockApiKey({ id, role: ApiKeyRole.ADMIN })));
+  }
+
+  // ── createApiKey ──────────────────────────────────────────────────
+
+
+  describe('service-level role allowlist', () => {
+    it('rejects unknown roles even if a caller bypasses HTTP DTO validation', async () => {
+      await expect(provisioning.createApiKey({
+        name: 'Invalid-role key',
+        role: 'superuser' as ApiKeyRole,
+      }, createAdminActor())).rejects.toThrow('Unsupported API key role');
+    });
+  });
+
+  describe('createApiKey', () => {
+    it('should generate a key with owa_k1_ prefix and save to DB', async () => {
+      const mockSaved = createMockApiKey({ name: 'My Key' });
+      (repository.create as jest.Mock).mockReturnValue(mockSaved);
+      (repository.save as jest.Mock).mockResolvedValue(mockSaved);
+
+      const result = await provisioning.createApiKey({ name: 'My Key' }, createAdminActor());
+
+      expect(result.rawKey).toMatch(/^owa_k1_[a-f0-9]{64}$/);
+      expect(result.apiKey).toBe(mockSaved);
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'My Key',
+          role: ApiKeyRole.OPERATOR, // default
+        }),
+      );
+    });
+
+    it('should use the provided role instead of default', async () => {
+      const mockSaved = createMockApiKey({ role: ApiKeyRole.ADMIN });
+      (repository.create as jest.Mock).mockReturnValue(mockSaved);
+      (repository.save as jest.Mock).mockResolvedValue(mockSaved);
+
+      await provisioning.createApiKey({ name: 'Admin Key', role: ApiKeyRole.ADMIN }, createAdminActor());
+
+      expect(repository.create).toHaveBeenCalledWith(expect.objectContaining({ role: ApiKeyRole.ADMIN }));
+    });
+
+    it.each([ApiKeyRole.TEAM_LEADER, ApiKeyRole.AGENT])(
+      'rejects management role %s through generic API-key creation',
+      async role => {
+        await expect(provisioning.createApiKey({ name: 'Managed principal key', role }, createAdminActor())).rejects.toThrow(
+          BadRequestException,
+        );
+        expect(repository.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should store the SHA-256 hash, not the raw key', async () => {
+      const mockSaved = createMockApiKey();
+      (repository.create as jest.Mock).mockReturnValue(mockSaved);
+      (repository.save as jest.Mock).mockResolvedValue(mockSaved);
+
+      const result = await provisioning.createApiKey({ name: 'Test' }, createAdminActor());
+
+      const expectedHash = hashKey(result.rawKey);
+      expect(repository.create).toHaveBeenCalledWith(expect.objectContaining({ keyHash: expectedHash }));
+    });
+  });
+
+  // ── findAll / findOne ─────────────────────────────────────────────
+
+  describe('findAll', () => {
+    it('should return all API keys ordered by createdAt DESC', async () => {
+      const keys = [createMockApiKey(), createMockApiKey({ id: 'uuid-2' })];
+      (repository.find as jest.Mock).mockResolvedValue(keys);
+
+      const result = await service.findAll();
+
+      expect(result).toHaveLength(2);
+      expect(repository.find).toHaveBeenCalledWith({ order: { createdAt: 'DESC' } });
+    });
+  });
+
+  describe('findOne', () => {
+    it('should return the API key if found', async () => {
+      const key = createMockApiKey();
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+
+      const result = await service.findOne('uuid-1');
+      expect(result).toBe(key);
+    });
+
+    it('should throw NotFoundException if key not found', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(null);
+
+      await expect(service.findOne('nonexistent')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── reissueApiKey ─────────────────────────────────────────────────
+
+  describe('reissueApiKey', () => {
+    it('replaces only keyHash/keyPrefix, preserves the row and returns the new plaintext once', async () => {
+      const original = createMockApiKey({
+        id: 'key-1',
+        name: 'Production Key',
+        role: ApiKeyRole.OPERATOR,
+        allowedIps: ['10.0.0.1'],
+        allowedSessions: ['session-1'],
+        isActive: true,
+        expiresAt: new Date('2027-01-01T00:00:00Z'),
+        lastUsedAt: new Date('2026-01-01T00:00:00Z'),
+        usageCount: 42,
+      });
+
+      setupKeys([original]);
+
+      const before = {
+        id: original.id,
+        name: original.name,
+        role: original.role,
+        teamLeaderId: original.teamLeaderId,
+        agentId: original.agentId,
+        allowedIps: [...(original.allowedIps ?? [])],
+        allowedSessions: [...(original.allowedSessions ?? [])],
+        isActive: original.isActive,
+        expiresAt: original.expiresAt?.getTime() ?? null,
+        lastUsedAt: original.lastUsedAt?.getTime() ?? null,
+        usageCount: original.usageCount,
+        keyHash: original.keyHash,
+        keyPrefix: original.keyPrefix,
+      };
+
+      const result = await service.reissueApiKey('key-1', createAdminActor());
+
+      expect(result.rawKey).toMatch(/^owa_k1_[a-f0-9]{64}$/);
+      expect(result.apiKey.id).toBe(before.id);
+
+      expect(result.apiKey.keyHash).toBe(hashKey(result.rawKey));
+      expect(result.apiKey.keyPrefix).toBe(result.rawKey.substring(0, 12));
+      expect(result.apiKey.keyHash).not.toBe(before.keyHash);
+      expect(result.apiKey.keyPrefix).not.toBe(before.keyPrefix);
+
+      expect(result.apiKey).toMatchObject({
+        id: before.id,
+        name: before.name,
+        role: before.role,
+        teamLeaderId: before.teamLeaderId,
+        agentId: before.agentId,
+        allowedIps: before.allowedIps,
+        allowedSessions: before.allowedSessions,
+        isActive: before.isActive,
+        usageCount: before.usageCount,
+      });
+
+      expect(result.apiKey.expiresAt?.getTime()).toBe(before.expiresAt);
+      expect(result.apiKey.lastUsedAt?.getTime()).toBe(before.lastUsedAt);
+
+      const write = committedWrites.at(-1);
+      expect(write).toBeDefined();
+      expect(write?.mode).toBe('update');
+      expect(write?.guarded).toBe(false);
+      expect(Object.keys(write?.patch ?? {}).sort()).toEqual(['keyHash', 'keyPrefix']);
+    });
+
+    it.each([
+      {
+        label: 'Team Leader',
+        role: ApiKeyRole.TEAM_LEADER,
+        teamLeaderId: 'tl-1',
+        agentId: null,
+      },
+      {
+        label: 'Agent',
+        role: ApiKeyRole.AGENT,
+        teamLeaderId: null,
+        agentId: 'agent-1',
+      },
+    ])('preserves $label principal binding during reissue', async binding => {
+      setupKeys([
+        createMockApiKey({
+          id: 'managed-key',
+          role: binding.role,
+          teamLeaderId: binding.teamLeaderId,
+          agentId: binding.agentId,
+        }),
+      ]);
+
+      const result = await service.reissueApiKey('managed-key', createAdminActor());
+
+      expect(result.apiKey.id).toBe('managed-key');
+      expect(result.apiKey.role).toBe(binding.role);
+      expect(result.apiKey.teamLeaderId).toBe(binding.teamLeaderId);
+      expect(result.apiKey.agentId).toBe(binding.agentId);
+    });
+
+
+    it('preserves the durable primary-Admin marker during reissue', async () => {
+      setupKeys([
+        createMockApiKey({
+          id: 'primary-admin',
+          role: ApiKeyRole.ADMIN,
+          isPrimaryAdminKey: true,
+        }),
+      ]);
+
+      const result = await service.reissueApiKey('primary-admin', createAdminActor());
+
+      expect(result.apiKey.isPrimaryAdminKey).toBe(true);
+      expect(
+        (await service.findOne('primary-admin')).isPrimaryAdminKey,
+      ).toBe(true);
+    });
+
+    it('invalidates the old plaintext and authenticates the replacement plaintext', async () => {
+      const oldRawKey = 'owa_k1_old_plaintext_key';
+
+      setupKeys([
+        createMockApiKey({
+          id: 'key-1',
+          keyHash: hashKey(oldRawKey),
+          keyPrefix: oldRawKey.substring(0, 12),
+        }),
+      ]);
+
+      const result = await service.reissueApiKey('key-1', createAdminActor());
+
+      await expect(
+        authenticator.validateApiKey(oldRawKey),
+      ).rejects.toThrow(UnauthorizedException);
+
+      await expect(
+        authenticator.validateApiKey(result.rawKey),
+      ).resolves.toMatchObject({
+        id: 'key-1',
+      });
+    });
+
+    it('evicts sockets authenticated with the old credential after a successful reissue', async () => {
+      const evictApiKey = jest.fn();
+
+      socketPort.evictApiKey.mockImplementation(evictApiKey);
+
+      setupKeys([
+        createMockApiKey({
+          id: 'key-1',
+        }),
+      ]);
+
+      await service.reissueApiKey('key-1', createAdminActor());
+
+      expect(evictApiKey).toHaveBeenCalledWith(
+        'key-1',
+        'revoked',
+      );
+    });
+
+    it('returns NotFoundException when the target key does not exist', async () => {
+      setupKeys([]);
+
+      await expect(
+        service.reissueApiKey('missing-key', createAdminActor()),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(committedWrites).toHaveLength(0);
+    });
+
+    it('does not evict sockets or change the stored credential when the update fails', async () => {
+      const original = createMockApiKey({
+        id: 'key-1',
+        keyHash: hashKey('old-secret'),
+        keyPrefix: 'old-secret'.substring(0, 12),
+      });
+
+      setupKeys([original]);
+
+      const evictApiKey = jest.fn();
+
+      socketPort.evictApiKey.mockImplementation(evictApiKey);
+
+      (repository.createQueryBuilder as jest.Mock).mockImplementationOnce(() => {
+        const qb = {
+          update() {
+            return this;
+          },
+          set() {
+            return this;
+          },
+          where() {
+            return this;
+          },
+          execute: jest.fn().mockRejectedValue(
+            new Error('database write failed'),
+          ),
+        };
+
+        return qb;
+      });
+
+      await expect(
+        service.reissueApiKey('key-1', createAdminActor()),
+      ).rejects.toThrow('database write failed');
+
+      expect((await service.findOne('key-1')).keyHash).toBe(
+        hashKey('old-secret'),
+      );
+      expect(evictApiKey).not.toHaveBeenCalled();
+    });
+
+    it('preserves revoked state rather than silently reactivating a credential', async () => {
+      setupKeys([
+        createMockApiKey({
+          id: 'key-1',
+          isActive: false,
+        }),
+      ]);
+
+      const result = await service.reissueApiKey('key-1', createAdminActor());
+
+      expect(result.apiKey.isActive).toBe(false);
+
+      await expect(
+        authenticator.validateApiKey(result.rawKey),
+      ).rejects.toThrow('API key is revoked');
+    });
+  });
+
+  // ── update ────────────────────────────────────────────────────────
+
+  describe('update', () => {
+    it('should update only the provided fields', async () => {
+      setupKeys([createMockApiKey({ id: 'uuid-1' })]);
+
+      const result = await service.update('uuid-1', { name: 'Updated' }, createAdminActor());
+
+      expect(result.name).toBe('Updated');
+      expect(result.role).toBe(ApiKeyRole.OPERATOR); // unchanged
+    });
+
+    it('evicts active WebSocket sockets when allowedSessions narrows', async () => {
+      const evictApiKey = jest.fn();
+      socketPort.evictApiKey.mockImplementation(evictApiKey);
+      setupKeys([createMockApiKey({ id: 'uuid-1', allowedSessions: ['sess-A', 'sess-B'] })]);
+
+      await service.update('uuid-1', { allowedSessions: ['sess-A'] }, createAdminActor());
+
+      expect(evictApiKey).toHaveBeenCalledWith('uuid-1', 'authorization_changed');
+    });
+
+    it('evicts active WebSocket sockets when the role changes', async () => {
+      const evictApiKey = jest.fn();
+      socketPort.evictApiKey.mockImplementation(evictApiKey);
+      setupKeys([createMockApiKey({ id: 'uuid-1', role: ApiKeyRole.OPERATOR })]);
+
+      await service.update('uuid-1', { role: ApiKeyRole.ADMIN }, createAdminActor());
+
+      expect(evictApiKey).toHaveBeenCalledWith('uuid-1', 'authorization_changed');
+    });
+
+    it('does not evict on a benign (name-only) update', async () => {
+      const evictApiKey = jest.fn();
+      socketPort.evictApiKey.mockImplementation(evictApiKey);
+      setupKeys([createMockApiKey({ id: 'uuid-1', name: 'original' })]);
+
+      await service.update('uuid-1', { name: 'renamed' }, createAdminActor());
+
+      expect(evictApiKey).not.toHaveBeenCalled();
+    });
+
+    it('rejects demoting or expiring the last usable admin', async () => {
+      setupKeys([createMockApiKey({ id: 'uuid-1', role: ApiKeyRole.ADMIN })]);
+
+      await expect(service.update('uuid-1', { role: ApiKeyRole.OPERATOR }, createAdminActor())).rejects.toThrow(/last active admin/i);
+      await expect(
+        service.update('uuid-1', { expiresAt: new Date(Date.now() + 60_000).toISOString() }, createAdminActor()),
+      ).rejects.toThrow(/last active admin/i);
+      expect(committedWrites).toHaveLength(0); // neither write landed
+    });
+  });
+
+  // ── delete / revoke ───────────────────────────────────────────────
+
+  describe('delete', () => {
+    it('should remove the API key from DB', async () => {
+      const key = createMockApiKey();
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.remove as jest.Mock).mockResolvedValue(key);
+
+      await service.delete('uuid-1', createAdminActor());
+
+      expect(repository.remove).toHaveBeenCalledWith(key);
+    });
+
+    it('should throw NotFoundException for non-existent key', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.delete('nonexistent', createAdminActor()),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('evicts active WebSocket sockets authenticated with the deleted key', async () => {
+      const evictApiKey = jest.fn();
+      socketPort.evictApiKey.mockImplementation(evictApiKey);
+
+      const key = createMockApiKey();
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.remove as jest.Mock).mockResolvedValue(key);
+
+      await service.delete('uuid-1', createAdminActor());
+
+      expect(repository.remove).toHaveBeenCalledWith(key);
+      expect(evictApiKey).toHaveBeenCalledWith('uuid-1', 'deleted');
+    });
+
+    it('rejects deleting the last usable admin but allows it when another usable admin exists', async () => {
+      setupKeys([createMockApiKey({ id: 'uuid-1', role: ApiKeyRole.ADMIN })]);
+
+      await expect(
+        service.delete('uuid-1', createAdminActor({ id: 'uuid-1' })),
+      ).rejects.toThrow(/last active admin/i);
+
+      setupKeys([
+        createMockApiKey({ id: 'uuid-1', role: ApiKeyRole.ADMIN }),
+        createMockApiKey({ id: 'uuid-2', role: ApiKeyRole.ADMIN }),
+      ]);
+
+      await expect(
+        service.delete('uuid-1', createAdminActor({ id: 'uuid-2' })),
+      ).resolves.toBeUndefined();
+      await expect(service.findOne('uuid-1')).rejects.toThrow(NotFoundException); // one delete committed
+      await expect(service.findOne('uuid-2')).resolves.toBeDefined(); // the survivor is intact
+    });
+  });
+
+
+  describe('delete authorization', () => {
+    it('allows an Operator to delete an ordinary non-primary API key', async () => {
+      setupKeys([
+        createMockApiKey({
+          id: 'ordinary-key',
+          role: ApiKeyRole.VIEWER,
+        }),
+      ]);
+
+      await expect(
+        service.delete(
+          'ordinary-key',
+          createOperatorActor(),
+        ),
+      ).resolves.toBeUndefined();
+
+      await expect(
+        service.findOne('ordinary-key'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('forbids an Operator from deleting the durable primary Admin key', async () => {
+      setupKeys([
+        createMockApiKey({
+          id: 'primary-admin',
+          role: ApiKeyRole.ADMIN,
+          isPrimaryAdminKey: true,
+        }),
+        createMockApiKey({
+          id: 'secondary-admin',
+          role: ApiKeyRole.ADMIN,
+        }),
+      ]);
+
+      await expect(
+        service.delete(
+          'primary-admin',
+          createOperatorActor(),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.findOne('primary-admin'),
+      ).resolves.toBeDefined();
+      expect(committedWrites).toHaveLength(0);
+    });
+
+    it('allows an Operator to delete a secondary Admin key when another usable Admin survives', async () => {
+      setupKeys([
+        createMockApiKey({
+          id: 'primary-admin',
+          role: ApiKeyRole.ADMIN,
+          isPrimaryAdminKey: true,
+        }),
+        createMockApiKey({
+          id: 'secondary-admin',
+          role: ApiKeyRole.ADMIN,
+        }),
+      ]);
+
+      await expect(
+        service.delete(
+          'secondary-admin',
+          createOperatorActor(),
+        ),
+      ).resolves.toBeUndefined();
+
+      await expect(
+        service.findOne('secondary-admin'),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        service.findOne('primary-admin'),
+      ).resolves.toBeDefined();
+    });
+
+    it('allows Admin to delete the primary key when another usable Admin survives and promotes a replacement primary', async () => {
+      const existsSpy = jest
+        .spyOn(fs, 'existsSync')
+        .mockReturnValue(false);
+
+      try {
+        setupKeys([
+          createMockApiKey({
+            id: 'primary-admin',
+            role: ApiKeyRole.ADMIN,
+            isPrimaryAdminKey: true,
+            createdAt: new Date('2026-01-01T00:00:00Z'),
+          }),
+          createMockApiKey({
+            id: 'secondary-admin',
+            role: ApiKeyRole.ADMIN,
+            isPrimaryAdminKey: false,
+            createdAt: new Date('2026-01-02T00:00:00Z'),
+          }),
+        ]);
+
+        await expect(
+          service.delete(
+            'primary-admin',
+            createAdminActor({
+              id: 'primary-admin',
+            }),
+          ),
+        ).resolves.toBeUndefined();
+
+        const replacement =
+          await service.findOne(
+            'secondary-admin',
+          );
+
+        expect(
+          replacement.isPrimaryAdminKey,
+        ).toBe(true);
+      } finally {
+        existsSpy.mockRestore();
+      }
+    });
+
+    it('forbids a session-scoped API-key manager from deleting keys through direct service calls', async () => {
+      setupKeys([
+        createMockApiKey({
+          id: 'ordinary-key',
+          role: ApiKeyRole.VIEWER,
+        }),
+      ]);
+
+      await expect(
+        service.delete(
+          'ordinary-key',
+          createOperatorActor({
+            allowedSessions: [
+              'session-1',
+            ],
+          }),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.findOne('ordinary-key'),
+      ).resolves.toBeDefined();
+    });
+
+    it('forbids a role without API_KEY_MANAGE from deleting keys through direct service calls', async () => {
+      setupKeys([
+        createMockApiKey({
+          id: 'ordinary-key',
+          role: ApiKeyRole.VIEWER,
+        }),
+      ]);
+
+      await expect(
+        service.delete(
+          'ordinary-key',
+          createMockApiKey({
+            id: 'viewer-actor',
+            role: ApiKeyRole.VIEWER,
+          }),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('revoke', () => {
+    it('should set isActive to false', async () => {
+      setupKeys([createMockApiKey({ id: 'uuid-1', isActive: true })]);
+
+      const result = await service.revoke('uuid-1', createAdminActor());
+
+      expect(result.isActive).toBe(false);
+    });
+
+    it('evicts active WebSocket sockets authenticated with the revoked key', async () => {
+      const evictApiKey = jest.fn();
+      socketPort.evictApiKey.mockImplementation(evictApiKey);
+
+      setupKeys([createMockApiKey({ id: 'uuid-1', isActive: true })]);
+
+      await service.revoke('uuid-1', createAdminActor());
+
+      expect((await service.findOne('uuid-1')).isActive).toBe(false);
+      expect(evictApiKey).toHaveBeenCalledWith('uuid-1', 'revoked');
+    });
+
+    it('does not roll back the revoke if WebSocket eviction throws (best-effort)', async () => {
+      socketPort.evictApiKey.mockImplementation(() => {
+          throw new Error('gateway unavailable');
+        });
+
+      setupKeys([createMockApiKey({ id: 'uuid-1', isActive: true })]);
+
+      const result = await service.revoke('uuid-1', createAdminActor());
+
+      expect(result.isActive).toBe(false); // revoke still succeeded
+    });
+
+    it('rejects revoking the last usable admin', async () => {
+      setupKeys([createMockApiKey({ id: 'uuid-1', role: ApiKeyRole.ADMIN, isActive: true })]);
+
+      await expect(service.revoke('uuid-1', createAdminActor())).rejects.toThrow(/last active admin/i);
+      expect(committedWrites).toHaveLength(0); // the write never landed
+      expect((await service.findOne('uuid-1')).isActive).toBe(true);
+    });
+  });
+
+  // ── last-admin guard under concurrency ─────────────────────────────
+
+  describe('last-admin guard under concurrency', () => {
+    const outcomes = (results: PromiseSettledResult<unknown>[]) => ({
+      succeeded: results.filter(r => r.status === 'fulfilled'),
+      conflicts: results.filter(r => r.status === 'rejected' && r.reason instanceof ConflictException),
+    });
+
+    it('rejects exactly one of two concurrent deletes against the last two admins', async () => {
+      setupLiveAdmins('admin-a', 'admin-b');
+
+      // Without statement-level guard+write, both checks run before either delete commits and both
+      // pass.
+      const results = await Promise.allSettled([service.delete('admin-a', createAdminActor({ id: 'admin-a' })),
+        service.delete('admin-b', createAdminActor({ id: 'admin-b' }))]);
+
+      const { succeeded, conflicts } = outcomes(results);
+      expect(succeeded).toHaveLength(1);
+      expect(conflicts).toHaveLength(1);
+      const survivors = await Promise.allSettled([service.findOne('admin-a'), service.findOne('admin-b')]);
+      expect(survivors.filter(r => r.status === 'fulfilled')).toHaveLength(1); // one admin survives — no lockout
+    });
+
+    it('rejects exactly one of a concurrent demote and revoke against the last two admins', async () => {
+      setupLiveAdmins('admin-a', 'admin-b');
+
+      const results = await Promise.allSettled([
+        service.update('admin-a', { role: ApiKeyRole.OPERATOR }, createAdminActor()),
+        service.revoke('admin-b', createAdminActor()),
+      ]);
+
+      const { succeeded, conflicts } = outcomes(results);
+      expect(succeeded).toHaveLength(1);
+      expect(conflicts).toHaveLength(1);
+      // The loser's write never happened: exactly one capability-stripping write in total.
+      const strippingWrites = committedWrites.filter(
+        w =>
+          w.mode === 'delete' ||
+          (w.patch?.role !== undefined && w.patch.role !== ApiKeyRole.ADMIN) ||
+          w.patch?.isActive === false,
+      );
+      expect(strippingWrites).toHaveLength(1);
+    });
+
+    it('lets concurrent deletes proceed when another usable admin remains', async () => {
+      setupLiveAdmins('admin-a', 'admin-b', 'admin-c');
+
+      const results = await Promise.allSettled([service.delete('admin-a', createAdminActor({ id: 'admin-a' })),
+        service.delete('admin-b', createAdminActor({ id: 'admin-b' }))]);
+
+      const { succeeded, conflicts } = outcomes(results);
+      expect(succeeded).toHaveLength(2);
+      expect(conflicts).toHaveLength(0);
+      await expect(service.findOne('admin-a')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('admin-b')).rejects.toThrow(NotFoundException);
+    });
+
+    it('runs non-admin mutations and benign admin updates on unguarded statements', async () => {
+      setupKeys([
+        createMockApiKey({ id: 'op-del', role: ApiKeyRole.OPERATOR }),
+        createMockApiKey({ id: 'op-rev', role: ApiKeyRole.OPERATOR }),
+        createMockApiKey({ id: 'op-demote', role: ApiKeyRole.OPERATOR }),
+        createMockApiKey({ id: 'adm-1', role: ApiKeyRole.ADMIN }),
+      ]);
+
+      await service.delete('op-del', createAdminActor()); // non-admin target delete
+      await service.revoke('op-rev', createAdminActor()); // non-admin revoke
+      await service.update('op-demote', { role: ApiKeyRole.VIEWER }, createAdminActor()); // demote of a non-admin
+      await service.update('adm-1', { name: 'renamed' }, createAdminActor()); // benign update of an admin
+
+      // The last-admin guard is bound via andWhere; none of these statements carries it — the
+      // benign admin rename runs unguarded even though the target IS a usable admin, because a
+      // non-stripping patch cannot strand the system.
+      expect(committedWrites).toHaveLength(3); // revoke + demote + rename (the delete removes the row)
+      expect(committedWrites.every(w => !w.guarded)).toBe(true);
+      await expect(service.findOne('op-del')).rejects.toThrow(NotFoundException);
+      expect((await service.findOne('op-rev')).isActive).toBe(false);
+    });
+  });
+
+  // ── racing mutations on the unguarded paths ───────────────────────
+
+  describe('racing mutations on unguarded targets', () => {
+    // Both scenarios model the same interleaving: the pre-read (findOne #1) returns a STALE
+    // snapshot, a concurrent mutation has already committed into the table by the time the
+    // write runs. The write must carry only its own patch — a full-entity save from the stale
+    // snapshot would resurrect the concurrent commit.
+    it('a rename does not resurrect a concurrent revoke: the write carries only name', async () => {
+      setupKeys([createMockApiKey({ id: 'op-1', role: ApiKeyRole.OPERATOR, isActive: false, name: 'original' })]);
+      (repository.findOne as jest.Mock).mockResolvedValueOnce(
+        createMockApiKey({ id: 'op-1', role: ApiKeyRole.OPERATOR, isActive: true, name: 'original' }), // stale pre-read
+      );
+
+      const result = await service.update('op-1', { name: 'renamed' }, createAdminActor());
+
+      expect(result.name).toBe('renamed');
+      expect(result.isActive).toBe(false); // the revoke survives the rename
+      expect((await service.findOne('op-1')).isActive).toBe(false); // in the table, not just the reply
+    });
+
+    it('a revoke does not clobber a concurrent rename: isActive is the only column written', async () => {
+      setupKeys([createMockApiKey({ id: 'op-1', role: ApiKeyRole.OPERATOR, isActive: true, name: 'renamed-by-peer' })]);
+      (repository.findOne as jest.Mock).mockResolvedValueOnce(
+        createMockApiKey({ id: 'op-1', role: ApiKeyRole.OPERATOR, isActive: true, name: 'original' }), // stale pre-read
+      );
+
+      const result = await service.revoke('op-1', createAdminActor());
+
+      expect(result.isActive).toBe(false);
+      expect(result.name).toBe('renamed-by-peer'); // the concurrent rename survives the revoke
+      expect((await service.findOne('op-1')).name).toBe('renamed-by-peer');
+    });
+  });
+
+  // ── last-admin invariant vs session-scoped admins ─────────────────
+
+  describe('last-admin invariant vs session-scoped admins', () => {
+    // Key-lifecycle routes are fenced behind @RequireUnscopedKey, so a session-scoped admin can
+    // never manage keys: it must NOT count as a surviving admin, and scoping the last unscoped
+    // admin must be rejected like a demotion — otherwise the system locks itself out for good.
+    const unscopedAdmin = (id: string) => createMockApiKey({ id, role: ApiKeyRole.ADMIN });
+    const scopedAdmin = (id: string) => createMockApiKey({ id, role: ApiKeyRole.ADMIN, allowedSessions: ['sess-1'] });
+
+    it('rejects deleting the last unscoped admin even while a session-scoped admin survives', async () => {
+      setupKeys([unscopedAdmin('admin-a'), scopedAdmin('admin-scoped')]);
+
+      await expect(
+        service.delete('admin-a', createAdminActor({ id: 'admin-a' })),
+      ).rejects.toThrow(/last active admin/i);
+      expect(repository.remove).not.toHaveBeenCalled();
+    });
+
+    it('rejects revoking the last unscoped admin even while a session-scoped admin survives', async () => {
+      setupKeys([unscopedAdmin('admin-a'), scopedAdmin('admin-scoped')]);
+
+      await expect(service.revoke('admin-a', createAdminActor())).rejects.toThrow(/last active admin/i);
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects demoting the last unscoped admin even while a session-scoped admin survives', async () => {
+      setupKeys([unscopedAdmin('admin-a'), scopedAdmin('admin-scoped')]);
+
+      await expect(service.update('admin-a', { role: ApiKeyRole.OPERATOR }, createAdminActor())).rejects.toThrow(/last active admin/i);
+    });
+
+    it('rejects scoping the last unscoped admin — the same capability-stripping as a demotion', async () => {
+      setupKeys([unscopedAdmin('admin-a'), scopedAdmin('admin-scoped')]);
+
+      await expect(service.update('admin-a', { allowedSessions: ['sess-9'] }, createAdminActor())).rejects.toThrow(/last active admin/i);
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('treats an empty allowedSessions write as unscoped — not capability-stripping', async () => {
+      setupKeys([unscopedAdmin('admin-a')]);
+
+      await expect(service.update('admin-a', { allowedSessions: [] }, createAdminActor())).resolves.toBeDefined();
+    });
+
+    it('lets a session-scoped admin be deleted — it never counted toward the invariant', async () => {
+      setupKeys([unscopedAdmin('admin-a'), scopedAdmin('admin-scoped')]);
+
+      await expect(
+        service.delete('admin-scoped', createAdminActor({ id: 'admin-a' })),
+      ).resolves.toBeUndefined();
+      await expect(service.findOne('admin-scoped')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('admin-a')).resolves.toBeDefined();
+    });
+
+    it('allows stripping an unscoped admin when another unscoped admin remains', async () => {
+      setupKeys([unscopedAdmin('admin-a'), unscopedAdmin('admin-b'), scopedAdmin('admin-scoped')]);
+
+      await expect(service.update('admin-a', { allowedSessions: ['sess-9'] }, createAdminActor())).resolves.toBeDefined();
+    });
+
+    it('evaluates the guard against the row’s live state, not the pre-read snapshot', async () => {
+      // The pre-read sees a usable admin; by the time the guarded statement runs, a concurrent
+      // mutation has already demoted it. The guard reads the row's CURRENT state inside the
+      // statement (the table double below), so there is no spurious conflict — the delete goes
+      // through and the demoted key is gone.
+      setupKeys([createMockApiKey({ id: 'admin-a', role: ApiKeyRole.OPERATOR })]);
+      (repository.findOne as jest.Mock).mockResolvedValueOnce(
+        createMockApiKey({ id: 'admin-a', role: ApiKeyRole.ADMIN }), // stale pre-read
+      );
+
+      await expect(
+        service.delete('admin-a', createAdminActor({ id: 'admin-a' })),
+      ).resolves.toBeUndefined();
+      await expect(service.findOne('admin-a')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── validateApiKey ────────────────────────────────────────────────
+
+  describe('validateApiKey', () => {
+    it('should return the API key for a valid raw key', async () => {
+      const rawKey = 'test-key';
+      const key = createMockApiKey({ keyHash: hashKey(rawKey) });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.save as jest.Mock).mockImplementation((k: ApiKey) => Promise.resolve(k));
+
+      const result = await authenticator.validateApiKey(rawKey);
+
+      expect(result.id).toBe(key.id);
+      expect(result.usageCount).toBe(1);
+      expect(result.lastUsedAt).toBeDefined();
+    });
+
+    it('accepts a key padded with whitespace, as HTTP header parsing already does', async () => {
+      // A key pasted with a stray space authenticates over REST (header values are trimmed in
+      // transit) and must authenticate over the WebSocket handshake too, which carries the
+      // literal string from the CONNECT payload.
+      const rawKey = 'padded-key';
+      const key = createMockApiKey({ keyHash: hashKey(rawKey) });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.save as jest.Mock).mockImplementation((k: ApiKey) => Promise.resolve(k));
+
+      await expect(authenticator.validateApiKey(` ${rawKey}\n`)).resolves.toMatchObject({ id: key.id });
+    });
+
+    it('coalesces the usage-stat write within the throttle window', async () => {
+      const rawKey = 'recent-key';
+      const key = createMockApiKey({ keyHash: hashKey(rawKey), lastUsedAt: new Date(), usageCount: 5 });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+
+      const result = await authenticator.validateApiKey(rawKey);
+
+      expect(repository.update).not.toHaveBeenCalled(); // throttled — no DB write this request
+      expect(result.usageCount).toBe(6); // but the count is still reflected in-memory
+      expect(result.lastUsedAt).toBeDefined();
+    });
+
+    it('flushes the usage-stat write once the throttle window has elapsed', async () => {
+      const rawKey = 'stale-key';
+      const key = createMockApiKey({
+        keyHash: hashKey(rawKey),
+        lastUsedAt: new Date(Date.now() - 5 * 60_000),
+        usageCount: 5,
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+
+      await authenticator.validateApiKey(rawKey);
+
+      // Scoped to the usage columns: persisting the whole entity here would write back the
+      // authorisation state this request loaded, reverting any concurrent administrator change.
+      const [criteria, patch] = (repository.update as jest.Mock).mock.calls[0] as [{ id: string }, Partial<ApiKey>];
+      expect(criteria).toEqual({ id: key.id });
+      expect(Object.keys(patch).sort()).toEqual(['lastUsedAt', 'usageCount']);
+      expect(patch.usageCount).toBe(6);
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw UnauthorizedException for invalid key', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(null);
+
+      await expect(authenticator.validateApiKey('wrong-key')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException for revoked key', async () => {
+      const key = createMockApiKey({ isActive: false, keyHash: hashKey('revoked') });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+
+      await expect(authenticator.validateApiKey('revoked')).rejects.toThrow('API key is revoked');
+    });
+
+    it('should throw UnauthorizedException for expired key', async () => {
+      const expired = new Date();
+      expired.setDate(expired.getDate() - 1);
+      const key = createMockApiKey({ expiresAt: expired, keyHash: hashKey('expired') });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+
+      await expect(authenticator.validateApiKey('expired')).rejects.toThrow('API key has expired');
+    });
+
+    it('should throw UnauthorizedException when IP is not allowed', async () => {
+      const key = createMockApiKey({
+        allowedIps: ['10.0.0.1'],
+        keyHash: hashKey('ip-restricted'),
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+
+      await expect(authenticator.validateApiKey('ip-restricted', '192.168.1.1')).rejects.toThrow('IP address not allowed');
+    });
+
+    it('should pass when client IP matches allowed IPs', async () => {
+      const key = createMockApiKey({
+        allowedIps: ['10.0.0.1'],
+        keyHash: hashKey('ip-ok'),
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.save as jest.Mock).mockImplementation((k: ApiKey) => Promise.resolve(k));
+
+      const result = await authenticator.validateApiKey('ip-ok', '10.0.0.1');
+      expect(result.id).toBe(key.id);
+    });
+
+    it('should fail closed when an IP whitelist is set but the client IP is unknown', async () => {
+      const key = createMockApiKey({
+        allowedIps: ['10.0.0.1'],
+        keyHash: hashKey('ip-no-client'),
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+
+      await expect(authenticator.validateApiKey('ip-no-client')).rejects.toThrow('Client IP could not be determined');
+    });
+
+    it('rejects a malformed client IP instead of coercing it into an allowed range', async () => {
+      const key = createMockApiKey({
+        allowedIps: ['10.0.0.1/32'],
+        keyHash: hashKey('ip-malformed'),
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+
+      // The previous lenient parser read '10.0.0.1abc' as 10.0.0.1 and let it through; the shared
+      // hardened matcher rejects a non-numeric octet, so the per-key whitelist holds.
+      await expect(authenticator.validateApiKey('ip-malformed', '10.0.0.1abc')).rejects.toThrow('IP address not allowed');
+    });
+
+    it('does not enforce allowedSessions during credential authentication', async () => {
+      const key = createMockApiKey({
+        allowedSessions: ['session-A'],
+        keyHash: hashKey('sess-restricted'),
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+
+      await expect(authenticator.validateApiKey('sess-restricted')).resolves.toBe(key);
+
+      // Session/tenant authorization belongs to SessionTenantAccessService, not ApiKeyAuthenticator.
+      expect(key.allowedSessions).toEqual(['session-A']);
+    });
+  });
+
+  // ── usage-stat lost-update safety + shutdown flush ────────────────
+
+  describe('usage-stat lost-update safety', () => {
+    it('keeps the accumulated delta when the windowed write fails, and the next flush carries it', async () => {
+      const rawKey = 'flaky-key';
+      // Fresh row per findOne, as TypeORM returns it (no identity map): the DB state never
+      // reflects the failed write, so the delta must survive in the pending map.
+      const freshRow = () =>
+        createMockApiKey({ keyHash: hashKey(rawKey), lastUsedAt: new Date(Date.now() - 5 * 60_000), usageCount: 5 });
+      (repository.findOne as jest.Mock).mockImplementation(() => Promise.resolve(freshRow()));
+      (repository.update as jest.Mock)
+        .mockRejectedValueOnce(new Error('db write failed'))
+        .mockResolvedValue({ affected: 1 });
+
+      // The windowed write fails: the request still succeeds (the key is valid) and the delta is kept.
+      const first = await authenticator.validateApiKey(rawKey);
+      expect(first.usageCount).toBe(6);
+
+      // Still due on the next request (DB lastUsedAt was never written) → the retry persists the
+      // failed delta plus this request's increment — nothing is lost.
+      await authenticator.validateApiKey(rawKey);
+      const writes = (repository.update as jest.Mock).mock.calls as Array<[unknown, Partial<ApiKey>]>;
+      expect(writes[1][1].usageCount).toBe(7); // DB 5 + failed delta 1 + this request 1
+
+      // The successful retry drained the accumulator — nothing left for the shutdown flush.
+      await usageTracker.onModuleDestroy();
+      expect(repository.increment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('usage-stat shutdown flush', () => {
+    it('flushes pending deltas on module destroy with an atomic increment, only once', async () => {
+      const rawKey = 'recent-key';
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        createMockApiKey({ keyHash: hashKey(rawKey), lastUsedAt: new Date(), usageCount: 5 }),
+      );
+      (repository.increment as jest.Mock).mockResolvedValue({ affected: 1 });
+
+      await authenticator.validateApiKey(rawKey); // inside the throttle window → coalesced, no DB write
+      expect(repository.update).not.toHaveBeenCalled();
+
+      await usageTracker.onModuleDestroy();
+      expect(repository.increment).toHaveBeenCalledWith({ id: 'uuid-1' }, 'usageCount', 1);
+
+      await usageTracker.onModuleDestroy(); // idempotent — nothing left pending
+      expect(repository.increment).toHaveBeenCalledTimes(1);
+    });
+
+    it('does nothing on destroy when there is nothing pending', async () => {
+      await usageTracker.onModuleDestroy();
+      expect(repository.increment).not.toHaveBeenCalled();
+    });
+
+    it('tolerates a failing flush (destroy still resolves — stats are best-effort)', async () => {
+      const rawKey = 'recent-key';
+      (repository.findOne as jest.Mock).mockResolvedValue(
+        createMockApiKey({ keyHash: hashKey(rawKey), lastUsedAt: new Date(), usageCount: 5 }),
+      );
+      (repository.increment as jest.Mock).mockRejectedValue(new Error('db gone'));
+
+      await authenticator.validateApiKey(rawKey);
+      await expect(usageTracker.onModuleDestroy()).resolves.toBeUndefined();
+    });
+  });
+
+  // ── bootstrap API key file (data/.api-key) staleness ─────────────
+
+  describe('bootstrap API key file (data/.api-key)', () => {
+    let existsSpy: jest.SpyInstance;
+    let readSpy: jest.Mock;
+    let unlinkSpy: jest.Mock;
+    let logSpy: jest.SpyInstance;
+
+    const bannerText = (): string => (logSpy.mock.calls as unknown[][]).map(call => String(call[0])).join('\n');
+
+    beforeEach(() => {
+      existsSpy = jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+      readSpy = jest.spyOn(fs, 'readFileSync') as unknown as jest.Mock;
+      readSpy.mockReturnValue('');
+      unlinkSpy = jest.spyOn(fs, 'unlinkSync') as unknown as jest.Mock;
+      unlinkSpy.mockImplementation(() => undefined);
+      logSpy = jest
+        .spyOn((bootstrap as unknown as { logger: { log: (...args: unknown[]) => void } }).logger, 'log')
+        .mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('revoke removes the bootstrap key file when it still holds the revoked key', async () => {
+      const key = createMockApiKey({ isActive: true }); // keyHash matches hashKey('test-key')
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.save as jest.Mock).mockImplementation((k: ApiKey) => Promise.resolve(k));
+      existsSpy.mockReturnValue(true);
+      readSpy.mockReturnValue('test-key\n');
+
+      await service.revoke('uuid-1', createAdminActor());
+
+      expect(unlinkSpy).toHaveBeenCalledWith(expect.stringContaining('.api-key'));
+    });
+
+    it('revoke leaves the file alone when it holds a different (still live) key', async () => {
+      const key = createMockApiKey({ isActive: true });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.save as jest.Mock).mockImplementation((k: ApiKey) => Promise.resolve(k));
+      existsSpy.mockReturnValue(true);
+      readSpy.mockReturnValue('another-key');
+
+      await service.revoke('uuid-1', createAdminActor());
+
+      expect(unlinkSpy).not.toHaveBeenCalled();
+    });
+
+    it('delete removes the bootstrap key file when it still holds the deleted key', async () => {
+      const key = createMockApiKey();
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.remove as jest.Mock).mockResolvedValue(key);
+      existsSpy.mockReturnValue(true);
+      readSpy.mockReturnValue('test-key');
+
+      await service.delete('uuid-1', createAdminActor());
+
+      expect(unlinkSpy).toHaveBeenCalledWith(expect.stringContaining('.api-key'));
+    });
+
+    it('tolerates a missing file on revoke (nothing to clean up)', async () => {
+      const key = createMockApiKey({ isActive: true });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.save as jest.Mock).mockImplementation((k: ApiKey) => Promise.resolve(k));
+      existsSpy.mockReturnValue(false);
+
+      await service.revoke('uuid-1', createAdminActor());
+
+      expect(unlinkSpy).not.toHaveBeenCalled();
+    });
+
+    it('boot removes a stale bootstrap file and the banner no longer advertises the dead key', async () => {
+      (repository.count as jest.Mock).mockResolvedValue(1); // not first boot → the file path is consulted
+      existsSpy.mockReturnValue(true);
+      readSpy.mockReturnValue('owa_k1_deaddeaddead');
+      (repository.findOne as jest.Mock).mockResolvedValue(null); // hash no longer resolves to any key
+
+      await bootstrap.onModuleInit();
+
+      expect(unlinkSpy).toHaveBeenCalledWith(expect.stringContaining('.api-key'));
+      expect(bannerText()).toContain('(check dashboard for keys)');
+      expect(bannerText()).not.toContain('owa_k1_d'); // no fingerprint of the dead key
+    });
+
+    it('boot keeps the bootstrap file when only the pepper changed (prefix matches, hash does not)', async () => {
+      const warnSpy = jest
+        .spyOn((bootstrap as unknown as { logger: { warn: (...args: unknown[]) => void } }).logger, 'warn')
+        .mockImplementation(() => undefined);
+      (repository.count as jest.Mock).mockResolvedValue(1);
+      existsSpy.mockReturnValue(true);
+      readSpy.mockReturnValue('owa_k1_pepperchanged');
+      // The hash lookup misses (the current pepper hashes the same key differently), but the
+      // unhashed prefix still resolves to the live row → wrong pepper, not a stale file.
+      (repository.findOne as jest.Mock)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue(createMockApiKey({ keyPrefix: 'owa_k1_peppe', keyHash: 'hash-under-old-pepper' }));
+
+      await bootstrap.onModuleInit();
+
+      expect(repository.findOne).toHaveBeenCalledWith({ where: { keyPrefix: 'owa_k1_peppe' } });
+      expect(unlinkSpy).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('API_KEY_PEPPER'), expect.anything());
+      expect(bannerText()).toContain('(check dashboard for keys)'); // still not advertised as live
+    });
+
+    it('boot still deletes the file when no row carries the file key prefix (genuine staleness)', async () => {
+      (repository.count as jest.Mock).mockResolvedValue(1);
+      existsSpy.mockReturnValue(true);
+      readSpy.mockReturnValue('owa_k1_deaddeaddead');
+      (repository.findOne as jest.Mock).mockResolvedValue(null); // neither the hash nor the prefix resolves
+
+      await bootstrap.onModuleInit();
+
+      expect(repository.findOne).toHaveBeenCalledWith({ where: { keyPrefix: 'owa_k1_deadd' } });
+      expect(unlinkSpy).toHaveBeenCalledWith(expect.stringContaining('.api-key'));
+    });
+
+    it('boot treats a revoked bootstrap key as stale too', async () => {
+      (repository.count as jest.Mock).mockResolvedValue(1);
+      existsSpy.mockReturnValue(true);
+      readSpy.mockReturnValue('test-key');
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockApiKey({ isActive: false }));
+
+      await bootstrap.onModuleInit();
+
+      expect(unlinkSpy).toHaveBeenCalled();
+      expect(bannerText()).toContain('(check dashboard for keys)');
+    });
+
+    it('boot keeps a live bootstrap key: file untouched, banner shows the masked fingerprint', async () => {
+      (repository.count as jest.Mock).mockResolvedValue(1);
+      existsSpy.mockReturnValue(true);
+      readSpy.mockReturnValue('test-key');
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockApiKey({ isActive: true }));
+
+      await bootstrap.onModuleInit();
+
+      expect(unlinkSpy).not.toHaveBeenCalled();
+      expect(bannerText()).toContain('(full key in data/.api-key');
+    });
+  });
+
+  // ── hasPermission ─────────────────────────────────────────────────
+
+  describe('hasPermission', () => {
+    it('should allow ADMIN to access ADMIN routes', () => {
+      const key = createMockApiKey({ role: ApiKeyRole.ADMIN });
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.ADMIN)).toBe(true);
+    });
+
+    it('should allow ADMIN to access OPERATOR routes', () => {
+      const key = createMockApiKey({ role: ApiKeyRole.ADMIN });
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.OPERATOR)).toBe(true);
+    });
+
+    it('should allow ADMIN to access VIEWER routes', () => {
+      const key = createMockApiKey({ role: ApiKeyRole.ADMIN });
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.VIEWER)).toBe(true);
+    });
+
+    it('should deny VIEWER access to OPERATOR routes', () => {
+      const key = createMockApiKey({ role: ApiKeyRole.VIEWER });
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.OPERATOR)).toBe(false);
+    });
+
+    it('should deny OPERATOR access to ADMIN routes', () => {
+      const key = createMockApiKey({ role: ApiKeyRole.OPERATOR });
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.ADMIN)).toBe(false);
+    });
+
+    it('keeps TEAM_LEADER compatible with legacy OPERATOR routes during migration', () => {
+      const key = createMockApiKey({ role: ApiKeyRole.TEAM_LEADER, teamLeaderId: 'tl-1' });
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.OPERATOR)).toBe(true);
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.VIEWER)).toBe(true);
+    });
+
+    it('does not let AGENT inherit legacy OPERATOR permission', () => {
+      const key = createMockApiKey({ role: ApiKeyRole.AGENT, agentId: 'agent-1' });
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.OPERATOR)).toBe(false);
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.VIEWER)).toBe(true);
+    });
+  });
+
+  // ── hasCapability ────────────────────────────────────────────────
+
+  describe('hasCapability', () => {
+    const keyFor = (role: ApiKeyRole): ApiKey =>
+      createMockApiKey({
+        role,
+        teamLeaderId: role === ApiKeyRole.TEAM_LEADER ? 'tl-1' : null,
+        agentId: role === ApiKeyRole.AGENT ? 'agent-1' : null,
+      });
+
+    it.each([
+      [ApiKeyRole.ADMIN, true, true],
+      [ApiKeyRole.OPERATOR, true, true],
+      [ApiKeyRole.VIEWER, true, false],
+      [ApiKeyRole.TEAM_LEADER, false, false],
+      [ApiKeyRole.AGENT, false, false],
+    ] as const)(
+      'maps %s to principal read=%s and manage=%s',
+      (role, canReadPrincipals, canManagePrincipals) => {
+        const key = keyFor(role);
+
+        expect(
+          RoleCapabilityPolicy.hasCapability(
+            key,
+            ApiCapability.PRINCIPAL_READ,
+          ),
+        ).toBe(canReadPrincipals);
+
+        expect(
+          RoleCapabilityPolicy.hasCapability(
+            key,
+            ApiCapability.PRINCIPAL_MANAGE,
+          ),
+        ).toBe(canManagePrincipals);
+      },
+    );
+
+    it('grants Agent only the intended assigned-session operational capabilities', () => {
+      const key = keyFor(ApiKeyRole.AGENT);
+
+      const allowed = [
+        ApiCapability.SESSION_READ,
+        ApiCapability.SESSION_START,
+        ApiCapability.SESSION_SHUTDOWN,
+        ApiCapability.CHAT_READ,
+        ApiCapability.CHAT_OPERATE,
+        ApiCapability.MESSAGE_SEND,
+        ApiCapability.MESSAGE_OPERATE,
+        ApiCapability.TEMPLATE_READ,
+      ];
+
+      const denied = [
+        ApiCapability.SESSION_CREATE,
+        ApiCapability.SESSION_MANAGE,
+        ApiCapability.SESSION_CONFIGURE,
+        ApiCapability.MESSAGE_BULK,
+        ApiCapability.WEBHOOK_MANAGE,
+        ApiCapability.TEMPLATE_MANAGE,
+        ApiCapability.SEARCH_MESSAGES,
+        ApiCapability.TEAM_MANAGE,
+        ApiCapability.PRINCIPAL_READ,
+        ApiCapability.PRINCIPAL_MANAGE,
+        ApiCapability.API_KEY_MANAGE,
+      ];
+
+      for (const capability of allowed) {
+        expect(RoleCapabilityPolicy.hasCapability(key, capability)).toBe(true);
+      }
+      for (const capability of denied) {
+        expect(RoleCapabilityPolicy.hasCapability(key, capability)).toBe(false);
+      }
+    });
+
+    it('grants Team Leader session/team/template management but not webhook management', () => {
+      const key = keyFor(ApiKeyRole.TEAM_LEADER);
+
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.SESSION_CREATE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.SESSION_MANAGE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.SESSION_CONFIGURE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.SESSION_START)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.SESSION_SHUTDOWN)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.TEMPLATE_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.TEMPLATE_MANAGE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.TEAM_MANAGE)).toBe(true);
+
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.WEBHOOK_MANAGE)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PRINCIPAL_READ)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PRINCIPAL_MANAGE)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.API_KEY_MANAGE)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.AUDIT_READ)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.STATS_READ)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PLUGIN_MANAGE)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.INFRA_MANAGE)).toBe(false);
+    });
+
+    it('keeps Viewer read-only and does not implicitly grant template access', () => {
+      const key = keyFor(ApiKeyRole.VIEWER);
+
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.SESSION_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.CHAT_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PRINCIPAL_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PRINCIPAL_MANAGE)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.SESSION_START)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.MESSAGE_SEND)).toBe(false);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.TEMPLATE_READ)).toBe(false);
+    });
+
+    it('grants Operator Admin-like management capabilities except Infrastructure', () => {
+      const key = keyFor(ApiKeyRole.OPERATOR);
+
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.SESSION_START)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.SESSION_SHUTDOWN)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.WEBHOOK_MANAGE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.TEMPLATE_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.TEMPLATE_MANAGE)).toBe(true);
+
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.TEAM_MANAGE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PRINCIPAL_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PRINCIPAL_MANAGE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.API_KEY_MANAGE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.AUDIT_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.STATS_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PLUGIN_MANAGE)).toBe(true);
+
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.INFRA_MANAGE)).toBe(false);
+      expect(RoleCapabilityPolicy.hasPermission(key, ApiKeyRole.ADMIN)).toBe(false);
+    });
+
+    it('grants Admin every administrative capability including Infrastructure', () => {
+      const key = keyFor(ApiKeyRole.ADMIN);
+
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PRINCIPAL_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PRINCIPAL_MANAGE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.API_KEY_MANAGE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.AUDIT_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.STATS_READ)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.PLUGIN_MANAGE)).toBe(true);
+      expect(RoleCapabilityPolicy.hasCapability(key, ApiCapability.INFRA_MANAGE)).toBe(true);
+    });
+  });
+
+  // ── hashKey (via validateApiKey) ──────────────────────────────────
+
+  describe('hashKey (determinism)', () => {
+    it('should produce the same hash for the same input', () => {
+      const key1 = createMockApiKey({ keyHash: hashKey('same-key') });
+      const key2 = createMockApiKey({ keyHash: hashKey('same-key') });
+
+      expect(key1.keyHash).toBe(key2.keyHash);
+    });
+
+    it('should produce different hashes for different inputs', () => {
+      expect(hashKey('key-a')).not.toBe(hashKey('key-b'));
+    });
+  });
+
+  // ── isIpAllowed / ipInCidr (via validateApiKey) ───────────────────
+
+  describe('IP CIDR validation (via validateApiKey)', () => {
+    it('should allow IP within CIDR range', async () => {
+      const key = createMockApiKey({
+        allowedIps: ['192.168.1.0/24'],
+        keyHash: hashKey('cidr-ok'),
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.save as jest.Mock).mockImplementation((k: ApiKey) => Promise.resolve(k));
+
+      const result = await authenticator.validateApiKey('cidr-ok', '192.168.1.100');
+      expect(result.id).toBe(key.id);
+    });
+
+    it('should reject IP outside CIDR range', async () => {
+      const key = createMockApiKey({
+        allowedIps: ['192.168.1.0/24'],
+        keyHash: hashKey('cidr-fail'),
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+
+      await expect(authenticator.validateApiKey('cidr-fail', '10.0.0.1')).rejects.toThrow('IP address not allowed');
+    });
+
+    it('should handle mixed exact IP and CIDR entries', async () => {
+      const key = createMockApiKey({
+        allowedIps: ['10.0.0.5', '192.168.0.0/16'],
+        keyHash: hashKey('mixed'),
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(key);
+      (repository.save as jest.Mock).mockImplementation((k: ApiKey) => Promise.resolve(k));
+
+      // Exact match
+      const r1 = await authenticator.validateApiKey('mixed', '10.0.0.5');
+      expect(r1.id).toBe(key.id);
+
+      // Reset usage for second call
+      key.usageCount = 0;
+
+      // CIDR match
+      const r2 = await authenticator.validateApiKey('mixed', '192.168.50.1');
+      expect(r2.id).toBe(key.id);
+    });
+  });
+
+  // ── API_KEY_PEPPER wiring ─────────────────────────────────────────
+  // Proves the service's hashing path actually reads the env var (not just the pure helper). We
+  // assert on the keyHash the service QUERIES findOne with, since the mock returns regardless.
+  describe('hashKey reads API_KEY_PEPPER', () => {
+    const ORIGINAL_ENV = process.env;
+    afterEach(() => {
+      process.env = ORIGINAL_ENV;
+    });
+
+    const queriedHash = async (rawKey: string): Promise<string> => {
+      (repository.findOne as jest.Mock).mockResolvedValue(null);
+      await expect(authenticator.validateApiKey(rawKey)).rejects.toThrow(UnauthorizedException);
+      const calls = (repository.findOne as jest.Mock).mock.calls as Array<[{ where: { keyHash: string } }]>;
+      return calls[0][0].where.keyHash;
+    };
+
+    it('hashes with HMAC-SHA256 when the pepper is set', async () => {
+      process.env = { ...ORIGINAL_ENV, API_KEY_PEPPER: 'server-pepper' };
+      const queried = await queriedHash('owa_raw_key');
+      expect(queried).toBe(createHmac('sha256', 'server-pepper').update('owa_raw_key').digest('hex'));
+      expect(queried).not.toBe(createHash('sha256').update('owa_raw_key').digest('hex'));
+    });
+
+    it('hashes with plain SHA-256 when the pepper is unset (existing keys keep validating)', async () => {
+      process.env = { ...ORIGINAL_ENV };
+      delete process.env.API_KEY_PEPPER;
+      const queried = await queriedHash('owa_raw_key');
+      expect(queried).toBe(createHash('sha256').update('owa_raw_key').digest('hex'));
+    });
+  });
+});
+
+
+
+
+

@@ -1,11 +1,11 @@
-# OpenWA - Docker Compose Configuration
+# al-hakim - Docker Compose Configuration
 # Production deployment with persistent Brave browser profiles
 
 services:
   # ===== CORE: Docker Socket Proxy (sole container with /var/run/docker.sock access) =====
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.4.2
-    container_name: openwa-docker-proxy
+    container_name: al-hakim-docker-proxy
     restart: unless-stopped
 
     networks:
@@ -23,22 +23,22 @@ services:
       POST: 1
 
     labels:
-      - 'com.openwa.service=docker-proxy'
-      - 'com.openwa.core=true'
+      - 'com.al-hakim.service=docker-proxy'
+      - 'com.al-hakim.core=true'
 
-  # ===== CORE: OpenWA Backend API =====
-  openwa-api:
+  # ===== CORE: al-hakim Backend API =====
+  al-hakim-api:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
 
-    container_name: SPGWA
+    container_name: al-hakim-api
     restart: unless-stopped
 
     stop_grace_period: 45s
 
     networks:
-      - openwa-network
+      - al-hakim-network
       - internal-docker
 
     security_opt:
@@ -59,8 +59,8 @@ services:
     tmpfs:
       - /tmp
 
-    pids_limit: ${OPENWA_PIDS_LIMIT:-8192}
-    mem_limit: ${OPENWA_MEM_LIMIT:-8g}
+    pids_limit: ${AL_HAKIM_PIDS_LIMIT:-8192}
+    mem_limit: ${AL_HAKIM_MEM_LIMIT:-8g}
 
     ports:
       - '127.0.0.1:${API_PORT:-2785}:2785'
@@ -192,7 +192,7 @@ services:
       - SIMULATE_TYPING=${SIMULATE_TYPING:-}
       - MCP_ENABLED=${MCP_ENABLED:-}
       - SEARCH_ENABLED=${SEARCH_ENABLED:-}
-      - SERVE_DASHBOARD=${SERVE_DASHBOARD:-}
+      - SERVE_DASHBOARD=false
       - CACHE_ENABLED=${CACHE_ENABLED:-}
       - DATABASE_LOGGING=${DATABASE_LOGGING:-}
       - MAIN_DATABASE_SYNCHRONIZE=${MAIN_DATABASE_SYNCHRONIZE:-}
@@ -332,7 +332,7 @@ services:
       - SEARCH_LIMIT_MAX=${SEARCH_LIMIT_MAX:-}
       - LOG_FORMAT=${LOG_FORMAT:-}
       - BASE_URL=${BASE_URL:-}
-      - DASHBOARD_URL=${DASHBOARD_URL:-}
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:2886}
 
       # Docker socket proxy
       - DOCKER_HOST=tcp://docker-proxy:2375
@@ -345,7 +345,7 @@ services:
       #   /app/data/plugins
       #   databases
       #   generated configuration
-      - openwa-data:/app/data
+      - al-hakim-data:/app/data
 
       # Required by DockerService for built-in datastore orchestration.
       - ./docker-compose.yml:/app/docker-compose.yml:ro
@@ -377,51 +377,111 @@ services:
       start_period: 30s
 
     labels:
-      - 'com.openwa.service=api'
-      - 'com.openwa.core=true'
+      - 'com.al-hakim.service=api'
+      - 'com.al-hakim.core=true'
+
+  # ===== CORE: React static server (private network only) =====
+  al-hakim-dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        VITE_API_URL: ${VITE_API_URL:-}
+        VITE_WS_URL: ${VITE_WS_URL:-}
+    container_name: al-hakim-dashboard
+    mem_limit: ${AL_HAKIM_DASHBOARD_MEM_LIMIT:-256m}
+    restart: unless-stopped
+    expose:
+      - '4173'
+    networks:
+      - al-hakim-network
+    security_opt:
+      - 'no-new-privileges:true'
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ['CMD', 'node', '-e', "require('http').get('http://127.0.0.1:4173/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - 'com.al-hakim.service=dashboard'
+      - 'com.al-hakim.core=true'
+
+  # ===== CORE: Nginx edge reverse proxy (the only dashboard-facing published port) =====
+  al-hakim-nginx:
+    build:
+      context: ./nginxconfig
+      dockerfile: Dockerfile
+    container_name: al-hakim-nginx
+    mem_limit: ${AL_HAKIM_NGINX_MEM_LIMIT:-128m}
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${DASHBOARD_PORT:-2886}:80'
+    networks:
+      - al-hakim-network
+    security_opt:
+      - 'no-new-privileges:true'
+    depends_on:
+      al-hakim-api:
+        condition: service_started
+      al-hakim-dashboard:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1/healthz || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - 'com.al-hakim.service=nginx'
+      - 'com.al-hakim.core=true'
 
   # ===== OPTIONAL: Built-in PostgreSQL =====
   postgres:
     image: postgres:16-alpine
-    container_name: openwa-postgres
+    container_name: al-hakim-postgres
     profiles: ['postgres', 'full']
     restart: unless-stopped
 
     networks:
-      - openwa-network
+      - al-hakim-network
 
     security_opt:
       - 'no-new-privileges:true'
 
     environment:
-      POSTGRES_USER: ${DATABASE_USERNAME:-openwa}
+      POSTGRES_USER: ${DATABASE_USERNAME:-al-hakim}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-}
-      POSTGRES_DB: ${DATABASE_NAME:-openwa}
+      POSTGRES_DB: ${DATABASE_NAME:-al-hakim}
       POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-public}
 
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./scripts/postgres-init-schema.sh:/docker-entrypoint-initdb.d/01-create-schema.sh:ro
+      - ./backend/scripts/postgres-init-schema.sh:/docker-entrypoint-initdb.d/01-create-schema.sh:ro
 
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${DATABASE_USERNAME:-openwa}']
+      test: ['CMD-SHELL', 'pg_isready -U ${DATABASE_USERNAME:-al-hakim}']
       interval: 5s
       timeout: 3s
       retries: 5
 
     labels:
-      - 'com.openwa.service=database'
-      - 'com.openwa.builtin=true'
+      - 'com.al-hakim.service=database'
+      - 'com.al-hakim.builtin=true'
 
   # ===== OPTIONAL: Built-in Redis =====
   redis:
     image: redis:7-alpine
-    container_name: openwa-redis
+    container_name: al-hakim-redis
     profiles: ['redis', 'full']
     restart: unless-stopped
 
     networks:
-      - openwa-network
+      - al-hakim-network
 
     security_opt:
       - 'no-new-privileges:true'
@@ -438,18 +498,18 @@ services:
       retries: 5
 
     labels:
-      - 'com.openwa.service=cache'
-      - 'com.openwa.builtin=true'
+      - 'com.al-hakim.service=cache'
+      - 'com.al-hakim.builtin=true'
 
   # ===== OPTIONAL: Built-in MinIO (S3-compatible) =====
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    container_name: openwa-minio
+    container_name: al-hakim-minio
     profiles: ['minio', 'full']
     restart: unless-stopped
 
     networks:
-      - openwa-network
+      - al-hakim-network
 
     security_opt:
       - 'no-new-privileges:true'
@@ -474,30 +534,30 @@ services:
       retries: 3
 
     labels:
-      - 'com.openwa.service=storage'
-      - 'com.openwa.builtin=true'
+      - 'com.al-hakim.service=storage'
+      - 'com.al-hakim.builtin=true'
 
 volumes:
-  openwa-data:
-    name: openwa_openwa-data
+  al-hakim-data:
+    name: al-hakim_data
     driver: local
 
   postgres-data:
-    name: openwa_postgres-data
+    name: al-hakim_postgres-data
     driver: local
 
   redis-data:
-    name: openwa_redis-data
+    name: al-hakim_redis-data
     driver: local
 
   minio-data:
-    name: openwa_minio-data
+    name: al-hakim_minio-data
     driver: local
 
 networks:
-  openwa-network:
-    name: openwa-network
+  al-hakim-network:
+    name: al-hakim-network
 
   internal-docker:
-    name: openwa-internal-docker
+    name: al-hakim-internal-docker
     internal: true

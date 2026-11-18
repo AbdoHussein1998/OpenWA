@@ -1,0 +1,114 @@
+import 'reflect-metadata';
+
+import { DataSource, Repository } from 'typeorm';
+
+import { ApiKey } from '../entities/api-key.entity';
+import { ApiKeyRole } from '../auth.levels.constants';
+import { ApiKeyManagementService } from './api-key-management.service';
+import { ApiKeyAdminSafetyService } from './api-key-admin-safety.service';
+import { ApiKeyUsageTracker } from '../api-key-usage-tracker.service';
+import type { UpdateApiKeyDto } from '../dto/api-key.dto';
+
+import { Agent } from '../../teamleader/entities/agent.entity';
+import { TeamLeader } from '../../teamleader/entities/team-leader.entity';
+
+/**
+ * Pins the empty-body semantics of update() against a REAL better-sqlite3 DataSource. Every
+ * UpdateApiKeyDto field is optional, so `{}` is a legal request that must stay the historical
+ * 200 no-op (the row returned unchanged). The unguarded path expresses this as a targeted UPDATE
+ * whose set list is empty — TypeORM's entity-targeted update then stamps only `updatedAt`
+ * (its empty-values branch appends the update-date column rather than throwing), which is easy
+ * to break silently in a future rewrite of the statement builder, so it gets a dedicated spec.
+ */
+describe('ApiKeyManagementService update with an empty DTO', () => {
+  let ds: DataSource;
+  let repo: Repository<ApiKey>;
+
+  beforeAll(async () => {
+    ds = new DataSource({
+      type: 'better-sqlite3',
+      database: ':memory:',
+
+      // ApiKey now has real main-DB relations to TeamLeader and Agent.
+      // TypeORM must receive the complete relation graph before it can build
+      // ApiKey metadata, even though this test does not populate those fields.
+      entities: [
+        ApiKey,
+        TeamLeader,
+        Agent,
+      ],
+
+      synchronize: true,
+    });
+
+    await ds.initialize();
+
+    repo = ds.getRepository(ApiKey);
+  });
+
+  afterAll(async () => {
+    if (ds?.isInitialized) {
+      await ds.destroy();
+    }
+  });
+
+  it('is a 200-style no-op: resolves with the row, no columns change', async () => {
+    const saved = await repo.save(
+      repo.create({
+        name: 'probe',
+        keyPrefix: 'kp',
+        keyHash: 'h',
+        role: ApiKeyRole.ADMIN,
+
+        teamLeaderId: null,
+        agentId: null,
+
+        isActive: true,
+        allowedIps: null,
+        allowedSessions: null,
+        expiresAt: null,
+        usageCount: 0,
+      }),
+    );
+
+    const tracker = {
+      record: jest.fn(),
+      forget: jest.fn(),
+    } as unknown as ApiKeyUsageTracker;
+
+    const service = new ApiKeyManagementService(
+      repo,
+      tracker,
+      new ApiKeyAdminSafetyService(repo),
+      {} as never, // bootstrap file is not used by update
+      {} as never, // socket evictor is not used when no authorization fields change
+    );
+
+    const before = await repo.findOneByOrFail({
+      id: saved.id,
+    });
+
+    const emptyDto = {} as UpdateApiKeyDto;
+
+    await expect(
+      service.update(
+        saved.id,
+        emptyDto,
+        saved,
+      ),
+    ).resolves.toMatchObject({
+      id: saved.id,
+      name: 'probe',
+    });
+
+    const after = await repo.findOneByOrFail({
+      id: saved.id,
+    });
+
+    expect(after.role).toBe(before.role);
+    expect(after.isActive).toBe(
+      before.isActive,
+    );
+    expect(after.name).toBe(before.name);
+  });
+});

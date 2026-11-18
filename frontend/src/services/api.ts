@@ -1,0 +1,1972 @@
+
+
+
+
+
+
+
+
+
+
+// API Service Layer for OpenWA Dashboard
+// Centralized API client with TypeScript types
+
+import { warnIfInsecureHttpUrl } from '../utils/urlSecurity';
+import { clearStoredApiKey, getStoredApiKey } from '../utils/authStorage';
+import type { UserRole } from '../types/role';
+
+// Resolve the API base URL. By default this is the same-origin relative path '/api',
+// correct when the separate dashboard container proxies /api to NestJS over
+// Docker DNS. For a split-origin deployment (dashboard hosted separately from the API), set VITE_API_URL at build time to the API ORIGIN — e.g.
+// `VITE_API_URL=https://gateway.example.com` — and the '/api' prefix is appended here.
+// Previously VITE_API_URL was documented but never read, so the dashboard always called
+// same-origin '/api' and a split deployment failed with "Invalid API Key" (#91).
+// Exported so direct fetches (e.g. auth/validate in Login.tsx / App.tsx) honor VITE_API_URL
+// too — otherwise split-origin deployments break. Empty VITE_API_URL → '/api'.
+const API_ORIGIN = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '');
+export const API_BASE_URL = `${API_ORIGIN}/api`;
+// Warn (not refuse — would break dev + TLS-terminating-proxy) when the API origin is an
+// insecure http:// URL pointing at a non-localhost host (API keys sent in cleartext).
+if (API_ORIGIN) warnIfInsecureHttpUrl(API_ORIGIN, 'VITE_API_URL');
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * The three tunable keys, as the gateway resolves them — not the raw stored column, which the API
+ * never returns. `maxReconnectAttempts` is null when reconnects are unlimited, which is the default
+ * and which no number in the accepted 0-20 range can express.
+ */
+export interface SessionConfig {
+  autoRejectCalls: boolean;
+  maxReconnectAttempts: number | null;
+  reconnectBaseDelay: number;
+}
+
+export interface Session {
+  id: string;
+  name: string;
+  /** Team Leader that owns the Session, or null for an unassigned Admin-created Session. */
+  ownerTeamLeaderId?: string | null;
+  status:
+    | 'created'
+    | 'initializing'
+    | 'authenticating'
+    | 'qr_ready'
+    | 'ready'
+    | 'disconnected'
+    | 'action_required'
+    | 'failed';
+  /**
+   * Whether the gateway holds a live engine for this session right now. The precondition the
+   * lifecycle routes enforce, and not derivable from `status`: `disconnected` covers both a session
+   * mid automatic-reconnect (engine present, start 400s) and one stopped through stop() (no engine).
+   * Optional BY DESIGN, not drift: the wire always carries it, but this client's state model
+   * clears it to "unknown" after a websocket status event until the row refreshes, so the action
+   * helpers fall back to the historical status set instead of trusting a stale value.
+   */
+  engineLoaded?: boolean;
+  phone?: string | null;
+  /**
+   * Intended/display phone configured when the session is created.
+   *
+   * This is metadata only. It may differ from `phone`, which is the
+   * WhatsApp account actually connected to the session, and it must
+   * never be used for authorization.
+   */
+  targetPhone?: string | null;
+  pushName?: string | null;
+  connectedAt?: string | null;
+  lastActive?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Human-readable reason carried while the status is 'failed' (terminal failure) or
+   * 'action_required' (operator must intervene, e.g. acknowledge an onboarding modal). */
+  lastError?: string | null;
+  /**
+   * A limit WhatsApp itself has placed on the account, or null when there is none. Distinct from
+   * `lastError`, which describes a fault on the gateway's side of the link. Optional only because a
+   * dashboard can be served by a gateway that predates the field.
+   */
+  restriction?: AccountRestriction | null;
+}
+
+/** One participant's presence within a chat. */
+export interface ParticipantPresence {
+  id: string;
+  /** `composing`/`recording` mean actively typing or recording; `paused` means they stopped. */
+  state: 'available' | 'unavailable' | 'composing' | 'recording' | 'paused';
+  /** Unix SECONDS. Absent whenever the contact's privacy settings hide last-seen. */
+  lastSeen?: number;
+}
+
+/** The last presence reported for a chat since it was subscribed. */
+export interface ChatPresence {
+  chatId: string;
+  participants: ParticipantPresence[];
+  groupOnlineCount?: number;
+  /** When the gateway received the report — NOT a WhatsApp timestamp. */
+  observedAt: string;
+}
+
+/**
+ * A restriction WhatsApp has in force on a session's account.
+ *
+ * `reachout_timelock` leaves the session connected and existing chats working — only starting new
+ * conversations is blocked — which is why it can appear on a perfectly `ready` session. `tos_block`
+ * and `proxy_block` refuse the connection itself and so cannot.
+ */
+export interface AccountRestriction {
+  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block';
+  /** The engine's own token for the cause, verbatim (`TOS_BLOCK`, `BIZ_QUALITY`, …). */
+  code: string;
+  /** ISO timestamp when enforcement ends, when WhatsApp states one. */
+  expiresAt?: string | null;
+}
+
+export interface CreateSessionInput {
+  name: string;
+  targetPhone?: string;
+  config?: Record<string, unknown>;
+  proxyUrl?: string;
+  proxyType?: 'http' | 'https' | 'socks4' | 'socks5';
+}
+
+export interface TeamLeader {
+  id: string;
+  name: string;
+  email: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  email: string | null;
+  teamLeaderId: string;
+  assignedSessionId: string | null;
+  /**
+   * Stored-template send quota for the rolling previous 24 hours.
+   *
+   * null -> unlimited
+   * 0    -> stored-template sending disabled
+   * N    -> at most N successful stored-template sends in the rolling window
+   */
+  templateSendLimit24h: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * ADMIN-only cross-database Agent overview returned by GET /admin/agents.
+ *
+ * Agent / Team Leader identity comes from the main database while the assigned
+ * Session summary comes from the data database. A stale assignedSessionId is
+ * preserved even when the corresponding Session row no longer exists, in
+ * which case assignedSession is null.
+ */
+export interface AdminAgentOverview {
+  id: string;
+  name: string;
+  email: string | null;
+  teamLeaderId: string;
+  teamLeader: {
+    id: string;
+    name: string;
+    email: string | null;
+  };
+  assignedSessionId: string | null;
+  assignedSession: {
+    id: string;
+    name: string;
+    status: Session['status'];
+    phone: string | null;
+    targetPhone: string | null;
+  } | null;
+  templateSendLimit24h: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+
+export interface AdminSessionOverview {
+  id: string;
+  name: string;
+  ownerTeamLeaderId: string | null;
+  status: Session['status'];
+  phone: string | null;
+  targetPhone: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminTeamLeaderResources {
+  teamLeader: TeamLeader;
+  sessions: AdminSessionOverview[];
+  agents: Array<{
+    id: string;
+    name: string;
+    email: string | null;
+    assignedSessionId: string | null;
+    templateSendLimit24h: number | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  canDelete: boolean;
+}
+
+export interface AdminTeamLeaderResourceSummary {
+  totals: {
+    teamLeaderCount: number;
+    sessionCount: number;
+    agentCount: number;
+    unassignedSessionCount: number;
+  };
+  teamLeaders: Array<{
+    teamLeaderId: string;
+    sessionCount: number;
+    agentCount: number;
+    unassignedSessionCount: number;
+  }>;
+}
+
+export interface ForceDeleteTeamLeaderResult {
+  teamLeaderId: string;
+  teamLeaderName: string;
+  deletedSessionIds: string[];
+  deletedAgentIds: string[];
+}
+
+export interface RetireTeamLeaderInput {
+  sessionReassignments: Array<{
+    sessionId: string;
+    targetTeamLeaderId: string;
+  }>;
+  agentReassignments: Array<{
+    agentId: string;
+    targetTeamLeaderId: string;
+    unassignSession?: boolean;
+  }>;
+}
+
+export interface RetireTeamLeaderResult {
+  teamLeaderId: string;
+  teamLeaderName: string;
+  delegatedSessionIds: string[];
+  delegatedAgentIds: string[];
+  preservedAgentSessionAssignments: number;
+}
+
+export interface ReassignAdminSessionInput {
+  targetTeamLeaderId: string;
+}
+
+/** Assign or clear an Agent's Session from the global Admin surface. */
+export interface AssignAdminAgentSessionInput {
+  sessionId: string | null;
+}
+
+export interface BulkReassignAdminSessionsInput extends ReassignAdminSessionInput {
+  sessionIds: string[];
+}
+
+export interface ReassignAdminAgentInput {
+  targetTeamLeaderId: string;
+  unassignSession?: boolean;
+}
+
+export interface BulkReassignAdminAgentsInput extends ReassignAdminAgentInput {
+  agentIds: string[];
+}
+
+export interface CreateTeamLeaderInput {
+  name: string;
+  email?: string;
+}
+
+export interface CreateAgentInput {
+  name: string;
+  email?: string;
+  /**
+   * null/omitted -> unlimited; 0 -> disabled; positive integer -> rolling 24-hour limit.
+   */
+  templateSendLimit24h?: number | null;
+}
+
+export interface CreateTeamLeaderResult {
+  teamLeader: TeamLeader;
+  /**
+   * Plaintext TEAM_LEADER API key.
+   * Returned only once by the backend.
+   */
+  apiKey: string;
+}
+
+export interface CreateAgentResult {
+  agent: Agent;
+  /**
+   * Plaintext AGENT API key.
+   * Returned only once by the backend.
+   */
+  apiKey: string;
+}
+
+/**
+ * Result returned when a Team Leader reissues an Agent API key.
+ *
+ * The previous Agent key is expected to be revoked by the backend.
+ * The replacement plaintext key is returned only in this response.
+ */
+export interface ReissueAgentApiKeyResult {
+  agent: Agent;
+  apiKey: string;
+}
+
+export interface SessionStats {
+  total: number;
+  active: number;
+  ready: number;
+  disconnected: number;
+  byStatus: Record<string, number>;
+  memoryUsage: { heapUsed: number; heapTotal: number; rss: number };
+}
+
+export type WebhookFilterOperator = 'is' | 'isNot' | 'contains' | 'equals';
+
+export interface WebhookFilterCondition {
+  field: string;
+  operator: WebhookFilterOperator;
+  value: string | string[] | boolean;
+  caseSensitive?: boolean;
+}
+
+export interface WebhookFilters {
+  conditions: WebhookFilterCondition[];
+}
+
+export interface Webhook {
+  id: string;
+  sessionId: string;
+  url: string;
+  events: string[];
+  filters?: WebhookFilters | null;
+  active: boolean;
+  retryCount: number;
+  /** Null until the first delivery attempt. */
+  lastTriggeredAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageTemplate {
+  id: string;
+  sessionId: string;
+  name: string;
+  body: string;
+  header?: string | null;
+  footer?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TemplatePayload {
+  name: string;
+  body: string;
+  header?: string | null;
+  footer?: string | null;
+}
+
+export type GenericApiKeyRole = Extract<UserRole, 'admin' | 'operator' | 'viewer'>;
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  /**
+   * Listing may legitimately contain principal-bound Team Leader and
+   * Agent credentials. Generic creation is narrower; see GenericApiKeyRole.
+   */
+  role: UserRole;
+  /** Bound management principal, or null for legacy ADMIN/OPERATOR/VIEWER keys. */
+  teamLeaderId: string | null;
+  /** Bound Agent principal, or null for non-Agent credentials. */
+  agentId: string | null;
+  allowedIps?: string[];
+  allowedSessions?: string[];
+  isActive: boolean;
+  /** Stable marker for the protected bootstrap/main Admin credential. */
+  isPrimaryAdminKey: boolean;
+  expiresAt?: string;
+  lastUsedAt?: string;
+  usageCount: number;
+  createdAt: string;
+}
+
+/** The creation response: every list/detail field plus the plaintext key, shown exactly once. */
+export interface CreatedApiKey extends ApiKey {
+  apiKey: string;
+}
+
+export interface AuditLog {
+  id: string;
+  action: string;
+  severity: 'info' | 'warn' | 'error';
+  apiKeyId: string | null;
+  apiKeyName: string | null;
+  sessionId: string | null;
+  sessionName: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  method: string | null;
+  path: string | null;
+  statusCode: number | null;
+  /** Null when the action succeeded. */
+  errorMessage: string | null;
+  /** Free-form context whose shape varies per action. */
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface MessageResponse {
+  messageId: string;
+  timestamp: number;
+}
+
+/**
+ * Body accepted by POST /sessions/:sessionId/messages/send-template.
+ *
+ * The backend accepts either a template id or a template name. Dashboard composer flows should
+ * normally keep and send the stable templateId selected from templateApi.list().
+ */
+export type SendTemplatePayload = {
+  chatId: string;
+  vars?: Record<string, string>;
+  mentions?: string[];
+  linkPreview?: boolean;
+} & (
+  | { templateId: string; templateName?: never }
+  | { templateName: string; templateId?: never }
+);
+
+/** Structured 429 body returned when an Agent cannot send another stored template. */
+export interface AgentTemplateQuotaErrorResponse {
+  statusCode: 429;
+  error: string;
+  code: 'AGENT_TEMPLATE_SEND_LIMIT_REACHED';
+  message: string;
+  templateSendLimit24h: number;
+  used24h: number;
+  remaining24h: number | null;
+  retryAfterSeconds: number | null;
+}
+
+/**
+ * Error thrown by the dashboard API client for non-2xx responses.
+ *
+ * `status` and `code` preserve the existing contract used by recovery UI. Quota fields are copied
+ * onto the Error as well so ChatComposer can render useful 429 feedback without parsing strings.
+ * `response` keeps the structured gateway body available for future machine-readable errors.
+ */
+export interface ApiRequestError extends Error {
+  status?: number;
+  code?: string;
+  response?: Record<string, unknown>;
+  templateSendLimit24h?: number;
+  used24h?: number;
+  remaining24h?: number | null;
+  retryAfterSeconds?: number | null;
+}
+
+export interface AgentTemplateQuotaError extends ApiRequestError {
+  status: 429;
+  code: 'AGENT_TEMPLATE_SEND_LIMIT_REACHED';
+  templateSendLimit24h: number;
+  used24h: number;
+  remaining24h: number | null;
+  retryAfterSeconds: number | null;
+}
+
+/** Narrow an arbitrary caught value to the stable Agent stored-template quota error. */
+export function isAgentTemplateQuotaError(error: unknown): error is AgentTemplateQuotaError {
+  if (!(error instanceof Error)) return false;
+
+  const candidate = error as ApiRequestError;
+  return (
+    candidate.status === 429 &&
+    candidate.code === 'AGENT_TEMPLATE_SEND_LIMIT_REACHED' &&
+    typeof candidate.templateSendLimit24h === 'number' &&
+    typeof candidate.used24h === 'number' &&
+    (typeof candidate.remaining24h === 'number' || candidate.remaining24h === null) &&
+    (typeof candidate.retryAfterSeconds === 'number' || candidate.retryAfterSeconds === null)
+  );
+}
+
+// Mirrors the backend engine ChatKind (dashboard cannot import wa-id.ts).
+export type ChatKind = 'individual' | 'group' | 'channel' | 'status' | 'broadcast' | 'unknown';
+
+// Chat summary returned by GET /sessions/:id/chats (mirrors the backend ChatSummary).
+export interface Chat {
+  id: string;
+  name: string;
+  isGroup: boolean;
+  kind: ChatKind;
+  unreadCount: number;
+  timestamp: number;
+  lastMessage?: string;
+}
+
+// Engine-neutral message types (mirrors the backend's IWhatsAppEngine MessageType). The backend
+// normalizes raw engine tokens at the adapter boundary (#265/#270), so persisted rows, the
+// message.received/sent payloads, and the websocket all use these values.
+export const MESSAGE_TYPES = [
+  'text',
+  'image',
+  'video',
+  'audio',
+  'voice',
+  'document',
+  'sticker',
+  'location',
+  'contact',
+  'poll',
+  'call',
+  'revoked',
+  'masked',
+  'unknown',
+] as const;
+export type MessageType = (typeof MESSAGE_TYPES)[number];
+
+/** Coerce an arbitrary string (e.g. a raw websocket payload field) to a known MessageType. */
+export function asMessageType(value: string | undefined): MessageType {
+  return (MESSAGE_TYPES as readonly string[]).includes(value ?? '') ? (value as MessageType) : 'unknown';
+}
+
+export interface ChatMessage {
+  id: string;
+  waMessageId?: string;
+  chatId: string;
+  /** Chat kind of the source conversation (present on live engine/WS payloads). */
+  kind?: ChatKind;
+  /**
+   * Human-readable name of the message's sender. For a group this is the participant who posted
+   * (their pushName/contact name); the chat view uses it to label who said what, like WhatsApp. Null
+   * on legacy rows or when the engine could not resolve a name.
+   */
+  chatName?: string;
+  /**
+   * Stable sender identity for a group message: the participant JID who actually posted (`from` is
+   * the group JID). Present on live/engine payloads and on rows persisted after the column was
+   * added; absent on 1:1 messages, outgoing echoes, and legacy rows.
+   */
+  author?: string;
+  from: string;
+  to: string;
+  body: string;
+  type: MessageType;
+  direction: 'incoming' | 'outgoing';
+  status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+  timestamp?: number;
+  createdAt: string;
+  metadata?: {
+    media?: { mimetype: string; filename?: string; data?: string; omitted?: boolean; sizeBytes?: number };
+    quotedMessage?: { id: string; body: string };
+    reactions?: Record<string, string>;
+    call?: { video: boolean; missed: boolean };
+  };
+}
+
+// Live WhatsApp message from the engine history endpoint (not a persisted DB row): it carries `fromMe`
+// instead of `direction`/`status`. Used to backfill a chat thread the gateway never captured live.
+export interface EngineHistoryMessage {
+  id: string;
+  chatId: string;
+  from: string;
+  to: string;
+  body: string;
+  type: MessageType;
+  /** Unix timestamp in seconds. */
+  timestamp: number;
+  fromMe: boolean;
+  isGroup: boolean;
+  isStatusBroadcast?: boolean;
+  kind: ChatKind;
+  /** Disappearing-messages timer on the chat, in seconds. Absent when the chat has none set. */
+  ephemeralDuration?: number;
+  /** Sender in a group: `from` is the group JID, so this participant WID is the real poster. */
+  author?: string;
+  mentionedIds?: string[];
+  /** Present on `call` messages only. */
+  call?: { video: boolean; missed: boolean };
+  isLidSender?: boolean;
+  senderPhone?: string | null;
+  /**
+   * Sender contact info, best-effort from the engine's cache. History carries `pushName` only;
+   * the richer fields arrive on `message.received` when `WEBHOOK_CONTACT_DETAILS=true`.
+   */
+  contact?: {
+    id?: string;
+    number?: string;
+    name?: string;
+    pushName?: string;
+    shortName?: string;
+    type?: string;
+    isMyContact?: boolean;
+    isWAContact?: boolean;
+    isBusiness?: boolean;
+    isEnterprise?: boolean;
+    verifiedName?: string;
+    verifiedLevel?: number;
+    isBlocked?: boolean;
+    labels?: string[];
+  };
+  /** Status/story styling. Declared by the engine payload; this route never sets either. */
+  backgroundColor?: string;
+  font?: number;
+  media?: {
+    mimetype: string;
+    filename?: string;
+    data?: string;
+    omitted?: boolean;
+    sizeBytes?: number;
+  };
+  quotedMessage?: { id: string; body: string };
+  location?: { latitude: number; longitude: number; description?: string; address?: string; url?: string };
+}
+
+// Mirrors the backend engine Channel / ChannelMessage (GET /sessions/:id/channels[/:id/messages]).
+export interface Channel {
+  id: string;
+  name: string;
+  description?: string;
+  inviteCode?: string;
+  subscriberCount?: number;
+  picture?: string;
+  verified?: boolean;
+  createdAt?: number;
+}
+
+export interface ChannelMessage {
+  id: string;
+  body: string;
+  timestamp: number;
+  hasMedia: boolean;
+  mediaUrl?: string;
+}
+
+// Mirrors the backend engine Status / IWhatsAppEngine status methods (GET /sessions/:id/status).
+export interface StatusUpdate {
+  id: string;
+  contact: { id: string; name?: string; pushName?: string };
+  type: 'text' | 'image' | 'video' | 'voice';
+  caption?: string;
+  mediaUrl?: string;
+  backgroundColor?: string;
+  font?: number;
+  timestamp: string;
+  expiresAt: string;
+}
+
+export interface ContactStatusGroup {
+  contact: { id: string; name?: string; pushName?: string };
+  items: StatusUpdate[];
+  latest: string;
+}
+
+// Minimal contact type for the recipient picker; the backend GET /sessions/:id/contacts
+// returns a Contact array; fields beyond id are optional.
+export interface Contact {
+  id: string;
+  name?: string;
+  pushName?: string;
+  /** MSISDN digits without separators — always present in the response. */
+  number: string;
+  isMyContact: boolean;
+  isBlocked: boolean;
+  /** Absent when the contact has none or privacy hides it. */
+  profilePicUrl?: string;
+}
+
+export interface SendMediaPayload {
+  base64?: string;
+  url?: string;
+  mimetype?: string;
+  filename?: string;
+  caption?: string;
+  /** Quote an earlier message, making the media send a reply. Omit for an ordinary send. */
+  quotedMessageId?: string;
+}
+
+// Payloads below mirror the backend DTOs in src/modules/message/dto (raw bodies, no envelope).
+export interface SendLocationPayload {
+  chatId: string;
+  latitude: number;
+  longitude: number;
+  description?: string;
+  address?: string;
+}
+
+export interface SendContactPayload {
+  chatId: string;
+  contactName: string;
+  contactNumber: string;
+}
+
+export interface SendPollPayload {
+  chatId: string;
+  name: string;
+  options: string[];
+  allowMultipleAnswers?: boolean;
+}
+
+export interface ForwardMessagePayload {
+  fromChatId: string;
+  toChatId: string;
+  messageId: string;
+}
+
+// Media block of a single bulk message (BulkMediaDto — no caption; caption sits next to it).
+export interface BulkMediaPayload {
+  url?: string;
+  base64?: string;
+  mimetype?: string;
+  filename?: string;
+  ptt?: boolean;
+}
+
+export interface BulkMessageItem {
+  chatId: string;
+  type: 'text' | 'image' | 'video' | 'audio' | 'document';
+  content: {
+    text?: string;
+    image?: BulkMediaPayload;
+    video?: BulkMediaPayload;
+    audio?: BulkMediaPayload;
+    document?: BulkMediaPayload;
+    caption?: string;
+  };
+  variables?: Record<string, string>;
+}
+
+export interface SendBulkPayload {
+  batchId?: string;
+  messages: BulkMessageItem[];
+  options?: {
+    delayBetweenMessages?: number;
+    randomizeDelay?: boolean;
+    stopOnError?: boolean;
+  };
+}
+
+/** 202 response of POST send-bulk — the batch is processing asynchronously; poll getBatchStatus. */
+export interface BulkBatchResponse {
+  batchId: string;
+  status: string;
+  totalMessages: number;
+  estimatedCompletionTime?: string;
+  statusUrl: string;
+}
+
+export type BatchStatus = 'pending' | 'processing' | 'completed' | 'cancelled' | 'failed';
+
+export interface BatchProgress {
+  total: number;
+  sent: number;
+  failed: number;
+  pending: number;
+  cancelled: number;
+}
+
+export interface BatchMessageResult {
+  chatId: string;
+  status: 'pending' | 'sent' | 'failed' | 'cancelled';
+  messageId?: string;
+  error?: { code: string; message: string };
+  sentAt?: string;
+}
+
+/** GET batch/:batchId shape; the cancel endpoint returns the same minus results/timestamps. */
+export interface BatchStatusResponse {
+  batchId: string;
+  status: BatchStatus;
+  progress: BatchProgress;
+  /** One entry per recipient already attempted — empty until the first send resolves. */
+  results: BatchMessageResult[];
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+export interface HealthStatus {
+  status: 'ok' | 'error';
+  timestamp?: string;
+  /** Running backend version (from package.json) — read live so the sidebar never shows a stale build. */
+  version?: string;
+  details?: {
+    database?: { status: string };
+    redis?: { status: string };
+    queue?: { status: string };
+  };
+}
+
+export interface InfraStatus {
+  // `builtIn` = OpenWA's own bundled container is actually running and backing this service (live),
+  // not just the saved intent — falls back to the saved flag when Docker is unavailable. (#488)
+  database: { connected: boolean; type: string; host: string; builtIn: boolean };
+  redis: { enabled: boolean; connected: boolean; host: string; port: number; builtIn: boolean };
+  queue: {
+    enabled: boolean;
+    webhooks: { pending: number; completed: number; failed: number };
+  };
+  storage: { type: 'local' | 's3'; path?: string; bucket?: string; builtIn: boolean; s3Available?: boolean };
+  engine: {
+    type: string;
+    headless: boolean;
+    // whatsapp-web.js only: the actual WhatsApp Web build in use (distinct from the library version)
+    // and how it was chosen. (#488)
+    webVersion?: string | null;
+    webVersionSource?: 'pinned' | 'auto' | 'native';
+  };
+  /**
+   * Editable settings supplied by a layer above `data/.env.generated` (the container environment or a
+   * project `.env`), which therefore cannot be changed from this page until that layer is. Reported by
+   * the gateway rather than inferred from a running-vs-saved mismatch, because that mismatch is also
+   * what an unrestarted save looks like and the two need opposite advice (#1082).
+   *
+   * Optional only because a dashboard can be served by a gateway that predates the field.
+   */
+  envPinned?: string[];
+}
+
+// Saved infrastructure config (from data/.env.generated) used to hydrate the form.
+// Secrets are never returned — `*Set` flags indicate whether a value is stored.
+export interface SavedConfig {
+  database: {
+    type: 'sqlite' | 'postgres';
+    builtIn: boolean;
+    host: string;
+    port: string;
+    username: string;
+    database: string;
+    schema: string;
+    poolSize: number;
+    sslEnabled: boolean;
+    sslRejectUnauthorized: boolean;
+    passwordSet: boolean;
+  };
+  redis: { enabled: boolean; builtIn: boolean; host: string; port: string; passwordSet: boolean };
+  queue: { enabled: boolean };
+  storage: {
+    type: 'local' | 's3';
+    builtIn: boolean;
+    localPath: string;
+    s3Bucket: string;
+    s3Region: string;
+    s3Endpoint: string;
+    s3CredentialsSet: boolean;
+  };
+  engine: { type: string; headless: boolean; sessionDataPath: string; browserArgs: string };
+}
+
+export interface SaveConfigPayload {
+  database?: {
+    type: 'sqlite' | 'postgres';
+    builtIn?: boolean;
+    host?: string;
+    port?: string;
+    username?: string;
+    password?: string;
+    database?: string;
+    schema?: string;
+    poolSize?: number;
+    sslEnabled?: boolean;
+    sslRejectUnauthorized?: boolean;
+  };
+  redis?: {
+    enabled?: boolean;
+    builtIn?: boolean;
+    host?: string;
+    port?: string;
+    password?: string;
+  };
+  queue?: {
+    enabled?: boolean;
+  };
+  storage?: {
+    type: 'local' | 's3';
+    builtIn?: boolean;
+    localPath?: string;
+    s3Bucket?: string;
+    s3Region?: string;
+    s3AccessKey?: string;
+    s3SecretKey?: string;
+    s3Endpoint?: string;
+  };
+  engine?: {
+    type?: string;
+    headless?: boolean;
+    sessionDataPath?: string;
+    browserArgs?: string;
+  };
+}
+
+// Global message search (mirrors the backend GET /search contract from #664).
+// `timestamp` is epoch-seconds (the messages column is seconds, not ms); `dateFrom`/`dateTo`
+// are epoch-ms on the wire — see `dateFrom`/`dateTo` JSDoc below.
+export interface SearchParams {
+  q: string;
+  sessionId?: string;
+  chatId?: string;
+  direction?: string;
+  type?: string;
+  from?: string;
+  /** Epoch-ms lower bound (inclusive) — the backend binds against messages.timestamp (/1000). */
+  dateFrom?: number;
+  /** Epoch-ms upper bound (inclusive). */
+  dateTo?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SearchHit {
+  messageId: string;
+  waMessageId: string;
+  sessionId: string;
+  chatId: string;
+  body: string;
+  /** Provider-generated excerpt with `<mark>` highlight markers — render as text, never as HTML. */
+  snippet: string;
+  /** Epoch-seconds (mirrors the persisted messages.timestamp column). */
+  timestamp: number;
+  type: string;
+  direction: 'incoming' | 'outgoing';
+  from: string;
+  score?: number;
+}
+
+export interface SearchResults {
+  hits: SearchHit[];
+  total: number;
+  tookMs: number;
+  provider: string;
+}
+
+// =============================================================================
+// API Client
+// =============================================================================
+
+// Shared failure handling for every response shape (json/text/blob). On 401 the stored API key is
+// invalid/expired/revoked — clear it and return to login so the user isn't stuck on a dashboard that
+// 401s every request; the never-settling promise halts this request's chain so callers neither flash
+// a generic error toast nor receive an undefined payload while the page navigates away. Otherwise
+// throw an Error carrying the HTTP status and, when the gateway supplied one, its machine code.
+async function handleErrorResponse<T>(response: Response): Promise<T> {
+  if (response.status === 401) {
+    clearStoredApiKey();
+    if (typeof window !== 'undefined') {
+      window.location.assign('/');
+      return new Promise<T>(() => {});
+    }
+  }
+
+  // On a non-JSON body (e.g. a reverse-proxy 502/503 HTML page) fall through to `HTTP <status>`
+  // rather than statusText: the status code is what the toast connection-lost de-dup matches on,
+  // and statusText is empty over HTTP/2 anyway.
+  const error = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  // Carry the HTTP status on the Error (message unchanged, so the toast de-dup still matches) so
+  // callers can tell apart a permission 403 from a real server 5xx instead of guessing from text.
+  // Carry the machine `code` too: the gateway's stable codes (SESSION_LOGOUT_INCOMPLETE,
+  // SESSION_NAME_TEARDOWN_PENDING, …) drive specific recovery UI, and a reverse-proxy 502 that
+  // never reached the gateway carries no code at all — that distinction is exactly what the unlink
+  // classifier keys on instead of fragile message heuristics.
+  const err = new Error(
+    typeof error.message === 'string' && error.message ? error.message : `HTTP ${response.status}`,
+  ) as ApiRequestError;
+
+  err.status = response.status;
+  err.response = error;
+
+  if (typeof error.code === 'string') {
+    err.code = error.code;
+  }
+
+  // Preserve the stable quota metadata returned by send-template. These guards also make this safe
+  // for unrelated error bodies and for reverse proxies that return non-JSON responses.
+  if (typeof error.templateSendLimit24h === 'number') {
+    err.templateSendLimit24h = error.templateSendLimit24h;
+  }
+  if (typeof error.used24h === 'number') {
+    err.used24h = error.used24h;
+  }
+  const remaining24h = error.remaining24h;
+  if (typeof remaining24h === 'number' || remaining24h === null) {
+    err.remaining24h = remaining24h;
+  }
+
+  const retryAfterSeconds = error.retryAfterSeconds;
+  if (typeof retryAfterSeconds === 'number' || retryAfterSeconds === null) {
+    err.retryAfterSeconds = retryAfterSeconds;
+  }
+
+  throw err;
+}
+
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const url = `${API_BASE_URL}${endpoint}`;
+
+  // Retrieve the active credential from either browser storage.
+  const apiKey = getStoredApiKey();
+
+  // For FormData (file uploads) let the browser set multipart/form-data + boundary itself.
+  const isFormData = options.body instanceof FormData;
+  const headers: HeadersInit = {
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+    ...options.headers,
+  };
+
+  const response = await fetch(url, { ...options, headers });
+
+  if (!response.ok) {
+    return handleErrorResponse<T>(response);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json();
+}
+
+/** Like {@link request} but returns the raw response text — e.g. a plugin's HTML config-UI bundle. */
+async function requestText(endpoint: string): Promise<string> {
+  const apiKey = getStoredApiKey();
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    headers: { ...(apiKey ? { 'X-API-Key': apiKey } : {}) },
+  });
+
+  if (!response.ok) {
+    return handleErrorResponse<string>(response);
+  }
+
+  return response.text();
+}
+
+/** Like {@link request} but returns a Blob — e.g. for status media downloads. */
+async function requestBlob(endpoint: string): Promise<Blob> {
+  const url = `${API_BASE_URL}${endpoint}`;
+
+  // Retrieve the active credential from either browser storage.
+  const apiKey = getStoredApiKey();
+
+  const headers: HeadersInit = {
+    ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+  };
+
+  const response = await fetch(url, { headers });
+
+  if (!response.ok) {
+    return handleErrorResponse<Blob>(response);
+  }
+
+  return response.blob();
+}
+
+// =============================================================================
+// Session API
+// =============================================================================
+
+export const sessionApi = {
+  list: () => request<Session[]>('/sessions'),
+  get: (id: string) => request<Session>(`/sessions/${id}`),
+  /**
+   * Create a session using the complete backend CreateSessionDto shape.
+   *
+   * Session ownership is derived by the backend from the authenticated
+   * principal; callers must never attempt to send an owner id here.
+   */
+  create: (input: CreateSessionInput) =>
+    request<Session>('/sessions', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  delete: (id: string) => request<void>(`/sessions/${id}`, { method: 'DELETE' }),
+  getConfig: (id: string) => request<SessionConfig>(`/sessions/${id}/config`),
+  // PATCH merges: only the keys sent are touched. Send null to clear one back to its default.
+  updateConfig: (id: string, patch: Partial<Record<keyof SessionConfig, boolean | number | null>>) =>
+    request<SessionConfig>(`/sessions/${id}/config`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  start: (id: string) => request<Session>(`/sessions/${id}/start`, { method: 'POST' }),
+  stop: (id: string) => request<Session>(`/sessions/${id}/stop`, { method: 'POST' }),
+  logout: (id: string) => request<Session>(`/sessions/${id}/logout`, { method: 'POST' }),
+  forceKill: (id: string) => request<Session>(`/sessions/${id}/force-kill`, { method: 'POST' }),
+  getQR: (id: string) => request<{ qrCode: string; status: string }>(`/sessions/${id}/qr`),
+  requestPairingCode: (id: string, phoneNumber: string) =>
+    request<{ pairingCode: string; status: string }>(`/sessions/${id}/pairing-code`, {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber }),
+    }),
+  getStats: () => request<SessionStats>('/sessions/stats/overview'),
+  getGroups: (id: string) =>
+    request<{ id: string; name: string; linkedParentJID?: string | null }[]>(`/sessions/${id}/groups`),
+  getChats: (id: string) => request<Chat[]>(`/sessions/${id}/chats`),
+  markChatRead: (id: string, chatId: string) =>
+    request<{ success: boolean }>(`/sessions/${id}/chats/read`, {
+      method: 'POST',
+      body: JSON.stringify({ chatId }),
+    }),
+  getChatMessages: (id: string, chatId: string, limit = 100) =>
+    request<{ messages: ChatMessage[]; total: number }>(
+      `/sessions/${id}/messages?chatId=${encodeURIComponent(chatId)}&limit=${limit}`,
+    ),
+  // Live history straight from WhatsApp (bypasses the DB) — backfills a thread the gateway never
+  // captured, e.g. a freshly paired session whose persisted store is still empty.
+  // includeMedia downloads the media payload (base64) for history messages so stickers/images/
+  // video/voice render instead of collapsing to an empty timestamp-only bubble.
+  getChatHistory: (id: string, chatId: string, limit = 100, includeMedia = false) =>
+    request<EngineHistoryMessage[]>(
+      `/sessions/${id}/messages/${encodeURIComponent(chatId)}/history?limit=${limit}${
+        includeMedia ? '&includeMedia=true' : ''
+      }`,
+    ),
+  // A message's stored media, fetched on demand. The message list carries its media inline only up to
+  // MESSAGE_LIST_INLINE_MEDIA_BUDGET_BYTES; past that budget the payload arrives as the
+  // `{ omitted: true, sizeBytes }` marker and the bytes are only reachable here. Served as an
+  // attachment (Content-Disposition), so callers download it rather than rendering it inline.
+  getMessageMediaBlob: (id: string, chatId: string, messageId: string) =>
+    requestBlob(`/sessions/${id}/messages/${encodeURIComponent(chatId)}/${encodeURIComponent(messageId)}/media`),
+  getSubscribedChannels: (id: string) => request<Channel[]>(`/sessions/${id}/channels`),
+  getChannelMessages: (id: string, channelId: string, limit = 50) =>
+    request<ChannelMessage[]>(`/sessions/${id}/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}`),
+  getContactStatuses: (id: string) => request<{ statuses: StatusUpdate[] }>(`/sessions/${id}/status`),
+  getStatusMediaBlob: (id: string, statusId: string) =>
+    requestBlob(`/sessions/${id}/status/${encodeURIComponent(statusId)}/media`),
+  postTextStatus: (
+    id: string,
+    text: string,
+    recipients?: string[],
+    extra?: { backgroundColor?: string; font?: number },
+  ) =>
+    request(`/sessions/${id}/status/send-text`, {
+      method: 'POST',
+      body: JSON.stringify({ text, recipients, ...extra }),
+    }),
+  postImageStatus: (
+    id: string,
+    image: { url?: string; base64?: string; mimetype?: string },
+    recipients?: string[],
+    caption?: string,
+  ) =>
+    request(`/sessions/${id}/status/send-image`, {
+      method: 'POST',
+      body: JSON.stringify({ image, recipients, caption }),
+    }),
+};
+
+// =============================================================================
+// Webhook API
+// =============================================================================
+
+export const webhookApi = {
+  listBySession: (sessionId: string) => request<Webhook[]>(`/sessions/${sessionId}/webhooks`),
+  listAll: () => request<Webhook[]>('/webhooks'),
+  create: (sessionId: string, data: { url: string; events: string[]; filters?: WebhookFilters | null }) =>
+    request<Webhook>(`/sessions/${sessionId}/webhooks`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (sessionId: string, id: string, data: Partial<Webhook>) =>
+    request<Webhook>(`/sessions/${sessionId}/webhooks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (sessionId: string, id: string) =>
+    request<void>(`/sessions/${sessionId}/webhooks/${id}`, { method: 'DELETE' }),
+  test: (sessionId: string, id: string) =>
+    request<{ success: boolean; statusCode?: number; error?: string }>(`/sessions/${sessionId}/webhooks/${id}/test`, {
+      method: 'POST',
+    }),
+};
+
+// =============================================================================
+// Template API
+// =============================================================================
+
+export const templateApi = {
+  list: (sessionId: string) => request<MessageTemplate[]>(`/sessions/${sessionId}/templates`),
+  create: (sessionId: string, data: TemplatePayload) =>
+    request<MessageTemplate>(`/sessions/${sessionId}/templates`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (sessionId: string, id: string, data: Partial<TemplatePayload>) =>
+    request<MessageTemplate>(`/sessions/${sessionId}/templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (sessionId: string, id: string) =>
+    request<void>(`/sessions/${sessionId}/templates/${id}`, { method: 'DELETE' }),
+};
+
+// =============================================================================
+// Contact API
+// =============================================================================
+
+export interface CheckNumberResponse {
+  number: string;
+  exists: boolean;
+  /** Engine-canonical WhatsApp id for the number (e.g. `…@c.us` or `…@lid`), or null if unregistered. */
+  whatsappId: string | null;
+}
+
+export interface ProfilePictureResponse {
+  /** Signed CDN URL for the contact/group picture, or null when hidden / unavailable. */
+  url: string | null;
+}
+
+export const contactApi = {
+  list: (sessionId: string) => request<Contact[]>(`/sessions/${sessionId}/contacts`),
+  checkNumber: (sessionId: string, number: string) =>
+    request<CheckNumberResponse>(`/sessions/${sessionId}/contacts/check/${encodeURIComponent(number)}`),
+  // Returns the contact/group profile picture URL. Both engines return null when the user hid their
+  // picture or has none. The URL is a signed WhatsApp CDN link that expires in a few hours, so the
+  // dashboard caches it for an hour (see useProfilePicture) and re-fetches on expiry.
+  profilePicture: (sessionId: string, contactId: string) =>
+    request<ProfilePictureResponse>(`/sessions/${sessionId}/contacts/${encodeURIComponent(contactId)}/profile-picture`),
+  // Best-effort resolution of a contact id (e.g. an @lid privacy id) to its phone number (MSISDN
+  // digits), or null when the engine can't map it. Cached a day by useResolvedPhone.
+  resolvePhone: (sessionId: string, contactId: string) =>
+    request<{ contactId: string; phone: string | null }>(
+      `/sessions/${sessionId}/contacts/${encodeURIComponent(contactId)}/phone`,
+    ),
+  // Batch-resolve profile picture URLs for a whole sidebar in ONE request — the per-chat burst of
+  // parallel single fetches exhausts the per-IP throttle (429s). Engine lookups run 3 at a time
+  // server-side; ids beyond the backend's 50-id cap are dropped client-side too.
+  profilePictures: (sessionId: string, contactIds: string[]) =>
+    request<{ pictures: Record<string, string | null> }>(
+      `/sessions/${sessionId}/contacts/profile-pictures?ids=${contactIds
+        .slice(0, 50)
+        .map(encodeURIComponent)
+        .join(',')}`,
+    ),
+};
+
+// =============================================================================
+// Team Leader / Agent Management API
+// =============================================================================
+
+/**
+ * ADMIN management surface.
+ *
+ * These routes require an unscoped ADMIN API key on the backend.
+ * Team Leader and Agent credentials are created through their domain
+ * endpoints so the API key is always bound to a real principal.
+ */
+export const adminTeamLeaderApi = {
+  list: () =>
+    request<TeamLeader[]>('/admin/team-leaders'),
+
+  resourceSummary: () =>
+    request<AdminTeamLeaderResourceSummary>(
+      '/admin/team-leaders/resource-summary',
+    ),
+
+  get: (teamLeaderId: string) =>
+    request<TeamLeader>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}`,
+    ),
+
+  getResources: (teamLeaderId: string) =>
+    request<AdminTeamLeaderResources>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/resources`,
+    ),
+
+  create: (data: CreateTeamLeaderInput) =>
+    request<CreateTeamLeaderResult>('/admin/team-leaders', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createAgent: (
+    teamLeaderId: string,
+    data: CreateAgentInput,
+  ) =>
+    request<CreateAgentResult>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/agents`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  /**
+   * Assign or transfer a Session directly to a Team Leader without requiring
+   * the current owner in the route. This is the route used for Admin-created
+   * Sessions whose ownerTeamLeaderId is null.
+   */
+  setSessionOwner: (
+    sessionId: string,
+    data: ReassignAdminSessionInput,
+  ) =>
+    request<AdminSessionOverview>(
+      `/admin/team-leaders/sessions/${encodeURIComponent(sessionId)}/owner`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  reassignSession: (
+    teamLeaderId: string,
+    sessionId: string,
+    data: ReassignAdminSessionInput,
+  ) =>
+    request<AdminSessionOverview>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/sessions/${encodeURIComponent(sessionId)}/owner`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  bulkReassignSessions: (
+    teamLeaderId: string,
+    data: BulkReassignAdminSessionsInput,
+  ) =>
+    request<AdminSessionOverview[]>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/sessions/bulk-reassign`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  delete: (teamLeaderId: string) =>
+    request<void>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}`,
+      {
+        method: 'DELETE',
+      },
+    ),
+
+  /**
+   * Permanently delete the Team Leader and every owned Session/Agent.
+   *
+   * This is intentionally separate from delete(), which remains the safe
+   * empty-principal deletion path.
+   */
+  forceDelete: (teamLeaderId: string) =>
+    request<ForceDeleteTeamLeaderResult>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/force`,
+      {
+        method: 'DELETE',
+      },
+    ),
+
+  retire: (
+    teamLeaderId: string,
+    data: RetireTeamLeaderInput,
+  ) =>
+    request<RetireTeamLeaderResult>(
+      `/admin/team-leaders/${encodeURIComponent(teamLeaderId)}/retire`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+};
+
+/**
+ * Global ADMIN Agent overview.
+ *
+ * The backend performs the main/data database merge; the dashboard receives
+ * one already-normalized row per Agent.
+ */
+export const adminAgentApi = {
+  list: () =>
+    request<AdminAgentOverview[]>('/admin/agents'),
+
+  get: (agentId: string) =>
+    request<AdminAgentOverview>(
+      `/admin/agents/${encodeURIComponent(agentId)}`,
+    ),
+
+  /**
+   * Assign a Session to an Agent, or clear the Agent assignment with null.
+   * The backend derives Session.ownerTeamLeaderId from Agent.teamLeaderId.
+   */
+  assignSession: (
+    agentId: string,
+    data: AssignAdminAgentSessionInput,
+  ) =>
+    request<AdminAgentOverview>(
+      `/admin/agents/${encodeURIComponent(agentId)}/assignment`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  reassign: (
+    agentId: string,
+    data: ReassignAdminAgentInput,
+  ) =>
+    request<AdminAgentOverview>(
+      `/admin/agents/${encodeURIComponent(agentId)}/team-leader`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  bulkReassign: (data: BulkReassignAdminAgentsInput) =>
+    request<AdminAgentOverview[]>('/admin/agents/bulk-reassign', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (agentId: string) =>
+    request<void>(
+      `/admin/agents/${encodeURIComponent(agentId)}`,
+      {
+        method: 'DELETE',
+      },
+    ),
+};
+
+/**
+ * Self-service surface for the authenticated Team Leader.
+ *
+ * The Team Leader id is deliberately NOT supplied by the browser.
+ * The backend derives it from the authenticated TEAM_LEADER API key.
+ */
+export const teamLeaderApi = {
+  me: () =>
+    request<TeamLeader>('/team-leader/me'),
+
+  listAgents: () =>
+    request<Agent[]>('/team-leader/agents'),
+
+  createAgent: (data: CreateAgentInput) =>
+    request<CreateAgentResult>('/team-leader/agents', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /**
+   * Replace the authenticated Team Leader's Agent credential.
+   *
+   * The backend must revoke the old AGENT key and return the new
+   * plaintext key exactly once.
+   */
+  reissueAgentApiKey: (agentId: string) =>
+    request<ReissueAgentApiKeyResult>(
+      `/team-leader/agents/${encodeURIComponent(agentId)}/api-key/rotate`,
+      {
+        method: 'POST',
+      },
+    ),
+
+  deleteAgent: (agentId: string) =>
+    request<void>(
+      `/team-leader/agents/${encodeURIComponent(agentId)}`,
+      {
+        method: 'DELETE',
+      },
+    ),
+
+  assignAgentSession: (
+    agentId: string,
+    sessionId: string | null,
+  ) =>
+    request<Agent>(
+      `/team-leader/agents/${encodeURIComponent(agentId)}/assignment`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ sessionId }),
+      },
+    ),
+};
+
+/**
+ * Self-service surface for the authenticated Agent.
+ *
+ * The backend derives the Agent identity from the AGENT API key.
+ */
+export const agentApi = {
+  me: () =>
+    request<Agent>('/agent/me'),
+};
+
+// =============================================================================
+// API Key API
+// =============================================================================
+
+export const apiKeyApi = {
+  list: () => request<ApiKey[]>('/auth/api-keys'),
+  /**
+   * Generic API-key creation intentionally accepts only the legacy roles.
+   * TEAM_LEADER and AGENT credentials must be created together with their
+   * principal records through adminTeamLeaderApi.
+   */
+  create: (data: {
+    name: string;
+    role: GenericApiKeyRole;
+    allowedIps?: string[];
+    allowedSessions?: string[];
+    expiresAt?: string;
+  }) =>
+    request<CreatedApiKey>('/auth/api-keys', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  /**
+   * Rotate an existing API-key row in place.
+   *
+   * The backend preserves the key id, role, principal bindings, restrictions,
+   * active state, and expiration. The replacement plaintext key exists only in
+   * this response and must remain ephemeral in React memory.
+   */
+  reissue: (id: string) =>
+    request<CreatedApiKey>(`/auth/api-keys/${encodeURIComponent(id)}/reissue`, {
+      method: 'POST',
+    }),
+  delete: (id: string) => request<void>(`/auth/api-keys/${id}`, { method: 'DELETE' }),
+  revoke: (id: string) => request<ApiKey>(`/auth/api-keys/${id}/revoke`, { method: 'POST' }),
+};
+
+// =============================================================================
+// Audit/Logs API
+// =============================================================================
+
+export const auditApi = {
+  list: (params?: { action?: string; severity?: string; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.action) query.set('action', params.action);
+    if (params?.severity) query.set('severity', params.severity);
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.offset) query.set('offset', String(params.offset));
+    const queryStr = query.toString();
+    return request<{ data: AuditLog[]; total: number }>(`/audit${queryStr ? `?${queryStr}` : ''}`);
+  },
+};
+
+// =============================================================================
+// Message API
+// =============================================================================
+
+export const messageApi = {
+  sendText: (sessionId: string, chatId: string, text: string) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/send-text`, {
+      method: 'POST',
+      body: JSON.stringify({ chatId, text }),
+    }),
+  sendMedia: (
+    sessionId: string,
+    chatId: string,
+    mediaType: 'image' | 'video' | 'audio' | 'document',
+    payload: SendMediaPayload,
+  ) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/send-${mediaType}`, {
+      method: 'POST',
+      body: JSON.stringify({ chatId, ...payload }),
+    }),
+  sendLocation: (sessionId: string, data: SendLocationPayload) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/send-location`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  sendContact: (sessionId: string, data: SendContactPayload) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/send-contact`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  // Stickers take the same media body as the other send-* endpoints (base64 XOR url + mimetype).
+  sendSticker: (sessionId: string, chatId: string, payload: SendMediaPayload) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/send-sticker`, {
+      method: 'POST',
+      body: JSON.stringify({ chatId, ...payload }),
+    }),
+  sendPoll: (sessionId: string, data: SendPollPayload) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/send-poll`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  forward: (sessionId: string, data: ForwardMessagePayload) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/forward`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  // Async batch: returns 202 immediately; poll getBatchStatus until a terminal status.
+  sendBulk: (sessionId: string, data: SendBulkPayload) =>
+    request<BulkBatchResponse>(`/sessions/${sessionId}/messages/send-bulk`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getBatchStatus: (sessionId: string, batchId: string) =>
+    request<BatchStatusResponse>(`/sessions/${sessionId}/messages/batch/${encodeURIComponent(batchId)}`),
+  cancelBatch: (sessionId: string, batchId: string) =>
+    request<BatchStatusResponse>(`/sessions/${sessionId}/messages/batch/${encodeURIComponent(batchId)}/cancel`, {
+      method: 'POST',
+    }),
+  reply: (sessionId: string, data: { chatId: string; quotedMessageId: string; text: string }) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/reply`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  react: (sessionId: string, data: { chatId: string; messageId: string; emoji: string }) =>
+    request<void>(`/sessions/${sessionId}/messages/react`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  delete: (sessionId: string, data: { chatId: string; messageId: string; forEveryone?: boolean }) =>
+    request<void>(`/sessions/${sessionId}/messages/delete`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  sendTemplate: (sessionId: string, data: SendTemplatePayload) =>
+    request<MessageResponse>(`/sessions/${sessionId}/messages/send-template`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
+// =============================================================================
+// Search API
+// =============================================================================
+
+export const searchApi = {
+  search: (params: SearchParams) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') query.set(key, String(value));
+    });
+    return request<SearchResults>(`/search?${query.toString()}`);
+  },
+};
+
+// =============================================================================
+// Health & Infrastructure API
+// =============================================================================
+
+export const healthApi = {
+  check: () => request<HealthStatus>('/health'),
+};
+
+export const infraApi = {
+  getStatus: () => request<InfraStatus>('/infra/status'),
+  getConfig: () => request<SavedConfig>('/infra/config'),
+  saveConfig: (config: SaveConfigPayload) =>
+    request<{ message: string; saved: boolean; envPath: string; profiles: string[] }>('/infra/config', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  restart: (profiles?: string[], profilesToRemove?: string[]) =>
+    request<{
+      message: string;
+      restarting: boolean;
+      profiles: string[];
+      profilesToRemove: string[];
+      estimatedTime: number;
+    }>('/infra/restart', {
+      method: 'POST',
+      body: JSON.stringify({ profiles: profiles || [], profilesToRemove: profilesToRemove || [] }),
+    }),
+  // Readiness, not the plain /infra/health ping. The restart poll must not be able to latch onto the
+  // process it just asked to shut down: /infra/health answers 200 for the whole drain and teardown,
+  // while /health/ready reports 503 as soon as draining starts and stays 503 until both databases
+  // answer. Public (no API key), like /infra/health.
+  healthCheck: () => request<{ status: 'ok' | 'error'; details: Record<string, { status: string }> }>('/health/ready'),
+  // Data migration: export all Data-DB tables (call while still on the OLD database, before switching),
+  // then import after the switch + restart. Used by the DB-switch migration guard so data isn't lost.
+  exportData: () =>
+    request<{
+      exportedAt: string;
+      dataDbType: string;
+      tables: Record<string, unknown[]>;
+      counts: Record<string, number>;
+      // Optional tables absent from an older schema. Always present in the response; a non-empty
+      // list means the backup is partial, not that those tables were empty.
+      skippedTables: string[];
+      // Inline media payloads the export budget refused. Always present; non-zero means the rows are
+      // all there but some of their media is not — a state a restored archive cannot express, since
+      // the omitted marker is the same one media skipped on the way in gets.
+      omittedInlineMedia: { messages: number; messageBatches: number };
+    }>('/infra/export-data'),
+  // 200 contract includes the orphan-engine reconciliation result (restartRequired / notices /
+  // stopped+failed ids). 409 has several causes and the error's `code` distinguishes them:
+  // IMPORT_WOULD_ORPHAN_ENGINES (live engines exist for sessions the backup would remove; the
+  // message lists them) is the only one the caller retries with stopOrphans=true to stop those
+  // engines inside the request. IMPORT_ALREADY_RUNNING (another restore is in flight) and
+  // IMPORT_NESTED_TRANSACTION (another transaction holds the connection) leave nothing to retry.
+  // force is deliberately NOT exposed: it leaves the engines writing into the restored tables until
+  // a restart — the window stopOrphans exists to close.
+  importData: (tables: Record<string, unknown[]>, options?: { stopOrphans?: boolean }) =>
+    request<{
+      imported: boolean;
+      counts?: Record<string, number>;
+      message?: string;
+      warnings?: string[];
+      notices?: string[];
+      restartRequired?: boolean;
+      orphanedEngines?: string[];
+      stoppedOrphanEngines?: string[];
+      failedOrphanEngines?: string[];
+    }>('/infra/import-data', {
+      method: 'POST',
+      body: JSON.stringify({ tables, ...options }),
+    }),
+};
+
+// =============================================================================
+// Plugin Types
+// =============================================================================
+
+/** Field definition within a plugin's config schema (mirrors the backend PluginConfigField). */
+export interface PluginConfigField {
+  // 'textarea' is a multi-line string; a field with `enum` renders as a <select>.
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'textarea';
+  title?: string;
+  description?: string;
+  default?: unknown;
+  enum?: unknown[];
+  required?: boolean;
+  secret?: boolean;
+  min?: number;
+  max?: number;
+  pattern?: string;
+  items?: PluginConfigField; // array element schema; array-of-rows when items.type === 'object'
+  properties?: Record<string, PluginConfigField>; // nested-object fields
+}
+
+export interface PluginConfigSchema {
+  type: 'object';
+  properties: Record<string, PluginConfigField>;
+}
+
+export interface PluginI18nText {
+  title?: string;
+  description?: string;
+}
+export interface PluginI18nLocale {
+  name?: string;
+  description?: string;
+  config?: Record<string, PluginI18nText>;
+}
+export type PluginI18n = Record<string, PluginI18nLocale>;
+
+export interface Plugin {
+  id: string;
+  name: string;
+  version: string;
+  type: 'engine' | 'storage' | 'queue' | 'auth' | 'extension';
+  description?: string;
+  author?: string;
+  status: 'installed' | 'enabled' | 'disabled' | 'error';
+  config: Record<string, unknown>;
+  builtIn: boolean;
+  provides: string[];
+  /** Whether this plugin can host provisioned ingress instances (drives the Instances tab). */
+  ingressCapable: boolean;
+  /** Declared config fields, when the plugin exposes a schema (drives the dashboard config form). */
+  configSchema?: PluginConfigSchema;
+  /** When set, the plugin ships a sandboxed-iframe config editor (preferred over configSchema). */
+  configUi?: { entry: string; height?: number };
+  /** Whether the plugin is scoped to specific sessions (false = global, always runs). */
+  sessionScoped: boolean;
+  /** Sessions the plugin is activated for; ['*'] = all numbers. */
+  activeSessions: string[];
+  /** Per-session config overrides, keyed by sessionId (secrets redacted per slice). */
+  sessionConfig?: Record<string, Record<string, unknown>>;
+  loadedAt?: string;
+  enabledAt?: string;
+  error?: string;
+  i18n?: PluginI18n;
+}
+
+export interface Engine {
+  id: string;
+  name: string;
+  enabled: boolean;
+  features: string[];
+  /** Underlying engine library (e.g. whatsapp-web.js 1.34.7), distinct from the adapter version. */
+  library?: { name: string; version: string };
+}
+
+/** A remote catalog entry annotated with this instance's install state. */
+export interface CatalogPlugin {
+  id: string;
+  name: string;
+  version: string;
+  type?: string;
+  status?: string;
+  description?: string;
+  author?: string;
+  license?: string;
+  keywords?: string[];
+  minOpenWAVersion?: string;
+  testedOpenWAVersion?: string;
+  homepage?: string;
+  download?: string;
+  installed: boolean;
+  installedVersion: string | null;
+  updateAvailable: boolean;
+  i18n?: PluginI18n;
+}
+
+// =============================================================================
+// Plugins API
+// =============================================================================
+
+export const pluginsApi = {
+  list: () => request<Plugin[]>('/plugins'),
+  get: (id: string) => request<Plugin>(`/plugins/${id}`),
+  enable: (id: string) =>
+    request<{ success: boolean; message: string }>(`/plugins/${id}/enable`, {
+      method: 'POST',
+    }),
+  disable: (id: string) =>
+    request<{ success: boolean; message: string }>(`/plugins/${id}/disable`, {
+      method: 'POST',
+    }),
+  updateConfig: (id: string, config: Record<string, unknown>) =>
+    request<{ success: boolean; message: string }>(`/plugins/${id}/config`, {
+      method: 'PUT',
+      body: JSON.stringify({ config }),
+    }),
+  /** Set which sessions a session-scoped plugin is activated for (['*'] = all). */
+  setSessions: (id: string, sessions: string[]) =>
+    request<Plugin>(`/plugins/${id}/sessions`, { method: 'PUT', body: JSON.stringify({ sessions }) }),
+  /** Set (or clear, with an empty object) a plugin's config override for one session. */
+  updateSessionConfig: (id: string, sessionId: string, config: Record<string, unknown>) =>
+    request<{ success: boolean; message: string }>(`/plugins/${id}/config/${encodeURIComponent(sessionId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ config }),
+    }),
+  healthCheck: (id: string) => request<{ healthy: boolean; message?: string }>(`/plugins/${id}/health`),
+  install: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return request<Plugin>('/plugins/install', { method: 'POST', body: form });
+  },
+  installFromUrl: (url: string) =>
+    request<Plugin>('/plugins/install-url', { method: 'POST', body: JSON.stringify({ url }) }),
+  updateFromUrl: (id: string, url: string) =>
+    request<Plugin>(`/plugins/${id}/update`, { method: 'POST', body: JSON.stringify({ url }) }),
+  catalog: () => request<CatalogPlugin[]>('/plugins/catalog'),
+  /** Fetch a plugin's sandboxed config-UI entry HTML (the API key stays here, in the parent). */
+  getConfigUi: (id: string) => requestText(`/plugins/${id}/config-ui`),
+  uninstall: (id: string) => request<{ success: boolean; message: string }>(`/plugins/${id}`, { method: 'DELETE' }),
+  getEngines: () => request<Engine[]>('/infra/engines'),
+  getCurrentEngine: () => request<{ engineType: string }>('/infra/engines/current'),
+};
+
+// =============================================================================
+// Plugin instances API (Integration Fabric provisioning; mirrors src/modules/integration)
+// =============================================================================
+
+export interface IngressUrl {
+  route: string;
+  url: string;
+}
+
+export interface InstanceView {
+  id: string;
+  pluginId: string;
+  instanceId: string;
+  sessionScope: string | null;
+  secret: string; // '***' on reads; plaintext once on create/regenerate
+  verifyToken: string | null;
+  config: Record<string, unknown> | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  ingressUrls: IngressUrl[];
+}
+
+export type MintedInstance = InstanceView; // same shape; `secret` carries the plaintext once
+
+export interface CreateInstanceInput {
+  instanceId: string;
+  sessionScope?: string;
+  verifyToken?: string;
+  /** Provider-fixed webhook secret (e.g. Chatwoot's). Omit to auto-generate one (shown once). */
+  secret?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface UpdateInstanceInput {
+  enabled?: boolean;
+  sessionScope?: string;
+  config?: Record<string, unknown>;
+}
+
+export const pluginInstancesApi = {
+  list: (pluginId: string) => request<InstanceView[]>(`/integration/plugins/${pluginId}/instances`),
+  create: (pluginId: string, body: CreateInstanceInput) =>
+    request<MintedInstance>(`/integration/plugins/${pluginId}/instances`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  regenerateSecret: (pluginId: string, instanceId: string) =>
+    request<MintedInstance>(`/integration/plugins/${pluginId}/instances/${instanceId}/regenerate-secret`, {
+      method: 'POST',
+    }),
+  update: (pluginId: string, instanceId: string, body: UpdateInstanceInput) =>
+    request<InstanceView>(`/integration/plugins/${pluginId}/instances/${instanceId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  remove: (pluginId: string, instanceId: string) =>
+    request<void>(`/integration/plugins/${pluginId}/instances/${instanceId}`, { method: 'DELETE' }),
+};
+
+// =============================================================================
+// Statistics API (mirrors src/modules/stats)
+// =============================================================================
+
+export type StatsPeriod = '24h' | '7d' | '30d';
+
+export interface OverviewStats {
+  sessions: { active: number; total: number; byStatus: Record<string, number> };
+  messages: { sent: number; received: number; failed: number; today: { sent: number; received: number } };
+}
+
+export interface MessageTimeSeriesPoint {
+  timestamp: string;
+  sent: number;
+  received: number;
+}
+
+export interface MessageStats {
+  timeSeries: MessageTimeSeriesPoint[];
+  byType: Record<string, number>;
+  bySession: Array<{ sessionId: string; name: string; sent: number; received: number }>;
+  topChats: Array<{ chatId: string; chatName?: string | null; messageCount: number }>;
+}
+
+export const statsApi = {
+  getOverview: () => request<OverviewStats>('/stats/overview'),
+  getMessages: (period: StatsPeriod) => request<MessageStats>(`/stats/messages?period=${period}`),
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

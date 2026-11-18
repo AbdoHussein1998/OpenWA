@@ -1,7 +1,7 @@
-# OpenWA - Local smoke / quick-start compose
+# al-hakim - Local smoke / quick-start compose
 #
-# This builds and runs the PRODUCTION image (same Dockerfile) against a local SQLite DB
-# with a bind-mounted ./data — it is a single-container local smoke test, NOT a
+# This runs the backend production image against a local SQLite DB
+# with a bind-mounted ./data plus separate Node frontend and Nginx edge, NOT a
 # hot-reload development environment (there is no source mount or `start:dev`).
 # DATABASE_SYNCHRONIZE=true keeps the SQLite schema zero-config for local use; the
 # production compose (docker-compose.yml) never forces synchronize (it defaults to false).
@@ -10,11 +10,11 @@
 
 services:
   # API Backend
-  openwa:
+  al-hakim-api:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
-    container_name: openwa-api
+    container_name: al-hakim-api-dev
     # Container hardening — same posture as production (same Dockerfile/entrypoint).
     security_opt:
       - 'no-new-privileges:true'
@@ -32,8 +32,8 @@ services:
     # Per-container PID ceiling (cgroup pids.max). 2048 fits several whatsapp-web.js sessions, which
     # each run a multi-process Chromium; Baileys (no Chromium) uses far fewer. A fork-bomb guard, not
     # an allocation — raising it is free for light containers. Do NOT use -1 (drops the guard). #636
-    pids_limit: ${OPENWA_PIDS_LIMIT:-2048}
-    mem_limit: ${OPENWA_MEM_LIMIT:-2g}
+    pids_limit: ${AL_HAKIM_PIDS_LIMIT:-2048}
+    mem_limit: ${AL_HAKIM_MEM_LIMIT:-2g}
     ports:
       # Bind to localhost by default; set BIND_HOST=0.0.0.0 in .env to reach it from another host.
       - '${BIND_HOST:-127.0.0.1}:2785:2785'
@@ -46,7 +46,7 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=2785
       - HOME=/tmp
-      # Chromium reads its home from the passwd entry (no /home/openwa), so it needs writable, existing
+      # Chromium reads its home from the passwd entry (no /home/alhakim), so it needs writable, existing
       # config/cache dirs on the tmpfs or it hard-crashes at launch; the entrypoint pre-creates them. (#254)
       - XDG_CONFIG_HOME=/tmp/.config
       - XDG_CACHE_HOME=/tmp/.cache
@@ -68,7 +68,7 @@ services:
       - PUPPETEER_HEADLESS=${PUPPETEER_HEADLESS:-true}
       - PUPPETEER_ARGS=${PUPPETEER_ARGS:---no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu}
       - PUPPETEER_PROTOCOL_TIMEOUT_MS=${PUPPETEER_PROTOCOL_TIMEOUT_MS:-}
-      # Optional WhatsApp Web version override. DEFAULT (empty, "latest", or "auto"): OpenWA auto-resolves a
+      # Optional WhatsApp Web version override. DEFAULT (empty, "latest", or "auto"): al-hakim auto-resolves a
       # settled build from the third-party wppconnect-team/wa-version registry and pins its remote HTML
       # (fetched into the web.whatsapp.com origin without an integrity check). Set "off" to disable pinning
       # and use the first-party build served by WhatsApp, or an exact version to pin a specific build.
@@ -103,7 +103,7 @@ services:
       - SIMULATE_TYPING=${SIMULATE_TYPING:-}
       - MCP_ENABLED=${MCP_ENABLED:-}
       - SEARCH_ENABLED=${SEARCH_ENABLED:-}
-      - SERVE_DASHBOARD=${SERVE_DASHBOARD:-}
+      - SERVE_DASHBOARD=false
       - CACHE_ENABLED=${CACHE_ENABLED:-}
       - DATABASE_LOGGING=${DATABASE_LOGGING:-}
       - MAIN_DATABASE_SYNCHRONIZE=${MAIN_DATABASE_SYNCHRONIZE:-}
@@ -273,7 +273,7 @@ services:
       - SEARCH_LIMIT_MAX=${SEARCH_LIMIT_MAX:-}
       - LOG_FORMAT=${LOG_FORMAT:-}
       - BASE_URL=${BASE_URL:-}
-      - DASHBOARD_URL=${DASHBOARD_URL:-}
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:2886}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -284,9 +284,58 @@ services:
       retries: 3
       start_period: 30s
 
-  # The dashboard SPA is bundled into the image and served by NestJS on the same port:
-  # open http://localhost:2785 — there is no separate dashboard container.
+
+
+  # Static frontend container; Nginx is another container.
+  al-hakim-dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        VITE_API_URL: ${VITE_API_URL:-}
+        VITE_WS_URL: ${VITE_WS_URL:-}
+    container_name: al-hakim-dashboard-dev
+    mem_limit: ${AL_HAKIM_DASHBOARD_MEM_LIMIT:-256m}
+    expose:
+      - '4173'
+    security_opt:
+      - 'no-new-privileges:true'
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'node', '-e', "require('http').get('http://127.0.0.1:4173/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Dedicated reverse proxy: published port 2886 (same origin API/WebSocket/MCP).
+  al-hakim-nginx:
+    build:
+      context: ./nginxconfig
+      dockerfile: Dockerfile
+    container_name: al-hakim-nginx-dev
+    mem_limit: ${AL_HAKIM_NGINX_MEM_LIMIT:-128m}
+    ports:
+      - '${BIND_HOST:-127.0.0.1}:${DASHBOARD_PORT:-2886}:80'
+    depends_on:
+      al-hakim-api:
+        condition: service_started
+      al-hakim-dashboard:
+        condition: service_healthy
+    security_opt:
+      - 'no-new-privileges:true'
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1/healthz || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 networks:
   default:
-    name: openwa-network
+    name: al-hakim-dev-network

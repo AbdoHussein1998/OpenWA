@@ -1,0 +1,1796 @@
+import { LogLevel } from '../../common/services/logger.service';
+
+
+
+
+
+
+
+
+
+
+
+
+import * as qrcode from 'qrcode';
+import * as path from 'path';
+import * as fs from 'fs/promises';
+import { Client, NoAuth, WAState } from 'whatsapp-web.js';
+import {
+  type AccountRestriction,
+  type ConnectionStage,
+  type EngineEventCallbacks,
+  EngineStatus,
+} from '../interfaces/whatsapp-engine.interface';
+import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
+import { type createLogger } from '../../common/services/logger.service';
+import { MAX_TIMER_MS } from '../../config/configuration';
+import { resolveWebVersionPin } from '../wa-web-version';
+import { resolveAuthTimeoutMs, resolveEngineInitTimeoutMs } from '../engine-init-timeout';
+import { isSupportedProxyUrl, buildProxyLaunchConfig } from './wwebjs-proxy';
+import { BACKPORT_MISSING_MESSAGE, isBackportMissing } from './wwebjs-backport-check';
+import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
+
+import { BraveProfileManager } from '../brave/brave-profile.manager';
+
+
+/**
+ * Detect Puppeteer's "Execution context was destroyed" error. During `Client.inject()` this is most
+ * often a persistent browser profile left stale by an al-hakim upgrade that changed the Chromium/Chrome
+ * binary (e.g. the v0.8.12 amd64 Debian Chromium → Chrome for Testing switch, #663 / #708) — but it is
+ * not exclusively that: Puppeteer also raises it on a page navigation or a renderer crash (see
+ * puppeteer-core `ExecutionContext` / `IsolatedWorld`), so the caller advises rather than asserts.
+ * Pure so the detection is unit-testable without mocking the whatsapp-web.js `Client`.
+ */
+export function isExecutionContextDestroyedError(reason: string): boolean {
+  return /execution context was destroyed/i.test(reason);
+}
+
+/**
+ * A first-inject rejection that reads as "the page navigated out from under the in-flight evaluate":
+ * the exec-context class above plus the 'window.require is not a function' variant (an evaluate
+ * landing on a document whose WA bundle has not booted yet). Deliberately SEPARATE from the
+ * stale-profile advisory classifier: the advisory names a remedy (delete the profile) that is wrong
+ * for the window.require shape (see src/config/process-error-monitor.ts) — this predicate only
+ * decides whether one in-place retry is worth it, both shapes being transient when a reload caused
+ * them. whatsapp-web.js registers its own re-inject handler only AFTER the first inject succeeds
+ * (Client.js:502 vs :504), so a navigation landing during it is caught by nothing upstream (#1081).
+ */
+function isNavigationShapedInitRejection(reason: string): boolean {
+  return isExecutionContextDestroyedError(reason) || /window\.require is not a function/i.test(reason);
+}
+
+// A post-READY page navigation (WhatsApp Web's ~5-minute first reload on a fresh pairing, a
+// service-worker update, …) destroys the page's JS world; whatsapp-web.js re-injects on its own
+// framenavigated handler (Client.js:504-513), but until WA Web has booted again getState() REJECTS,
+// so the liveness probe reads a healing page as dead and every delegate evaluate dies as a raw
+// TypeError under a status that still says READY (#1081). Sizing — floor: the pre-boot phase alone
+// (page load + WA Web bundle boot, the stretch where getState() rejects) takes tens of seconds on a
+// slow host, and upstream's re-inject then polls up to 30s for window.WWebJS (Client.js:332-343);
+// ceiling: one watchdog interval (60s), so a page that navigates and then wedges loses at most one
+// probe to the grace and still dies within one extra interval. NOT a sibling of
+// READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS above: that one is capped by the 90s reconcile deadline,
+// this one by keeping the watchdog's safety net alive — do not "harmonize" them.
+export const NAVIGATION_REINJECT_GRACE_MS = 60_000;
+
+// Hard bound per recovery episode (first navigation → the next completed re-inject): a page stuck in
+// a navigation loop re-stamps the rolling grace faster than it expires, which would suppress the
+// watchdog forever and leave a zombie session READY that only ever answers 409. Past this cap the
+// probe reports the truth again and the watchdog takes over.
+export const NAVIGATION_EPISODE_CAP_MS = 3 * NAVIGATION_REINJECT_GRACE_MS;
+
+/**
+ * Ambiguous Puppeteer/CDP failures such as "Execution context was destroyed" are not proof that
+ * the browser died. They also occur during normal WhatsApp Web navigations. Outside the explicit
+ * navigation grace, keep the Session alive for this bounded confirmation window while probing the
+ * page. Hard-death signals (browser disconnected/page close/Target closed) still disconnect
+ * immediately.
+ */
+export const PAGE_TRANSPORT_CONFIRMATION_MS = 20_000;
+const PAGE_TRANSPORT_CONFIRMATION_PROBE_INTERVAL_MS = 2_500;
+
+// The single in-adapter retry of a navigation-killed first inject only runs while at least this much
+// of the lifecycle's outer init deadline remains — a retry the outer race SIGKILLs mid-launch would
+// surface as a bare 504 with no reason. Below it, fail with today's exact terminal shape instead.
+const INIT_RETRY_MIN_REMAINING_MS = 20_000;
+
+// WhatsApp Web states that mean WhatsApp has judged the account or its egress, mapped to the neutral
+// restriction kinds. This is the ONLY channel the library offers: there is no dedicated event, error
+// type or cause code for account standing (whatsapp-web.js 1.34.7), just a `WAState` string on the
+// `disconnected` event.
+//
+// Deliberately only three of the twelve states. UNPAIRED/UNPAIRED_IDLE and LOGOUT are unlinks,
+// CONFLICT is another device taking over, DEPRECATED_VERSION is our own client being too old, and
+// TIMEOUT is a fault — none is a statement about the account's standing, and reporting them as
+// restrictions would be exactly the false positive that makes the signal worthless to act on.
+const WA_STATE_RESTRICTIONS: Readonly<Record<string, AccountRestriction['kind']>> = {
+  TOS_BLOCK: 'tos_block',
+  SMB_TOS_BLOCK: 'tos_block',
+  PROXYBLOCK: 'proxy_block',
+};
+
+/**
+ * Host surface for {@link WwebjsLifecycle}. The adapter keeps the public engine methods as thin
+ * forwarders and builds ONE object literal of these closures, so the delegate drives connection
+ * state only through the seams named here: the sibling delegates it coordinates (reconcile,
+ * onboarding watcher, call cache, stuck-auth) and the adapter-owned event surface.
+ */
+export interface WwebjsLifecycleHost {
+  readonly logger: ReturnType<typeof createLogger>;
+  readonly config: WhatsAppWebJsConfig;
+  /** Live callbacks bag — read per event, since initialize() installs it after delegates are built. */
+  getCallbacks(): EngineEventCallbacks;
+  /** Re-emit a status transition on the adapter's EventEmitter (`stateChanged`). */
+  emitState(status: EngineStatus): void;
+  /** Arm / disarm the pre-authentication QR_READY reconciliation (./wwebjs-reconcile). */
+  scheduleAuthReconcile(): void;
+  clearAuthReconcile(): void;
+  /** Arm / disarm the post-authentication readiness reconciliation (./wwebjs-reconcile). */
+  scheduleReadyReconcile(): void;
+  clearReadyReconcile(): void;
+  /** Arm / disarm the onboarding-modal watcher (./wwebjs-onboarding). */
+  startOnboardingWatcher(): void;
+  clearOnboardingWatcher(): void;
+  /** Drop every cached live-call handle — the client they point at is going away. */
+  clearLiveCalls(): void;
+  /** Release pending media jobs when this one-shot client generation is retired. */
+  closeInboundMedia(): void;
+
+  /** Register the domain client events (messages, groups, calls) on a freshly built client. */
+  attachDomainEvents(client: Client): void;
+}
+
+/**
+ * Connection lifecycle extracted from WhatsAppWebJsAdapter: the initialize launch (with its single
+ * navigation-killed retry), the client-event wiring for connection state, puppeteer death detection,
+ * teardown in its four flavors, the liveness probe, and the state behind them. The adapter keeps the
+ * public IWhatsAppEngine members as thin forwarders and injects the host surface via closures, so
+ * the delegate never touches adapter state beyond the seams the host names.
+ *
+ * The state fields below are public where the adapter aliases them by reference (host closures and
+ * an unmodified spec poking `adapter.client` / `adapter.status` / … through a cast keep working
+ * byte-identically — the same aliasing BaileysAdapter does for `sock`); the rest stay private.
+ */
+export class WwebjsLifecycle {
+  /** Live whatsapp-web.js client, null once torn down. Aliased by the adapter's `client` accessor. */
+  client: Client | null = null;
+  /** Current engine status. Aliased by the adapter's `status` accessor. */
+  status: EngineStatus = EngineStatus.DISCONNECTED;
+  /** Last encoded QR, cleared on authentication. Aliased by the adapter's `qrCode` accessor. */
+  qrCode: string | null = null;
+  /** Own-account phone number, read once at readiness. */
+  private phoneNumber: string | null = null;
+  /** Own-account push name, read once at readiness. */
+  private pushName: string | null = null;
+  /** Set once teardown begins so a late 'authenticated' can't resurrect a disconnecting adapter. Not
+   *  reset — an adapter is single-use after teardown (the session creates a fresh one to reconnect).
+   *  Aliased by the adapter's `tearingDown` accessor. */
+  tearingDown = false;
+  /** Set by logout() before it starts the native unlink, which itself registers the real
+   *  `client.logout()` promise as the credential teardown. The 'disconnected' LOGOUT handler consults
+   *  this to avoid registering a second, redundant stand-in for the same profile rm — while still
+   *  registering one for a WhatsApp-initiated logout, including one that lands after another teardown
+   *  path has already latched the flags below. Aliased by the adapter's `logoutInitiated` accessor. */
+  logoutInitiated = false;
+  /** Set once the adapter ACTIVELY transitions to DISCONNECTED (engine disconnect, puppeteer death,
+   *  stuck-auth recovery, teardown). Same single-use contract as `tearingDown`, but it latches earlier:
+   *  on LOGOUT whatsapp-web.js keeps the browser and re-runs inject(), while the lifecycle only replaces
+   *  the engine after the reconnect backoff — so for those seconds the old client can still emit a QR or
+   *  re-authenticate, and neither belongs to the session any more (#982). Aliased by the adapter's
+   *  `disconnectReported` accessor. */
+  disconnectReported = false;
+  // Navigation re-inject window (#1081): stamped by our framenavigated listener, closed by the
+  // library's re-emitted 'ready' and by teardown. Timestamps, never timers — several suites pin
+  // exact jest timer counts, and a timer would also outlive the single-use adapter.
+  /**
+   * Consecutive per-command protocol timeouts observed while the session is READY. A single timeout
+   * is treated as a transient browser/renderer fault; repeated timeouts after failed health probes
+   * trigger the existing forceDestroy() recovery path.
+   */
+  private consecutiveProtocolTimeouts = 0;
+  /**
+   * At most one ambiguous transport-death confirmation runs at a time. Delegate calls can fail in
+   * bursts while the page is navigating; coalescing prevents a burst from spawning competing
+   * health-check loops that could each independently disconnect the same client generation.
+   */
+  private pageTransportConfirmationInFlight = false;
+  private lastMainFrameNavigationAt = 0;
+  private navigationEpisodeStartedAt = 0;
+  /** True after at least one QR was produced by this client generation. */
+  private qrPresentedThisAttempt = false;
+  /**
+   * True after requestPairingCode() succeeds. Authentication after that point must not be labelled
+   * as a QR scan merely because the page also happened to have produced a QR earlier.
+   */
+  private pairingCodeRequestedThisAttempt = false;
+
+  constructor(
+    private readonly host: WwebjsLifecycleHost,
+    private readonly braveProfileManager: BraveProfileManager,
+  ) {}
+
+  private emitConnectionStage(stage: ConnectionStage): void {
+    this.host.getCallbacks().onConnectionStage?.({ stage, source: 'native' });
+  }
+
+  async initialize(): Promise<void> {
+    this.host.logger.event(LogLevel.DEBUG, 'engine.wwebjs.initialize', 'initialize', 'Browser engine initialization started', { sessionId: this.host.config.sessionId });
+    this.setStatus(EngineStatus.INITIALIZING);
+    const initStartedAt = Date.now();
+
+    // An install that skipped the message-id backport fails later with errors that name no cause
+    // (#889) — say so here instead, while the operator is still looking at the startup logs.
+    if (isBackportMissing()) {
+      this.host.logger.error(BACKPORT_MISSING_MESSAGE);
+    }
+
+    try {
+      // Build puppeteer args, including proxy if configured
+      const puppeteerArgs = this.host.config.puppeteer?.args
+        ? [...this.host.config.puppeteer.args]
+        : [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+          ];
+
+      // Add proxy configuration if provided — but only when the URL parses to a supported scheme, so
+      // a malformed/stored proxy value can't break the Chromium launch or smuggle a non-proxy scheme.
+      let proxyAuthentication: { username: string; password: string } | undefined;
+      if (this.host.config.proxy) {
+        if (isSupportedProxyUrl(this.host.config.proxy.url)) {
+          // Chromium ignores credentials in --proxy-server; pass a credential-less server and hand the
+          // username/password to wwjs's proxyAuthentication (page.authenticate) for HTTP/HTTPS proxies (#628).
+          const proxyLaunch = buildProxyLaunchConfig(this.host.config.proxy.url);
+          puppeteerArgs.push(`--proxy-server=${proxyLaunch.serverArg}`);
+          proxyAuthentication = proxyLaunch.proxyAuthentication;
+          if (proxyLaunch.socksAuthUnsupported) {
+            this.host.logger.warn(
+              `Proxy for session ${this.host.config.sessionId} has credentials on a SOCKS proxy, but Chromium ` +
+                `cannot authenticate SOCKS proxies. Use an IP-authorized proxy or an HTTP/HTTPS proxy instead.`,
+            );
+          }
+          this.host.logger.log(`Using proxy: ${proxyLaunch.serverArg}`);
+        } else {
+          this.host.logger.warn(`Ignoring invalid proxy URL for session ${this.host.config.sessionId}`);
+        }
+      }
+
+      // Marker arg: Chromium silently ignores unknown flags, so this exists purely as a label that
+      // lets BraveProfileManager identify this session's browser processes in `ps`
+      // output later (after a hard kill of the al-hakim process orphaned them).
+      puppeteerArgs.push(`--al-hakim-session=${this.host.config.sessionId}`);
+
+      // Pin the WA-Web version (fixes the 1.34.x "stuck at authenticating" hang on some setups,
+      // #251/#488). DEFAULT: auto-resolve a settled build from the wa-version registry and pin its
+      // remote HTML (no integrity check — resolveWebVersionPin logs a loud warning); only
+      // WWEBJS_WEB_VERSION=off leaves whatsapp-web.js to use the first-party build from WhatsApp.
+      const versionPin = await resolveWebVersionPin();
+      if (this.tearingDown) {
+        this.setStatus(EngineStatus.DISCONNECTED);
+        return;
+      }
+      if (versionPin) {
+        this.host.logger.log(`Pinning WhatsApp Web version ${versionPin.webVersion}`);
+      }
+
+      // Extend the first-boot init wait on slow setups (WSL2/low-resource), #353. Opt-in:
+      // unset keeps whatsapp-web.js's 30000ms default.
+      const authTimeoutMs = resolveAuthTimeoutMs();
+      if (authTimeoutMs) {
+        this.host.logger.log(`Using auth timeout ${authTimeoutMs}ms`);
+      }
+
+      // One retry for a navigation-killed first inject (#1081): a WhatsApp Web reload landing
+      // mid-inject rejects initialize() with nothing upstream ever retrying (see
+      // isNavigationShapedInitRejection), and the onError channel below is terminal end to end.
+      // Structurally a single second try — skipped when the lifecycle's outer init race is nearly
+      // spent (a retry the race SIGKILLs mid-launch would surface as a bare 504 with no reason), and
+      // abandoned when attempt 1's browser cannot be destroyed (see resetForInitRetry).
+      try {
+        await this.runInitAttempt(puppeteerArgs, authTimeoutMs, proxyAuthentication, versionPin);
+      } catch (attemptError) {
+        const attemptReason = attemptError instanceof Error ? attemptError.message : String(attemptError);
+        const budgetLeftMs = resolveEngineInitTimeoutMs() - (Date.now() - initStartedAt);
+        if (
+          this.tearingDown ||
+          !isNavigationShapedInitRejection(attemptReason) ||
+          budgetLeftMs < INIT_RETRY_MIN_REMAINING_MS
+        ) {
+          throw attemptError;
+        }
+        this.host.logger.warn(
+          `"${attemptReason}" killed the first inject — a page navigation landed before ` +
+            `whatsapp-web.js installed its re-inject handler. Retrying the launch once (#1081).`,
+          { sessionId: this.host.config.sessionId, action: 'init_navigation_retry' },
+        );
+        const cleaned = await this.resetForInitRetry();
+        if (this.tearingDown) {
+          this.setStatus(EngineStatus.DISCONNECTED);
+          return;
+        }
+        if (!cleaned) {
+          this.host.logger.warn(
+            "Attempt 1's browser did not die within the destroy bound — abandoning the retry rather " +
+              'than launching a second Chromium into the same profile',
+            { sessionId: this.host.config.sessionId, action: 'init_navigation_retry_abandoned' },
+          );
+          throw attemptError;
+        }
+        await this.runInitAttempt(puppeteerArgs, authTimeoutMs, proxyAuthentication, versionPin);
+      }
+    } catch (error) {
+      this.host.clearAuthReconcile();
+      this.host.clearReadyReconcile();
+      this.setStatus(EngineStatus.FAILED);
+      const reason = error instanceof Error ? error.message : String(error);
+      // What the dashboard renders as `lastError` is exactly this string and nothing else — the log
+      // below never reaches it. Carry a one-line remedy with the reason for the one failure we can
+      // actually advise on, so the session card stops being a dead end (#1081).
+      let surfacedReason = reason;
+      if (isExecutionContextDestroyedError(reason)) {
+        // #708: Puppeteer's "Execution context was destroyed" during inject reads like a Puppeteer bug.
+        // During initialize() its dominant cause is a browser profile left stale by an upgrade that
+        // changed the Chromium/Chrome binary (e.g. v0.8.12 amd64: Debian Chromium → Chrome for Testing,
+        // #663) — but it can also follow a page navigation or a renderer crash, so advise, don't assert.
+        // The profile dir is the same persistent Brave user-data directory stuck-auth recovery removes. Safe to compute
+        // here: sessionDataPath is a required config field already resolved in the try block above, so
+        // this can't throw and mask the original error we are about to rethrow.
+        this.host.logger.warn(
+          `"${reason}" during initialize. If this followed an al-hakim upgrade that changed the ` +
+            `Chromium/Chrome binary (v0.8.12 amd64 switched Debian Chromium → Chrome for Testing), the ` +
+          `session's Brave browser profile is likely stale — delete the profile dir ` +
+          `"${this.braveProfileManager.getProfilePath(this.host.config.sessionId)}" ` +
+            `and start again to re-scan. If no upgrade happened, Puppeteer also raises this on a page ` +
+            `navigation or renderer crash (check for memory pressure or a WhatsApp Web reload). ` +
+            `See docs/12-troubleshooting-faq.md.`,
+        );
+        // Kept short and with the raw Puppeteer text FIRST: operators search on that string, and the
+        // dashboard truncates a long reason. The profile path stays in the log above — it is too long
+        // for a card, and naming the wrong remedy is worse than pointing at the FAQ, since deleting a
+        // profile forces an irreversible re-pair.
+        surfacedReason =
+          `${reason} WhatsApp Web's page context was destroyed during startup. If this followed an ` +
+          `upgrade, the session's browser profile is likely stale — see docs/12-troubleshooting-faq.md.`;
+      }
+      this.host.getCallbacks().onError?.(surfacedReason);
+      throw error;
+    }
+  }
+
+  /**
+   * One construction+launch attempt: everything from `new Client(...)` through the puppeteer death
+   * listeners. Extracted so the navigation retry (#1081) repeats the FULL sequence — a second
+   * attempt without setupEventHandlers() would have no qr/authenticated/ready handlers at all, and
+   * without the pre-launch sweeps it would trip over attempt 1's stale Singleton files. A LIVE
+   * attempt-1 browser never reaches attempt 2: resetForInitRetry() abandons the retry instead.
+   */
+  private async runInitAttempt(
+    puppeteerArgs: string[],
+    authTimeoutMs: number | undefined,
+    proxyAuthentication: { username: string; password: string } | undefined,
+    versionPin: Awaited<ReturnType<typeof resolveWebVersionPin>>,
+  ): Promise<void> {
+    this.host.logger.event(LogLevel.DEBUG, 'engine.wwebjs.browser_launch', 'runInitAttempt', 'Browser initialization attempt started', { sessionId: this.host.config.sessionId });
+    // Range-checked at the sink, not only in configuration.ts: a plugin config written through
+    // `PUT /api/plugins/whatsapp-web.js/config` is validated as an object and merged over the env
+    // blob at every boot, so it can carry a value the config layer never saw. Both bounds are
+    // load-bearing. `common/CallbackRegistry.js` arms the timer under `if (timeout)`, so 0 arms
+    // none and a wedged renderer holds the command, and the request behind it, indefinitely; above
+    // MAX_TIMER_MS Node's timer overflows and fires after 1 ms, so the browser never launches.
+    const configuredProtocolTimeout = this.host.config.puppeteer?.protocolTimeoutMs;
+    const protocolTimeout =
+      typeof configuredProtocolTimeout === 'number' &&
+      configuredProtocolTimeout > 0 &&
+      configuredProtocolTimeout <= MAX_TIMER_MS
+        ? configuredProtocolTimeout
+        : undefined;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BRAVE PROFILE SETUP — THE CORE ARCHITECTURAL CHANGE
+    // ═══════════════════════════════════════════════════════════════════════
+    // 
+    // BEFORE: Puppeteer launched its bundled Chromium with a TEMPORARY profile.
+    //   → Every restart = new browser identity = WhatsApp requires QR re-scan.
+    //
+    // AFTER: Puppeteer launches the REAL Brave binary with a PERSISTENT profile.
+    //   → Profile survives restarts = WhatsApp auth restored automatically.
+    //
+    // The sessionId becomes the profile identity: /data/brave-profiles/<sessionId>
+    // This enforces RULE 1: 1 al-hakim session = 1 Brave profile
+    // This enforces RULE 2: sessionId = profile identity
+
+    // Step 1: Resolve where this session's Brave profile lives on disk
+    const braveProfilePath = this.braveProfileManager.getProfilePath(this.host.config.sessionId);
+    
+    // Step 2: Ensure the directory exists (creates it if first time, no-op if exists)
+    // Like Python: os.makedirs(profile_path, exist_ok=True)
+    await this.braveProfileManager.ensureProfile(this.host.config.sessionId);
+    this.host.logger.log(`Using Brave profile: ${braveProfilePath}`);
+
+    // Step 3: Resolve which Brave binary to launch
+    // Priority:
+    //   1. config.brave.executablePath
+    //   2. config.puppeteer.executablePath
+    //   3. Automatically detect Brave on Windows
+    //   4. Existing Linux default
+    const braveExecutable = await this.resolveBraveExecutable();
+    // ═══════════════════════════════════════════════════════════════════════
+
+    const client = new Client({
+      authStrategy: new NoAuth(),
+      puppeteer: {
+        headless: this.host.config.puppeteer?.headless ?? true,
+        args: puppeteerArgs,
+        // Do NOT let Puppeteer install its own process signal handlers. By default it handles
+        // SIGINT (→ synchronous process.exit(130), which would skip the graceful drain entirely)
+        // and SIGTERM/SIGHUP (→ kills Chromium at signal time, defeating the drain window). We own
+        // signal handling in main.ts. Puppeteer's unconditional `exit` hook still SIGKILLs this
+        // browser when the process actually exits, so nothing is orphaned.
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        handleSIGHUP: false,
+        userDataDir: braveProfilePath,  // ← Brave stores cookies, localStorage, IndexedDB here
+
+        // ═══════════════════════════════════════════════════════════════════
+        // THE TWO CRITICAL LINES — BROWSER IDENTITY MAPPING
+        // ═══════════════════════════════════════════════════════════════════
+        // executablePath: Tells Puppeteer "use THIS browser binary, not your bundled Chromium"
+        //   → Points to real Brave installed in Docker (e.g., /usr/bin/brave)
+        //   → Python equivalent: subprocess.Popen(['/usr/bin/brave', ...])
+        //
+        // userDataDir: Tells Brave "store ALL your data HERE" 
+        //   → Cookies, localStorage, IndexedDB, service workers, cache
+        //   → This is what makes the session PERSISTENT across restarts
+        //   → Python equivalent: chrome --user-data-dir=/path/to/profile
+        //
+        // Together: sessionId → profilePath → Brave binary → persistent identity
+        executablePath: braveExecutable,
+        // ═══════════════════════════════════════════════════════════════════
+        // Per-CDP-command budget, spread only when the host configured a usable one (see above).
+        // Absent, puppeteer-core nullish-coalesces to its own 180 000 ms (`cdp/Connection.js`).
+        ...(protocolTimeout !== undefined ? { protocolTimeout } : {}),
+      },
+      ...(authTimeoutMs !== undefined ? { authTimeoutMs } : {}),
+      ...(proxyAuthentication ? { proxyAuthentication } : {}),
+      ...(versionPin ?? {}),
+    });
+    this.client = client;
+
+    this.setupEventHandlers();
+    if (this.tearingDown) {
+      this.client = null;
+      this.setStatus(EngineStatus.DISCONNECTED);
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BRAVE ORPHAN CLEANUP — replaces old Chromium-specific cleanup
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // WHY: When al-hakim crashes hard (SIGKILL, power loss, OOM killer), Puppeteer's
+    // normal cleanup hook never runs. Brave keeps running, holding file locks on the
+    // profile directory. On next start, Brave refuses to open a locked profile.
+    //
+    // WHAT: Find Brave processes with our session marker arg (--al-hakim-session=<id>)
+    // and SIGKILL them. Then remove stale lock files (SingletonLock, SingletonSocket).
+    //
+    // WHEN: BEFORE client.initialize() — this runs before the new browser exists,
+    // so it can only kill ORPHANS (previous crashed sessions), never the live one.
+    //
+    // RULE 3: Browser process is disposable, but profile must survive.
+    //   → We kill the old process, but the profile directory stays intact.
+
+    // Kill any Brave processes from a previous crashed session holding this profile
+    await this.braveProfileManager.killOrphanedBraveProcesses(
+      this.host.config.sessionId,
+      this.host.logger,
+    );
+
+    // Remove stale lock files left by a crashed Brave instance
+    // These files prevent Brave from opening the profile: "Profile is in use"
+    await this.braveProfileManager.removeStaleSingletonFiles(
+      this.host.config.sessionId,
+      this.host.logger,
+    );
+    // ═══════════════════════════════════════════════════════════════════════
+
+    await client.initialize();
+    // whatsapp-web.js 1.34.x never observes the Chromium process/page it drives, so a crashed
+    // browser leaves the client looking READY forever ("silent death"). Attach death listeners
+    // to the puppeteer handles so a dead browser surfaces as a normal disconnect → reconnect.
+    this.attachPuppeteerLifecycleListeners();
+  }
+  
+  /**
+   * Reset between a failed first init attempt and its single retry (#1081). Deliberately NOT
+   * beginClientTeardown(): that would latch tearingDown (the adapter is single-use after teardown)
+   * and write DISCONNECTED, whose disconnectReported latch permanently drops the retry's
+   * qr/authenticated events. The reconcile clear matters most: the patched hasSynced level-check can
+   * fire AUTHENTICATED before the navigation-killed evaluate rejects initialize(), leaving attempt
+   * 1's 90s deadline live — its non-bridge branch deletes credentials (recoverFromStuckAuth), which
+   * must never run underneath a retry that is about to succeed.
+   *
+   * Returns false when attempt 1's browser could not be destroyed within the bound — the caller
+   * must then abandon the retry:launching a second Brave into the same userDataDir risks
+
+   * "Profile already in use" lock conflicts copy (an irreversible re-pair), and the marker-based orphan
+   * sweep is explicitly best-effort, so it cannot be trusted as the escalation for a LIVE browser.
+   */
+  private async resetForInitRetry(): Promise<boolean> {
+    const failed = this.client;
+    this.client = null;
+    this.host.clearAuthReconcile();
+    this.host.clearReadyReconcile();
+    this.qrCode = null;
+    this.setStatus(EngineStatus.INITIALIZING);
+    if (!failed) return true;
+    // The old client may still emit late events from persisted page bindings; 'authenticated' and
+    // 'ready' have no source-client identity fence, so silence it before the new attempt starts.
+    failed.removeAllListeners();
+    // Bounded DIRECT destroy — never this.destroy()/forceDestroy(), both of which latch the
+    // teardown flags above.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        failed.destroy(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('init-retry destroy timed out')), 5_000);
+          timeout.unref?.();
+        }),
+      ]);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.host.logger.warn('Destroying the failed first init attempt did not complete cleanly', {
+        error: message,
+      });
+      // A FAST rejection means the browser was already gone (destroy found nothing live to close) —
+      // safe to relaunch. A TIMEOUT means a live, wedged Chromium still holds the profile.
+      return message !== 'init-retry destroy timed out';
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Resolve the Brave executable for the current operating system.
+   *
+   * Resolution order:
+   *
+   * 1. config.brave.executablePath, but only when the path really exists.
+   * 2. config.puppeteer.executablePath, but only when the path really exists.
+   * 3. Well-known Brave installation paths for the current OS.
+   * 4. Brave binaries discoverable through PATH.
+   *
+   * This existence check is important because configuration.ts historically
+   * defaulted brave.executablePath to `/usr/bin/brave`. Without validating that
+   * path first, a Windows host receives the Linux default and Puppeteer fails
+   * before Windows auto-detection can run.
+   */
+  private async resolveBraveExecutable(): Promise<string> {
+    const seen = new Set<string>();
+    const candidates: string[] = [];
+
+    const addCandidate = (candidate?: string | null): void => {
+      if (!candidate) {
+        return;
+      }
+
+      const trimmed = candidate.trim();
+      if (!trimmed || seen.has(trimmed)) {
+        return;
+      }
+
+      seen.add(trimmed);
+      candidates.push(trimmed);
+    };
+
+    /*
+     * Explicit configuration has first priority, but it is not trusted blindly.
+     * A stale/default Linux path on Windows must not prevent OS auto-detection.
+     */
+    addCandidate(this.host.config.brave?.executablePath);
+    addCandidate(this.host.config.puppeteer?.executablePath);
+
+    const pathDirectories = (process.env.PATH ?? '')
+      .split(path.delimiter)
+      .map(directory => directory.trim())
+      .filter(Boolean);
+
+    switch (process.platform) {
+      case 'win32': {
+        const installRoots = [
+          process.env.PROGRAMFILES,
+          process.env['PROGRAMFILES(X86)'],
+          process.env.LOCALAPPDATA,
+          process.env.USERPROFILE
+            ? path.join(process.env.USERPROFILE, 'AppData', 'Local')
+            : undefined,
+        ].filter((root): root is string => Boolean(root));
+
+        for (const root of installRoots) {
+          addCandidate(
+            path.join(
+              root,
+              'BraveSoftware',
+              'Brave-Browser',
+              'Application',
+              'brave.exe',
+            ),
+          );
+
+          addCandidate(
+            path.join(
+              root,
+              'BraveSoftware',
+              'Brave-Browser-Beta',
+              'Application',
+              'brave.exe',
+            ),
+          );
+
+          addCandidate(
+            path.join(
+              root,
+              'BraveSoftware',
+              'Brave-Browser-Nightly',
+              'Application',
+              'brave.exe',
+            ),
+          );
+        }
+
+        for (const directory of pathDirectories) {
+          addCandidate(path.join(directory, 'brave.exe'));
+          addCandidate(path.join(directory, 'brave-browser.exe'));
+        }
+
+        break;
+      }
+
+      case 'darwin': {
+        addCandidate(
+          '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+        );
+
+        addCandidate(
+          '/Applications/Brave Browser Beta.app/Contents/MacOS/Brave Browser Beta',
+        );
+
+        addCandidate(
+          '/Applications/Brave Browser Nightly.app/Contents/MacOS/Brave Browser Nightly',
+        );
+
+        if (process.env.HOME) {
+          addCandidate(
+            path.join(
+              process.env.HOME,
+              'Applications',
+              'Brave Browser.app',
+              'Contents',
+              'MacOS',
+              'Brave Browser',
+            ),
+          );
+        }
+
+        for (const directory of pathDirectories) {
+          addCandidate(path.join(directory, 'brave'));
+          addCandidate(path.join(directory, 'brave-browser'));
+        }
+
+        break;
+      }
+
+      case 'linux': {
+        addCandidate('/usr/bin/brave-browser');
+        addCandidate('/usr/bin/brave');
+        addCandidate('/usr/bin/brave-browser-stable');
+        addCandidate('/usr/local/bin/brave-browser');
+        addCandidate('/usr/local/bin/brave');
+        addCandidate('/snap/bin/brave');
+
+        for (const directory of pathDirectories) {
+          addCandidate(path.join(directory, 'brave-browser'));
+          addCandidate(path.join(directory, 'brave'));
+          addCandidate(path.join(directory, 'brave-browser-stable'));
+        }
+
+        break;
+      }
+
+      default: {
+        /*
+         * Unknown Unix-like platforms still get a PATH-based attempt.
+         */
+        for (const directory of pathDirectories) {
+          addCandidate(path.join(directory, 'brave-browser'));
+          addCandidate(path.join(directory, 'brave'));
+        }
+
+        break;
+      }
+    }
+
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+
+        this.host.logger.log(
+          `Using Brave browser executable: ${candidate}`,
+          {
+            platform: process.platform,
+            executablePath: candidate,
+            action: 'brave_executable_resolved',
+          },
+        );
+
+        return candidate;
+      } catch {
+        /*
+         * Candidate is absent/inaccessible on this host.
+         * Continue to the next configured/OS/PATH location.
+         */
+      }
+    }
+
+    const configuredBrave = this.host.config.brave?.executablePath;
+    const configuredPuppeteer = this.host.config.puppeteer?.executablePath;
+
+    throw new Error(
+      `Brave browser executable was not found for platform '${process.platform}'. ` +
+        `Checked ${candidates.length} candidate path(s). ` +
+        `Configured Brave path: ${configuredBrave || '(none)'}. ` +
+        `Configured Puppeteer path: ${configuredPuppeteer || '(none)'}. ` +
+        `Install Brave or set BRAVE_EXECUTABLE / brave.executablePath to the correct executable.`,
+    );
+  }
+
+  setupEventHandlers(): void {
+    if (!this.client) return;
+
+    // Every handler registered by this call belongs to exactly one whatsapp-web.js Client generation.
+    // Re-check that identity before mutating lifecycle state so a retired init-attempt/browser cannot
+    // race a replacement client with late qr/authenticated/ready/disconnected events.
+    const sourceClient = this.client;
+
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    sourceClient.on('qr', async (qr: string) => {
+      // A 'qr' buffered by a wedged page can flush during the awaited client.destroy(), after
+      // recoverFromStuckAuth() nulls this.client, or from a client that whatsapp-web.js re-injected
+      // after a LOGOUT (#982) — in the last case the browser is still alive and will keep serving QRs
+      // until the lifecycle replaces the engine. Ignore all of them so a late event can't resurrect a
+      // finished adapter to QR_READY and publish a QR that links a phantom device. Mirrors the
+      // 'authenticated' guard below; the normal first QR is unaffected (initialize() moves the status to
+      // INITIALIZING before any client exists, so the latch is still clear).
+      const statusAtQrStart = this.getStatus();
+      if (
+        this.client !== sourceClient ||
+        this.tearingDown ||
+        this.disconnectReported ||
+        !this.client ||
+        (statusAtQrStart !== EngineStatus.INITIALIZING && statusAtQrStart !== EngineStatus.QR_READY)
+      ) {
+        return;
+      }
+      // Capture the source client so the post-await fence can prove THIS client is still the live one.
+      // qrcode.toDataURL() is an awaited macrotask: a 'disconnected' (or a teardown nulling this.client)
+      // that lands during the encode leaves the pre-await guard stale. Encode to a LOCAL so the stored
+      // qrCode is only touched once the fence re-proves the source client and the finished flags.
+      const qrSourceClient = sourceClient;
+      try {
+        const encodedQr = await qrcode.toDataURL(qr);
+        // Post-await fence: the encode resolved, but the source client may have disconnected or been
+        // replaced while we were waiting. Re-check the live client identity and the finished flags before
+        // assigning state, publishing a QR, or driving any downstream callback/webhook — a late encode for
+        // a dead/finished adapter must be dropped, not resurrected. The status is read through getStatus()
+        // (not `this.status`) so the pre-await guard's narrowing does not elide this comparison:
+        // setStatus(FAILED) can run on another tick during the await.
+        const currentStatus = this.getStatus();
+        if (
+          this.client !== qrSourceClient ||
+          this.tearingDown ||
+          this.disconnectReported ||
+          (currentStatus !== EngineStatus.INITIALIZING && currentStatus !== EngineStatus.QR_READY)
+        ) {
+          /*
+           * Authentication/readiness may have advanced while qrcode.toDataURL() was awaiting.
+           * Never let a stale QR encode drive the state machine backwards:
+           *
+           *   AUTHENTICATING  -> QR_READY
+           *   READY           -> QR_READY
+           *   ACTION_REQUIRED -> QR_READY
+           *   FAILED          -> QR_READY
+           *
+           * INITIALIZING -> QR_READY and QR_READY -> QR_READY are the only legitimate QR
+           * transitions (the latter is normal QR rotation).
+           */
+          return;
+        }
+
+        this.qrCode = encodedQr;
+        this.qrPresentedThisAttempt = true;
+        this.setStatus(EngineStatus.QR_READY);
+        this.emitConnectionStage('qr_ready');
+        this.host.getCallbacks().onQRCode?.(this.qrCode);
+        // Do not rely exclusively on whatsapp-web.js's `authenticated` edge. With a persistent
+        // Brave profile the page can already be synced before that edge listener is attached; the
+        // QR watcher is the runtime backstop that replays the missed handoff when necessary.
+        this.host.scheduleAuthReconcile();
+      } catch (error) {
+        this.host.logger.error('Error generating QR code', String(error));
+      }
+    });
+
+    sourceClient.on('authenticated', () => {
+      // Only the first authentication starts the reconcile window. Ignore a re-fired 'authenticated'
+      // while already AUTHENTICATING (so it can't restart the 90s deadline), once READY/FAILED, or any
+      // time after the adapter is finished — teardown, or a reported disconnect the lifecycle has not
+      // replaced the engine for yet (#982). The initial status is DISCONNECTED too, so "finished" is
+      // carried by the flags, never by the status alone.
+      if (
+        this.client !== sourceClient ||
+        this.tearingDown ||
+        this.disconnectReported ||
+        this.status === EngineStatus.AUTHENTICATING ||
+        this.status === EngineStatus.READY ||
+        this.status === EngineStatus.ACTION_REQUIRED ||
+        this.status === EngineStatus.FAILED
+      ) {
+        return;
+      }
+      this.host.clearAuthReconcile();
+      if (this.qrPresentedThisAttempt && !this.pairingCodeRequestedThisAttempt) {
+        this.emitConnectionStage('qr_scanned');
+      }
+      this.emitConnectionStage('authenticated');
+      this.setStatus(EngineStatus.AUTHENTICATING);
+      this.emitConnectionStage('authenticating');
+      this.qrCode = null;
+      this.host.scheduleReadyReconcile();
+    });
+
+    sourceClient.on('ready', () => {
+      // A late ready from a retired client must not touch a null/replaced client or resurrect a
+      // terminal lifecycle state.
+      if (
+        this.client !== sourceClient ||
+        !this.client ||
+        this.tearingDown ||
+        this.disconnectReported ||
+        this.status === EngineStatus.DISCONNECTED ||
+        this.status === EngineStatus.FAILED ||
+        this.status === EngineStatus.ACTION_REQUIRED
+      ) {
+        return;
+      }
+
+      // The library re-emits 'ready' at the end of EVERY completed (re)inject pipeline, but
+      // whatsapp-web.js can also emit a PREMATURE ready before its message bridge is attached.
+      // Therefore the navigation window must be cleared only after the eventsAttached guard below
+      // has proved that this ready edge belongs to a completed reinjection. Clearing it before the
+      // guard creates a false-death race: an avatar/contact read can then hit "Execution context was
+      // destroyed" while reinjection is still running and be misclassified as a dead Session.
+      // whatsapp-web.js can emit `ready` BEFORE its message listeners are attached: its post-auth
+      // callback runs once per hasSynced trigger, and any run that finds `window.WWebJS` already
+      // defined skips the attach and bare-emits `ready` — including while the first run's attach is
+      // still in flight (observed live). Promoting on that premature emit binds READY to a session
+      // whose inbound bridge may never come up. The patched client's `eventsAttached` flag
+      // (scripts/patch-wwebjs-ready-sync.js) distinguishes the cases: `false` → ignore this emit
+      // and let the attach's own completion re-emit `ready` (it always does), with the readiness
+      // reconciliation as the backstop when the attach failed instead. `undefined` (unpatched
+      // tree) keeps the legacy behaviour.
+      if ((this.client as Client & { eventsAttached?: boolean }).eventsAttached === false) {
+        this.host.logger.warn('Ignoring premature ready: the message event bridge is not attached yet', {
+          sessionId: this.host.config.sessionId,
+          action: 'premature_ready_ignored',
+        });
+        return;
+      }
+
+      // A bridge-capable ready is the completion edge for a post-navigation reinjection. Do this
+      // before markReadyFromClientInfo(): that helper intentionally early-returns while already
+      // READY, which is the normal state for a post-READY page reload.
+      this.clearNavigationReinjectWindow();
+      this.markReadyFromClientInfo();
+    });
+
+    // Message/group/call domain events: registered through the adapter's attachDomainEvents seam,
+    // which wires ./wwebjs-message-events, ./wwebjs-group-events and the call-cache delegate.
+    this.host.attachDomainEvents(sourceClient);
+
+    sourceClient.on('disconnected', reason => {
+      // whatsapp-web.js treats this event as terminal for this Client generation. Do not try to
+      // preserve a pre-auth generation here: upstream may already be destroying its browser. The
+      // generation fence prevents a later authenticated/ready from resurrecting that dead client.
+      if (this.client !== sourceClient || this.tearingDown || this.disconnectReported) return;
+
+      const reasonCode = String(reason);
+      const statusAtDisconnect = this.status;
+      const eventsAttached = (sourceClient as Client & { eventsAttached?: boolean }).eventsAttached;
+      const hasIdentity = Boolean(sourceClient.info?.wid?.user);
+
+      this.host.logger.warn('WhatsApp Web client disconnected', {
+        sessionId: this.host.config.sessionId,
+        reason: reasonCode,
+        status: statusAtDisconnect,
+        hasIdentity,
+        eventsAttached,
+        action: 'wwebjs_disconnected',
+      });
+
+      this.host.clearAuthReconcile();
+      this.host.clearReadyReconcile();
+
+      if (reasonCode === 'LOGOUT') {
+        // With NoAuth the browser profile is the persistence layer. whatsapp-web.js/WA has already
+        // performed the unlink; we preserve the browser profile itself (preferences/cache) and let
+        // the next generation discover that it needs a fresh pairing.
+        this.host.logger.warn(
+          'WhatsApp unlinked this device (LOGOUT). The Brave profile container is preserved; ' +
+            'the next start should return to pairing if the stored WA link is no longer valid.',
+          { sessionId: this.host.config.sessionId, action: 'wwebjs_logout_disconnect' },
+        );
+      }
+
+      this.setStatus(EngineStatus.DISCONNECTED);
+
+      const restriction = WA_STATE_RESTRICTIONS[reasonCode];
+      if (restriction) {
+        this.host.getCallbacks().onAccountRestriction?.({ kind: restriction, code: reasonCode });
+      }
+      this.host.getCallbacks().onDisconnected?.(reasonCode);
+    });
+
+    sourceClient.on('auth_failure', (message?: string) => {
+      if (this.client !== sourceClient || this.tearingDown || this.disconnectReported) return;
+      this.host.clearAuthReconcile();
+      this.host.clearReadyReconcile();
+      this.setStatus(EngineStatus.FAILED);
+      // Authentication failure is terminal for this generation. Do not automatically erase the
+      // persistent Brave profile here: destructive cleanup is reserved for the one-shot stuck-auth
+      // recovery path, which is session-budgeted and process-safe. Route this through onError.
+      this.host.getCallbacks().onError?.(message ? `Authentication failed: ${message}` : 'Authentication failed');
+    });
+  }
+
+  /**
+   * Attach to the loosely-typed whatsapp-web.js puppeteer handles (same cast pattern as
+   * isClientRuntimeReady/forceDestroy). whatsapp-web.js itself never listens to these, so without
+   * this a dead Chromium is invisible: browser process death, renderer crash ("Aw Snap"), and a
+   * closed tab all mean the session is gone, no matter what status the client still reports.
+   */
+  attachPuppeteerLifecycleListeners(): void {
+    const sourceClient = this.client;
+    if (!sourceClient) return;
+    const { pupBrowser, pupPage } = sourceClient as unknown as {
+      pupBrowser?: { on: (event: 'disconnected', cb: () => void) => void };
+      pupPage?: {
+        on: (event: 'error' | 'close' | 'framenavigated', cb: (frame?: { url?: () => string }) => void) => void;
+        mainFrame?: () => unknown;
+      };
+    };
+    // Puppeteer listeners outlive whatsapp-web.js removeAllListeners(). They MUST capture the
+    // client which installed them, otherwise a delayed old-browser crash can kill a replacement.
+    const isCurrent = (): boolean =>
+      this.client === sourceClient && !this.tearingDown && !this.disconnectReported;
+    pupBrowser?.on('disconnected', () => {
+      if (isCurrent()) this.handlePuppeteerDeath('Browser process closed or crashed', sourceClient);
+    });
+    pupPage?.on('error', () => {
+      if (isCurrent()) this.handlePuppeteerDeath('Page crashed', sourceClient);
+    });
+    pupPage?.on('close', () => {
+      if (isCurrent()) this.handlePuppeteerDeath('Page closed', sourceClient);
+    });
+    // A page NAVIGATION fires none of the above: the page is healing, not dead — whatsapp-web.js
+    // re-injects on its own framenavigated handler and re-emits 'ready' when done. Stamp the window
+    // so probeLiveness and ensureReady treat it as alive-but-recovering (#1081). Never stamp the
+    // LOGOUT navigation shapes (post_logout URL, or upstream's latched lastLoggedOut): there the
+    // credential teardown driven by the DISCONNECTED('LOGOUT') event is the path that must win.
+    pupPage?.on('framenavigated', frame => {
+      if (!isCurrent()) return;
+      try {
+        // mainFrame is feature-detected: the spec harnesses' EventEmitter pages have no frames.
+        if (typeof pupPage.mainFrame === 'function' && frame !== pupPage.mainFrame()) return;
+        if (typeof frame?.url === 'function' && frame.url().includes('post_logout=1')) return;
+      } catch {
+        return; // the frame detached before this handler ran — nothing worth stamping
+      }
+      // lastLoggedOut is a runtime field the wwjs typings do not declare (same loose-cast pattern as
+      // the pupBrowser/pupPage handles above).
+      if ((this.client as unknown as { lastLoggedOut?: boolean } | null)?.lastLoggedOut) return;
+      const now = Date.now();
+      if (this.navigationEpisodeStartedAt === 0) this.navigationEpisodeStartedAt = now;
+      this.lastMainFrameNavigationAt = now;
+      // `graced: false` here means the episode cap already expired — the stamp is recorded but the
+      // probe/ensureReady grace is NOT being granted, so the log must not claim it is.
+      this.host.logger.warn('Page navigated; whatsapp-web.js is re-injecting', {
+        sessionId: this.host.config.sessionId,
+        action: 'page_navigation_reinject_window',
+        graced: this.isInNavigationReinjectWindow(),
+      });
+    });
+  }
+
+  /**
+   * Route a Chromium/page death (detected via the puppeteer handles) through the exact same path as
+   * the client's own 'disconnected' event. A deliberate teardown also fires the browser's
+   * 'disconnected', and a real crash usually fires page 'error' and browser 'disconnected' together
+   * — so ignore calls during teardown or once the status already is DISCONNECTED/FAILED (first
+   * signal wins, no double-report).
+   */
+  private handlePuppeteerDeath(reason: string, sourceClient: Client | null = this.client): void {
+    if (!sourceClient || this.client !== sourceClient || this.tearingDown || this.disconnectReported) return;
+    this.host.logger.event(LogLevel.WARN, 'engine.browser.death_observed', 'handlePuppeteerDeath', 'Browser process or page death observed', { sessionId: this.host.config.sessionId, observedReason: reason, actorType: 'unknown' });
+    if (this.tearingDown || this.status === EngineStatus.DISCONNECTED || this.status === EngineStatus.FAILED) {
+      return;
+    }
+    this.host.clearAuthReconcile();
+    this.host.clearReadyReconcile();
+    this.setStatus(EngineStatus.DISCONNECTED);
+    this.host.getCallbacks().onDisconnected?.(reason);
+  }
+
+  /**
+   * Error-message signatures of a dead page/transport: Puppeteer raises these when the browser
+   * process, the renderer, or the CDP connection is gone (e.g. 'Protocol error: Target closed').
+   */
+  private static readonly PAGE_TRANSPORT_ERROR_PATTERN =
+    /protocol error|target closed|targetclosederror|detached frame|session closed|connection closed/i;
+
+  /**
+   * A per-command CDP timeout is NOT a death: the renderer is merely slower than the budget, and
+   * the next command may succeed. On Puppeteer 24.38.0 this message carries none of the signatures
+   * above, so the guard changes no current behaviour — it pins the intent.
+   *
+   * Matched on the FULL puppeteer phrase, not a bare `timed out`: a broad exclusion would also
+   * swallow a genuine death whose message happens to mention a timeout.
+   */
+  private static readonly PROTOCOL_TIMEOUT_PATTERN = /timed out\. increase the 'protocoltimeout'/i;
+
+  /** Whether the error carries a dead page/transport signature (see PAGE_TRANSPORT_ERROR_PATTERN). */
+  isPageTransportError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    if (WwebjsLifecycle.PROTOCOL_TIMEOUT_PATTERN.test(message)) {
+      return false;
+    }
+    return WwebjsLifecycle.PAGE_TRANSPORT_ERROR_PATTERN.test(message);
+  }
+
+  public isProtocolTimeoutError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return WwebjsLifecycle.PROTOCOL_TIMEOUT_PATTERN.test(message);
+  }
+  
+
+  async probeBrowserHealth(): Promise<boolean> {
+  if (!this.client || this.tearingDown || this.status !== EngineStatus.READY) {
+    return false;
+  }
+
+  const { pupPage } = this.client as unknown as {
+    pupPage?: {
+      isClosed?: () => boolean;
+      evaluate: <T>(pageFunction: () => T) => Promise<T>;
+    };
+  };
+
+  if (!pupPage) {
+    return false;
+  }
+
+  if (typeof pupPage.isClosed === 'function' && pupPage.isClosed()) {
+    return false;
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    await Promise.race([
+      pupPage.evaluate(() => true),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('browser health probe timed out')),
+          10_000,
+        );
+        timeout.unref?.();
+      }),
+    ]);
+
+    return true;
+  } catch (error) {
+    this.host.logger.warn('Browser health probe failed', {
+      sessionId: this.host.config.sessionId,
+      error: error instanceof Error ? error.message : String(error),
+      action: 'browser_health_probe_failed',
+    });
+
+    return false;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+
+  /**
+   * Error shapes that prove the target/CDP session is already gone. These can disconnect
+   * immediately. A plain "Protocol error", "Execution context was destroyed", or "detached frame"
+   * is deliberately NOT in this set because normal page navigation produces those too.
+   */
+  private static readonly HARD_PAGE_TRANSPORT_ERROR_PATTERN =
+    /target closed|targetclosederror|session closed|connection closed|browser (?:has )?disconnected/i;
+
+  /**
+   * Report a failed page operation without promoting every Puppeteer protocol exception into an
+   * immediate Session death.
+   *
+   * Hard target/connection closure is definitive and still disconnects synchronously. Ambiguous
+   * protocol/context failures are first protected by the explicit navigation grace; outside that
+   * window they receive a bounded PAGE_TRANSPORT_CONFIRMATION_MS health-check period. The original
+   * operation still rejects to its caller immediately — only the Session-level death decision is
+   * deferred.
+   */
+  reportIfPageTransportError(error: unknown, context: string): void {
+    if (!this.isPageTransportError(error)) {
+      return;
+    }
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    if (this.isInNavigationReinjectWindow()) {
+      this.host.logger.warn(
+        `Page transport error during ${context} inside the navigation re-inject window — not a death`,
+        {
+          sessionId: this.host.config.sessionId,
+          error: message,
+          action: 'page_transport_error_graced',
+        },
+      );
+      return;
+    }
+
+    if (WwebjsLifecycle.HARD_PAGE_TRANSPORT_ERROR_PATTERN.test(message)) {
+      this.host.logger.warn(
+        `Hard page transport error during ${context} — treating the session as dead`,
+        {
+          sessionId: this.host.config.sessionId,
+          error: message,
+          action: 'page_transport_error_hard_death',
+        },
+      );
+      this.handlePuppeteerDeath(`Page transport error during ${context}`);
+      return;
+    }
+
+    if (this.pageTransportConfirmationInFlight) {
+      this.host.logger.warn(
+        `Ambiguous page transport error during ${context} while a health confirmation is already running`,
+        {
+          sessionId: this.host.config.sessionId,
+          error: message,
+          action: 'page_transport_error_confirmation_coalesced',
+        },
+      );
+      return;
+    }
+
+    this.pageTransportConfirmationInFlight = true;
+    this.host.logger.warn(
+      `Ambiguous page transport error during ${context}; confirming browser death before disconnecting`,
+      {
+        sessionId: this.host.config.sessionId,
+        error: message,
+        confirmationMs: PAGE_TRANSPORT_CONFIRMATION_MS,
+        action: 'page_transport_error_confirmation_started',
+      },
+    );
+
+    void this.confirmAmbiguousPageTransportFailure(context)
+      .catch(confirmError => {
+        this.host.logger.warn('Page transport health confirmation failed unexpectedly', {
+          sessionId: this.host.config.sessionId,
+          context,
+          error:
+            confirmError instanceof Error
+              ? confirmError.message
+              : String(confirmError),
+          action: 'page_transport_error_confirmation_failed',
+        });
+      })
+      .finally(() => {
+        this.pageTransportConfirmationInFlight = false;
+      });
+  }
+
+  /**
+   * Confirm ambiguous transport death with repeated direct page probes. Twenty seconds is long
+   * enough to absorb the short context-destruction/reload gap seen in production without turning a
+   * truly wedged READY session into a multi-minute zombie.
+   */
+  private async confirmAmbiguousPageTransportFailure(context: string): Promise<void> {
+    const sourceClient = this.client;
+    if (
+      !sourceClient ||
+      this.tearingDown ||
+      this.status !== EngineStatus.READY
+    ) {
+      return;
+    }
+
+    const deadline =
+      Date.now() +
+      PAGE_TRANSPORT_CONFIRMATION_MS;
+
+    while (Date.now() < deadline) {
+      if (
+        this.client !== sourceClient ||
+        this.tearingDown ||
+        this.status !== EngineStatus.READY
+      ) {
+        return;
+      }
+
+      if (this.isInNavigationReinjectWindow()) {
+        this.host.logger.warn(
+          `Navigation/reinjection was observed while confirming ${context}; keeping the session alive`,
+          {
+            sessionId: this.host.config.sessionId,
+            action: 'page_transport_error_confirmation_graced',
+          },
+        );
+        return;
+      }
+
+      if (await this.probeBrowserHealth()) {
+        this.host.logger.warn(
+          `Browser recovered while confirming page transport error during ${context}; keeping the session alive`,
+          {
+            sessionId: this.host.config.sessionId,
+            action: 'page_transport_error_confirmation_recovered',
+          },
+        );
+        return;
+      }
+
+      const remainingMs =
+        deadline -
+        Date.now();
+
+      if (remainingMs <= 0) {
+        break;
+      }
+
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(
+          resolve,
+          Math.min(
+            PAGE_TRANSPORT_CONFIRMATION_PROBE_INTERVAL_MS,
+            remainingMs,
+          ),
+        );
+        timer.unref?.();
+      });
+    }
+
+    if (
+      this.client !== sourceClient ||
+      this.tearingDown ||
+      this.status !== EngineStatus.READY
+    ) {
+      return;
+    }
+
+    if (this.isInNavigationReinjectWindow()) {
+      return;
+    }
+
+    this.host.logger.warn(
+      `Page transport remained unhealthy for ${PAGE_TRANSPORT_CONFIRMATION_MS}ms during ${context}; treating the session as dead`,
+      {
+        sessionId: this.host.config.sessionId,
+        action: 'page_transport_error_confirmed_dead',
+      },
+    );
+    this.handlePuppeteerDeath(`Confirmed page transport failure during ${context}`);
+  }
+
+  markReadyFromClientInfo(): void {
+    if (
+      [EngineStatus.READY, EngineStatus.DISCONNECTED, EngineStatus.FAILED, EngineStatus.ACTION_REQUIRED].includes(
+        this.status,
+      )
+    ) {
+      return;
+    }
+
+    const wasAuthenticating = this.status === EngineStatus.AUTHENTICATING;
+
+    try {
+      const info = this.client?.info;
+      const phone = info?.wid?.user || null;
+      const pushName = info?.pushname || null;
+
+      // READY is the persisted identity boundary. Never publish READY with an empty phone: doing so
+      // makes the DB say the engine is usable while the account identity is unknown, and it also
+      // defeats restart logic that relies on a completed link. If a library `ready` emit races
+      // ClientInfo population, stay/re-enter AUTHENTICATING and let the existing reconciler retry.
+      if (!phone) {
+        this.host.logger.warn(
+          'WhatsApp Web signalled readiness before the own-account identity was available; keeping the session authenticating',
+          {
+            sessionId: this.host.config.sessionId,
+            action: 'ready_identity_not_available',
+          },
+        );
+
+        this.host.clearAuthReconcile();
+        if (!wasAuthenticating) {
+          this.setStatus(EngineStatus.AUTHENTICATING);
+          this.host.scheduleReadyReconcile();
+        }
+        return;
+      }
+
+      this.phoneNumber = phone;
+      this.pushName = pushName;
+
+      // A native whatsapp-web.js `ready` means the page socket and own identity are usable. The
+      // patched eventsAttached flag is the stronger bridge signal when available; `undefined` keeps
+      // the existing compatibility behaviour for an unpatched dependency tree.
+      this.emitConnectionStage('runtime_connected');
+      this.emitConnectionStage('identity_ready');
+      if ((this.client as Client & { eventsAttached?: boolean } | null)?.eventsAttached === true) {
+        this.emitConnectionStage('event_bridge_ready');
+      }
+
+      this.host.clearAuthReconcile();
+      this.host.clearReadyReconcile();
+      this.setStatus(EngineStatus.READY);
+      this.emitConnectionStage('ready');
+      this.host.getCallbacks().onReady?.(phone, pushName || '');
+
+      // A freshly-linked account may show a "What's new" onboarding modal that, left
+      // unacknowledged, gets the companion unlinked later. Arm the watcher only after the session
+      // has a real identity and READY has actually been published.
+      this.host.startOnboardingWatcher();
+    } catch (error) {
+      this.host.logger.error('Error getting client info', String(error));
+
+      // An exception reading ClientInfo is not proof of readiness. Preserve/re-enter the
+      // AUTHENTICATING state and allow the normal reconciliation window to retry instead of
+      // persisting READY with an empty identity.
+      this.host.clearAuthReconcile();
+      if (!wasAuthenticating) {
+        this.setStatus(EngineStatus.AUTHENTICATING);
+        this.host.scheduleReadyReconcile();
+      }
+    }
+  }
+
+  /** The single status-transition funnel: latches disconnectReported, fires the callback, re-emits
+   *  on the adapter's EventEmitter. Public because the sibling delegates (reconcile, stuck-auth,
+   *  onboarding watcher) drive transitions through their host slices. */
+  setStatus(status: EngineStatus): void {
+    // Latch before anything observes the transition. The constructor's initial DISCONNECTED is a field
+    // initializer and never reaches here, so this only ever fires on a real transition — startup is
+    // unaffected while a finished adapter is marked finished for good.
+    if (status === EngineStatus.DISCONNECTED) {
+      this.disconnectReported = true;
+    }
+    // The cached QR belongs to the page that produced it, so it dies with the QR_READY window. Same
+    // funnel placement as the Baileys engine: only the 'authenticated' and init-retry exits cleared the
+    // cache by hand, so a browser or page death, a failed init, an auth failure and teardown all left a
+    // dead QR to be served over GET /qr for the whole reconnect backoff.
+    if (status !== EngineStatus.QR_READY) {
+      this.qrCode = null;
+    }
+    this.status = status;
+    if (status === EngineStatus.DISCONNECTED || status === EngineStatus.FAILED) {
+      this.host.closeInboundMedia();
+    }
+    this.host.getCallbacks().onStateChanged?.(status);
+    this.host.emitState(status);
+  }
+
+  private beginClientTeardown(): Client | null {
+    this.tearingDown = true;
+    // Any cached call handle is dead once the client goes away — drop them all so a later
+    // rejectCall() reports not-found instead of acting on a destroyed page.
+    this.host.clearLiveCalls();
+    // Before the clientless early-return: a teardown must always close the navigation window, or a
+    // stale stamp could grace the next generation's probe (single-use contract notwithstanding).
+    this.clearNavigationReinjectWindow();
+    this.host.clearAuthReconcile();
+    this.host.clearReadyReconcile();
+    const client = this.client;
+    if (!client) return null;
+
+    this.host.clearOnboardingWatcher();
+    if (this.status !== EngineStatus.DISCONNECTED) {
+      this.setStatus(EngineStatus.DISCONNECTED);
+    }
+
+    return client;
+  }
+
+  private finishClientTeardown(client: Client): void {
+    if (this.client === client) {
+      this.client = null;
+    }
+    this.host.clearAuthReconcile();
+    this.host.clearReadyReconcile();
+    this.host.clearOnboardingWatcher();
+    this.clearNavigationReinjectWindow();
+  }
+
+  async disconnect(): Promise<void> {
+    this.host.logger.event(LogLevel.INFO, 'engine.wwebjs.disconnect_requested', 'disconnect', 'Browser engine disconnect requested', { sessionId: this.host.config.sessionId });
+  const client = this.beginClientTeardown();
+  if (!client) return;
+
+  try {
+    // With NoAuth + persistent profile, destroy() closes the browser
+    // but the profile (cookies, cache, localStorage) survives on disk.
+    // Next start: Brave reopens the same profile, WhatsApp reads the
+    // stored session, auto-restores — no QR scan needed.
+    await client.destroy();
+  } catch (error) {
+    this.host.logger.warn('Destroy client failed:', { error: String(error) });
+  } finally {
+    this.finishClientTeardown(client);
+  }
+}
+
+  async logout(): Promise<void> {
+    this.host.logger.event(LogLevel.INFO, 'engine.wwebjs.logout_requested', 'logout', 'Browser engine logout requested', { sessionId: this.host.config.sessionId });
+    this.logoutInitiated = true;
+    const client = this.beginClientTeardown();
+    if (!client) {
+      throw new Error('No live WhatsApp Web client — the unlink was not sent');
+    }
+
+    try {
+      await client.logout();
+    } catch (error) {
+      this.host.logger.warn('Logout failed:', { error: String(error) });
+      try {
+        await client.destroy();
+      } catch (destroyError) {
+        this.host.logger.warn('Client destroy also failed during logout fallback', { error: String(destroyError) });
+      }
+      throw error;
+    } finally {
+      this.finishClientTeardown(client);
+      // Profile is INTENTIONALLY preserved. The Brave profile survives logout.
+      // Next start() with the same sessionId will reuse the same profile.
+      // If WhatsApp unlinked the device, the stale session in the profile will
+      // fail gracefully and emit a fresh QR code — no delete needed here.
+    }
+  }
+
+  async destroy(): Promise<void> {
+    this.host.logger.event(LogLevel.DEBUG, 'engine.wwebjs.destroy_requested', 'destroy', 'Browser engine destroy requested', { sessionId: this.host.config.sessionId });
+    const client = this.beginClientTeardown();
+    if (!client) return;
+
+    try {
+      await client.destroy();
+    } finally {
+      this.finishClientTeardown(client);
+    }
+  }
+
+  /**
+   * Force-recover a wedged session: SIGKILL THIS client's own Chromium process directly (not a
+   * process-wide `pkill`, which would also kill other sessions), then best-effort `client.destroy()`
+   * for the rest of the cleanup. Both steps are wrapped so a missing process handle or a hung destroy
+   * can't prevent the engine from being torn down and the status reset.
+   */
+  async forceDestroy(): Promise<void> {
+    this.host.logger.event(LogLevel.WARN, 'engine.wwebjs.force_destroy_requested', 'forceDestroy', 'Browser forced destruction requested', { sessionId: this.host.config.sessionId });
+    const client = this.beginClientTeardown();
+    if (!client) return;
+
+    try {
+      // pupBrowser is the Puppeteer Browser; .process() is the Chromium ChildProcess (null if already gone).
+      const proc = (
+        client as unknown as { pupBrowser?: { process?: () => { kill?: (sig: string) => void } | null } }
+      ).pupBrowser?.process?.();
+      proc?.kill?.('SIGKILL');
+    } catch (err) {
+      this.host.logger.warn('forceDestroy: failed to kill the browser process', { error: String(err) });
+    }
+
+    try {
+      await client.destroy();
+    } catch (err) {
+      this.host.logger.warn('forceDestroy: client.destroy() failed after the kill (continuing)', {
+        error: String(err),
+      });
+    } finally {
+      this.finishClientTeardown(client);
+    }
+  }
+
+  getStatus(): EngineStatus {
+    return this.status;
+  }
+
+  getQRCode(): string | null {
+    return this.qrCode;
+  }
+
+  getPhoneNumber(): string | null {
+    return this.phoneNumber;
+  }
+
+  getPushName(): string | null {
+    return this.pushName;
+  }
+
+  /**
+   * Whether a recent main-frame navigation is still inside its bounded re-inject window. Two bounds:
+   * the rolling per-navigation grace, and the per-episode cap that stops a navigation LOOP from
+   * re-stamping its way past the watchdog forever. Consulted only AFTER the READY-status gates in
+   * probeLiveness()/ensureReady() — a teardown or LOGOUT drops the status first, and the grace must
+   * never outrank that (#1081).
+   */
+  /**
+   * Stamp the navigation/reinjection grace BEFORE code intentionally calls page.reload().
+   *
+   * Relying only on Puppeteer's later `framenavigated` event leaves a small race where an in-flight
+   * delegate evaluate rejects first. The readiness reconciler calls this method immediately before
+   * its deliberate reinjection reloads, so those errors are correctly treated as transient from
+   * the first millisecond of the reload.
+   */
+  beginNavigationReinjectWindow(reason: string): void {
+    if (
+      this.tearingDown ||
+      this.status === EngineStatus.DISCONNECTED ||
+      this.status === EngineStatus.FAILED
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    if (this.navigationEpisodeStartedAt === 0) {
+      this.navigationEpisodeStartedAt = now;
+    }
+    this.lastMainFrameNavigationAt = now;
+
+    this.host.logger.warn('WhatsApp Web page reload/reinjection is expected', {
+      sessionId: this.host.config.sessionId,
+      reason,
+      action: 'page_navigation_reinject_expected',
+      graced: this.isInNavigationReinjectWindow(),
+    });
+  }
+
+  isInNavigationReinjectWindow(): boolean {
+    if (this.lastMainFrameNavigationAt === 0) return false;
+    const now = Date.now();
+    return (
+      now - this.lastMainFrameNavigationAt < NAVIGATION_REINJECT_GRACE_MS &&
+      now - this.navigationEpisodeStartedAt < NAVIGATION_EPISODE_CAP_MS
+    );
+  }
+
+  private clearNavigationReinjectWindow(): void {
+    this.lastMainFrameNavigationAt = 0;
+    this.navigationEpisodeStartedAt = 0;
+  }
+
+  /**
+   * Active liveness probe for the session watchdog: race a real getState() round-trip against a 10s
+   * timeout. Probe failure or timeout means dead — a wedged page can keep reporting CONNECTED
+   * (whatsapp-web.js #5728), so turning consecutive probe failures into a reconnect decision stays
+   * the calling watchdog's job. One exception: inside the bounded navigation re-inject window a
+   * failing probe answers alive, since the page is healing, not dead (#1081).
+   */
+  async probeLiveness(): Promise<boolean> {
+    if (this.status !== EngineStatus.READY || !this.client) return false;
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const state = await Promise.race([
+        this.client.getState(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('liveness probe timed out')), 10_000);
+          timeout.unref?.();
+        }),
+      ]);
+      if (state === WAState.CONNECTED) {
+        // CONNECTED alone is not enough to close a reinjection window on the patched client:
+        // eventsAttached=false means the page socket recovered but the message bridge is still being
+        // rebuilt. Closing the grace there recreates the exact false-death race this window exists
+        // to prevent. Unpatched clients expose `undefined`; preserve the legacy behaviour for them.
+        const eventsAttached =
+          (this.client as Client & { eventsAttached?: boolean } | null)?.eventsAttached;
+
+        if (eventsAttached !== false) {
+          // Observed recovery closes the navigation episode. Without this, an episode whose re-inject
+          // died silently (no 'ready' re-emit, but WA Web's socket back up) would keep a stale episode
+          // anchor forever, denying the grace to every LATER navigation via the episode cap.
+          this.clearNavigationReinjectWindow();
+        }
+
+        return true;
+      }
+      return this.isInNavigationReinjectWindow();
+    } catch {
+      // Inside the navigation window the evaluate rejecting (context destroyed, window.require not
+      // yet a function) means the page is healing, not dead — answer alive so the watchdog does not
+      // tear down a session whatsapp-web.js is about to re-inject (#1081). The window is bounded, so
+      // a page that navigated and then wedged still dies within one extra watchdog interval.
+      return this.isInNavigationReinjectWindow();
+    } finally {
+      // Never leave the timeout dangling when getState() settles first (Jest open-handle hygiene).
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Request an 8-char pairing code so the user can link via "Link with phone number" instead of
+   * scanning the QR.
+   *
+   * Gated on QR_READY, not on the client merely existing. `this.client` is assigned before
+   * `client.initialize()` (see runInitAttempt), so for the whole Chromium launch — seconds on a
+   * modest host — a client is present while its `pupPage` is still null, and whatsapp-web.js's
+   * requestPairingCode reaches `exposeFunctionIfAbsent(this.pupPage, …)` and throws a raw TypeError
+   * that surfaces as a 500. QR_READY is the precise window this can work in anyway: the library
+   * emits 'qr' only once the Store is injected and the in-page socket reports UNPAIRED, which are
+   * the same preconditions the pairing flow needs.
+   */
+  async requestPairingCode(phoneNumber: string): Promise<string> {
+    if (!this.client || this.status !== EngineStatus.QR_READY) {
+      throw new EngineNotReadyError('Session is not waiting to be linked. Start it and wait for the QR stage.');
+    }
+    const pairingCode = await this.client.requestPairingCode(phoneNumber);
+    this.pairingCodeRequestedThisAttempt = true;
+    return pairingCode;
+  }
+
+  
+  async handleProtocolTimeout(operation: string): Promise<void> {
+    const MAX_PROTOCOL_TIMEOUT_RECOVERY_ATTEMPTS = 2;
+
+    this.host.logger.warn('Puppeteer protocol timeout detected', {
+      sessionId: this.host.config.sessionId,
+      operation,
+      status: this.status,
+      consecutiveProtocolTimeouts: this.consecutiveProtocolTimeouts,
+      action: 'protocol_timeout_detected',
+    });
+
+    if (
+      this.tearingDown ||
+      this.status === EngineStatus.DISCONNECTED ||
+      this.status === EngineStatus.FAILED ||
+      !this.client
+    ) {
+      return;
+    }
+
+    /*
+    * First question:
+    * Is the Chromium/CDP/page transport still responsive?
+    */
+    const browserHealthy = await this.probeBrowserHealth();
+
+    if (browserHealthy) {
+      this.consecutiveProtocolTimeouts = 0;
+
+      this.host.logger.warn(
+        'Browser is responsive after protocol timeout; keeping session alive',
+        {
+          sessionId: this.host.config.sessionId,
+          operation,
+          action: 'protocol_timeout_browser_healthy',
+        },
+      );
+
+      return;
+    }
+
+    /*
+    * The direct page probe failed.
+    *
+    * Before destroying the browser, give the existing whatsapp-web.js
+    * liveness probe a chance to confirm that the WhatsApp runtime itself
+    * is still alive/recovering.
+    */
+    const waRuntimeHealthy = await this.probeLiveness();
+
+    if (waRuntimeHealthy) {
+      this.consecutiveProtocolTimeouts = 0;
+
+      this.host.logger.warn(
+        'WhatsApp runtime is still responsive after protocol timeout; keeping session alive',
+        {
+          sessionId: this.host.config.sessionId,
+          operation,
+          action: 'protocol_timeout_wa_runtime_healthy',
+        },
+      );
+
+      return;
+    }
+
+    /*
+    * Both probes failed.
+    *
+    * Do NOT kill the browser on the first occurrence. Count consecutive
+    * failures and only escalate after repeated evidence of a wedged session.
+    */
+    this.consecutiveProtocolTimeouts += 1;
+
+    this.host.logger.error(
+  `Protocol timeout followed by failed browser and WhatsApp liveness probes ` +
+    `(sessionId=${this.host.config.sessionId}, operation=${operation}, ` +
+    `consecutiveProtocolTimeouts=${this.consecutiveProtocolTimeouts}, ` +
+    `recoveryThreshold=${MAX_PROTOCOL_TIMEOUT_RECOVERY_ATTEMPTS}, ` +
+    `action=protocol_timeout_health_failed)`,
+);
+  
+
+    if (
+      this.consecutiveProtocolTimeouts <
+      MAX_PROTOCOL_TIMEOUT_RECOVERY_ATTEMPTS
+    ) {
+      this.host.logger.warn(
+        'Keeping the session alive after the first failed protocol-timeout recovery check',
+        {
+          sessionId: this.host.config.sessionId,
+          operation,
+          consecutiveProtocolTimeouts: this.consecutiveProtocolTimeouts,
+          action: 'protocol_timeout_recovery_deferred',
+        },
+      );
+
+      return;
+    }
+
+    this.host.logger.error(
+  `Repeated protocol timeouts with failed health checks; forcing browser recovery ` +
+    `(sessionId=${this.host.config.sessionId}, operation=${operation}, ` +
+    `consecutiveProtocolTimeouts=${this.consecutiveProtocolTimeouts}, ` +
+    `action=protocol_timeout_force_destroy)`,
+);
+
+    this.consecutiveProtocolTimeouts = 0;
+
+    await this.forceDestroy();
+  }
+
+
+
+
+
+
+
+
+}
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
