@@ -131,6 +131,36 @@ describe('MessageSendService', () => {
     });
   });
 
+  describe('durable request idempotency', () => {
+    it('persists a keyed send claim before issuing the engine call', async () => {
+      await service.sendText('sess-1', { chatId: '628@c.us', text: 'one', idempotencyKey: 'request-0001' });
+      expect(repository.create).toHaveBeenCalledWith(expect.objectContaining({
+        idempotencyKey: 'request-0001',
+        sendRequestHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }));
+    });
+
+    it('rejects a colliding key without calling sendMessage twice', async () => {
+      const dup = Object.assign(new Error('unique constraint failed'), { code: 'SQLITE_CONSTRAINT_UNIQUE' });
+      (repository.save as jest.Mock).mockRejectedValueOnce(dup);
+      (repository.findOne as jest.Mock).mockResolvedValueOnce({
+        id: 'existing-row', sessionId: 'sess-1', idempotencyKey: 'request-0001',
+        sendRequestHash: 'oldhash', status: MessageStatus.UNCERTAIN,
+      });
+      await expect(service.sendText('sess-1', {
+        chatId: '628@c.us', text: 'one', idempotencyKey: 'request-0001',
+      })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'SEND_IDEMPOTENCY_KEY_REUSED' }) });
+      expect(mockEngine.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid keys even when non-REST callers bypass DTO validation', async () => {
+      await expect(service.sendText('sess-1', {
+        chatId: '628@c.us', text: 'one', idempotencyKey: 'short',
+      })).rejects.toThrow('idempotencyKey');
+      expect(mockEngine.sendTextMessage).not.toHaveBeenCalled();
+    });
+  });
+
   describe('sendText', () => {
     it('should send text message and return messageId + timestamp', async () => {
       const result = await service.sendText('sess-1', {
@@ -285,7 +315,7 @@ describe('MessageSendService', () => {
       expect(calls[0][2]).toMatchObject({ sessionId: 'sess-1', source: 'MessageService' });
     });
 
-    it('re-emits message:persisted with FAILED when the send itself fails (#906)', async () => {
+    it('re-emits message:persisted with UNCERTAIN when a send may have reached WhatsApp (#906)', async () => {
       mockEngine.sendTextMessage.mockRejectedValueOnce(new Error('engine down'));
 
       await expect(service.sendText('sess-1', { chatId: '628123456789@c.us', text: 'hi' })).rejects.toThrow();
@@ -295,7 +325,7 @@ describe('MessageSendService', () => {
       ) as unknown[][];
       expect(calls).toHaveLength(2);
       expect(calls[0][1]).toMatchObject({ message: { status: MessageStatus.PENDING } });
-      expect(calls[1][1]).toMatchObject({ message: { status: MessageStatus.FAILED } });
+      expect(calls[1][1]).toMatchObject({ message: { status: MessageStatus.UNCERTAIN } });
     });
 
     it('reconciles provider indexes when the send echo won the race: upsert the surviving row + drop the ghost (#906)', async () => {
@@ -316,8 +346,8 @@ describe('MessageSendService', () => {
 
       // SENT state merged onto the echo row; the redundant PENDING row dropped.
       expect(repository.update).toHaveBeenCalledWith(
-        { sessionId: 'sess-1', waMessageId: 'wa-msg-1' },
-        expect.objectContaining({ status: MessageStatus.SENT }),
+        { sessionId: 'sess-1', waMessageId: 'wa-msg-1', status: expect.anything() },
+        { status: MessageStatus.SENT },
       );
       expect(repository.delete).toHaveBeenCalledWith({ id: 'msg-uuid-1' });
       const persisted = (hookManager.execute as jest.Mock).mock.calls.filter(
@@ -555,16 +585,12 @@ describe('MessageSendService', () => {
       );
     });
 
-    it('fires message:failed when a media send fails (previously only sendText did)', async () => {
+    it('records an opaque media send failure as UNCERTAIN without claiming WhatsApp rejected it', async () => {
       mockEngine.sendImageMessage.mockRejectedValueOnce(new Error('engine down'));
-      await expect(service.sendImage('sess-1', { chatId: '628@c.us', url: 'https://e.com/i.jpg' })).rejects.toThrow(
-        'engine down',
-      );
-      expect(hookManager.execute).toHaveBeenCalledWith(
-        'message:failed',
-        expect.objectContaining({ type: 'image', error: 'engine down' }),
-        expect.any(Object),
-      );
+      await expect(service.sendImage('sess-1', { chatId: '628@c.us', url: 'https://e.com/i.jpg' }))
+        .rejects.toMatchObject({ response: expect.objectContaining({ code: 'SEND_OUTCOME_UNCERTAIN' }) });
+      expect(hookManager.execute).not.toHaveBeenCalledWith('message:failed', expect.anything(), expect.anything());
+      expect((repository.save as jest.Mock).mock.calls.at(-1)![0]).toMatchObject({ status: MessageStatus.UNCERTAIN });
     });
   });
 
@@ -669,11 +695,11 @@ describe('MessageSendService', () => {
         }),
       ).rejects.toThrow();
 
-      // The persisted FAILED row must not retain the (often multi-MB) base64 — it's never displayed
+      // The persisted UNCERTAIN row must not retain the (often multi-MB) base64 — it's never displayed
       // or retried — but should keep the descriptive mimetype/filename.
       const calls = (repository.save as jest.Mock).mock.calls as [Message][];
       const saved = calls.at(-1)![0];
-      expect(saved.status).toBe(MessageStatus.FAILED);
+      expect(saved.status).toBe(MessageStatus.UNCERTAIN);
       const media = (saved.metadata as { media?: { data?: unknown; mimetype?: string; filename?: string } }).media;
       expect(media?.data).toBeUndefined();
       expect(media?.mimetype).toBe('image/png');
@@ -1206,6 +1232,25 @@ describe('MessageSendService', () => {
     });
   });
 
+  describe('transactional idempotency claim transfer', () => {
+    it('moves the key to the echo atomically when the echo wins the WhatsApp ID unique race', async () => {
+      (repository.save as jest.Mock)
+        .mockImplementationOnce(msg => Promise.resolve(msg))
+        .mockRejectedValueOnce(Object.assign(new Error('unique'), { code: 'SQLITE_CONSTRAINT_UNIQUE' }));
+      const transaction = jest.fn(async callback => callback({
+        delete: jest.fn().mockResolvedValue({ affected: 1 }),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
+      }));
+      Object.assign(repository, { manager: { transaction } });
+      await service.sendText('sess-1', {
+        chatId: '621@c.us', text: 'hi', idempotencyKey: 'request-0001',
+      });
+      expect(transaction).toHaveBeenCalledTimes(1);
+      // No separate non-transactional delete may free the idempotency key before the transfer.
+      expect(repository.delete).not.toHaveBeenCalled();
+    });
+  });
+
   describe('persistSentState vs the own-send echo (dedup race)', () => {
     it('merges state onto the echo row, then drops the redundant PENDING row', async () => {
       // The engine's message_create echo (onMessageCreate) won the insert race, so the SENT-state save
@@ -1221,7 +1266,11 @@ describe('MessageSendService', () => {
       expect(result.messageId).toBe('wa-msg-1'); // send reported success
       expect(repository.update).toHaveBeenCalledWith(
         { sessionId: 'sess-1', waMessageId: 'wa-msg-1' },
-        expect.objectContaining({ status: MessageStatus.SENT, timestamp: 1706868000 }),
+        expect.objectContaining({ timestamp: 1706868000 }),
+      );
+      expect(repository.update).toHaveBeenCalledWith(
+        { sessionId: 'sess-1', waMessageId: 'wa-msg-1', status: expect.anything() },
+        { status: MessageStatus.SENT },
       );
       expect(repository.delete).toHaveBeenCalledWith({ id: 'msg-uuid-1' });
     });

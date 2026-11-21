@@ -1,5 +1,5 @@
 import { EditedMessage, IncomingMessage, MessageContact, MessageType } from '../interfaces/whatsapp-engine.interface';
-import type { SerializedWid } from '../types/whatsapp-web-js.types';
+import { readWid, type SerializedWid } from '../types/whatsapp-web-js.types';
 import { chatKind } from '../identity/wa-id';
 
 /**
@@ -82,7 +82,7 @@ export function buildIncomingMessageBase(msg: RawMessageFields): IncomingMessage
     // backport every arriving message otherwise carries `id: undefined`. The empty sentinel means
     // "received, id unreadable" and is normalized to NULL where it is persisted — never to `''`, which
     // the non-partial (sessionId, waMessageId) unique index would collide the second such message on.
-    id: msg.id._serialized ?? msg.id.$1 ?? '',
+    id: readWid(msg.id) ?? '',
     from: msg.from,
     to: msg.to,
     chatId,
@@ -156,7 +156,7 @@ export function buildEditedMessage(message: IncomingMessage, hasMedia: boolean):
  * full wwebjs `Contact`, and so the async getters stay out by construction.
  */
 export interface RawContactFields {
-  id?: { _serialized?: string };
+  id?: SerializedWid;
   number?: string;
   name?: string;
   pushname?: string;
@@ -184,7 +184,7 @@ export function mapContactFields(contact: RawContactFields, full = false): Messa
   if (contact.name) out.name = contact.name;
   if (contact.pushname) out.pushName = contact.pushname;
   if (!full) return out;
-  const id = contact.id?._serialized;
+  const id = readWid(contact.id);
   if (id) out.id = id;
   if (contact.number) out.number = contact.number;
   if (contact.shortName) out.shortName = contact.shortName;

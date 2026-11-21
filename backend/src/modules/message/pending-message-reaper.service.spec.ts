@@ -67,14 +67,14 @@ describe('PendingMessageReaperService.sweep', () => {
       [string, { sessionId: string; message: Message }, { sessionId: string; source: string }]
     >;
 
-  it('fails a stale outgoing PENDING row, marks it reapedAt, and emits message:persisted', async () => {
+  it('marks an interrupted outgoing PENDING row uncertain, marks it reapedAt, and emits message:persisted', async () => {
     const id = await insertMessage();
 
     const stats = await service.sweep(OPTS);
 
     expect(stats).toEqual({ scanned: 1, reaped: 1, failed: 0 });
     const row = await stored(id);
-    expect(row.status).toBe(MessageStatus.FAILED);
+    expect(row.status).toBe(MessageStatus.UNCERTAIN);
     expect(typeof (row.metadata as { reapedAt?: string }).reapedAt).toBe('string');
 
     expect(persistedCalls()).toHaveLength(1);
@@ -82,7 +82,7 @@ describe('PendingMessageReaperService.sweep', () => {
     expect(event).toBe('message:persisted');
     expect(payload.sessionId).toBe('sess-1');
     expect(payload.message.id).toBe(id);
-    expect(payload.message.status).toBe(MessageStatus.FAILED);
+    expect(payload.message.status).toBe(MessageStatus.UNCERTAIN);
     expect((payload.message.metadata as { reapedAt?: string }).reapedAt).toBeDefined();
     expect(context).toEqual({ sessionId: 'sess-1', source: 'PendingMessageReaperService' });
   });
@@ -127,13 +127,13 @@ describe('PendingMessageReaperService.sweep', () => {
     const first = await service.sweep(tight);
 
     expect(first).toEqual({ scanned: 3, reaped: 3, failed: 0 });
-    for (const id of ids.slice(0, 3)) expect((await stored(id)).status).toBe(MessageStatus.FAILED);
+    for (const id of ids.slice(0, 3)) expect((await stored(id)).status).toBe(MessageStatus.UNCERTAIN);
     for (const id of ids.slice(3)) expect((await stored(id)).status).toBe(MessageStatus.PENDING);
     expect(persistedCalls()).toHaveLength(3);
 
     const second = await service.sweep(tight);
     expect(second).toEqual({ scanned: 2, reaped: 2, failed: 0 });
-    for (const id of ids) expect((await stored(id)).status).toBe(MessageStatus.FAILED);
+    for (const id of ids) expect((await stored(id)).status).toBe(MessageStatus.UNCERTAIN);
   });
 
   it('drops the outbound media payload on reap but keeps mimetype/filename and other metadata', async () => {
@@ -168,7 +168,7 @@ describe('PendingMessageReaperService.sweep', () => {
 
     expect(stats).toEqual({ scanned: 2, reaped: 1, failed: 1 });
     expect((await stored(first)).status).toBe(MessageStatus.PENDING);
-    expect((await stored(second)).status).toBe(MessageStatus.FAILED);
+    expect((await stored(second)).status).toBe(MessageStatus.UNCERTAIN);
     expect(persistedCalls()).toHaveLength(1);
     updateSpy.mockRestore();
   });

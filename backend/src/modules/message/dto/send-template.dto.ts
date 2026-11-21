@@ -8,6 +8,7 @@ import {
   IsArray,
   ArrayMaxSize,
   MaxLength,
+  Matches,
   IsBoolean,
   Validate,
 } from 'class-validator';
@@ -16,6 +17,18 @@ import { MENTIONS_DESCRIPTION, MENTIONS_MAX, MENTION_WID_MAX_LENGTH } from './se
 import { IsMentionWidConstraint } from './is-mention-wid.validator';
 
 export class SendTemplateMessageDto {
+  @ApiPropertyOptional({
+    description: 'Optional per-session idempotency key (8–128 ASCII characters). Reusing the key never sends a second copy; duplicate requests return 409 with the existing local row status.',
+    minLength: 8,
+    maxLength: 128,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  @Matches(/^[A-Za-z0-9._:-]{8,128}$/)
+  idempotencyKey?: string;
+
+
   @ApiProperty({
     description: 'WhatsApp chat ID (phone@c.us for individual, groupId@g.us for groups)',
     example: '628123456789@c.us',

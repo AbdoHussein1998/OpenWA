@@ -169,20 +169,21 @@ export class MessageService implements PluginMessagePort {
       description?: string;
       address?: string;
       quotedMessageId?: string;
+      idempotencyKey?: string;
     },
   ): Promise<MessageResponseDto> {
     return this.sender.sendLocation(sessionId, dto);
   }
   sendContact(
     sessionId: string,
-    dto: { chatId: string; contactName: string; contactNumber: string; quotedMessageId?: string },
+    dto: { chatId: string; contactName: string; contactNumber: string; quotedMessageId?: string; idempotencyKey?: string },
   ): Promise<MessageResponseDto> {
     return this.sender.sendContact(sessionId, dto);
   }
 
   sendPoll(
     sessionId: string,
-    dto: { chatId: string; name: string; options: string[]; allowMultipleAnswers?: boolean; quotedMessageId?: string },
+    dto: { chatId: string; name: string; options: string[]; allowMultipleAnswers?: boolean; quotedMessageId?: string; idempotencyKey?: string },
   ): Promise<MessageResponseDto> {
     return this.sender.sendPoll(sessionId, dto);
   }
@@ -197,7 +198,7 @@ export class MessageService implements PluginMessagePort {
   }
   forward(
     sessionId: string,
-    dto: { fromChatId: string; toChatId: string; messageId: string },
+    dto: { fromChatId: string; toChatId: string; messageId: string; idempotencyKey?: string },
   ): Promise<MessageResponseDto> {
     return this.sender.forward(sessionId, dto);
   }

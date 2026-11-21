@@ -103,3 +103,74 @@ describe('SessionStatusBroadcaster', () => {
     expect(emitSessionStatus).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('SessionStatusBroadcaster ordered persistence', () => {
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+  };
+
+  it('does not let a slow READY write overwrite a later DISCONNECTED', async () => {
+    const gate = deferred();
+    const persisted: SessionStatus[] = [];
+    const update = jest.fn().mockImplementation(async (_id: string, patch: { status: SessionStatus }) => {
+      if (patch.status === SessionStatus.READY) await gate.promise;
+      persisted.push(patch.status);
+      return { affected: 1 };
+    });
+    const emit = jest.fn();
+    const broadcaster = new SessionStatusBroadcaster({
+      sessionRepository: { update } as unknown as Repository<Session>,
+      eventsGateway: { emitSessionStatus: emit } as never,
+      webhookService: { dispatch: jest.fn().mockResolvedValue(undefined) } as never,
+      logger: console as never,
+    });
+    const ready = broadcaster.updateReady('s1', '20123456', 'Test');
+    const disconnected = broadcaster.updateStatus('s1', SessionStatus.DISCONNECTED);
+    expect(update).toHaveBeenCalledTimes(1);
+    gate.resolve();
+    await Promise.all([ready, disconnected]);
+    expect(persisted).toEqual([SessionStatus.READY, SessionStatus.DISCONNECTED]);
+    expect(emit.mock.calls.map(args => args[1])).toEqual([SessionStatus.READY, SessionStatus.DISCONNECTED]);
+  });
+
+  it('drops queued stale READY metadata after the engine is retired', async () => {
+    const gate = deferred();
+    let current = true;
+    const update = jest.fn().mockImplementation(async () => { await gate.promise; return { affected: 1 }; });
+    const broadcaster = new SessionStatusBroadcaster({
+      sessionRepository: { update } as unknown as Repository<Session>,
+      eventsGateway: { emitSessionStatus: jest.fn() } as never,
+      webhookService: { dispatch: jest.fn().mockResolvedValue(undefined) } as never,
+      logger: console as never,
+    });
+    const initializing = broadcaster.updateStatus('s2', SessionStatus.INITIALIZING);
+    const ready = broadcaster.updateReady('s2', '20', 'Old client', () => current);
+    current = false;
+    gate.resolve();
+    await Promise.all([initializing, ready]);
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it('drains all pending mutations before permanent deletion', async () => {
+    const gate = deferred();
+    const update = jest.fn().mockImplementation(async () => { await gate.promise; return { affected: 1 }; });
+    const broadcaster = new SessionStatusBroadcaster({
+      sessionRepository: { update } as unknown as Repository<Session>,
+      eventsGateway: { emitSessionStatus: jest.fn() } as never,
+      webhookService: { dispatch: jest.fn().mockResolvedValue(undefined) } as never,
+      logger: console as never,
+    });
+    const first = broadcaster.updateStatus('s3', SessionStatus.QR_READY);
+    const second = broadcaster.updateStatus('s3', SessionStatus.DISCONNECTED);
+    let drained = false;
+    const drain = broadcaster.awaitIdle('s3').then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    gate.resolve();
+    await Promise.all([first, second, drain]);
+    expect(drained).toBe(true);
+    expect(update).toHaveBeenCalledTimes(2);
+  });
+});

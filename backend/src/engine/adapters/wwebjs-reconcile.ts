@@ -13,6 +13,7 @@ import {
 } from '../interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
+import { type WwebjsBridgeStatus } from './wwebjs-bridge-monitor';
 import {
   DEFAULT_WWEBJS_READY_TIMEOUT_MS,
   resolveReadyTimeoutMs,
@@ -29,6 +30,8 @@ export interface WwebjsReadyReconcileHost {
   readonly logger: ReturnType<typeof createLogger>;
   readonly config: WhatsAppWebJsConfig;
   getClient(): Client | null;
+  /** Same positive, client-generation-fenced signal used by lifecycle ready and liveness. */
+  getBridgeStatus?(client: Client | null): WwebjsBridgeStatus;
   getStatus(): EngineStatus;
   setStatus(status: EngineStatus): void;
   /** Live callbacks bag — read per event, since initialize() installs it after delegates are built. */
@@ -67,15 +70,11 @@ const READY_RECONCILE_INTERVAL_MS = 2000;
  */
 export const READY_RECONCILE_TIMEOUT_MS = DEFAULT_WWEBJS_READY_TIMEOUT_MS;
 
-// How long after `authenticated` the event bridge is allowed to still be attaching before a reload is
-// considered. whatsapp-web.js clears `eventsAttached` in its constructor (Client.js:109) and sets it
-// only once attachEventListeners() resolves (Client.js:373); in between it evaluates LoadUtils, polls
-// up to 30s for window.WWebJS (Client.js:334), then builds ClientInfo and InterfaceController. So a
-// false flag is the NORMAL reading for most of a minute on a loaded host, and reloading on it aborts
-// a healthy attach — the page navigates out from under the in-flight inject(), which then dies before
-// re-exposing the bridge and cannot be retried (#1081). Must exceed upstream's own 30s poll with room
-// for the rest of the pipeline, and stay well under READY_RECONCILE_TIMEOUT_MS so a reload that IS
-// warranted still has time to reinject before the deadline.
+// Wait beyond upstream's usual inject/poll period before one safe page reload when the event
+// attachment is still IN PROGRESS. Phase 2 observes attachEventListeners() completion directly
+// (stock 1.34.8 has no public eventsAttached field), while retaining the optional local patch's
+// stronger negative signal. We never reload merely for a missing/unsupported instrumentation
+// method: that cannot be corrected by page navigation and should fail with a diagnosis instead.
 export const READY_RECONCILE_BRIDGE_RELOAD_GRACE_MS = 45_000;
 
 /**
@@ -511,18 +510,18 @@ export class WwebjsReadyReconcile {
       // configured readiness ceiling.
       if (Date.now() - this.readyReconcileStartedAt >= this.readyReconcileTimeoutMs) {
         const liveClient = this.host.getClient();
-        const eventsAttached = (liveClient as Client & { eventsAttached?: boolean } | null)?.eventsAttached;
+        const bridgeStatus = this.bridgeStatus(liveClient);
 
         // A CONNECTED page is proof that the phone/account pairing itself succeeded. Never wipe
         // credentials merely because the browser-side runtime or event bridge is still incomplete:
         // slow phones and large accounts can legitimately spend minutes in this post-scan phase.
         if (this.hasObservedConnected) {
-          const bridgeDead = eventsAttached === false;
+          const bridgeDead = bridgeStatus !== 'attached';
 
           this.host.logger.error(
             bridgeDead
-              ? 'WhatsApp Web stayed connected but its event bridge never attached within the readiness ' +
-                  'deadline — inbound messages would be silently lost, so the session is marked failed. ' +
+              ? 'WhatsApp Web stayed connected but its event bridge attachment could not be verified within ' +
+                  'the readiness deadline — inbound messages may be lost, so the session is marked failed. ' +
                   'The saved credentials were kept; restart the session to relaunch the browser.'
               : 'WhatsApp Web reached CONNECTED but the browser runtime did not become fully ready within ' +
                   'the readiness deadline. The saved credentials were kept because pairing succeeded; ' +
@@ -534,6 +533,7 @@ export class WwebjsReadyReconcile {
                 ? 'ready_reconcile_bridge_dead'
                 : 'ready_reconcile_connected_incomplete',
               timeoutMs: this.readyReconcileTimeoutMs,
+              bridgeStatus,
             },
           );
 
@@ -543,8 +543,8 @@ export class WwebjsReadyReconcile {
             .getCallbacks()
             .onError?.(
               bridgeDead
-                ? 'WhatsApp Web is connected but its event bridge never attached, so inbound messages ' +
-                    'would be lost. The saved session was kept — restart the session to relaunch the browser.'
+                ? 'WhatsApp Web is connected but its message event bridge is not verified; inbound messages ' +
+                    'may be lost. The saved session was kept — restart the session and check installed 1.34.8 compatibility.'
                 : 'WhatsApp Web connected, but browser readiness did not finish in time. The saved session ' +
                     'was kept — restart the session to continue without pairing the phone again.',
             );
@@ -632,6 +632,13 @@ export class WwebjsReadyReconcile {
     return this.host.getClient();
   }
 
+  private bridgeStatus(client: Client | null): WwebjsBridgeStatus {
+    if (this.host.getBridgeStatus) return this.host.getBridgeStatus(client);
+    // For standalone reconciler fixtures only; production provides the lifecycle monitor.
+    const patched = (client as Client & { eventsAttached?: boolean } | null)?.eventsAttached;
+    return patched === true ? 'attached' : patched === false ? 'attaching' : 'unverified';
+  }
+
   private async isClientRuntimeReady(): Promise<boolean> {
     const client = this.client();
     if (!client) {
@@ -663,13 +670,10 @@ export class WwebjsReadyReconcile {
       this.emitConnectionStage('identity_ready');
     }
 
-    // The patched whatsapp-web.js client (scripts/patch-wwebjs-ready-sync.js) reports whether
-    // attachEventListeners resolved. `false` means the page->Node message bridge is dead even
-    // though the page reports CONNECTED — promoting that session to READY masks the loss of every
-    // inbound event. Start the reload grace from the FIRST observation of this exact condition.
-    // `undefined` is an unpatched tree: keep the legacy WWebJS checks rather than refusing readiness
-    // on a tree that cannot ever expose the flag.
-    if ((client as Client & { eventsAttached?: boolean }).eventsAttached === false) {
+    // An absent eventsAttached field in stock 1.34.8 must NOT be interpreted as bridge-ready.
+    // The lifecycle monitor confirms attachEventListeners completion for this exact generation.
+    const bridgeStatus = this.bridgeStatus(client);
+    if (bridgeStatus !== 'attached') {
       if (this.bridgeDeadObservedAt === 0) {
         this.bridgeDeadObservedAt = Date.now();
         this.host.logger.warn(
@@ -690,7 +694,7 @@ export class WwebjsReadyReconcile {
 
     if (
       this.host.getStatus() === EngineStatus.AUTHENTICATING &&
-      (client as Client & { eventsAttached?: boolean }).eventsAttached === true
+      bridgeStatus === 'attached'
     ) {
       this.emitConnectionStage('event_bridge_ready');
     }
@@ -790,7 +794,9 @@ export class WwebjsReadyReconcile {
     const status = this.host.getStatus();
     if (!client || (status !== EngineStatus.QR_READY && status !== EngineStatus.AUTHENTICATING)) return;
     if (!this.lastProbeStateConnected || !client.info?.wid?.user) return;
-    if ((client as Client & { eventsAttached?: boolean }).eventsAttached !== false) {
+    if (this.bridgeStatus(client) !== 'attaching') {
+      // An unsupported Client method cannot be fixed by a page reload; fail with an actionable
+      // diagnostic at the normal deadline while preserving the paired Brave profile.
       this.resetBridgeRecoveryObservation();
       return;
     }

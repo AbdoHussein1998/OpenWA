@@ -5,6 +5,7 @@ import { EngineTransportError } from '../../common/errors/engine-transport.error
 import { chatKind, isChannelJid } from '../identity/wa-id';
 import { WwebjsMessaging } from './wwebjs-messaging';
 import { type WwebjsEngineHost } from './wwebjs-host';
+import { readWid } from '../types/whatsapp-web-js.types';
 
 /**
  * Chat-list operations extracted from WhatsAppWebJsAdapter. The adapter keeps the public methods as
@@ -98,7 +99,7 @@ export class WwebjsChats {
   // Some WA system or channel-like entries can lack the normal serialized id;
   // skip those instead of failing the whole dashboard chats request.
   for (const chat of chats) {
-    const id = chat.id?._serialized;
+    const id = readWid(chat.id);
 
     if (!id) {
       skipped++;

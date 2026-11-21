@@ -330,6 +330,10 @@ export class EngineFactory
         ) ??
       '/data/brave-profiles';
 
+    // Credential deletion cannot race a peer's live browser or a crashed owner whose state
+    // has not been verified. Check BEFORE deleting any engine directory, not after a partial purge.
+    await new BraveProfileManager(braveProfileBasePath).assertProfileUnlocked(sessionName);
+
     const dirs:
       Array<{
         engine: string;

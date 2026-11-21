@@ -129,7 +129,14 @@ export class SessionEngineEventWiring {
         });
         return;
       }
-      void host.updateStatus(id, status);
+      void host.updateStatus(id, status).catch(error => {
+        this.logger.warn('Unable to persist engine status transition', {
+          sessionId: id,
+          status,
+          action: 'session_status_write_failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     };
 
     return {

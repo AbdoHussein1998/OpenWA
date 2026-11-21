@@ -28,9 +28,14 @@ import { resolveWebVersionPin } from '../wa-web-version';
 import { resolveAuthTimeoutMs, resolveEngineInitTimeoutMs } from '../engine-init-timeout';
 import { isSupportedProxyUrl, buildProxyLaunchConfig } from './wwebjs-proxy';
 import { BACKPORT_MISSING_MESSAGE, isBackportMissing } from './wwebjs-backport-check';
+import { inspectWwebjsRuntime } from './wwebjs-runtime-compat';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
+import { WwebjsBridgeMonitor, type WwebjsBridgeStatus } from './wwebjs-bridge-monitor';
 
-import { BraveProfileManager } from '../brave/brave-profile.manager';
+import { BraveProfileManager, type BraveProfileLeaseRelease } from '../brave/brave-profile.manager';
+import { BraveProcessSupervisor, type ObservedBrowserProcess } from '../brave/brave-process-supervisor';
+import { boundedBrowserOperation, BROWSER_TEARDOWN_BUDGETS } from '../brave/brave-browser-teardown';
+import { BraveFailureCode, braveFailureReason, elapsedBrowserMs } from '../brave/brave-lifecycle-diagnostics';
 
 
 /**
@@ -197,6 +202,52 @@ export class WwebjsLifecycle {
   private navigationEpisodeStartedAt = 0;
   /** True after at least one QR was produced by this client generation. */
   private qrPresentedThisAttempt = false;
+  private readonly bridgeMonitor = new WwebjsBridgeMonitor();
+  private readonly browserProcessSupervisor = new BraveProcessSupervisor();
+  /** Holds the profile lock across the complete Client lifetime, including the one init retry. */
+  private profileLeaseRelease?: BraveProfileLeaseRelease;
+  /** Coalesce attempts when the process scan outlasts the caller's lease-release deadline. */
+  private pendingProfileLeaseRelease?: Promise<void>;
+  /** A timed-out CDP destroy may continue in the background. Never start it twice on the same Client. */
+  private pendingClientDestroy?: { client: Client; promise: Promise<void> };
+  /** Stuck-auth deletion owns the lease until profile deletion finishes, not just browser exit. */
+  private profileResetActive = false;
+
+  private async releaseProfileLease(): Promise<void> {
+    const lease = this.profileLeaseRelease;
+    if (!lease) return;
+    let pending = this.pendingProfileLeaseRelease;
+    if (!pending) {
+      pending = Promise.resolve().then(() => lease());
+      this.pendingProfileLeaseRelease = pending;
+      // If the caller timed out, a late successful release must still clear the
+      // cached token. Otherwise a second caller may run the same unlink twice.
+      void pending.then(
+        () => { if (this.profileLeaseRelease === lease) this.profileLeaseRelease = undefined; },
+        () => undefined,
+      ).finally(() => {
+        if (this.pendingProfileLeaseRelease === pending) {
+          this.pendingProfileLeaseRelease = undefined;
+        }
+      });
+    }
+    try {
+      await boundedBrowserOperation(
+        () => pending,
+        BROWSER_TEARDOWN_BUDGETS.leaseMs,
+        'Brave profile lease release',
+      );
+    } catch (error) {
+      // Do not claim success: the lock is deliberately retained if a browser may still own it.
+      this.host.logger.event(LogLevel.WARN, 'engine.browser.lease_retained', 'releaseProfileLease',
+        'Brave profile ownership lock retained after incomplete teardown', {
+          sessionId: this.host.config.sessionId,
+          action: 'brave_profile_lock_retained', status: 'failed',
+          reasonCode: BraveFailureCode.BROWSER_TEARDOWN_INCOMPLETE,
+        });
+      throw error;
+    }
+  }
   /**
    * True after requestPairingCode() succeeds. Authentication after that point must not be labelled
    * as a QR scan merely because the page also happened to have produced a QR earlier.
@@ -217,8 +268,22 @@ export class WwebjsLifecycle {
     this.setStatus(EngineStatus.INITIALIZING);
     const initStartedAt = Date.now();
 
-    // An install that skipped the message-id backport fails later with errors that name no cause
-    // (#889) — say so here instead, while the operator is still looking at the startup logs.
+    // Inventory the ACTUAL installed library. Do not confuse the npm package release with the
+    // independently selected WhatsApp Web page build or with local postinstall patches.
+    const compatibility = inspectWwebjsRuntime();
+    this.host.logger.log('whatsapp-web.js runtime compatibility', {
+      sessionId: this.host.config.sessionId,
+      ...compatibility,
+      eventBridgeVerification: 'adapter-owned attachEventListeners completion',
+    });
+    if (compatibility.version !== '1.34.8') {
+      this.host.logger.warn('This adapter was reviewed against whatsapp-web.js 1.34.8; verify compatibility with the installed release', {
+        sessionId: this.host.config.sessionId,
+        installedVersion: compatibility.version,
+        expectedVersion: '1.34.8',
+        action: 'wwebjs_version_not_verified',
+      });
+    }
     if (isBackportMissing()) {
       this.host.logger.error(BACKPORT_MISSING_MESSAGE);
     }
@@ -356,6 +421,12 @@ export class WwebjsLifecycle {
           `${reason} WhatsApp Web's page context was destroyed during startup. If this followed an ` +
           `upgrade, the session's browser profile is likely stale — see docs/12-troubleshooting-faq.md.`;
       }
+      this.host.logger.event(LogLevel.ERROR, 'engine.browser.initialize_failed', 'initialize',
+        'Brave-backed WhatsApp engine initialization failed', {
+          sessionId: this.host.config.sessionId, status: 'failed',
+          elapsedMs: elapsedBrowserMs(initStartedAt),
+          reasonCode: braveFailureReason(error, BraveFailureCode.BROWSER_LAUNCH_FAILED),
+        });
       this.host.getCallbacks().onError?.(surfacedReason);
       throw error;
     }
@@ -374,7 +445,12 @@ export class WwebjsLifecycle {
     proxyAuthentication: { username: string; password: string } | undefined,
     versionPin: Awaited<ReturnType<typeof resolveWebVersionPin>>,
   ): Promise<void> {
-    this.host.logger.event(LogLevel.DEBUG, 'engine.wwebjs.browser_launch', 'runInitAttempt', 'Browser initialization attempt started', { sessionId: this.host.config.sessionId });
+    const launchStartedAt = Date.now();
+    this.host.logger.event(LogLevel.INFO, 'engine.browser.launch_started', 'runInitAttempt',
+      'Browser initialization attempt started', {
+        sessionId: this.host.config.sessionId, status: 'started',
+        headless: this.host.config.puppeteer?.headless ?? true,
+      });
     // Range-checked at the sink, not only in configuration.ts: a plugin config written through
     // `PUT /api/plugins/whatsapp-web.js/config` is validated as an object and merged over the env
     // blob at every boot, so it can carry a value the config layer never saw. Both bounds are
@@ -409,6 +485,13 @@ export class WwebjsLifecycle {
     // Step 2: Ensure the directory exists (creates it if first time, no-op if exists)
     // Like Python: os.makedirs(profile_path, exist_ok=True)
     await this.braveProfileManager.ensureProfile(this.host.config.sessionId);
+    // Acquire before orphan enumeration / Singleton cleanup. A matching process marker alone
+    // does not prove an orphan and must never justify killing a peer's active browser.
+    if (!this.profileLeaseRelease) {
+      this.profileLeaseRelease = await this.braveProfileManager.acquireProfileLease(
+        this.host.config.sessionId, this.host.logger,
+      );
+    }
     this.host.logger.log(`Using Brave profile: ${braveProfilePath}`);
 
     // Step 3: Resolve which Brave binary to launch
@@ -420,11 +503,27 @@ export class WwebjsLifecycle {
     const braveExecutable = await this.resolveBraveExecutable();
     // ═══════════════════════════════════════════════════════════════════════
 
+    // Bind this browser generation to the *existing* filesystem lease. A new
+    // backend can recover its orphan only if the old backend is confirmed dead
+    // and the Brave launch argument matches that old lease's owner token.
+    // This marker is a generation identifier, not a secret or access token.
+    const leaseToken = this.profileLeaseRelease?.ownerToken;
+    if (!leaseToken) throw new Error('Brave profile lease missing before browser launch');
+    const launchArgs = [
+      // Reserved browser identity flags are managed exclusively by the engine.
+      // A plugin-provided --user-data-dir or duplicate marker would defeat
+      // profile verification, so do not forward them to Chromium.
+      ...puppeteerArgs.filter(arg =>
+        !/^--(?:al-hakim-session|al-hakim-lease|user-data-dir)(?:=|$)/.test(arg)),
+      `--al-hakim-session=${this.host.config.sessionId}`,
+      `--al-hakim-lease=${leaseToken}`,
+    ];
+
     const client = new Client({
       authStrategy: new NoAuth(),
       puppeteer: {
         headless: this.host.config.puppeteer?.headless ?? true,
-        args: puppeteerArgs,
+        args: launchArgs,
         // Do NOT let Puppeteer install its own process signal handlers. By default it handles
         // SIGINT (→ synchronous process.exit(130), which would skip the graceful drain entirely)
         // and SIGTERM/SIGHUP (→ kills Chromium at signal time, defeating the drain window). We own
@@ -459,32 +558,35 @@ export class WwebjsLifecycle {
       ...(versionPin ?? {}),
     });
     this.client = client;
+    // Instrument the real 1.34.8 attachEventListeners() before initialize() can invoke it.
+    // An unpatched eventsAttached=undefined is NOT evidence of a working message bridge.
+    if (!this.bridgeMonitor.instrument(client)) {
+      this.host.logger.error(
+        'Cannot verify whatsapp-web.js event bridge: attachEventListeners is unavailable or cannot be observed. ' +
+          'This engine will not report READY until compatibility is restored.',
+        undefined,
+        { sessionId: this.host.config.sessionId, action: 'wwebjs_bridge_instrumentation_unavailable' },
+      );
+    }
 
     this.setupEventHandlers();
     if (this.tearingDown) {
       this.client = null;
       this.setStatus(EngineStatus.DISCONNECTED);
+      await this.releaseProfileLease();
       return;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // BRAVE ORPHAN CLEANUP — replaces old Chromium-specific cleanup
+    // POST-RECOVERY BRAVE VERIFICATION
     // ═══════════════════════════════════════════════════════════════════════
-    //
-    // WHY: When al-hakim crashes hard (SIGKILL, power loss, OOM killer), Puppeteer's
-    // normal cleanup hook never runs. Brave keeps running, holding file locks on the
-    // profile directory. On next start, Brave refuses to open a locked profile.
-    //
-    // WHAT: Find Brave processes with our session marker arg (--al-hakim-session=<id>)
-    // and SIGKILL them. Then remove stale lock files (SingletonLock, SingletonSocket).
-    //
-    // WHEN: BEFORE client.initialize() — this runs before the new browser exists,
-    // so it can only kill ORPHANS (previous crashed sessions), never the live one.
-    //
-    // RULE 3: Browser process is disposable, but profile must survive.
-    //   → We kill the old process, but the profile directory stays intact.
+    // acquireProfileLease() has already checked any abandoned owner under an
+    // exclusive recovery claim. Only a Brave process with the same old lease
+    // generation, session marker and user-data directory can be reaped there.
+    // This check must now find zero remaining marked processes. It NEVER kills
+    // a merely matching process during ordinary startup.
 
-    // Kill any Brave processes from a previous crashed session holding this profile
+    // Refuse startup if any unverified session-marked Brave process remains.
     await this.braveProfileManager.killOrphanedBraveProcesses(
       this.host.config.sessionId,
       this.host.logger,
@@ -503,6 +605,13 @@ export class WwebjsLifecycle {
     // browser leaves the client looking READY forever ("silent death"). Attach death listeners
     // to the puppeteer handles so a dead browser surfaces as a normal disconnect → reconnect.
     this.attachPuppeteerLifecycleListeners();
+    this.host.logger.event(LogLevel.INFO, 'engine.browser.launch_succeeded', 'runInitAttempt',
+      'Browser initialized and process supervision installed', {
+        sessionId: this.host.config.sessionId, status: 'succeeded',
+        elapsedMs: elapsedBrowserMs(launchStartedAt),
+        browserPid: this.browserProcessSupervisor.getPid(client),
+        headless: this.host.config.puppeteer?.headless ?? true,
+      });
   }
   
   /**
@@ -869,26 +978,20 @@ export class WwebjsLifecycle {
         return;
       }
 
-      // The library re-emits 'ready' at the end of EVERY completed (re)inject pipeline, but
-      // whatsapp-web.js can also emit a PREMATURE ready before its message bridge is attached.
-      // Therefore the navigation window must be cleared only after the eventsAttached guard below
-      // has proved that this ready edge belongs to a completed reinjection. Clearing it before the
-      // guard creates a false-death race: an avatar/contact read can then hit "Execution context was
-      // destroyed" while reinjection is still running and be misclassified as a dead Session.
-      // whatsapp-web.js can emit `ready` BEFORE its message listeners are attached: its post-auth
-      // callback runs once per hasSynced trigger, and any run that finds `window.WWebJS` already
-      // defined skips the attach and bare-emits `ready` — including while the first run's attach is
-      // still in flight (observed live). Promoting on that premature emit binds READY to a session
-      // whose inbound bridge may never come up. The patched client's `eventsAttached` flag
-      // (scripts/patch-wwebjs-ready-sync.js) distinguishes the cases: `false` → ignore this emit
-      // and let the attach's own completion re-emit `ready` (it always does), with the readiness
-      // reconciliation as the backstop when the attach failed instead. `undefined` (unpatched
-      // tree) keeps the legacy behaviour.
-      if ((this.client as Client & { eventsAttached?: boolean }).eventsAttached === false) {
-        this.host.logger.warn('Ignoring premature ready: the message event bridge is not attached yet', {
+      // 1.34.8's duplicate synced callback can emit ready before attachEventListeners resolves.
+      // Our adapter-owned monitor tracks completion independently of the optional local patch.
+      const bridgeStatus = this.getBridgeStatus(sourceClient);
+      if (bridgeStatus !== 'attached') {
+        this.host.logger.warn('Ignoring premature ready: event bridge completion is unverified', {
           sessionId: this.host.config.sessionId,
+          bridgeStatus,
           action: 'premature_ready_ignored',
         });
+        if (this.status !== EngineStatus.AUTHENTICATING) {
+          this.host.clearAuthReconcile();
+          this.setStatus(EngineStatus.AUTHENTICATING);
+          this.host.scheduleReadyReconcile();
+        }
         return;
       }
 
@@ -911,7 +1014,7 @@ export class WwebjsLifecycle {
 
       const reasonCode = String(reason);
       const statusAtDisconnect = this.status;
-      const eventsAttached = (sourceClient as Client & { eventsAttached?: boolean }).eventsAttached;
+      const bridgeStatus = this.getBridgeStatus(sourceClient);
       const hasIdentity = Boolean(sourceClient.info?.wid?.user);
 
       this.host.logger.warn('WhatsApp Web client disconnected', {
@@ -919,7 +1022,7 @@ export class WwebjsLifecycle {
         reason: reasonCode,
         status: statusAtDisconnect,
         hasIdentity,
-        eventsAttached,
+        bridgeStatus,
         action: 'wwebjs_disconnected',
       });
 
@@ -974,6 +1077,40 @@ export class WwebjsLifecycle {
         mainFrame?: () => unknown;
       };
     };
+    let capturedProcess: ObservedBrowserProcess | null | undefined;
+    try {
+      capturedProcess = (
+        sourceClient as unknown as { pupBrowser?: { process?: () => ObservedBrowserProcess | null } }
+      ).pupBrowser?.process?.();
+    } catch (error) {
+      this.host.logger.warn('Unable to inspect Puppeteer browser process handle', {
+        sessionId: this.host.config.sessionId,
+        action: 'brave_process_handle_inspection_failed', error: String(error),
+      });
+    }
+    const browserPid = this.browserProcessSupervisor.observe(
+      sourceClient, capturedProcess,
+      reason => this.handlePuppeteerDeath(reason, sourceClient),
+      (_error, pid) => this.host.logger.event(LogLevel.WARN, 'engine.browser.process_error',
+        'observeBrowser', 'Brave process emitted an error', {
+          sessionId: this.host.config.sessionId, browserPid: pid,
+          action: 'brave_process_error', status: 'failed',
+          reasonCode: BraveFailureCode.BROWSER_PROCESS_ERROR,
+        }),
+    );
+    if (browserPid !== null) {
+      this.host.logger.event(LogLevel.INFO, 'engine.browser.process_supervised',
+        'observeBrowser', 'Brave process now supervised', {
+          sessionId: this.host.config.sessionId, browserPid,
+          action: 'brave_process_supervised', status: 'succeeded',
+          headless: this.host.config.puppeteer?.headless ?? true,
+        });
+    } else {
+      this.host.logger.warn('Browser process handle unavailable; Puppeteer CDP death listeners remain active', {
+        sessionId: this.host.config.sessionId,
+        action: 'brave_process_handle_unavailable',
+      });
+    }
     // Puppeteer listeners outlive whatsapp-web.js removeAllListeners(). They MUST capture the
     // client which installed them, otherwise a delayed old-browser crash can kill a replacement.
     const isCurrent = (): boolean =>
@@ -1004,6 +1141,7 @@ export class WwebjsLifecycle {
       // lastLoggedOut is a runtime field the wwjs typings do not declare (same loose-cast pattern as
       // the pupBrowser/pupPage handles above).
       if ((this.client as unknown as { lastLoggedOut?: boolean } | null)?.lastLoggedOut) return;
+      this.bridgeMonitor.invalidate(sourceClient);
       const now = Date.now();
       if (this.navigationEpisodeStartedAt === 0) this.navigationEpisodeStartedAt = now;
       this.lastMainFrameNavigationAt = now;
@@ -1304,6 +1442,10 @@ export class WwebjsLifecycle {
     this.handlePuppeteerDeath(`Confirmed page transport failure during ${context}`);
   }
 
+  getBridgeStatus(client: Client | null = this.client): WwebjsBridgeStatus {
+    return this.bridgeMonitor.getStatus(client);
+  }
+
   markReadyFromClientInfo(): void {
     if (
       [EngineStatus.READY, EngineStatus.DISCONNECTED, EngineStatus.FAILED, EngineStatus.ACTION_REQUIRED].includes(
@@ -1341,17 +1483,29 @@ export class WwebjsLifecycle {
         return;
       }
 
+      // Do not trust a bare upstream `ready`: 1.34.8 can emit it from a duplicate synced handoff
+      // even while attachEventListeners() is still in flight. Only a positively completed attach
+      // (for THIS Client and page generation) can open the READY boundary.
+      const bridgeStatus = this.getBridgeStatus();
+      if (bridgeStatus !== 'attached') {
+        this.host.logger.warn('WhatsApp identity is available but its message event bridge is not verified', {
+          sessionId: this.host.config.sessionId,
+          bridgeStatus,
+          action: 'ready_bridge_unverified',
+        });
+        this.host.clearAuthReconcile();
+        if (!wasAuthenticating) {
+          this.setStatus(EngineStatus.AUTHENTICATING);
+          this.host.scheduleReadyReconcile();
+        }
+        return;
+      }
+
       this.phoneNumber = phone;
       this.pushName = pushName;
-
-      // A native whatsapp-web.js `ready` means the page socket and own identity are usable. The
-      // patched eventsAttached flag is the stronger bridge signal when available; `undefined` keeps
-      // the existing compatibility behaviour for an unpatched dependency tree.
       this.emitConnectionStage('runtime_connected');
       this.emitConnectionStage('identity_ready');
-      if ((this.client as Client & { eventsAttached?: boolean } | null)?.eventsAttached === true) {
-        this.emitConnectionStage('event_bridge_ready');
-      }
+      this.emitConnectionStage('event_bridge_ready');
 
       this.host.clearAuthReconcile();
       this.host.clearReadyReconcile();
@@ -1424,6 +1578,7 @@ export class WwebjsLifecycle {
   }
 
   private finishClientTeardown(client: Client): void {
+    this.browserProcessSupervisor.detach(client);
     if (this.client === client) {
       this.client = null;
     }
@@ -1433,93 +1588,269 @@ export class WwebjsLifecycle {
     this.clearNavigationReinjectWindow();
   }
 
+  /** The same browser generation may be retired by disconnect() and then forceDestroy(). */
+  private destroyClientOnce(client: Client): Promise<void> {
+    const pending = this.pendingClientDestroy;
+    if (pending && pending.client === client) return pending.promise;
+    const promise = Promise.resolve().then(() => client.destroy());
+    this.pendingClientDestroy = { client, promise };
+    return promise;
+  }
+
+  private capturedBrowserPid(client: Client): number | null {
+    const processHandle = (
+      client as unknown as { pupBrowser?: { process?: () => ObservedBrowserProcess | null } }
+    ).pupBrowser?.process?.();
+    return this.browserProcessSupervisor.getPid(client) ?? processHandle?.pid ?? null;
+  }
+
+  /**
+   * Phase 3 teardown: first ask whatsapp-web.js to close, then escalate ONLY against the
+   * browser captured by this adapter generation and this filesystem lease owner token.
+   * A missing PID never authorizes kill-by-name. The lease release independently checks
+   * all session-marked browsers and fails closed if one remains or enumeration fails.
+   *
+   * A failed lease release is not swallowed. The client remains attached on failure so
+   * SessionEngineControls.stop() can retry using forceDestroy() without losing its PID.
+   */
+  private async teardownBrowser(
+    client: Client, forceFirst: boolean, action: string, releaseLease = true,
+  ): Promise<void> {
+    const teardownStartedAt = Date.now();
+    this.host.logger.event(LogLevel.INFO, 'engine.browser.teardown_started', action,
+      'Browser teardown started', {
+        sessionId: this.host.config.sessionId, status: 'started',
+        forced: forceFirst, browserPid: this.browserProcessSupervisor.getPid(client),
+      });
+    let gracefulError: unknown;
+    let terminationError: unknown;
+    let forced = forceFirst;
+    const hadLease = Boolean(this.profileLeaseRelease);
+    let forcedSucceeded = false;
+    let destroySucceeded = false;
+
+    if (!forceFirst) {
+      try {
+        await boundedBrowserOperation(
+          () => this.destroyClientOnce(client),
+          BROWSER_TEARDOWN_BUDGETS.graceMs,
+          'client.destroy()',
+        );
+        destroySucceeded = true;
+      } catch (error) {
+        gracefulError = error;
+        forced = true;
+        this.host.logger.warn('Graceful Brave shutdown incomplete; escalating to owned tree termination', {
+          sessionId: this.host.config.sessionId, action: 'brave_graceful_shutdown_incomplete',
+          operation: action, error: String(error),
+        });
+      }
+    }
+
+    if (forced) {
+      const browserPid = this.capturedBrowserPid(client);
+      if (browserPid) {
+        try {
+          await boundedBrowserOperation(
+            () => this.braveProfileManager.terminateOwnedBrowserTree(
+              this.host.config.sessionId, browserPid, this.host.logger,
+              this.profileLeaseRelease?.ownerToken ?? '',
+            ),
+            BROWSER_TEARDOWN_BUDGETS.forceMs,
+            'owned Brave process-tree termination',
+          );
+          forcedSucceeded = true;
+        } catch (error) {
+          terminationError = error;
+          this.host.logger.warn('Ownership-verified Brave tree termination incomplete', {
+            sessionId: this.host.config.sessionId, action: 'brave_owned_tree_termination_failed',
+            operation: action, browserPid, error: String(error),
+          });
+        }
+      } else {
+        this.host.logger.warn('No captured Brave PID; cannot use forced OS termination', {
+          sessionId: this.host.config.sessionId, action: 'brave_process_pid_missing', operation: action,
+        });
+      }
+      // In a force-first path CDP teardown can hang after its browser has already exited.
+      // Bound it; whether teardown is actually safe is decided by verified tree termination
+      // AND release of our filesystem lock, not whether a dead CDP connection resolves.
+      if (forceFirst) {
+        try {
+          await boundedBrowserOperation(
+            () => this.destroyClientOnce(client),
+            BROWSER_TEARDOWN_BUDGETS.postKillDestroyMs,
+            'client.destroy() after forced termination',
+          );
+          destroySucceeded = true;
+        } catch (error) {
+          gracefulError = error;
+          this.host.logger.warn('Post-termination client.destroy() incomplete', {
+            sessionId: this.host.config.sessionId, action: 'brave_post_kill_destroy_incomplete',
+            operation: action, error: String(error),
+          });
+        }
+      }
+    }
+
+    // Profile reset keeps this same lease while deleting credentials. Never release it
+    // before the deletion; instead verify independently that no session browser lives.
+    try {
+      if (releaseLease) {
+        await this.releaseProfileLease();
+      } else {
+        await boundedBrowserOperation(
+          () => this.braveProfileManager.killOrphanedBraveProcesses(
+            this.host.config.sessionId, this.host.logger, false,
+          ),
+          BROWSER_TEARDOWN_BUDGETS.leaseMs,
+          'Brave profile-reset process verification',
+        );
+      }
+    } catch (releaseError) {
+      this.host.logger.event(LogLevel.ERROR, 'engine.browser.teardown_failed', action,
+        'Brave teardown incomplete; ownership remains protected', {
+          sessionId: this.host.config.sessionId, status: 'failed',
+          reasonCode: BraveFailureCode.BROWSER_TEARDOWN_INCOMPLETE,
+          browserPid: this.browserProcessSupervisor.getPid(client), forced,
+          elapsedMs: elapsedBrowserMs(teardownStartedAt),
+        });
+      throw new Error(
+        `BROWSER_TEARDOWN_INCOMPLETE: ${action}: profile lock retained; ` +
+        `graceful=${String(gracefulError ?? 'ok')}; ` +
+        `forced=${String(terminationError ?? 'not needed')}; ` +
+        `release=${String(releaseError)}`,
+      );
+    }
+
+    // Standalone adapters constructed without a lease must not silently count a failed
+    // destroy or a failed kill as complete. A real leased adapter relies on the release
+    // callback's independently verified absence of session-marked browser processes.
+    if (!hadLease && !destroySucceeded && !forcedSucceeded) {
+      this.host.logger.event(LogLevel.ERROR, 'engine.browser.teardown_failed', action,
+        'Brave teardown incomplete; browser exit not verified', {
+          sessionId: this.host.config.sessionId, status: 'failed',
+          reasonCode: BraveFailureCode.BROWSER_TEARDOWN_INCOMPLETE,
+          elapsedMs: elapsedBrowserMs(teardownStartedAt), forced,
+        });
+      throw new Error(`BROWSER_TEARDOWN_INCOMPLETE: ${action}: browser exit not verified`);
+    }
+    this.finishClientTeardown(client);
+    this.host.logger.event(LogLevel.INFO, 'engine.browser.teardown_succeeded', action,
+      'Brave teardown completed', {
+        sessionId: this.host.config.sessionId, action: 'brave_teardown_complete',
+        status: 'succeeded', elapsedMs: elapsedBrowserMs(teardownStartedAt),
+        forced, browserPid: this.browserProcessSupervisor.getPid(client),
+      });
+  }
+
+  private async finishTeardownWithClient(client: Client | null, force: boolean, action: string): Promise<void> {
+    if (!client) {
+      // The stuck-auth path temporarily detaches its Client before deleting the profile.
+      // A concurrent forceDestroy()/destroy() must not unlock it in the middle of deletion.
+      if (this.profileResetActive) {
+        throw new Error('BROWSER_PROFILE_RESET_IN_PROGRESS: profile lease remains held');
+      }
+      await this.releaseProfileLease();
+      return;
+    }
+    await this.teardownBrowser(client, force, action);
+  }
+
+  /** Called synchronously before stuck-auth detaches its client, fencing competing teardown. */
+  beginProfileReset(): void {
+    this.profileResetActive = true;
+  }
+
+  /** Stuck-auth reset holds this lease while its dedicated profile is deleted. */
+  async stopClientForProfileReset(client: Client | null): Promise<void> {
+    this.profileResetActive = true;
+    if (!client) {
+      await boundedBrowserOperation(
+        () => this.braveProfileManager.killOrphanedBraveProcesses(
+          this.host.config.sessionId, this.host.logger, false,
+        ),
+        BROWSER_TEARDOWN_BUDGETS.leaseMs,
+        'Brave profile-reset process verification',
+      );
+      return;
+    }
+    await this.teardownBrowser(client, false, 'stuck-auth-reset', false);
+  }
+
+  /** Invoked only after successful profile deletion, never before. */
+  async completeProfileReset(): Promise<void> {
+    await this.releaseProfileLease();
+    this.profileResetActive = false;
+  }
+
   async disconnect(): Promise<void> {
     this.host.logger.event(LogLevel.INFO, 'engine.wwebjs.disconnect_requested', 'disconnect', 'Browser engine disconnect requested', { sessionId: this.host.config.sessionId });
-  const client = this.beginClientTeardown();
-  if (!client) return;
-
-  try {
-    // With NoAuth + persistent profile, destroy() closes the browser
-    // but the profile (cookies, cache, localStorage) survives on disk.
-    // Next start: Brave reopens the same profile, WhatsApp reads the
-    // stored session, auto-restores — no QR scan needed.
-    await client.destroy();
-  } catch (error) {
-    this.host.logger.warn('Destroy client failed:', { error: String(error) });
-  } finally {
-    this.finishClientTeardown(client);
+    const client = this.beginClientTeardown();
+    await this.finishTeardownWithClient(client, false, 'disconnect');
   }
-}
 
   async logout(): Promise<void> {
     this.host.logger.event(LogLevel.INFO, 'engine.wwebjs.logout_requested', 'logout', 'Browser engine logout requested', { sessionId: this.host.config.sessionId });
     this.logoutInitiated = true;
     const client = this.beginClientTeardown();
     if (!client) {
+      await this.releaseProfileLease();
       throw new Error('No live WhatsApp Web client — the unlink was not sent');
     }
 
+    let logoutError: unknown;
     try {
-      await client.logout();
+      await boundedBrowserOperation(
+        () => client.logout(), BROWSER_TEARDOWN_BUDGETS.graceMs, 'client.logout()',
+      );
     } catch (error) {
-      this.host.logger.warn('Logout failed:', { error: String(error) });
-      try {
-        await client.destroy();
-      } catch (destroyError) {
-        this.host.logger.warn('Client destroy also failed during logout fallback', { error: String(destroyError) });
-      }
-      throw error;
-    } finally {
-      this.finishClientTeardown(client);
-      // Profile is INTENTIONALLY preserved. The Brave profile survives logout.
-      // Next start() with the same sessionId will reuse the same profile.
-      // If WhatsApp unlinked the device, the stale session in the profile will
-      // fail gracefully and emit a fresh QR code — no delete needed here.
+      logoutError = error;
+      this.host.logger.warn('WhatsApp logout did not complete; retiring the browser', {
+        sessionId: this.host.config.sessionId, action: 'brave_logout_incomplete', error: String(error),
+      });
     }
+    if (!logoutError) {
+      // whatsapp-web.js logout() already invokes destroy() before it resolves. Do NOT
+      // call destroy() again: it can hang on a closed CDP session and turn a confirmed
+      // unlink into a false timeout. Its profile lease still verifies browser exit.
+      try {
+        await this.releaseProfileLease();
+        this.finishClientTeardown(client);
+        return;
+      } catch (releaseError) {
+        // An acknowledged remote unlink is not enough to free an occupied profile.
+        // Escalate only with our captured PID + owner token. Failure remains visible.
+        this.host.logger.warn('Logout completed but browser ownership remains; escalating', {
+          sessionId: this.host.config.sessionId,
+          action: 'brave_logout_cleanup_escalation', error: String(releaseError),
+        });
+        await this.teardownBrowser(client, true, 'logout-post-unlink');
+        return;
+      }
+    }
+
+    // An unacknowledged/failed unlink must NEVER be reported as a successful logout.
+    // Retire the local browser anyway, retaining the lock on unsafe teardown.
+    try {
+      await this.teardownBrowser(client, true, 'logout');
+    } catch (cleanupError) {
+      throw new AggregateError([logoutError, cleanupError], 'WhatsApp logout and browser teardown both failed');
+    }
+    throw logoutError;
   }
 
   async destroy(): Promise<void> {
     this.host.logger.event(LogLevel.DEBUG, 'engine.wwebjs.destroy_requested', 'destroy', 'Browser engine destroy requested', { sessionId: this.host.config.sessionId });
     const client = this.beginClientTeardown();
-    if (!client) return;
-
-    try {
-      await client.destroy();
-    } finally {
-      this.finishClientTeardown(client);
-    }
+    await this.finishTeardownWithClient(client, false, 'destroy');
   }
 
-  /**
-   * Force-recover a wedged session: SIGKILL THIS client's own Chromium process directly (not a
-   * process-wide `pkill`, which would also kill other sessions), then best-effort `client.destroy()`
-   * for the rest of the cleanup. Both steps are wrapped so a missing process handle or a hung destroy
-   * can't prevent the engine from being torn down and the status reset.
-   */
+  /** Bounded immediate escalation for a wedged CDP client; never a machine-wide Brave kill. */
   async forceDestroy(): Promise<void> {
     this.host.logger.event(LogLevel.WARN, 'engine.wwebjs.force_destroy_requested', 'forceDestroy', 'Browser forced destruction requested', { sessionId: this.host.config.sessionId });
     const client = this.beginClientTeardown();
-    if (!client) return;
-
-    try {
-      // pupBrowser is the Puppeteer Browser; .process() is the Chromium ChildProcess (null if already gone).
-      const proc = (
-        client as unknown as { pupBrowser?: { process?: () => { kill?: (sig: string) => void } | null } }
-      ).pupBrowser?.process?.();
-      proc?.kill?.('SIGKILL');
-    } catch (err) {
-      this.host.logger.warn('forceDestroy: failed to kill the browser process', { error: String(err) });
-    }
-
-    try {
-      await client.destroy();
-    } catch (err) {
-      this.host.logger.warn('forceDestroy: client.destroy() failed after the kill (continuing)', {
-        error: String(err),
-      });
-    } finally {
-      this.finishClientTeardown(client);
-    }
+    await this.finishTeardownWithClient(client, true, 'forceDestroy');
   }
 
   getStatus(): EngineStatus {
@@ -1562,6 +1893,7 @@ export class WwebjsLifecycle {
       return;
     }
 
+    this.bridgeMonitor.invalidate(this.client!);
     const now = Date.now();
     if (this.navigationEpisodeStartedAt === 0) {
       this.navigationEpisodeStartedAt = now;
@@ -1602,28 +1934,22 @@ export class WwebjsLifecycle {
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
+      const sourceClient = this.client;
       const state = await Promise.race([
-        this.client.getState(),
+        sourceClient.getState(),
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => reject(new Error('liveness probe timed out')), 10_000);
           timeout.unref?.();
         }),
       ]);
+      if (this.client !== sourceClient) return false;
       if (state === WAState.CONNECTED) {
-        // CONNECTED alone is not enough to close a reinjection window on the patched client:
-        // eventsAttached=false means the page socket recovered but the message bridge is still being
-        // rebuilt. Closing the grace there recreates the exact false-death race this window exists
-        // to prevent. Unpatched clients expose `undefined`; preserve the legacy behaviour for them.
-        const eventsAttached =
-          (this.client as Client & { eventsAttached?: boolean } | null)?.eventsAttached;
-
-        if (eventsAttached !== false) {
-          // Observed recovery closes the navigation episode. Without this, an episode whose re-inject
-          // died silently (no 'ready' re-emit, but WA Web's socket back up) would keep a stale episode
-          // anchor forever, denying the grace to every LATER navigation via the episode cap.
-          this.clearNavigationReinjectWindow();
+        // WA socket connectivity does not prove that Node receives messages. During page reload,
+        // allow the bounded reinjection grace; after it expires, let the watchdog recover the engine.
+        if (this.getBridgeStatus(sourceClient) !== 'attached') {
+          return this.isInNavigationReinjectWindow();
         }
-
+        this.clearNavigationReinjectWindow();
         return true;
       }
       return this.isInNavigationReinjectWindow();

@@ -92,8 +92,12 @@ function createTestBraveProfileManager(
     profileExists: jest.fn().mockResolvedValue(true),
     ensureProfile: jest.fn().mockResolvedValue(undefined),
     deleteProfile: jest.fn().mockResolvedValue(undefined),
+    acquireProfileLease: jest.fn().mockResolvedValue(
+      Object.assign(async () => undefined, { ownerToken: '00000000-0000-4000-8000-000000000001' }),
+    ),
     killOrphanedBraveProcesses: jest.fn().mockResolvedValue(undefined),
     removeStaleSingletonFiles: jest.fn().mockResolvedValue(undefined),
+    terminateOwnedBrowserTree: jest.fn().mockResolvedValue(undefined),
   } as unknown as BraveProfileManager;
 }
 
@@ -671,6 +675,9 @@ describe('WhatsAppWebJsAdapter.requestPairingCode readiness', () => {
 
 describe('WhatsAppWebJsAdapter.getChatHistory enrichment (parity with the live path)', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -896,6 +903,9 @@ describe('WhatsAppWebJsAdapter.getChatHistory enrichment (parity with the live p
 
 describe('WhatsAppWebJsAdapter.sendPollMessage', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -946,6 +956,9 @@ describe('WhatsAppWebJsAdapter.sendPollMessage', () => {
 
 describe('WhatsAppWebJsAdapter.forwardMessage (returns the real sent id, not a synthetic fwd_ id)', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -1008,6 +1021,9 @@ describe('WhatsAppWebJsAdapter channels (#625 — wwebjs Client has no getChanne
   const CHANNEL = '120363401234567890@newsletter';
 
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -1064,6 +1080,9 @@ describe('WhatsAppWebJsAdapter channel-JID guard (#554 — wwebjs Channel lacks 
   const USER = '628111@c.us';
 
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -1343,6 +1362,9 @@ describe('WhatsAppWebJsAdapter chat labels (add/remove via read-modify-write, Bu
   const NEWSLETTER = '120363401234567890@newsletter';
 
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -1411,29 +1433,32 @@ describe('WhatsAppWebJsAdapter.forceDestroy (recover a wedged session, #351)', (
   };
   const getClient = (adapter: WhatsAppWebJsAdapter): unknown => (adapter as unknown as { client: unknown }).client;
 
-  it('SIGKILLs only its own browser process, then best-effort destroys the client', async () => {
-    const kill = jest.fn();
+  it('requests verified tree termination for its captured Brave PID, then destroys the client', async () => {
+    const terminateOwnedBrowserTree = jest.fn().mockResolvedValue(undefined);
     const destroy = jest.fn().mockResolvedValue(undefined);
-    const adapter = newAdapter();
-    setClient(adapter, { pupBrowser: { process: () => ({ kill }) }, destroy });
+    const adapter = new WhatsAppWebJsAdapter(createWwebjsTestConfig(
+      'sess-1', {}, { terminateOwnedBrowserTree } as unknown as BraveProfileManager,
+    ));
+    setClient(adapter, { pupBrowser: { process: () => ({ pid: 12345 }) }, destroy });
 
     await adapter.forceDestroy();
 
-    expect(kill).toHaveBeenCalledWith('SIGKILL');
+    expect(terminateOwnedBrowserTree).toHaveBeenCalledWith('sess-1', 12345, expect.anything(), '');
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(getClient(adapter)).toBeNull();
     expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
   });
 
-  it('still completes when the process handle is gone and destroy() rejects (best-effort)', async () => {
+  it('reports an incomplete teardown when no PID or lease can prove a failed destroy is safe', async () => {
     const adapter = newAdapter();
     setClient(adapter, {
       pupBrowser: { process: () => null },
       destroy: jest.fn().mockRejectedValue(new Error('wedged')),
     });
 
-    await expect(adapter.forceDestroy()).resolves.toBeUndefined();
-    expect(getClient(adapter)).toBeNull();
+    await expect(adapter.forceDestroy()).rejects.toThrow(/BROWSER_TEARDOWN_INCOMPLETE/);
+    // Keep the client handle so a later verified retry can inspect/retire the same browser.
+    expect(getClient(adapter)).not.toBeNull();
     expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
   });
 
@@ -1608,6 +1633,7 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
     const client = Object.assign(new EventEmitter(), {
       info: { wid: { user: '628123' }, pushname: 'Tester' },
       getState: jest.fn().mockResolvedValue(WAState.CONNECTED),
+      eventsAttached: true,
       pupPage: {
         evaluate: jest.fn().mockResolvedValue(true),
       },
@@ -1877,6 +1903,43 @@ describe('WhatsAppWebJsAdapter ready reconciliation (#251/#273)', () => {
 
     // The attach completes and re-emits ready — this one counts.
     client.eventsAttached = true;
+    client.emit('ready');
+    expect(adapter.getStatus()).toBe(EngineStatus.READY);
+    expect(onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not promote an unverified unpatched client on a native ready event', () => {
+    jest.useFakeTimers();
+    const adapter = newAdapter();
+    const { client, onReady } = attachFakeClient(adapter, { eventsAttached: undefined });
+    client.emit('authenticated');
+    client.emit('ready');
+    expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
+    expect(onReady).not.toHaveBeenCalled();
+  });
+
+  it('promotes an unpatched 1.34.8 client only after the observed attach method resolves', async () => {
+    jest.useFakeTimers();
+    const adapter = newAdapter();
+    let resolve!: () => void;
+    const attachment = new Promise<void>(yes => { resolve = yes; });
+    const { client, onReady } = attachFakeClient(adapter, {
+      eventsAttached: undefined,
+      attachEventListeners: jest.fn(() => attachment),
+    } as unknown as Partial<FakeClient>);
+    const monitor = (adapter as unknown as {
+      lifecycle: { bridgeMonitor: { instrument: (c: unknown) => boolean } };
+    }).lifecycle.bridgeMonitor;
+    expect(monitor.instrument(client)).toBe(true);
+
+    client.emit('authenticated');
+    const attach = (client as unknown as { attachEventListeners: () => Promise<void> }).attachEventListeners();
+    client.emit('ready');
+    expect(adapter.getStatus()).toBe(EngineStatus.AUTHENTICATING);
+    expect(onReady).not.toHaveBeenCalled();
+
+    resolve();
+    await attach;
     client.emit('ready');
     expect(adapter.getStatus()).toBe(EngineStatus.READY);
     expect(onReady).toHaveBeenCalledTimes(1);
@@ -2584,6 +2647,9 @@ describe('WhatsAppWebJsAdapter.resolveContactPhone (@lid -> phone, #263)', () =>
 
 describe('WhatsAppWebJsAdapter status methods', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -4823,6 +4889,9 @@ describe('WhatsAppWebJsAdapter inbound media concurrency (slot held until the re
  */
 describe('WhatsAppWebJsAdapter send-result contract', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -4922,6 +4991,9 @@ describe('WhatsAppWebJsAdapter message_ack (unreadable id)', () => {
 
 describe('WhatsAppWebJsAdapter createGroup (not available on this engine)', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -5083,6 +5155,9 @@ describe('WhatsAppWebJsAdapter.probeLiveness (session watchdog probe)', () => {
   const adapterWith = (client: unknown, status: EngineStatus = EngineStatus.READY): WhatsAppWebJsAdapter => {
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = status;
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     (adapter as unknown as { client: unknown }).client = client;
     return adapter;
   };
@@ -5091,6 +5166,14 @@ describe('WhatsAppWebJsAdapter.probeLiveness (session watchdog probe)', () => {
     const adapter = adapterWith({ getState: jest.fn().mockResolvedValue(WAState.CONNECTED) });
 
     await expect(adapter.probeLiveness()).resolves.toBe(true);
+  });
+
+  it('fails the watchdog when CONNECTED has no verified event bridge', async () => {
+    const adapter = adapterWith({
+      getState: jest.fn().mockResolvedValue(WAState.CONNECTED),
+      eventsAttached: undefined,
+    });
+    await expect(adapter.probeLiveness()).resolves.toBe(false);
   });
 
   it('resolves false when getState() rejects (page already gone)', async () => {
@@ -5166,6 +5249,7 @@ describe('WhatsAppWebJsAdapter navigation re-inject grace (#1081)', () => {
         .mockRejectedValue(new Error('Execution context was destroyed, most likely because of a navigation.')),
       pupBrowser: new EventEmitter(),
       pupPage: new EventEmitter(),
+      eventsAttached: true,
       ...clientOverrides,
     });
     (adapter as unknown as { client: unknown }).client = client;
@@ -5623,6 +5707,9 @@ describe('WhatsAppWebJsAdapter Brave launch marker and pre-launch orchestration'
 
 describe('WhatsAppWebJsAdapter page transport error detection (wedged page fast-path, wwebjs #5728)', () => {
   const readyAdapter = (client: unknown): { adapter: WhatsAppWebJsAdapter; onDisconnected: jest.Mock } => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -5744,6 +5831,9 @@ describe('WhatsAppWebJsAdapter page transport error detection (wedged page fast-
 
 describe('WhatsAppWebJsAdapter group join + settings + own profile', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -5936,6 +6026,9 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
   const GROUP = '120363000@g.us';
 
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -7213,6 +7306,9 @@ describe('WhatsAppWebJsAdapter channel administration', () => {
   const CHANNEL = '120363401234567890@newsletter';
 
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -7308,6 +7404,9 @@ describe('WhatsAppWebJsAdapter channel administration', () => {
 // caller would read as fact, and that a shapeless answer becomes a not-found.
 describe('WhatsAppWebJsAdapter group join-info', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -7365,6 +7464,9 @@ describe('WhatsAppWebJsAdapter group join-info', () => {
 // only an explicit false is worth forwarding — and forwarding it is what actually suppresses.
 describe('WhatsAppWebJsAdapter link preview', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -7470,6 +7572,9 @@ describe('WhatsAppWebJsAdapter voice status', () => {
 // joinGroupViaInviteCode already makes this split.
 describe('WhatsAppWebJsAdapter transport death is not a not-found', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;
@@ -7516,6 +7621,9 @@ describe('WhatsAppWebJsAdapter transport death is not a not-found', () => {
 
 describe('WhatsAppWebJsAdapter raw-id extraction hardening', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    if (client && typeof client === 'object' && !('eventsAttached' in client)) {
+      (client as { eventsAttached?: boolean }).eventsAttached = true;
+    }
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
     (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
     (adapter as unknown as { client: unknown }).client = client;

@@ -21,12 +21,11 @@ import * as path from 'path';
 const NORMALIZED_ID_MARKER = /_normalizeId\(|\.\$1/;
 
 export const BACKPORT_MISSING_MESSAGE =
-  'The installed whatsapp-web.js is missing the message-id backport this build requires. On current ' +
-  'WhatsApp Web builds every send will fail with "the engine returned no message" — even when the ' +
-  'message is delivered — and chat and media reads will fail with "r: r". The install skipped the ' +
-  'patch, usually because neither the `patch` binary nor git was available. Apply it with ' +
-  '`node scripts/patch-wwebjs-201832.js` (or reinstall with `npm install`) and restart. ' +
-  'See docs/12-troubleshooting-faq.md.';
+  'The installed whatsapp-web.js Message.js source lacks an identifiable message-ID normalization ' +
+  'fix (_normalizeId or $1 fallback). On WhatsApp Web builds that use id.$1 this can break message ' +
+  'IDs and outgoing sends. Version 1.34.8 includes the upstream normalization; verify the actual ' +
+  'installed package, clean up stale patches targeting 1.34.7, and reinstall from the lockfile. ' +
+  'Apply a backport script only if the installed older version actually needs it.';
 
 /**
  * Whether the installed whatsapp-web.js is known NOT to carry the backport.

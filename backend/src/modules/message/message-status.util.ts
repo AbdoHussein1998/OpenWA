@@ -50,11 +50,11 @@ export function deliveryStatusToAck(status: DeliveryStatus): number {
 export function ackStatusTransitionFrom(target: MessageStatus): MessageStatus[] {
   switch (target) {
     case MessageStatus.DELIVERED:
-      return [MessageStatus.PENDING, MessageStatus.SENT];
+      return [MessageStatus.PENDING, MessageStatus.SENT, MessageStatus.UNCERTAIN];
     case MessageStatus.READ:
-      return [MessageStatus.PENDING, MessageStatus.SENT, MessageStatus.DELIVERED];
+      return [MessageStatus.PENDING, MessageStatus.SENT, MessageStatus.UNCERTAIN, MessageStatus.DELIVERED];
     case MessageStatus.FAILED:
-      return [MessageStatus.PENDING, MessageStatus.SENT];
+      return [MessageStatus.PENDING, MessageStatus.SENT, MessageStatus.UNCERTAIN];
     default:
       return [];
   }

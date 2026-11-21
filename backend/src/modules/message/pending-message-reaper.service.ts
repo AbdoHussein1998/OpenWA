@@ -40,10 +40,10 @@ export interface PendingMessageReaperStats {
  * and in any search provider's index fed by `message:persisted`, as a message that never resolves.
  *
  * The reaper sweeps small batches of stale outgoing PENDING rows (older than the grace window),
- * marks them FAILED with a `reapedAt` metadata marker (distinguishable from a genuine send failure
- * without a new column), and re-emits `message:persisted` for each — the same emission MessageService
+ * marks them UNCERTAIN with a `reapedAt` metadata marker (distinguishable from a genuine send failure), and re-emits `message:persisted` for each — the same emission MessageService
  * performs for every persisted outbound state — so a provider's copy reconciles to the terminal
- * state instead of staying stuck at the initial PENDING write.
+ * state instead of staying stuck at the initial PENDING write. The reaper cannot know whether
+ * a process crashed before or after WhatsApp accepted the send, so FAILED would be misleading.
  *
  * Mirrors IngressReconcilerService's lifecycle: a raw unref'd setInterval started on module init
  * (first sweep after one interval), cleared on destroy. Young PENDING rows (a send still in flight)
@@ -129,14 +129,14 @@ export class PendingMessageReaperService implements OnModuleInit, OnModuleDestro
   private async reapRow(row: Message, now: Date): Promise<boolean> {
     // A reaped row is terminal: it is never retried and its media is never rendered, so drop the
     // base64 payload exactly as MessageService.saveFailedMessage does for a genuine send failure —
-    // keeping a multi-MB payload in a terminal row only bloats the messages table. The reapedAt
-    // marker tells the reaper's FAILED apart from a real send failure.
+    // keeping a multi-MB payload in an unresolved row only bloats the messages table. The reapedAt
+    // marker records an interrupted send that may have reached WhatsApp.
     const media = (row.metadata as { media?: { data?: unknown } } | undefined)?.media;
     if (media) {
       delete media.data;
     }
     row.metadata = { ...(row.metadata ?? {}), reapedAt: now.toISOString() };
-    row.status = MessageStatus.FAILED;
+    row.status = MessageStatus.UNCERTAIN;
     // The guard lives IN the UPDATE: a send that resolved between this sweep's find() and this
     // write has already persisted its own SENT + waMessageId, and a blind save would clobber that
     // terminal outcome back to FAILED/null. Zero affected rows = the live path won the race —

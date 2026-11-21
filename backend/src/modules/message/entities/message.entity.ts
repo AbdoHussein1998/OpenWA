@@ -37,6 +37,8 @@ export enum MessageStatus {
   DELIVERED = 'delivered',
   READ = 'read',
   FAILED = 'failed',
+  /** The engine may already have sent this message; automatic retry is unsafe. */
+  UNCERTAIN = 'uncertain',
 }
 
 @Entity('messages')
@@ -45,6 +47,7 @@ export enum MessageStatus {
 // Composite index for the ack-driven status UPDATE (scoped by sessionId + waMessageId).
 // Without it every ack does a full table scan of a hot table.
 @Index('UQ_messages_sessionId_waMessageId', ['sessionId', 'waMessageId'], { unique: true })
+@Index('UQ_messages_sessionId_idempotencyKey', ['sessionId', 'idempotencyKey'], { unique: true })
 export class Message {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -60,6 +63,14 @@ export class Message {
 
   @Column({ nullable: true })
   waMessageId!: string;
+
+  /** Optional caller-supplied per-session send key. NULL for legacy and non-keyed operations. */
+  @Column({ type: 'varchar', length: 128, nullable: true, select: false })
+  idempotencyKey?: string | null;
+
+  /** SHA-256 of the effective send payload + action, used only to detect key reuse. */
+  @Column({ type: 'varchar', length: 64, nullable: true, select: false })
+  sendRequestHash?: string | null;
 
   @Column()
   chatId!: string;

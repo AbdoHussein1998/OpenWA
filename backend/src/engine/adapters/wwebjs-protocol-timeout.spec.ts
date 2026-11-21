@@ -35,13 +35,16 @@ describe('whatsapp-web.js protocol timeout', () => {
   const braveProfileManager = {
     getProfilePath: jest.fn((sessionId: string) => `./data/brave-profiles/${sessionId}`),
     ensureProfile: jest.fn().mockResolvedValue(undefined),
+    acquireProfileLease: jest.fn().mockResolvedValue(
+      Object.assign(async () => undefined, { ownerToken: '00000000-0000-4000-8000-000000000001' }),
+    ),
     killOrphanedBraveProcesses: jest.fn().mockResolvedValue(undefined),
     removeStaleSingletonFiles: jest.fn().mockResolvedValue(undefined),
   } as unknown as BraveProfileManager;
 
   const launchedPuppeteerOptions = async (
     protocolTimeoutMs?: number,
-  ): Promise<{ protocolTimeout?: number } | undefined> => {
+  ): Promise<{ protocolTimeout?: number; args?: string[] } | undefined> => {
     const adapter = new WhatsAppWebJsAdapter({
       sessionId: SESSION_ID,
       sessionDataPath: './data/sessions',
@@ -67,6 +70,7 @@ describe('whatsapp-web.js protocol timeout', () => {
           options: {
             puppeteer?: {
               protocolTimeout?: number;
+              args?: string[];
             };
           };
         };
@@ -99,6 +103,12 @@ describe('whatsapp-web.js protocol timeout', () => {
     } else {
       process.env.WWEBJS_WEB_VERSION = savedWebVersion;
     }
+  });
+
+  it('tags the launched Brave browser with the exact filesystem lease generation', async () => {
+    const options = await launchedPuppeteerOptions();
+    expect(options?.args).toContain('--al-hakim-lease=00000000-0000-4000-8000-000000000001');
+    expect(options?.args).toContain('--al-hakim-session=sess-protocol-timeout');
   });
 
   it('hands a configured budget to the Client as puppeteer.protocolTimeout', async () => {

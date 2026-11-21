@@ -2,7 +2,8 @@ import { ConflictException } from '@nestjs/common';
 
 export type EngineNotReadyCode =
   | 'ENGINE_NOT_READY'
-  | 'ENGINE_REINJECTING';
+  | 'ENGINE_REINJECTING'
+  | 'ENGINE_EVENT_BRIDGE_NOT_READY';
 
 /**
  * Thrown by the engine layer when an operation requires a connected, READY
@@ -14,6 +15,8 @@ export type EngineNotReadyCode =
  * page bridge. Both remain HTTP 409 so existing callers keep the same retryable
  * conflict semantics, while newer dashboard code can distinguish the expected
  * reinjection window without parsing human-readable text.
+ * `ENGINE_EVENT_BRIDGE_NOT_READY` identifies a client that is logically READY
+ * but whose WhatsApp Web event listeners have not been confirmed attached.
  */
 export class EngineNotReadyError extends ConflictException {
   constructor(

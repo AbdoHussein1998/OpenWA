@@ -1,7 +1,7 @@
-import { Injectable, BadRequestException, Optional } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, HttpException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, QueryDeepPartialEntity } from 'typeorm';
+import { In, Repository, QueryDeepPartialEntity } from 'typeorm';
 import { SessionService } from '../session/session.service';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SendTextMessageDto, SendMediaMessageDto, SendAudioMessageDto, MessageResponseDto } from './dto';
@@ -19,6 +19,9 @@ import { resolveFeatureFlags } from '../../config/feature-flags';
 import { isUniqueViolation } from '../../common/utils/db-errors';
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
 import { phoneFromWhatsAppIdentity } from './message-phone.util';
+import { sendIdempotencyFields } from './send-idempotency.util';
+import { SendOutcomeUncertainError } from '../../common/errors/send-outcome-uncertain.error';
+import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 
 /** Default cap on a rendered template's final text; overridable via TEMPLATE_RENDER_MAX_CHARS. */
 export const DEFAULT_TEMPLATE_RENDER_MAX_CHARS = 64 * 1024;
@@ -37,6 +40,8 @@ function isUrlPointerMetadata(metadata: Record<string, unknown> | undefined): bo
 /** Persistence payload for one outbound row written by {@link MessageSendService.saveOutgoingMessage}. */
 export interface SaveOutgoingMessageData {
   waMessageId?: string;
+  idempotencyKey?: string;
+  sendRequestHash?: string;
   chatId: string;
   body?: string;
   type: string;
@@ -103,6 +108,7 @@ export class MessageSendService {
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('text', finalDto),
       chatId: finalDto.chatId,
       body: finalDto.text,
       type: 'text',
@@ -131,8 +137,8 @@ export class MessageSendService {
         result = await engine.sendTextMessage(finalDto.chatId, finalDto.text);
       }
     } catch (error) {
-      // The SEND itself failed — mark FAILED + fire message:failed (a post-send persistence fault is
-      // handled separately by persistSentState and must NOT land here).
+      // Failed-before-send errors become FAILED; ambiguous post-invocation errors become UNCERTAIN.
+      // A post-send persistence fault is handled separately by persistSentState.
       return this.failSend(sessionId, 'text', message, finalDto, error);
     }
 
@@ -164,15 +170,22 @@ export class MessageSendService {
     // message's own row already makes that chat warm, so the gate is a no-op there.
     const target = input as { chatId?: string; toChatId?: string };
     await this.pacing.assertSendAllowed(sessionId, target.chatId ?? target.toChatId);
-    return applySendingGate(this.hookManager, sessionId, type, input, 'MessageService');
+    const gated = await applySendingGate(this.hookManager, sessionId, type, input, 'MessageService');
+    // The idempotency key belongs to the caller, not to a plugin rewriting the message. A plugin
+    // that replaces the payload must not accidentally strip the duplicate-send guard (or inject
+    // its own key). Fingerprinting still uses the effective post-plugin message content.
+    const originalKey = (input as { idempotencyKey?: string }).idempotencyKey;
+    const result = gated as T & { idempotencyKey?: string };
+    if (originalKey !== undefined) return { ...result, idempotencyKey: originalKey };
+    if (!Object.prototype.hasOwnProperty.call(result, 'idempotencyKey')) return gated;
+    const { idempotencyKey: _ignoredPluginKey, ...rest } = result;
+    return rest as T;
   }
 
   /**
-   * Mark a send as FAILED, fire the `message:failed` plugin hook, then throw a client-facing error.
-   * Centralised so failure notifications cover every sender (previously only `sendText` fired
-   * `message:failed`; media/extended sends failed silently to plugins). The post-send persistence-fault
-   * path (persistSentState) deliberately does NOT route here — a message the engine already accepted
-   * must never be reported as a send failure.
+   * Separate definitive pre-wire failures from an indeterminate post-dispatch result. An unknown
+   * outcome stays UNCERTAIN and surfaces 409; message:failed is emitted only for a definite failure.
+   * The post-send persistence-fault path (persistSentState) does not route here.
    */
   private async failSend(
     sessionId: string,
@@ -187,6 +200,25 @@ export class MessageSendService {
     // requests trip the breaker on a healthy session.
     if (countsTowardSendBreaker(error)) {
       this.pacing.recordSendFailure(sessionId);
+    }
+    // A browser/transport failure after dispatch does not prove the message was NOT accepted.
+    // Preserve the row as UNCERTAIN, do not fire message:failed, and do not instruct the client
+    // to retry blindly. Deterministic 4xx pre-send validation still uses FAILED below.
+    const definiteFailure = error instanceof SsrfBlockedError || error instanceof EngineNotSupportedError ||
+      (error instanceof HttpException && error.getStatus() >= 400 && error.getStatus() < 500 &&
+       !(error instanceof SendOutcomeUncertainError));
+    if (!definiteFailure) {
+      try {
+        await this.saveUncertainMessage(message);
+      } catch (persistError) {
+        // The 409 remains informative even when the row update itself fails; the initial PENDING
+        // row was already written and the reaper will mark it UNCERTAIN after the grace window.
+        this.logger.error('Failed to persist uncertain send outcome', String(persistError));
+      }
+      this.logger.warn('WhatsApp send outcome unknown; automatic retry unsafe', {
+        sessionId, localMessageId: message.id, type,
+      });
+      throw new SendOutcomeUncertainError(message.id);
     }
     await this.saveFailedMessage(message);
     // Sanitize the hook payload: an SSRF block's raw .message names the resolved internal address
@@ -246,6 +278,7 @@ export class MessageSendService {
       text,
       mentions: dto.mentions,
       linkPreview: dto.linkPreview,
+      ...(dto.idempotencyKey ? { idempotencyKey: dto.idempotencyKey } : {}),
     });
   }
 
@@ -257,6 +290,7 @@ export class MessageSendService {
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('image', finalDto),
       chatId: finalDto.chatId,
       body: finalDto.caption || '',
       type: 'image',
@@ -283,6 +317,7 @@ export class MessageSendService {
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('video', finalDto),
       chatId: finalDto.chatId,
       body: finalDto.caption || '',
       type: 'video',
@@ -319,6 +354,7 @@ export class MessageSendService {
     // Save message as pending BEFORE sending. A PTT send is a 'voice' note (matches inbound
     // classification, the outbound webhook echo, stats, and the dashboard), not a plain 'audio' file.
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('audio', finalDto),
       chatId: finalDto.chatId,
       type: finalDto.ptt ? 'voice' : 'audio',
       metadata: {
@@ -344,6 +380,7 @@ export class MessageSendService {
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('document', finalDto),
       chatId: finalDto.chatId,
       body: finalDto.caption || finalDto.filename || '',
       type: 'document',
@@ -371,6 +408,7 @@ export class MessageSendService {
       description?: string;
       address?: string;
       quotedMessageId?: string;
+      idempotencyKey?: string;
     },
   ): Promise<MessageResponseDto> {
     this.logger.event(LogLevel.DEBUG, 'message.send_location.started', 'sendLocation', 'Location message send started', { sessionId });
@@ -379,6 +417,7 @@ export class MessageSendService {
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('location', finalDto),
       chatId: finalDto.chatId,
       body: `📍 ${finalDto.description || 'Location'}`,
       type: 'location',
@@ -402,7 +441,7 @@ export class MessageSendService {
 
   async sendContact(
     sessionId: string,
-    dto: { chatId: string; contactName: string; contactNumber: string; quotedMessageId?: string },
+    dto: { chatId: string; contactName: string; contactNumber: string; quotedMessageId?: string; idempotencyKey?: string },
   ): Promise<MessageResponseDto> {
     this.logger.event(LogLevel.DEBUG, 'message.send_contact.started', 'sendContact', 'Contact message send started', { sessionId });
     const finalDto = await this.applySendingGate(sessionId, 'contact', dto);
@@ -410,6 +449,7 @@ export class MessageSendService {
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('contact', finalDto),
       chatId: finalDto.chatId,
       body: `📇 ${finalDto.contactName}`,
       type: 'contact',
@@ -431,7 +471,7 @@ export class MessageSendService {
 
   async sendPoll(
     sessionId: string,
-    dto: { chatId: string; name: string; options: string[]; allowMultipleAnswers?: boolean; quotedMessageId?: string },
+    dto: { chatId: string; name: string; options: string[]; allowMultipleAnswers?: boolean; quotedMessageId?: string; idempotencyKey?: string },
   ): Promise<MessageResponseDto> {
     this.logger.event(LogLevel.DEBUG, 'message.send_poll.started', 'sendPoll', 'Poll send started', { sessionId });
     const finalDto = await this.applySendingGate(sessionId, 'poll', dto);
@@ -440,6 +480,7 @@ export class MessageSendService {
     // Save message as pending BEFORE sending. A poll has no plain-text body, so store the
     // question — that keeps the message history readable.
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('poll', finalDto),
       chatId: finalDto.chatId,
       body: `📊 ${finalDto.name}`,
       type: 'poll',
@@ -468,6 +509,7 @@ export class MessageSendService {
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('sticker', finalDto),
       chatId: finalDto.chatId,
       type: 'sticker',
       quotedMessageId: finalDto.quotedMessageId,
@@ -487,7 +529,7 @@ export class MessageSendService {
 
   async reply(
     sessionId: string,
-    dto: { chatId: string; quotedMessageId: string; text: string; mentions?: string[] },
+    dto: { chatId: string; quotedMessageId: string; text: string; mentions?: string[]; idempotencyKey?: string },
   ): Promise<MessageResponseDto> {
     this.logger.event(LogLevel.DEBUG, 'message.reply.started', 'reply', 'Message reply started', { sessionId });
     const finalDto = await this.applySendingGate(sessionId, 'reply', dto);
@@ -506,6 +548,7 @@ export class MessageSendService {
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('reply', finalDto),
       chatId: finalDto.chatId,
       body: finalDto.text,
       type: 'text',
@@ -529,7 +572,7 @@ export class MessageSendService {
 
   async forward(
     sessionId: string,
-    dto: { fromChatId: string; toChatId: string; messageId: string },
+    dto: { fromChatId: string; toChatId: string; messageId: string; idempotencyKey?: string },
   ): Promise<MessageResponseDto> {
     this.logger.event(LogLevel.DEBUG, 'message.forward.started', 'forward', 'Message forwarding started', { sessionId });
     const finalDto = await this.applySendingGate(sessionId, 'forward', dto);
@@ -537,6 +580,7 @@ export class MessageSendService {
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
+      ...sendIdempotencyFields('forward', finalDto),
       chatId: finalDto.toChatId,
       body: '[Forwarded]',
       type: 'forward',
@@ -575,6 +619,8 @@ export class MessageSendService {
       // swallowed into a warning, losing the row silently. Normalizing at this one chokepoint covers
       // every caller instead of relying on each to remember.
       waMessageId: data.waMessageId || undefined,
+      idempotencyKey: data.idempotencyKey,
+      sendRequestHash: data.sendRequestHash,
       chatId: data.chatId,
       from: session?.phone || 'me',
       to: data.chatId,
@@ -590,6 +636,26 @@ export class MessageSendService {
         : data.metadata,
     });
     const saved = await this.messageRepository.save(message).catch(async (err: unknown) => {
+      if (data.idempotencyKey && isUniqueViolation(err)) {
+        const existing = await this.messageRepository.findOne({
+          where: { sessionId, idempotencyKey: data.idempotencyKey },
+          // Both fields are hidden from ordinary message-history SELECTs; this explicit
+          // select is required to distinguish a true replay from a changed request.
+          select: { id: true, status: true, waMessageId: true, sendRequestHash: true },
+        });
+        if (existing) {
+          const reused = existing.sendRequestHash !== data.sendRequestHash;
+          throw new ConflictException({
+            code: reused ? 'SEND_IDEMPOTENCY_KEY_REUSED' : 'SEND_IDEMPOTENCY_REPLAY',
+            message: reused
+              ? 'This idempotencyKey was used with different send content.'
+              : 'This idempotencyKey has already been accepted; no second WhatsApp send was started.',
+            localMessageId: existing.id,
+            status: existing.status,
+            ...(existing.waMessageId ? { messageId: existing.waMessageId } : {}),
+          });
+        }
+      }
       const waMessageId = message.waMessageId;
       if (!waMessageId || !isUniqueViolation(err)) throw err;
       const patch: QueryDeepPartialEntity<Message> = {
@@ -645,6 +711,16 @@ export class MessageSendService {
    * (often multi-MB) is never displayed or retried, so keeping it only bloats the messages table; the
    * mimetype/filename are kept so the row still describes what was attempted.
    */
+  private async saveUncertainMessage(message: Message): Promise<void> {
+    // An uncertain row must remain inspectable, but inlining multi-MB base64 in an unresolved
+    // operation is unnecessary. Do NOT turn it into FAILED: WhatsApp may already have it.
+    const media = (message.metadata as { media?: { data?: unknown } } | undefined)?.media;
+    if (media) delete media.data;
+    message.status = MessageStatus.UNCERTAIN;
+    await this.messageRepository.save(message);
+    this.emitPersisted(message.sessionId, message);
+  }
+
   private async saveFailedMessage(message: Message): Promise<void> {
     const media = (message.metadata as { media?: { data?: unknown } } | undefined)?.media;
     if (media) {
@@ -690,8 +766,9 @@ export class MessageSendService {
             messageId: message.id,
           },
         );
+        // Update metadata separately from delivery status. An ACK may already have made the
+        // surviving echo DELIVERED/READ; an unconditional status:SENT patch would roll it back.
         const patch: QueryDeepPartialEntity<Message> = {
-          status: MessageStatus.SENT,
           timestamp: result.timestamp,
           sentByPhone: message.sentByPhone,
           sentToPhone: message.sentToPhone,
@@ -699,27 +776,66 @@ export class MessageSendService {
         if (message.metadata && !isUrlPointerMetadata(message.metadata)) {
           patch.metadata = message.metadata as QueryDeepPartialEntity<Record<string, unknown>>;
         }
-        await this.messageRepository
-          .update({ sessionId: message.sessionId, waMessageId: result.id }, patch)
-          .catch(err =>
-            this.logger.warn(`Merging SENT state onto the echo-persisted row failed (id=${result.id})`, {
-              error: err instanceof Error ? err.message : String(err),
-            }),
+        const echoWhere = { sessionId: message.sessionId, waMessageId: result.id };
+        let pendingRowRemoved = false;
+        if (message.idempotencyKey) {
+          // The pending row is the UNIQUE idempotency-key owner. Deleting it first and only
+          // later copying the key to the echo creates a replay window across backend workers.
+          // Transfer claim+payload in ONE DB transaction: either the echo owns the key at commit,
+          // or the pending row remains a durable duplicate-send guard after rollback.
+          try {
+            await this.messageRepository.manager.transaction(async manager => {
+              await manager.delete(Message, { id: message.id, sessionId: message.sessionId });
+              const transferred = await manager.update(Message, echoWhere, {
+                ...patch,
+                idempotencyKey: message.idempotencyKey,
+                sendRequestHash: message.sendRequestHash,
+              });
+              if (transferred.affected === 0) throw new Error('Echo disappeared during idempotency-key transfer');
+              await manager.update(Message, {
+                ...echoWhere,
+                status: In([MessageStatus.PENDING, MessageStatus.UNCERTAIN]),
+              }, { status: MessageStatus.SENT });
+            });
+            pendingRowRemoved = true;
+          } catch (transferError) {
+            this.logger.error(
+              'Atomic echo/idempotency-claim merge failed; pending claim retained',
+              transferError instanceof Error
+                ? transferError.stack ?? transferError.message
+                : String(transferError),
+              { sessionId: message.sessionId, messageId: message.id },
+            );
+          }
+        } else {
+          await this.messageRepository.update(echoWhere, patch).catch(err =>
+            this.logger.warn(`Merging message metadata onto echo ${result.id} failed`, { error: String(err) }),
           );
-        await this.messageRepository.delete({ id: message.id }).catch(() => undefined);
+          await this.messageRepository.update({
+            ...echoWhere,
+            status: In([MessageStatus.PENDING, MessageStatus.UNCERTAIN]),
+          }, { status: MessageStatus.SENT }).catch(err =>
+            this.logger.warn(`Advancing echo ${result.id} to SENT failed`, { error: String(err) }),
+          );
+          await this.messageRepository.delete({ id: message.id }).then(() => {
+            pendingRowRemoved = true;
+          }).catch(() => undefined);
+        }
         // Reconcile provider indexes (#906): upsert the surviving echo row (now carrying our SENT
         // state + media) and drop the ghost PENDING document this redundant row produced earlier.
         const surviving = await this.messageRepository
           .findOne({ where: { sessionId: message.sessionId, waMessageId: result.id } })
           .catch(() => null);
         if (surviving) this.emitPersisted(message.sessionId, surviving);
-        void this.hookManager
-          .execute(
-            'message:deleted',
-            { sessionId: message.sessionId, message: { ...message } },
-            { sessionId: message.sessionId, source: 'MessageService' },
-          )
-          .catch(() => undefined);
+        if (pendingRowRemoved) {
+          void this.hookManager
+            .execute(
+              'message:deleted',
+              { sessionId: message.sessionId, message: { ...message } },
+              { sessionId: message.sessionId, source: 'MessageService' },
+            )
+            .catch(() => undefined);
+        }
       } else {
         this.logger.warn(`Persisting SENT state failed after a successful send (id=${result.id})`, {
           error: persistError instanceof Error ? persistError.message : String(persistError),

@@ -10,6 +10,7 @@ import {
   ArrayMinSize,
   ArrayMaxSize,
   MaxLength,
+  Matches,
   IsIn,
   Validate,
 } from 'class-validator';
@@ -38,6 +39,18 @@ export const CONTACT_NUMBER_MAX_LENGTH = 30;
 export const REACTION_EMOJI_MAX_LENGTH = 32;
 
 export class SendLocationDto {
+  @ApiPropertyOptional({
+    description: 'Optional per-session idempotency key (8–128 ASCII characters). Reusing the key never sends a second copy; duplicate requests return 409 with the existing local row status.',
+    minLength: 8,
+    maxLength: 128,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  @Matches(/^[A-Za-z0-9._:-]{8,128}$/)
+  idempotencyKey?: string;
+
+
   @ApiProperty({ description: 'Chat ID (e.g. 628123456789@c.us)' })
   @IsString()
   @IsNotEmpty()
@@ -73,6 +86,18 @@ export class SendLocationDto {
 }
 
 export class SendContactDto {
+  @ApiPropertyOptional({
+    description: 'Optional per-session idempotency key (8–128 ASCII characters). Reusing the key never sends a second copy; duplicate requests return 409 with the existing local row status.',
+    minLength: 8,
+    maxLength: 128,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  @Matches(/^[A-Za-z0-9._:-]{8,128}$/)
+  idempotencyKey?: string;
+
+
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
@@ -98,6 +123,18 @@ export class SendContactDto {
 }
 
 export class SendPollDto {
+  @ApiPropertyOptional({
+    description: 'Optional per-session idempotency key (8–128 ASCII characters). Reusing the key never sends a second copy; duplicate requests return 409 with the existing local row status.',
+    minLength: 8,
+    maxLength: 128,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  @Matches(/^[A-Za-z0-9._:-]{8,128}$/)
+  idempotencyKey?: string;
+
+
   @ApiProperty({ description: 'Chat ID (e.g. 628123456789@c.us or 1203630000@g.us)' })
   @IsString()
   @IsNotEmpty()
@@ -141,6 +178,18 @@ export class SendPollDto {
 }
 
 export class ReplyMessageDto {
+  @ApiPropertyOptional({
+    description: 'Optional per-session idempotency key (8–128 ASCII characters). Reusing the key never sends a second copy; duplicate requests return 409 with the existing local row status.',
+    minLength: 8,
+    maxLength: 128,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  @Matches(/^[A-Za-z0-9._:-]{8,128}$/)
+  idempotencyKey?: string;
+
+
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
@@ -169,6 +218,18 @@ export class ReplyMessageDto {
 }
 
 export class ForwardMessageDto {
+  @ApiPropertyOptional({
+    description: 'Optional per-session idempotency key (8–128 ASCII characters). Reusing the key never sends a second copy; duplicate requests return 409 with the existing local row status.',
+    minLength: 8,
+    maxLength: 128,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  @Matches(/^[A-Za-z0-9._:-]{8,128}$/)
+  idempotencyKey?: string;
+
+
   @ApiProperty()
   @IsString()
   @IsNotEmpty()

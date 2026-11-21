@@ -8,6 +8,7 @@ import { IWhatsAppEngine } from '../../interfaces/whatsapp-engine.interface';
 import { WhatsAppWebJsAdapter } from '../../adapters/whatsapp-web-js.adapter';
 import { LidMappingStore } from '../../identity/lid-mapping-store.service';
 import { BraveProfileManager } from '../../brave/brave-profile.manager';
+import { inspectWwebjsRuntime } from '../../adapters/wwebjs-runtime-compat';
 
 export class WhatsAppWebJsPlugin implements IEnginePlugin {
   type = PluginType.ENGINE as const;
@@ -170,9 +171,19 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
   }
 
   healthCheck(): Promise<{ healthy: boolean; message?: string }> {
+    const runtime = inspectWwebjsRuntime();
+    // Plugin compatibility is NOT proof of browser launch, linked-device login, or event delivery.
+    // Only fail for a confirmed incompatible installed source, never missing/bundled metadata.
+    const healthy = runtime.attachEventListenersMethod !== 'missing' &&
+      runtime.messageIdNormalization !== 'missing';
     return Promise.resolve({
-      healthy: true,
-      message: 'WhatsApp-web.js engine is available',
+      healthy,
+      message: healthy
+        ? `whatsapp-web.js ${runtime.version}: plugin source appears compatible ` +
+            `(bridge method: ${runtime.attachEventListenersMethod}, message IDs: ${runtime.messageIdNormalization}). ` +
+            'Live session/browser/bridge health is verified separately.'
+        : `whatsapp-web.js ${runtime.version}: installed source is missing a required method or ID normalization; ` +
+            'check 1.34.8 install and postinstall patches.',
     });
   }
 }

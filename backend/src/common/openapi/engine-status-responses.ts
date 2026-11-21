@@ -20,7 +20,9 @@ export const ENGINE_NOT_READY_409 =
   'retry. A session that was never started answers `400` instead, and the session lifecycle routes ' +
   'answer `409` for a conflicting state rather than this. One window answers this while the session ' +
   'still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects ' +
-  'into it — for those few seconds the answer is a `409` naming the reload; retry shortly.';
+  'into it — for those few seconds the answer is a `409` naming the reload; retry shortly. ' +
+  'The engine can also return `ENGINE_EVENT_BRIDGE_NOT_READY` when WhatsApp Web is connected ' +
+  'but the message event listener bridge has not finished attaching.';
 
 /**
  * `EngineNotReadyError` (409) on `POST /sessions/:sessionId/pairing-code`, where the generic wording

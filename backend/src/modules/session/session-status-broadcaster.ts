@@ -20,6 +20,10 @@ export class SessionStatusBroadcaster {
   // onStateChanged and a dedicated callback (onQRCode/onDisconnected), so this guards both the WS emit
   // and the webhook POST against firing the same status twice. Cleared on delete().
   readonly lastDispatchedStatus = new Map<string, SessionStatus>();
+  // Serialize every status mutation by UUID. The engine is event-driven and some callers intentionally
+  // do not await their write; without this queue a delayed QR/READY write can overtake DISCONNECTED.
+  // A rejected write must not poison subsequent updates or strand the queue.
+  private readonly pendingWrites = new Map<string, Promise<void>>();
 
   private readonly sessionRepository: Repository<Session>;
   private readonly eventsGateway: EventsGateway;
@@ -38,16 +42,58 @@ export class SessionStatusBroadcaster {
     this.logger = deps.logger;
   }
 
-  async updateStatus(id: string, status: SessionStatus): Promise<void> {
-    await this.sessionRepository.update(id, { status });
+  /** Enqueue synchronously so invocation order, not database completion order, wins. */
+  private enqueue(id: string, write: () => Promise<void>): Promise<void> {
+    const previous = this.pendingWrites.get(id);
+    // Run the first write immediately (preserves the INITIALIZING retirement fence's timing).
+    const pending = previous ? previous.catch(() => undefined).then(write) : write();
+    this.pendingWrites.set(id, pending);
+    // Avoid an unhandled rejection from the cleanup continuation. Never remove a newer task.
+    void pending.then(
+      () => { if (this.pendingWrites.get(id) === pending) this.pendingWrites.delete(id); },
+      () => { if (this.pendingWrites.get(id) === pending) this.pendingWrites.delete(id); },
+    );
+    return pending;
+  }
+
+  updateStatus(id: string, status: SessionStatus): Promise<void> {
+    return this.enqueue(id, () => this.persistAndBroadcast(id, status, { status }));
+  }
+
+  /** Keep READY identity/timestamps in the SAME per-session queue as status transitions. */
+  updateReady(id: string, phone: string, pushName: string, stillCurrent?: () => boolean): Promise<void> {
+    return this.enqueue(id, async () => {
+      // The engine can retire while waiting for an earlier database write to settle.
+      if (stillCurrent && !stillCurrent()) return;
+      const at = new Date();
+      await this.persistAndBroadcast(id, SessionStatus.READY, {
+        status: SessionStatus.READY,
+        phone,
+        pushName,
+        connectedAt: at,
+        lastActiveAt: at,
+      });
+    });
+  }
+
+  /** Used by permanent deletion so no old status mutation can land after parent-row removal. */
+  async awaitIdle(id: string): Promise<void> {
+    // Queue may have a previous rejected write: deletion must still be able to proceed.
+    await this.pendingWrites.get(id)?.catch(() => undefined);
+  }
+
+  private async persistAndBroadcast(
+    id: string,
+    status: SessionStatus,
+    patch: Parameters<Repository<Session>['update']>[1],
+  ): Promise<void> {
+    await this.sessionRepository.update(id, patch);
     this.logger.debug(`Session status updated to ${status}`, {
       sessionId: id,
       status,
       action: 'status_update',
     });
-    // Mirror the status change to WS clients AND subscribed webhooks — both de-duped. Some engines signal
-    // one transition via both onStateChanged AND a dedicated callback (onQRCode/onDisconnected), which
-    // would otherwise emit/POST the same status twice; only act when it actually changed from the last one.
+    // Never publish a status before its database write settles.
     if (this.lastDispatchedStatus.get(id) !== status) {
       this.lastDispatchedStatus.set(id, status);
       this.eventsGateway.emitSessionStatus(id, status);

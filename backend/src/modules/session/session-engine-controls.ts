@@ -295,6 +295,10 @@ export class SessionEngineControls {
         // the stop is reported as incomplete instead of claimed clean: a retryable 502 with a stable
         // code, and no success log (the controller audits SESSION_STOPPED only after this resolves).
         await this.host.updateStatus(id, SessionStatus.DISCONNECTED);
+        this.logger.event(LogLevel.ERROR, 'session.browser.stop_incomplete', 'stop',
+          'Session stopped locally but the engine did not finish teardown', {
+            sessionId: id, status: 'failed', reasonCode: 'SESSION_STOP_INCOMPLETE',
+          });
         throw new BadGatewayException({
           statusCode: HttpStatus.BAD_GATEWAY,
           message:
@@ -432,8 +436,21 @@ export class SessionEngineControls {
     // Await THIS engine's in-flight INITIALIZING write before teardown / the final DISCONNECTED
     // write so a delayed pre-initialize status update can never settle after the retirement.
     await this.fences.awaitInitialStatus(id, engine);
-    await this.fences.teardownEngineSafely(id, engine, e => e.forceDestroy(), 'force-destroy');
+    const tornDown = await this.fences.teardownEngineSafely(id, engine, e => e.forceDestroy(), 'force-destroy');
     this.engines.deleteIfLive(id, engine);
+    if (!tornDown) {
+      await this.host.updateStatus(id, SessionStatus.DISCONNECTED);
+      this.logger.event(LogLevel.ERROR, 'session.browser.force_kill_incomplete', 'forceKill',
+        'Forced engine teardown could not be verified', {
+          sessionId: id, status: 'failed', reasonCode: 'SESSION_STOP_INCOMPLETE',
+        });
+      throw new BadGatewayException({
+        statusCode: HttpStatus.BAD_GATEWAY,
+        message: 'Forced browser teardown did not complete; profile ownership may still be held.',
+        error: 'Bad Gateway',
+        code: 'SESSION_STOP_INCOMPLETE',
+      });
+    }
 
     this.logger.warn(`Session force-killed: ${session.name}`, {
       sessionId: id,
@@ -502,6 +519,10 @@ export class SessionEngineControls {
         }
         throw fenceError;
       }
+
+      // Drain ALL queued status writes before removing the row. A detached QR/READY/FAILED write
+      // must not race the transaction or re-emit a deleted session's status afterwards.
+      await this.broadcaster.awaitIdle(id);
 
       // DB removal is NOT best-effort: a genuine failure must surface (500) rather than be swallowed.
       // Filesystem purge already completed; a DB failure leaves the row reserved but may require
@@ -659,7 +680,25 @@ export class SessionEngineControls {
     this.reconnectStates.clear();
 
     await Promise.allSettled(
-      [...this.engines].map(([sessionId, engine]) => this.fences.destroyEngineSafely(sessionId, engine)),
+      [...this.engines].map(async ([sessionId, engine]) => {
+        let completed = await this.fences.destroyEngineSafely(sessionId, engine);
+        if (!completed) {
+          // A CDP destroy may settle but leave its OS process alive, or the profile
+          // process scan may fail. Match stop()'s escalation before abandoning this
+          // session. Other sessions continue shutting down in parallel.
+          this.logger.warn('Graceful engine shutdown incomplete; escalating to forced teardown', {
+            sessionId, action: 'shutdown_browser_escalate',
+          });
+          completed = await this.fences.teardownEngineSafely(
+            sessionId, engine, e => e.forceDestroy(), 'force-destroy',
+          );
+        }
+        if (!completed) {
+          this.logger.error('Engine shutdown incomplete; Brave ownership lock may remain', undefined, {
+            sessionId, action: 'shutdown_browser_teardown_incomplete',
+          });
+        }
+      }),
     );
     this.engines.clear();
   }

@@ -32,7 +32,7 @@ describe('deliveryStatusToAck (deprecated legacy ack integer)', () => {
 
 describe('ackStatusTransitionFrom (monotonic delivery-state guard)', () => {
   it('DELIVERED may advance only from PENDING/SENT (never downgrades a READ row)', () => {
-    expect(ackStatusTransitionFrom(MessageStatus.DELIVERED)).toEqual([MessageStatus.PENDING, MessageStatus.SENT]);
+    expect(ackStatusTransitionFrom(MessageStatus.DELIVERED)).toEqual([MessageStatus.PENDING, MessageStatus.SENT, MessageStatus.UNCERTAIN]);
     expect(ackStatusTransitionFrom(MessageStatus.DELIVERED)).not.toContain(MessageStatus.READ);
   });
 
@@ -40,13 +40,14 @@ describe('ackStatusTransitionFrom (monotonic delivery-state guard)', () => {
     expect(ackStatusTransitionFrom(MessageStatus.READ)).toEqual([
       MessageStatus.PENDING,
       MessageStatus.SENT,
+      MessageStatus.UNCERTAIN,
       MessageStatus.DELIVERED,
     ]);
   });
 
   it('FAILED does not clobber an already delivered/read message', () => {
     const from = ackStatusTransitionFrom(MessageStatus.FAILED);
-    expect(from).toEqual([MessageStatus.PENDING, MessageStatus.SENT]);
+    expect(from).toEqual([MessageStatus.PENDING, MessageStatus.SENT, MessageStatus.UNCERTAIN]);
     expect(from).not.toContain(MessageStatus.DELIVERED);
     expect(from).not.toContain(MessageStatus.READ);
   });

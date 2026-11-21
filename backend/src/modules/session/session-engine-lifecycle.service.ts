@@ -722,20 +722,13 @@ export class SessionEngineLifecycle {
     // one-shot recovery budget is re-armed for a future episode.
     this.stuckAuthRecoveryUsed.delete(id);
 
-    void this.sessionRepository
-      .update(id, {
-        status: SessionStatus.READY,
-        phone,
-        pushName,
-        connectedAt: new Date(),
-        lastActiveAt: new Date(),
-      })
-      .catch(err =>
-        this.logger.warn('Failed to persist session ready state', {
-          sessionId: id,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
+    // READY metadata must use the same per-session write queue as QR/INIT/DISCONNECTED.
+    // The closure is evaluated when the queued write executes, not just when it is enqueued.
+    void this.broadcaster.updateReady(id, phone, pushName, () => this.isLiveEngine(id, engine))
+      .catch(err => this.logger.warn('Failed to persist session ready state', {
+        sessionId: id,
+        error: err instanceof Error ? err.message : String(err),
+      }));
 
     // Best-effort snapshot of the account's own contacts' currently-active statuses. Live status
     // posts arrive through onMessage below; this just backfills what was already up before we
@@ -879,7 +872,12 @@ export class SessionEngineLifecycle {
       },
     );
 
-    void this.updateStatus(id, SessionStatus.DISCONNECTED);
+    void this.updateStatus(id, SessionStatus.DISCONNECTED).catch(error => this.logger.warn(
+      'Failed to persist disconnected state', {
+        sessionId: id, action: 'session_status_write_failed',
+        error: error instanceof Error ? error.message : String(error),
+      },
+    ));
 
     // Pre-schedule fence: scheduleReconnect's timer eventually calls executeReconnect, which does
     // a fresh engines.get(id) and destroys whatever engine currently owns the id. If this engine
@@ -922,7 +920,12 @@ export class SessionEngineLifecycle {
       // Same ownership fence as the engine callbacks: a reconnect chain that exhausts itself after
       // this node's lease lapsed must not park a peer's session in FAILED, which nothing resets
       // automatically. The in-memory error above is per-process and harmless either way.
-      if (this.ownsSession(id)) void this.updateStatus(id, SessionStatus.FAILED);
+      if (this.ownsSession(id)) void this.updateStatus(id, SessionStatus.FAILED).catch(error => this.logger.warn(
+        'Failed to persist reconnect-exhausted state', {
+          sessionId: id, action: 'session_status_write_failed',
+          error: error instanceof Error ? error.message : String(error),
+        },
+      ));
       // Terminal path — evict the dead engine so it neither holds a concurrency slot nor makes a
       // subsequent start() reject the session as "already started". This mirrors onError's terminal
       // path (the same rationale: leaving the engine in the map wedges the session). The engine may

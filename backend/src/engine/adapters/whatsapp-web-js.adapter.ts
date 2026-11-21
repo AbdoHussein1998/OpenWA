@@ -327,6 +327,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       logger: this.logger,
       config: this.config,
       getClient: () => this.client,
+      getBridgeStatus: client => this.lifecycle.getBridgeStatus(client),
       getStatus: () => this.status,
       setStatus: status => this.lifecycle.setStatus(status),
       getCallbacks: () => this.callbacks,
@@ -342,6 +343,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       setClient: client => (this.lifecycle.client = client),
       setStatus: status => this.lifecycle.setStatus(status),
       getCallbacks: () => this.callbacks,
+      beginProfileReset: () => this.lifecycle.beginProfileReset(),
+      stopClientForProfileReset: client => this.lifecycle.stopClientForProfileReset(client),
+      completeProfileReset: () => this.lifecycle.completeProfileReset(),
     });
     this.calls = new WwebjsCalls({
       logger: this.logger,
@@ -1071,6 +1075,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       throw new EngineNotReadyError(
         'WhatsApp Web is reloading its page and the session is re-injecting. Retry in a few seconds.',
         'ENGINE_REINJECTING',
+      );
+    }
+    if (this.lifecycle.getBridgeStatus() !== 'attached') {
+      throw new EngineNotReadyError(
+        'WhatsApp Web message event bridge is not ready. Retry after reinjection or reconnect.',
+        'ENGINE_EVENT_BRIDGE_NOT_READY',
       );
     }
   }

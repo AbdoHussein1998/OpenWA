@@ -5,6 +5,7 @@ import { type Client } from 'whatsapp-web.js';
 import { type EngineEventCallbacks, EngineStatus } from '../interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
+import { boundedBrowserOperation, BROWSER_TEARDOWN_BUDGETS } from '../brave/brave-browser-teardown';
 
 /**
  * Stuck-auth detection and recovery for the NoAuth + persistent-Brave architecture.
@@ -22,9 +23,11 @@ export interface WwebjsStuckAuthHost {
   setStatus(status: EngineStatus): void;
   /** Live callbacks bag — read per event, since initialize() installs it after delegates are built. */
   getCallbacks(): EngineEventCallbacks;
+  /** Lease-aware supervision from WwebjsLifecycle, when constructed through the real adapter. */
+  beginProfileReset?(): void;
+  stopClientForProfileReset?(client: Client | null): Promise<void>;
+  completeProfileReset?(): Promise<void>;
 }
-
-const CLIENT_DESTROY_TIMEOUT_MS = 5_000;
 
 export class WwebjsStuckAuth {
   /**
@@ -73,6 +76,7 @@ export class WwebjsStuckAuth {
 
     // Retire this generation before any await. A late qr/authenticated/ready/disconnected from this
     // Client must not mutate lifecycle state while its browser/profile is being removed.
+    this.host.beginProfileReset?.();
     this.host.setClient(null);
     client?.removeAllListeners?.();
 
@@ -83,6 +87,8 @@ export class WwebjsStuckAuth {
     const resetOperation = (async (): Promise<void> => {
       await this.stopClientForProfileReset(client);
       await this.clearBraveProfile();
+      // Release only AFTER the destructive operation has fully finished.
+      await this.host.completeProfileReset?.();
     })();
     this.host.getCallbacks().onCredentialTeardownStarted?.(resetOperation);
     try {
@@ -117,56 +123,25 @@ export class WwebjsStuckAuth {
    * session's --al-hakim-session marker remains. That verification is the safety gate before deletion.
    */
   private async stopClientForProfileReset(client: Client | null): Promise<void> {
+    if (this.host.stopClientForProfileReset) {
+      await this.host.stopClientForProfileReset(client);
+      return;
+    }
+
+    // Standalone/test host fallback. Never kill an unverified PID directly or authorize
+    // marker-wide orphan reaping. A graceful timeout is a terminal recovery failure.
     if (client && typeof client.destroy === 'function') {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          client.destroy(),
-          new Promise<never>((_, reject) => {
-            timeout = setTimeout(
-              () => reject(new Error(`client.destroy() timed out after ${CLIENT_DESTROY_TIMEOUT_MS}ms`)),
-              CLIENT_DESTROY_TIMEOUT_MS,
-            );
-            timeout.unref?.();
-          }),
-        ]);
-      } catch (error) {
-        this.host.logger.warn('Graceful client destroy did not complete during stuck-auth recovery', {
-          sessionId: this.host.config.sessionId,
-          action: 'stuck_auth_destroy_incomplete',
-          error: error instanceof Error ? error.message : String(error),
-        });
-
-        // Best-effort direct kill of this client's browser process. The manager verification below is
-        // still authoritative and will fail closed if any marked Brave process survives.
-        try {
-          const proc = (
-            client as unknown as {
-              pupBrowser?: { process?: () => { kill?: (signal: string) => void } | null };
-            }
-          ).pupBrowser?.process?.();
-          proc?.kill?.('SIGKILL');
-        } catch (killError) {
-          this.host.logger.warn('Direct Brave kill failed during stuck-auth recovery', {
-            sessionId: this.host.config.sessionId,
-            action: 'stuck_auth_direct_kill_failed',
-            error: killError instanceof Error ? killError.message : String(killError),
-          });
-        }
-      } finally {
-        if (timeout) clearTimeout(timeout);
-      }
+      await boundedBrowserOperation(
+        () => client.destroy(), BROWSER_TEARDOWN_BUDGETS.graceMs,
+        'stuck-auth client.destroy()',
+      );
     }
-
     const manager = this.host.config.braveProfileManager;
-    if (!manager) {
-      throw new Error('Brave profile manager is unavailable');
-    }
-
-    // This is not merely cleanup: it independently proves the profile has no live Brave owner.
-    await manager.killOrphanedBraveProcesses(
-      this.host.config.sessionId,
-      this.host.logger,
+    if (!manager) throw new Error('Brave profile manager is unavailable');
+    await boundedBrowserOperation(
+      () => manager.killOrphanedBraveProcesses(this.host.config.sessionId, this.host.logger, false),
+      BROWSER_TEARDOWN_BUDGETS.leaseMs,
+      'stuck-auth process verification',
     );
   }
 
