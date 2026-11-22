@@ -1,38 +1,33 @@
-/**
- * Phase 3 per-step deadlines. The existing SessionLifecycleFences deadline is 10 seconds;
- * the worst normal path (grace -> OS escalation -> lease verification) is 9.5 seconds.
- * These operations are NOT cancellable: a timed-out underlying call continues, but the
- * profile lock remains held until independently verified safe to release.
- */
-export const BROWSER_TEARDOWN_BUDGETS = Object.freeze({
-  graceMs: 2_000,
-  forceMs: 4_000,
-  leaseMs: 3_500,
-  postKillDestroyMs: 500,
-});
+/** Legacy entrypoint retained for existing WwebjsLifecycle/WwebjsStuckAuth imports. */
+import {
+  BrowserTeardownTimeoutError,
+  boundedBrowserOperation as boundedNeutralBrowserOperation,
+} from '../browser/browser-teardown';
 
-export class BraveTeardownTimeoutError extends Error {
-  constructor(readonly operation: string, readonly timeoutMs: number) {
-    super(`${operation} timed out after ${timeoutMs}ms`);
+export { BROWSER_TEARDOWN_BUDGETS } from '../browser/browser-teardown';
+
+/** Preserve the historical class name for callers checking error.name/type. */
+export class BraveTeardownTimeoutError extends BrowserTeardownTimeoutError {
+  constructor(operation: string, timeoutMs: number) {
+    super(operation, timeoutMs);
     this.name = 'BraveTeardownTimeoutError';
   }
 }
 
-/** Bounds the caller's wait; always consumes later rejections from the underlying promise. */
+/**
+ * The deadline implementation lives in browser-teardown.ts. Translate only
+ * its timeout error to preserve instanceof BraveTeardownTimeoutError for old
+ * consumers; other failures are propagated unchanged.
+ */
 export async function boundedBrowserOperation<T>(
-  operation: () => Promise<T>,
-  timeoutMs: number,
-  label: string,
+  operation: () => Promise<T>, timeoutMs: number, label: string,
 ): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
-      Promise.resolve().then(operation),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new BraveTeardownTimeoutError(label, timeoutMs)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
+    return await boundedNeutralBrowserOperation(operation, timeoutMs, label);
+  } catch (error) {
+    if (error instanceof BrowserTeardownTimeoutError) {
+      throw new BraveTeardownTimeoutError(error.operation, error.timeoutMs);
+    }
+    throw error;
   }
 }

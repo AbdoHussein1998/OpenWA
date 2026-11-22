@@ -7,7 +7,9 @@ import { PluginContext, PluginType, IEnginePlugin } from '../../../core/plugins'
 import { IWhatsAppEngine } from '../../interfaces/whatsapp-engine.interface';
 import { WhatsAppWebJsAdapter } from '../../adapters/whatsapp-web-js.adapter';
 import { LidMappingStore } from '../../identity/lid-mapping-store.service';
-import { BraveProfileManager } from '../../brave/brave-profile.manager';
+import { BrowserProfileManager } from '../../browser/browser-profile.manager';
+import { BrowserManager } from '../../browser/browser.manager';
+import { resolveBrowserSettings } from '../../browser/browser-config';
 import { inspectWwebjsRuntime } from '../../adapters/wwebjs-runtime-compat';
 
 export class WhatsAppWebJsPlugin implements IEnginePlugin {
@@ -22,6 +24,7 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
     // Shared lid<->phone table, threaded to the adapter so it can persist learned phone->lid pairs
     // (mirrors how BaileysPlugin receives it; #583 R3).
     private readonly lidMappingStore?: LidMappingStore,
+    private readonly browserManager: BrowserManager = new BrowserManager(),
   ) {}
 
   onLoad(context: PluginContext): Promise<void> {
@@ -62,6 +65,11 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
         executablePath?: string;
         profileBasePath?: string;
       };
+      browser?: {
+        type?: unknown;
+        executablePath?: string;
+        profileBasePath?: string;
+      };
     };
 
     const puppeteer = engineConfig.puppeteer ?? {};
@@ -81,26 +89,16 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
     const protocolTimeoutMs =
       puppeteer.protocolTimeoutMs;
 
-    const brave = engineConfig.brave ?? {};
-
-    // Prefer the explicit Brave executable path.
-    // Fall back to the legacy Puppeteer executable path, then the default Linux Brave path.
-    const braveExecutablePath =
-      brave.executablePath ??
-      puppeteer.executablePath ??
-      '/usr/bin/brave';
-
-    // One persistent Brave profile root shared by sessions.
-    // Each session gets:
-    //   <baseProfilePath>/<sessionId>
-    const braveProfileBasePath =
-      brave.profileBasePath ??
-      '/data/brave-profiles';
-
-    // The profile manager is responsible for creating, resolving,
-    // cleaning and deleting session-specific Brave profiles.
-    const braveProfileManager =
-      new BraveProfileManager(braveProfileBasePath);
+    // The effective plugin config (context.config when present) is authoritative.
+    // It must use exactly the same resolver as the direct fallback.
+    const browserSettings = resolveBrowserSettings(engineConfig, {
+      profileBasePath: '/data/brave-profiles',
+      executablePath: '/usr/bin/brave',
+    });
+    const browserDriver = this.browserManager.getBrowser(browserSettings.type);
+    const browserProfileManager = new BrowserProfileManager(
+      browserSettings.profileBasePath, [browserDriver],
+    );
 
     return new WhatsAppWebJsAdapter({
       sessionId,
@@ -113,12 +111,16 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
         protocolTimeoutMs,
       },
 
-      brave: {
-        executablePath: braveExecutablePath,
-        profileBasePath: braveProfileBasePath,
-      },
+      browser: browserSettings,
+      browserDriver,
+      browserProfileManager,
 
-      braveProfileManager,
+      // Legacy alias is retained for WwebjsStuckAuth (migrated in Phase 6).
+      braveProfileManager: browserProfileManager,
+      brave: browserSettings.type === 'brave' ? {
+        executablePath: browserSettings.executablePath,
+        profileBasePath: browserSettings.profileBasePath,
+      } : undefined,
 
       proxy: proxyUrl
         ? {
@@ -129,6 +131,23 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
 
       lidMappingStore: this.lidMappingStore,
     });
+  }
+
+  /**
+   * Profile deletion must resolve the same effective root as createEngine().
+   * In particular, context.config can include a persisted override that is
+   * not visible through EngineFactory's base ConfigService snapshot.
+   */
+  getEffectiveProfileBasePath(): string {
+    const engineConfig = (this.context?.config ?? this.registeredConfig ?? {}) as {
+      browser?: { type?: unknown; executablePath?: string; profileBasePath?: string };
+      brave?: { executablePath?: string; profileBasePath?: string };
+      puppeteer?: { executablePath?: string };
+    };
+    return resolveBrowserSettings(engineConfig, {
+      profileBasePath: '/data/brave-profiles',
+      executablePath: '/usr/bin/brave',
+    }).profileBasePath;
   }
 
   getFeatures(): string[] {

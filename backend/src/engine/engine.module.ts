@@ -6,6 +6,7 @@ import { BaileysMessageStoreService } from './adapters/baileys-message-store.ser
 import { LidMapping } from './identity/lid-mapping.entity';
 import { LidMappingStoreService } from './identity/lid-mapping-store.service';
 import { EngineRegistry } from './engine-registry.service';
+import { BrowserManager } from './browser/browser.manager';
 
 @Global()
 @Module({
@@ -13,7 +14,7 @@ import { EngineRegistry } from './engine-registry.service';
   // EngineRegistry is exported from this @Global module so the feature services that only need a
   // live engine can inject it directly, instead of importing SessionModule to reach the lifecycle
   // owner. It is a singleton by DI, which is what makes it a safe single source of truth.
-  providers: [EngineFactory, BaileysMessageStoreService, LidMappingStoreService, EngineRegistry],
-  exports: [EngineFactory, LidMappingStoreService, EngineRegistry],
+  providers: [BrowserManager, EngineFactory, BaileysMessageStoreService, LidMappingStoreService, EngineRegistry],
+  exports: [BrowserManager, EngineFactory, LidMappingStoreService, EngineRegistry],
 })
 export class EngineModule {}

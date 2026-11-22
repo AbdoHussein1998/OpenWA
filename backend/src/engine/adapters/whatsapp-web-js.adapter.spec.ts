@@ -87,7 +87,7 @@ function createTestBraveProfileManager(
 ): BraveProfileManager {
   const resolvedBase = path.resolve(baseProfilePath);
 
-  return {
+  const manager = {
     getProfilePath: jest.fn((sessionId: string) => path.join(resolvedBase, sessionId)),
     profileExists: jest.fn().mockResolvedValue(true),
     ensureProfile: jest.fn().mockResolvedValue(undefined),
@@ -98,7 +98,13 @@ function createTestBraveProfileManager(
     killOrphanedBraveProcesses: jest.fn().mockResolvedValue(undefined),
     removeStaleSingletonFiles: jest.fn().mockResolvedValue(undefined),
     terminateOwnedBrowserTree: jest.fn().mockResolvedValue(undefined),
-  } as unknown as BraveProfileManager;
+  };
+  // The new browser-neutral check delegates to the legacy mocked method so the
+  // existing order, failure and call-count assertions retain their meaning.
+  return Object.assign(manager, {
+    assertNoConflictingBrowserProcesses: (sessionId: string, logger: unknown) =>
+      manager.killOrphanedBraveProcesses(sessionId, logger),
+  }) as unknown as BraveProfileManager;
 }
 
 function createWwebjsTestConfig(

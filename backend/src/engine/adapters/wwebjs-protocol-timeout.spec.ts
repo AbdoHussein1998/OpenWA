@@ -39,6 +39,7 @@ describe('whatsapp-web.js protocol timeout', () => {
       Object.assign(async () => undefined, { ownerToken: '00000000-0000-4000-8000-000000000001' }),
     ),
     killOrphanedBraveProcesses: jest.fn().mockResolvedValue(undefined),
+    assertNoConflictingBrowserProcesses: jest.fn().mockResolvedValue(undefined),
     removeStaleSingletonFiles: jest.fn().mockResolvedValue(undefined),
   } as unknown as BraveProfileManager;
 

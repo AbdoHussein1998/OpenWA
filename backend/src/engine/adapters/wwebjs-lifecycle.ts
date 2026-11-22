@@ -12,8 +12,6 @@ import { LogLevel } from '../../common/services/logger.service';
 
 
 import * as qrcode from 'qrcode';
-import * as path from 'path';
-import * as fs from 'fs/promises';
 import { Client, NoAuth, WAState } from 'whatsapp-web.js';
 import {
   type AccountRestriction,
@@ -32,10 +30,13 @@ import { inspectWwebjsRuntime } from './wwebjs-runtime-compat';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
 import { WwebjsBridgeMonitor, type WwebjsBridgeStatus } from './wwebjs-bridge-monitor';
 
-import { BraveProfileManager, type BraveProfileLeaseRelease } from '../brave/brave-profile.manager';
-import { BraveProcessSupervisor, type ObservedBrowserProcess } from '../brave/brave-process-supervisor';
-import { boundedBrowserOperation, BROWSER_TEARDOWN_BUDGETS } from '../brave/brave-browser-teardown';
-import { BraveFailureCode, braveFailureReason, elapsedBrowserMs } from '../brave/brave-lifecycle-diagnostics';
+import { BrowserProfileManager, type BrowserProfileLeaseRelease } from '../browser/browser-profile.manager';
+import { BrowserProcessSupervisor, type ObservedBrowserProcess } from '../browser/browser-process-supervisor';
+import { boundedBrowserOperation, BROWSER_TEARDOWN_BUDGETS } from '../browser/browser-teardown';
+import { BrowserFailureCode, browserFailureReason, elapsedBrowserMs } from '../browser/browser-lifecycle-diagnostics';
+import { BrowserManager } from '../browser/browser.manager';
+import type { BrowserInterface } from '../browser/interfaces/browser.interface';
+import { createBrowserLaunchArgs } from '../browser/browser-launch-args';
 
 
 /**
@@ -192,6 +193,8 @@ export class WwebjsLifecycle {
    * trigger the existing forceDestroy() recovery path.
    */
   private consecutiveProtocolTimeouts = 0;
+  /** Coalesce concurrent protocol-timeout reports for one browser generation. */
+  private protocolTimeoutRecoveryInFlight?: Promise<void>;
   /**
    * At most one ambiguous transport-death confirmation runs at a time. Delegate calls can fail in
    * bursts while the page is navigating; coalescing prevents a burst from spawning competing
@@ -203,9 +206,9 @@ export class WwebjsLifecycle {
   /** True after at least one QR was produced by this client generation. */
   private qrPresentedThisAttempt = false;
   private readonly bridgeMonitor = new WwebjsBridgeMonitor();
-  private readonly browserProcessSupervisor = new BraveProcessSupervisor();
+  private readonly browserProcessSupervisor: BrowserProcessSupervisor;
   /** Holds the profile lock across the complete Client lifetime, including the one init retry. */
-  private profileLeaseRelease?: BraveProfileLeaseRelease;
+  private profileLeaseRelease?: BrowserProfileLeaseRelease;
   /** Coalesce attempts when the process scan outlasts the caller's lease-release deadline. */
   private pendingProfileLeaseRelease?: Promise<void>;
   /** A timed-out CDP destroy may continue in the background. Never start it twice on the same Client. */
@@ -235,15 +238,15 @@ export class WwebjsLifecycle {
       await boundedBrowserOperation(
         () => pending,
         BROWSER_TEARDOWN_BUDGETS.leaseMs,
-        'Brave profile lease release',
+        'Browser profile lease release',
       );
     } catch (error) {
       // Do not claim success: the lock is deliberately retained if a browser may still own it.
       this.host.logger.event(LogLevel.WARN, 'engine.browser.lease_retained', 'releaseProfileLease',
-        'Brave profile ownership lock retained after incomplete teardown', {
+        'Browser profile ownership lock retained after incomplete teardown', {
           sessionId: this.host.config.sessionId,
           action: 'brave_profile_lock_retained', status: 'failed',
-          reasonCode: BraveFailureCode.BROWSER_TEARDOWN_INCOMPLETE,
+          reasonCode: BrowserFailureCode.BROWSER_TEARDOWN_INCOMPLETE,
         });
       throw error;
     }
@@ -254,10 +257,18 @@ export class WwebjsLifecycle {
    */
   private pairingCodeRequestedThisAttempt = false;
 
+  /**
+   * The adapter/plugin normally supplies the shared profile manager and selected driver.
+   * Keep a default Brave driver for direct legacy WwebjsLifecycle construction.
+   */
   constructor(
     private readonly host: WwebjsLifecycleHost,
-    private readonly braveProfileManager: BraveProfileManager,
-  ) {}
+    private readonly profileManager: BrowserProfileManager,
+    private readonly browser: BrowserInterface = new BrowserManager().getBrowser('brave'),
+  ) {
+    const label = `${this.browser.type.charAt(0).toUpperCase()}${this.browser.type.slice(1)} browser`;
+    this.browserProcessSupervisor = new BrowserProcessSupervisor(label);
+  }
 
   private emitConnectionStage(stage: ConnectionStage): void {
     this.host.getCallbacks().onConnectionStage?.({ stage, source: 'native' });
@@ -324,10 +335,7 @@ export class WwebjsLifecycle {
         }
       }
 
-      // Marker arg: Chromium silently ignores unknown flags, so this exists purely as a label that
-      // lets BraveProfileManager identify this session's browser processes in `ps`
-      // output later (after a hard kill of the al-hakim process orphaned them).
-      puppeteerArgs.push(`--al-hakim-session=${this.host.config.sessionId}`);
+      // Session/lease identity flags are added centrally in runInitAttempt(), never by drivers.
 
       // Pin the WA-Web version (fixes the 1.34.x "stuck at authenticating" hang on some setups,
       // #251/#488). DEFAULT: auto-resolve a settled build from the wa-version registry and pin its
@@ -407,8 +415,8 @@ export class WwebjsLifecycle {
         this.host.logger.warn(
           `"${reason}" during initialize. If this followed an al-hakim upgrade that changed the ` +
             `Chromium/Chrome binary (v0.8.12 amd64 switched Debian Chromium → Chrome for Testing), the ` +
-          `session's Brave browser profile is likely stale — delete the profile dir ` +
-          `"${this.braveProfileManager.getProfilePath(this.host.config.sessionId)}" ` +
+          `session's browser profile may be stale — delete the profile dir ` +
+          `"${this.profileManager.getProfilePath(this.host.config.sessionId)}" ` +
             `and start again to re-scan. If no upgrade happened, Puppeteer also raises this on a page ` +
             `navigation or renderer crash (check for memory pressure or a WhatsApp Web reload). ` +
             `See docs/12-troubleshooting-faq.md.`,
@@ -422,10 +430,10 @@ export class WwebjsLifecycle {
           `upgrade, the session's browser profile is likely stale — see docs/12-troubleshooting-faq.md.`;
       }
       this.host.logger.event(LogLevel.ERROR, 'engine.browser.initialize_failed', 'initialize',
-        'Brave-backed WhatsApp engine initialization failed', {
-          sessionId: this.host.config.sessionId, status: 'failed',
+        'Browser-backed WhatsApp engine initialization failed', {
+          sessionId: this.host.config.sessionId, browserType: this.browser.type, status: 'failed',
           elapsedMs: elapsedBrowserMs(initStartedAt),
-          reasonCode: braveFailureReason(error, BraveFailureCode.BROWSER_LAUNCH_FAILED),
+          reasonCode: browserFailureReason(error, BrowserFailureCode.BROWSER_LAUNCH_FAILED),
         });
       this.host.getCallbacks().onError?.(surfacedReason);
       throw error;
@@ -448,7 +456,7 @@ export class WwebjsLifecycle {
     const launchStartedAt = Date.now();
     this.host.logger.event(LogLevel.INFO, 'engine.browser.launch_started', 'runInitAttempt',
       'Browser initialization attempt started', {
-        sessionId: this.host.config.sessionId, status: 'started',
+        sessionId: this.host.config.sessionId, browserType: this.browser.type, status: 'started',
         headless: this.host.config.puppeteer?.headless ?? true,
       });
     // Range-checked at the sink, not only in configuration.ts: a plugin config written through
@@ -465,59 +473,42 @@ export class WwebjsLifecycle {
         ? configuredProtocolTimeout
         : undefined;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // BRAVE PROFILE SETUP — THE CORE ARCHITECTURAL CHANGE
-    // ═══════════════════════════════════════════════════════════════════════
-    // 
-    // BEFORE: Puppeteer launched its bundled Chromium with a TEMPORARY profile.
-    //   → Every restart = new browser identity = WhatsApp requires QR re-scan.
-    //
-    // AFTER: Puppeteer launches the REAL Brave binary with a PERSISTENT profile.
-    //   → Profile survives restarts = WhatsApp auth restored automatically.
-    //
-    // The sessionId becomes the profile identity: /data/brave-profiles/<sessionId>
-    // This enforces RULE 1: 1 al-hakim session = 1 Brave profile
-    // This enforces RULE 2: sessionId = profile identity
-
-    // Step 1: Resolve where this session's Brave profile lives on disk
-    const braveProfilePath = this.braveProfileManager.getProfilePath(this.host.config.sessionId);
-    
-    // Step 2: Ensure the directory exists (creates it if first time, no-op if exists)
-    // Like Python: os.makedirs(profile_path, exist_ok=True)
-    await this.braveProfileManager.ensureProfile(this.host.config.sessionId);
-    // Acquire before orphan enumeration / Singleton cleanup. A matching process marker alone
-    // does not prove an orphan and must never justify killing a peer's active browser.
+    // Persistent identity and ownership are browser-independent. Keep the exact
+    // profile base path supplied by the adapter: no data migration in Phase 4.
+    const browserProfilePath = this.profileManager.getProfilePath(this.host.config.sessionId);
+    await this.profileManager.ensureProfile(this.host.config.sessionId);
+    // Hold one exclusive lease through navigation retries and teardown.
     if (!this.profileLeaseRelease) {
-      this.profileLeaseRelease = await this.braveProfileManager.acquireProfileLease(
+      this.profileLeaseRelease = await this.profileManager.acquireProfileLease(
         this.host.config.sessionId, this.host.logger,
       );
     }
-    this.host.logger.log(`Using Brave profile: ${braveProfilePath}`);
+    this.host.logger.log(`Using ${this.browser.type} profile: ${browserProfilePath}`);
 
-    // Step 3: Resolve which Brave binary to launch
-    // Priority:
-    //   1. config.brave.executablePath
-    //   2. config.puppeteer.executablePath
-    //   3. Automatically detect Brave on Windows
-    //   4. Existing Linux default
-    const braveExecutable = await this.resolveBraveExecutable();
-    // ═══════════════════════════════════════════════════════════════════════
+    // The selected driver resolves only its executable. Puppeteer and the
+    // whatsapp-web.js Client remain owned by this lifecycle.
+    const browserExecutable = await this.browser.resolveExecutablePath({
+      executablePath: this.host.config.browser?.executablePath ?? this.host.config.brave?.executablePath,
+      puppeteerExecutablePath: this.host.config.puppeteer?.executablePath,
+      strictExecutablePath: this.host.config.browser?.strictExecutablePath ?? false,
+    });
+    this.host.logger.log(`Using ${this.browser.type} browser executable: ${browserExecutable}`, {
+      platform: process.platform,
+      executablePath: browserExecutable,
+      action: this.browser.type === 'brave' ? 'brave_executable_resolved' : 'browser_executable_resolved',
+    });
 
-    // Bind this browser generation to the *existing* filesystem lease. A new
-    // backend can recover its orphan only if the old backend is confirmed dead
-    // and the Brave launch argument matches that old lease's owner token.
-    // This marker is a generation identifier, not a secret or access token.
+    // A browser process may only be recovered when it is tied to the exact
+    // existing filesystem lease. Driver-provided arguments cannot forge these
+    // markers, or override the user-data directory.
     const leaseToken = this.profileLeaseRelease?.ownerToken;
-    if (!leaseToken) throw new Error('Brave profile lease missing before browser launch');
-    const launchArgs = [
-      // Reserved browser identity flags are managed exclusively by the engine.
-      // A plugin-provided --user-data-dir or duplicate marker would defeat
-      // profile verification, so do not forward them to Chromium.
-      ...puppeteerArgs.filter(arg =>
-        !/^--(?:al-hakim-session|al-hakim-lease|user-data-dir)(?:=|$)/.test(arg)),
-      `--al-hakim-session=${this.host.config.sessionId}`,
-      `--al-hakim-lease=${leaseToken}`,
-    ];
+    if (!leaseToken) throw new Error('Browser profile lease missing before browser launch');
+    const launchArgs = createBrowserLaunchArgs(
+      this.host.config.sessionId,
+      leaseToken,
+      puppeteerArgs,
+      this.browser.getBrowserSpecificArgs(),
+    );
 
     const client = new Client({
       authStrategy: new NoAuth(),
@@ -532,23 +523,9 @@ export class WwebjsLifecycle {
         handleSIGINT: false,
         handleSIGTERM: false,
         handleSIGHUP: false,
-        userDataDir: braveProfilePath,  // ← Brave stores cookies, localStorage, IndexedDB here
-
-        // ═══════════════════════════════════════════════════════════════════
-        // THE TWO CRITICAL LINES — BROWSER IDENTITY MAPPING
-        // ═══════════════════════════════════════════════════════════════════
-        // executablePath: Tells Puppeteer "use THIS browser binary, not your bundled Chromium"
-        //   → Points to real Brave installed in Docker (e.g., /usr/bin/brave)
-        //   → Python equivalent: subprocess.Popen(['/usr/bin/brave', ...])
-        //
-        // userDataDir: Tells Brave "store ALL your data HERE" 
-        //   → Cookies, localStorage, IndexedDB, service workers, cache
-        //   → This is what makes the session PERSISTENT across restarts
-        //   → Python equivalent: chrome --user-data-dir=/path/to/profile
-        //
-        // Together: sessionId → profilePath → Brave binary → persistent identity
-        executablePath: braveExecutable,
-        // ═══════════════════════════════════════════════════════════════════
+        // Persistent profile and executable are resolved independently.
+        userDataDir: browserProfilePath,
+        executablePath: browserExecutable,
         // Per-CDP-command budget, spread only when the host configured a usable one (see above).
         // Absent, puppeteer-core nullish-coalesces to its own 180 000 ms (`cdp/Connection.js`).
         ...(protocolTimeout !== undefined ? { protocolTimeout } : {}),
@@ -577,28 +554,17 @@ export class WwebjsLifecycle {
       return;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // POST-RECOVERY BRAVE VERIFICATION
-    // ═══════════════════════════════════════════════════════════════════════
-    // acquireProfileLease() has already checked any abandoned owner under an
-    // exclusive recovery claim. Only a Brave process with the same old lease
-    // generation, session marker and user-data directory can be reaped there.
-    // This check must now find zero remaining marked processes. It NEVER kills
-    // a merely matching process during ordinary startup.
-
-    // Refuse startup if any unverified session-marked Brave process remains.
-    await this.braveProfileManager.killOrphanedBraveProcesses(
+    // Lease recovery has already verified abandoned owners. Refuse launch if
+    // any marked/unknown browser process still uses this session's profile.
+    // This is a *check*, not an invitation to kill marker-matched processes.
+    await this.profileManager.assertNoConflictingBrowserProcesses(
       this.host.config.sessionId,
       this.host.logger,
     );
-
-    // Remove stale lock files left by a crashed Brave instance
-    // These files prevent Brave from opening the profile: "Profile is in use"
-    await this.braveProfileManager.removeStaleSingletonFiles(
+    await this.profileManager.removeStaleSingletonFiles(
       this.host.config.sessionId,
       this.host.logger,
     );
-    // ═══════════════════════════════════════════════════════════════════════
 
     await client.initialize();
     // whatsapp-web.js 1.34.x never observes the Chromium process/page it drives, so a crashed
@@ -607,7 +573,7 @@ export class WwebjsLifecycle {
     this.attachPuppeteerLifecycleListeners();
     this.host.logger.event(LogLevel.INFO, 'engine.browser.launch_succeeded', 'runInitAttempt',
       'Browser initialized and process supervision installed', {
-        sessionId: this.host.config.sessionId, status: 'succeeded',
+        sessionId: this.host.config.sessionId, browserType: this.browser.type, status: 'succeeded',
         elapsedMs: elapsedBrowserMs(launchStartedAt),
         browserPid: this.browserProcessSupervisor.getPid(client),
         headless: this.host.config.puppeteer?.headless ?? true,
@@ -663,200 +629,6 @@ export class WwebjsLifecycle {
     } finally {
       if (timeout) clearTimeout(timeout);
     }
-  }
-
-  /**
-   * Resolve the Brave executable for the current operating system.
-   *
-   * Resolution order:
-   *
-   * 1. config.brave.executablePath, but only when the path really exists.
-   * 2. config.puppeteer.executablePath, but only when the path really exists.
-   * 3. Well-known Brave installation paths for the current OS.
-   * 4. Brave binaries discoverable through PATH.
-   *
-   * This existence check is important because configuration.ts historically
-   * defaulted brave.executablePath to `/usr/bin/brave`. Without validating that
-   * path first, a Windows host receives the Linux default and Puppeteer fails
-   * before Windows auto-detection can run.
-   */
-  private async resolveBraveExecutable(): Promise<string> {
-    const seen = new Set<string>();
-    const candidates: string[] = [];
-
-    const addCandidate = (candidate?: string | null): void => {
-      if (!candidate) {
-        return;
-      }
-
-      const trimmed = candidate.trim();
-      if (!trimmed || seen.has(trimmed)) {
-        return;
-      }
-
-      seen.add(trimmed);
-      candidates.push(trimmed);
-    };
-
-    /*
-     * Explicit configuration has first priority, but it is not trusted blindly.
-     * A stale/default Linux path on Windows must not prevent OS auto-detection.
-     */
-    addCandidate(this.host.config.brave?.executablePath);
-    addCandidate(this.host.config.puppeteer?.executablePath);
-
-    const pathDirectories = (process.env.PATH ?? '')
-      .split(path.delimiter)
-      .map(directory => directory.trim())
-      .filter(Boolean);
-
-    switch (process.platform) {
-      case 'win32': {
-        const installRoots = [
-          process.env.PROGRAMFILES,
-          process.env['PROGRAMFILES(X86)'],
-          process.env.LOCALAPPDATA,
-          process.env.USERPROFILE
-            ? path.join(process.env.USERPROFILE, 'AppData', 'Local')
-            : undefined,
-        ].filter((root): root is string => Boolean(root));
-
-        for (const root of installRoots) {
-          addCandidate(
-            path.join(
-              root,
-              'BraveSoftware',
-              'Brave-Browser',
-              'Application',
-              'brave.exe',
-            ),
-          );
-
-          addCandidate(
-            path.join(
-              root,
-              'BraveSoftware',
-              'Brave-Browser-Beta',
-              'Application',
-              'brave.exe',
-            ),
-          );
-
-          addCandidate(
-            path.join(
-              root,
-              'BraveSoftware',
-              'Brave-Browser-Nightly',
-              'Application',
-              'brave.exe',
-            ),
-          );
-        }
-
-        for (const directory of pathDirectories) {
-          addCandidate(path.join(directory, 'brave.exe'));
-          addCandidate(path.join(directory, 'brave-browser.exe'));
-        }
-
-        break;
-      }
-
-      case 'darwin': {
-        addCandidate(
-          '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
-        );
-
-        addCandidate(
-          '/Applications/Brave Browser Beta.app/Contents/MacOS/Brave Browser Beta',
-        );
-
-        addCandidate(
-          '/Applications/Brave Browser Nightly.app/Contents/MacOS/Brave Browser Nightly',
-        );
-
-        if (process.env.HOME) {
-          addCandidate(
-            path.join(
-              process.env.HOME,
-              'Applications',
-              'Brave Browser.app',
-              'Contents',
-              'MacOS',
-              'Brave Browser',
-            ),
-          );
-        }
-
-        for (const directory of pathDirectories) {
-          addCandidate(path.join(directory, 'brave'));
-          addCandidate(path.join(directory, 'brave-browser'));
-        }
-
-        break;
-      }
-
-      case 'linux': {
-        addCandidate('/usr/bin/brave-browser');
-        addCandidate('/usr/bin/brave');
-        addCandidate('/usr/bin/brave-browser-stable');
-        addCandidate('/usr/local/bin/brave-browser');
-        addCandidate('/usr/local/bin/brave');
-        addCandidate('/snap/bin/brave');
-
-        for (const directory of pathDirectories) {
-          addCandidate(path.join(directory, 'brave-browser'));
-          addCandidate(path.join(directory, 'brave'));
-          addCandidate(path.join(directory, 'brave-browser-stable'));
-        }
-
-        break;
-      }
-
-      default: {
-        /*
-         * Unknown Unix-like platforms still get a PATH-based attempt.
-         */
-        for (const directory of pathDirectories) {
-          addCandidate(path.join(directory, 'brave-browser'));
-          addCandidate(path.join(directory, 'brave'));
-        }
-
-        break;
-      }
-    }
-
-    for (const candidate of candidates) {
-      try {
-        await fs.access(candidate);
-
-        this.host.logger.log(
-          `Using Brave browser executable: ${candidate}`,
-          {
-            platform: process.platform,
-            executablePath: candidate,
-            action: 'brave_executable_resolved',
-          },
-        );
-
-        return candidate;
-      } catch {
-        /*
-         * Candidate is absent/inaccessible on this host.
-         * Continue to the next configured/OS/PATH location.
-         */
-      }
-    }
-
-    const configuredBrave = this.host.config.brave?.executablePath;
-    const configuredPuppeteer = this.host.config.puppeteer?.executablePath;
-
-    throw new Error(
-      `Brave browser executable was not found for platform '${process.platform}'. ` +
-        `Checked ${candidates.length} candidate path(s). ` +
-        `Configured Brave path: ${configuredBrave || '(none)'}. ` +
-        `Configured Puppeteer path: ${configuredPuppeteer || '(none)'}. ` +
-        `Install Brave or set BRAVE_EXECUTABLE / brave.executablePath to the correct executable.`,
-    );
   }
 
   setupEventHandlers(): void {
@@ -1092,15 +864,15 @@ export class WwebjsLifecycle {
       sourceClient, capturedProcess,
       reason => this.handlePuppeteerDeath(reason, sourceClient),
       (_error, pid) => this.host.logger.event(LogLevel.WARN, 'engine.browser.process_error',
-        'observeBrowser', 'Brave process emitted an error', {
+        'observeBrowser', 'Browser process emitted an error', {
           sessionId: this.host.config.sessionId, browserPid: pid,
           action: 'brave_process_error', status: 'failed',
-          reasonCode: BraveFailureCode.BROWSER_PROCESS_ERROR,
+          reasonCode: BrowserFailureCode.BROWSER_PROCESS_ERROR,
         }),
     );
     if (browserPid !== null) {
       this.host.logger.event(LogLevel.INFO, 'engine.browser.process_supervised',
-        'observeBrowser', 'Brave process now supervised', {
+        'observeBrowser', 'Browser process now supervised', {
           sessionId: this.host.config.sessionId, browserPid,
           action: 'brave_process_supervised', status: 'succeeded',
           headless: this.host.config.puppeteer?.headless ?? true,
@@ -1640,7 +1412,7 @@ export class WwebjsLifecycle {
       } catch (error) {
         gracefulError = error;
         forced = true;
-        this.host.logger.warn('Graceful Brave shutdown incomplete; escalating to owned tree termination', {
+        this.host.logger.warn('Graceful browser shutdown incomplete; escalating to owned tree termination', {
           sessionId: this.host.config.sessionId, action: 'brave_graceful_shutdown_incomplete',
           operation: action, error: String(error),
         });
@@ -1652,23 +1424,23 @@ export class WwebjsLifecycle {
       if (browserPid) {
         try {
           await boundedBrowserOperation(
-            () => this.braveProfileManager.terminateOwnedBrowserTree(
+            () => this.profileManager.terminateOwnedBrowserTree(
               this.host.config.sessionId, browserPid, this.host.logger,
               this.profileLeaseRelease?.ownerToken ?? '',
             ),
             BROWSER_TEARDOWN_BUDGETS.forceMs,
-            'owned Brave process-tree termination',
+            'owned browser process-tree termination',
           );
           forcedSucceeded = true;
         } catch (error) {
           terminationError = error;
-          this.host.logger.warn('Ownership-verified Brave tree termination incomplete', {
+          this.host.logger.warn('Ownership-verified browser tree termination incomplete', {
             sessionId: this.host.config.sessionId, action: 'brave_owned_tree_termination_failed',
             operation: action, browserPid, error: String(error),
           });
         }
       } else {
-        this.host.logger.warn('No captured Brave PID; cannot use forced OS termination', {
+        this.host.logger.warn('No captured browser PID; cannot use forced OS termination', {
           sessionId: this.host.config.sessionId, action: 'brave_process_pid_missing', operation: action,
         });
       }
@@ -1700,18 +1472,18 @@ export class WwebjsLifecycle {
         await this.releaseProfileLease();
       } else {
         await boundedBrowserOperation(
-          () => this.braveProfileManager.killOrphanedBraveProcesses(
-            this.host.config.sessionId, this.host.logger, false,
+          () => this.profileManager.assertNoConflictingBrowserProcesses(
+            this.host.config.sessionId, this.host.logger,
           ),
           BROWSER_TEARDOWN_BUDGETS.leaseMs,
-          'Brave profile-reset process verification',
+          'Browser profile-reset process verification',
         );
       }
     } catch (releaseError) {
       this.host.logger.event(LogLevel.ERROR, 'engine.browser.teardown_failed', action,
-        'Brave teardown incomplete; ownership remains protected', {
+        'Browser teardown incomplete; ownership remains protected', {
           sessionId: this.host.config.sessionId, status: 'failed',
-          reasonCode: BraveFailureCode.BROWSER_TEARDOWN_INCOMPLETE,
+          reasonCode: BrowserFailureCode.BROWSER_TEARDOWN_INCOMPLETE,
           browserPid: this.browserProcessSupervisor.getPid(client), forced,
           elapsedMs: elapsedBrowserMs(teardownStartedAt),
         });
@@ -1728,16 +1500,16 @@ export class WwebjsLifecycle {
     // callback's independently verified absence of session-marked browser processes.
     if (!hadLease && !destroySucceeded && !forcedSucceeded) {
       this.host.logger.event(LogLevel.ERROR, 'engine.browser.teardown_failed', action,
-        'Brave teardown incomplete; browser exit not verified', {
+        'Browser teardown incomplete; browser exit not verified', {
           sessionId: this.host.config.sessionId, status: 'failed',
-          reasonCode: BraveFailureCode.BROWSER_TEARDOWN_INCOMPLETE,
+          reasonCode: BrowserFailureCode.BROWSER_TEARDOWN_INCOMPLETE,
           elapsedMs: elapsedBrowserMs(teardownStartedAt), forced,
         });
       throw new Error(`BROWSER_TEARDOWN_INCOMPLETE: ${action}: browser exit not verified`);
     }
     this.finishClientTeardown(client);
     this.host.logger.event(LogLevel.INFO, 'engine.browser.teardown_succeeded', action,
-      'Brave teardown completed', {
+      'Browser teardown completed', {
         sessionId: this.host.config.sessionId, action: 'brave_teardown_complete',
         status: 'succeeded', elapsedMs: elapsedBrowserMs(teardownStartedAt),
         forced, browserPid: this.browserProcessSupervisor.getPid(client),
@@ -1767,11 +1539,11 @@ export class WwebjsLifecycle {
     this.profileResetActive = true;
     if (!client) {
       await boundedBrowserOperation(
-        () => this.braveProfileManager.killOrphanedBraveProcesses(
-          this.host.config.sessionId, this.host.logger, false,
+        () => this.profileManager.assertNoConflictingBrowserProcesses(
+          this.host.config.sessionId, this.host.logger,
         ),
         BROWSER_TEARDOWN_BUDGETS.leaseMs,
-        'Brave profile-reset process verification',
+        'Browser profile-reset process verification',
       );
       return;
     }
@@ -1987,7 +1759,19 @@ export class WwebjsLifecycle {
   }
 
   
-  async handleProtocolTimeout(operation: string): Promise<void> {
+  handleProtocolTimeout(operation: string): Promise<void> {
+    if (this.protocolTimeoutRecoveryInFlight) return this.protocolTimeoutRecoveryInFlight;
+    const operationPromise = this.handleProtocolTimeoutOnce(operation);
+    const pending = operationPromise.finally(() => {
+      if (this.protocolTimeoutRecoveryInFlight === pending) {
+        this.protocolTimeoutRecoveryInFlight = undefined;
+      }
+    });
+    this.protocolTimeoutRecoveryInFlight = pending;
+    return pending;
+  }
+
+  private async handleProtocolTimeoutOnce(operation: string): Promise<void> {
     const MAX_PROTOCOL_TIMEOUT_RECOVERY_ATTEMPTS = 2;
 
     this.host.logger.warn('Puppeteer protocol timeout detected', {

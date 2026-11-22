@@ -23,6 +23,11 @@
  */
 export const BLANK_SHADOWED_ENV_KEYS: string[] = [
   'ENGINE_TYPE',
+  // Forwarded blank BROWSER_* values must not shadow .env/data/.env.generated;
+  // the old Brave settings remain legal compatibility fallbacks.
+  'BROWSER_TYPE',
+  'BROWSER_EXECUTABLE_PATH',
+  'BROWSER_PROFILE_BASE_PATH',
   // Inbound-media knobs. Not dashboard-managed, but every blank compose forward must be cleared or
   // the empty value shadows .env / data/.env.generated — which is why the gate above requires an
   // entry for each one.

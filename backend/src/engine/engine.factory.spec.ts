@@ -6,6 +6,10 @@ import { ConfigService } from '@nestjs/config';
 import { PluginLoaderService, PluginType } from '../core/plugins';
 import { BaileysMessageStoreService } from './adapters/baileys-message-store.service';
 import { LidMappingStoreService } from './identity/lid-mapping-store.service';
+import { WhatsAppWebJsAdapter } from './adapters/whatsapp-web-js.adapter';
+import { BrowserManager } from './browser/browser.manager';
+import { BrowserProfileManager } from './browser/browser-profile.manager';
+import { WhatsAppWebJsPlugin } from './builtin/whatsapp-web-js';
 
 describe('EngineFactory', () => {
   const engineBlob = {
@@ -111,6 +115,53 @@ describe('EngineFactory', () => {
     expect(() => factory.create({ sessionId: 'sess-2', dbSessionId: 'db-2' })).not.toThrow();
   });
 
+  it('injects the BrowserManager into the registered plugin', async () => {
+    const registerBuiltInPlugin = jest.fn();
+    const pluginLoader = {
+      registerBuiltInPlugin,
+      enablePlugin: jest.fn().mockResolvedValue(undefined),
+    } as unknown as PluginLoaderService;
+    const browserManager = new BrowserManager();
+    const factory = new EngineFactory(buildConfigService(), pluginLoader, buildMessageStore(), buildLidStore(), browserManager);
+    await factory.onModuleInit();
+    const wwjs = registerBuiltInPlugin.mock.calls.find(call => (call as [{ id: string }])[0].id === 'whatsapp-web.js')![1];
+    const adapter = wwjs.createEngine({ sessionId: 'sess-selected' }) as WhatsAppWebJsAdapter;
+    const config = (adapter as unknown as { config: {
+      browserDriver: object; browserProfileManager: BrowserProfileManager; braveProfileManager: BrowserProfileManager;
+    } }).config;
+    expect(config.browserDriver).toBe(browserManager.getBrowser('brave'));
+    expect(config.browserProfileManager).toBe(config.braveProfileManager);
+  });
+
+  it('resolves the same Brave driver and profile root in direct fallback as in the plugin', () => {
+    const pluginLoader = { getPlugin: jest.fn().mockReturnValue(undefined) } as unknown as PluginLoaderService;
+    const browserManager = new BrowserManager();
+    const factory = new EngineFactory(buildConfigService({
+      'engine.browser.type': 'brave',
+      'engine.browser.executablePath': '/configured/browser',
+      'engine.browser.profileBasePath': '/persisted/profiles',
+    }), pluginLoader, buildMessageStore(), buildLidStore(), browserManager);
+    const adapter = factory.create({ sessionId: 'sess-fallback', dbSessionId: 'db-fallback' }) as WhatsAppWebJsAdapter;
+    const config = (adapter as unknown as { config: {
+      browser: { type: string; executablePath: string; profileBasePath: string };
+      browserDriver: object; browserProfileManager: BrowserProfileManager; braveProfileManager: BrowserProfileManager;
+    } }).config;
+    expect(config.browser).toEqual({
+      type: 'brave', executablePath: '/configured/browser', profileBasePath: '/persisted/profiles',
+      strictExecutablePath: true,
+    });
+    expect(config.browserDriver).toBe(browserManager.getBrowser('brave'));
+    expect(config.browserProfileManager).toBe(config.braveProfileManager);
+    expect(config.browserProfileManager.getProfilePath('sess-fallback')).toContain('/persisted/profiles/sess-fallback');
+  });
+
+  it('fails closed when a fallback configuration selects an unregistered browser', () => {
+    const pluginLoader = { getPlugin: jest.fn().mockReturnValue(undefined) } as unknown as PluginLoaderService;
+    const factory = new EngineFactory(buildConfigService({ 'engine.browser.type': 'chrome' }),
+      pluginLoader, buildMessageStore(), buildLidStore());
+    expect(() => factory.create({ sessionId: 'not-started', dbSessionId: 'db' })).toThrow(/Unsupported browser type/);
+  });
+
   it('throws instead of silently building whatsapp-web.js when a non-wwebjs engine has no plugin', () => {
     // The legacy fallback only builds wwebjs; reaching it with ENGINE_TYPE=baileys must fail loudly
     // rather than run the wrong engine.
@@ -154,6 +205,7 @@ describe('EngineFactory', () => {
         buildConfigService({
           'engine.sessionDataPath': sessionDataPath,
           'engine.baileys.authDir': authDir,
+          'engine.browser.profileBasePath': path.join(tmpRoot, 'profiles'),
         }),
         pluginLoader,
         buildMessageStore(),
@@ -259,6 +311,56 @@ describe('EngineFactory', () => {
     it('is a no-op (no throw) when neither auth dir exists', async () => {
       const { factory } = buildBothDirFactory('baileys');
       await expect(factory.purgeSessionData('never-linked')).resolves.toBeUndefined();
+    });
+
+    it('uses the plugin effective profile root for purge when it overrides ConfigService', async () => {
+      const registeredRoot = path.join(tmpRoot, 'registered-profiles');
+      const effectiveRoot = path.join(tmpRoot, 'effective-profiles');
+      const plugin = new WhatsAppWebJsPlugin({ browser: { profileBasePath: registeredRoot } });
+      void plugin.onLoad({
+        config: { browser: { profileBasePath: effectiveRoot } },
+        logger: { log: jest.fn() },
+      } as unknown as import('../core/plugins').PluginContext);
+      const pluginLoader = {
+        getPlugin: jest.fn((id: string) => id === 'whatsapp-web.js' ? { instance: plugin } : undefined),
+      } as unknown as PluginLoaderService;
+      const factory = new EngineFactory(buildConfigService({
+        'engine.sessionDataPath': path.join(tmpRoot, 'sessions'),
+        'engine.baileys.authDir': path.join(tmpRoot, 'baileys'),
+        'engine.browser.profileBasePath': registeredRoot,
+      }), pluginLoader, buildMessageStore(), buildLidStore());
+      const actualProfile = path.join(effectiveRoot, 'alice');
+      fs.mkdirSync(actualProfile, { recursive: true });
+      fs.writeFileSync(path.join(actualProfile, 'credentials'), 'test');
+      await factory.purgeSessionData('alice');
+      expect(fs.existsSync(actualProfile)).toBe(false);
+    });
+
+    it('refuses to delete credentials while another browser profile lease exists', async () => {
+      const { factory, wwjsDir, baileysDir } = buildBothDirFactory('whatsapp-web.js');
+      fs.mkdirSync(wwjsDir, { recursive: true });
+      fs.mkdirSync(baileysDir, { recursive: true });
+      const lockPath = path.join(tmpRoot, 'profiles', '.openwa-profile-locks', 'alice');
+      fs.mkdirSync(lockPath, { recursive: true });
+
+      await expect(factory.purgeSessionData('alice')).rejects.toThrow(/ownership lock/);
+      expect(fs.existsSync(wwjsDir)).toBe(true);
+      expect(fs.existsSync(baileysDir)).toBe(true);
+    });
+
+    it('refuses all credential deletion when process ownership cannot be verified', async () => {
+      const { factory, wwjsDir, baileysDir } = buildBothDirFactory('whatsapp-web.js');
+      fs.mkdirSync(wwjsDir, { recursive: true });
+      fs.mkdirSync(baileysDir, { recursive: true });
+      const spy = jest.spyOn(BrowserProfileManager.prototype, 'assertNoConflictingBrowserProcesses')
+        .mockRejectedValue(new Error('BROWSER_ORPHAN_RECOVERY_UNSAFE: unmarked browser uses profile'));
+      try {
+        await expect(factory.purgeSessionData('alice')).rejects.toThrow(/unmarked browser/);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(fs.existsSync(wwjsDir)).toBe(true);
+      expect(fs.existsSync(baileysDir)).toBe(true);
     });
 
     it('refuses to purge an unsafe session name (no rm on a traversal path)', async () => {

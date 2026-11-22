@@ -5,15 +5,16 @@ import { type Client } from 'whatsapp-web.js';
 import { type EngineEventCallbacks, EngineStatus } from '../interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
-import { boundedBrowserOperation, BROWSER_TEARDOWN_BUDGETS } from '../brave/brave-browser-teardown';
+import { boundedBrowserOperation, BROWSER_TEARDOWN_BUDGETS } from '../browser/browser-teardown';
+import type { BrowserProfileManager } from '../browser/browser-profile.manager';
 
 /**
- * Stuck-auth detection and recovery for the NoAuth + persistent-Brave architecture.
+ * Stuck-auth detection and recovery for NoAuth + a persistent browser profile.
  *
  * The WhatsApp credentials are no longer owned by LocalAuth under sessionDataPath. They live inside
- * the per-session Brave user-data directory managed by BraveProfileManager. Recovery therefore has
+ * the per-session browser user-data directory managed by BrowserProfileManager. Recovery therefore has
  * to retire the current browser generation completely before removing that profile; deleting files
- * underneath a live Chromium/Brave process risks a partial profile and an endless re-pair loop.
+ * underneath a live browser process risks a partial profile and an endless re-pair loop.
  */
 export interface WwebjsStuckAuthHost {
   readonly logger: ReturnType<typeof createLogger>;
@@ -42,8 +43,8 @@ export class WwebjsStuckAuth {
    * Recover a session that authenticated but never reached a usable runtime.
    *
    * One destructive recovery is allowed for the whole reconnect episode. The current client is
-   * detached first so late whatsapp-web.js events cannot resurrect it; then the Brave process is
-   * stopped and independently verified gone; only then is the dedicated Brave profile deleted.
+   * detached first so late whatsapp-web.js events cannot resurrect it; then the browser process is
+   * stopped and independently verified gone; only then is the dedicated browser profile deleted.
    * A failed/unsafe profile reset is terminal and does NOT emit onDisconnected, because reconnecting
    * onto a profile that may still be owned by a live process would make the situation worse.
    */
@@ -86,7 +87,7 @@ export class WwebjsStuckAuth {
     // tracked until it settles, and the error remains fatal to this engine generation.
     const resetOperation = (async (): Promise<void> => {
       await this.stopClientForProfileReset(client);
-      await this.clearBraveProfile();
+      await this.clearBrowserProfile();
       // Release only AFTER the destructive operation has fully finished.
       await this.host.completeProfileReset?.();
     })();
@@ -96,7 +97,7 @@ export class WwebjsStuckAuth {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.host.logger.error(
-        `Stuck-auth recovery could not safely reset the Brave profile: ${reason}`,
+        `Stuck-auth recovery could not safely reset the browser profile: ${reason}`,
         undefined,
         {
           sessionId: this.host.config.sessionId,
@@ -105,7 +106,7 @@ export class WwebjsStuckAuth {
       );
       this.host.setStatus(EngineStatus.FAILED);
       this.host.getCallbacks().onError?.(
-        'WhatsApp Web authentication is stuck, but al-hakim could not safely reset the Brave profile. ' +
+        'WhatsApp Web authentication is stuck, but al-hakim could not safely reset the browser profile. ' +
           'The session was stopped to avoid corrupting its browser data. Check the server logs and restart it manually.',
       );
       return;
@@ -113,14 +114,15 @@ export class WwebjsStuckAuth {
 
     this.host.setStatus(EngineStatus.DISCONNECTED);
     this.host.getCallbacks().onDisconnected?.(
-      'Saved Brave session could not be restored; profile cleared for re-pairing',
+      'Saved browser session could not be restored; profile cleared for re-pairing',
     );
   }
 
   /**
-   * Stop the live whatsapp-web.js/Brave generation with a bounded graceful destroy. Regardless of
-   * whether destroy succeeds, BraveProfileManager then verifies that no process carrying this
-   * session's --al-hakim-session marker remains. That verification is the safety gate before deletion.
+   * Stop the live whatsapp-web.js/browser generation with a bounded graceful destroy. In the
+   * lifecycle path, teardown verifies process exit while retaining the profile lease. In the
+   * standalone fallback, BrowserProfileManager verifies the absence of any conflicting browser
+   * process before destructive deletion. Uncertain process state must fail closed.
    */
   private async stopClientForProfileReset(client: Client | null): Promise<void> {
     if (this.host.stopClientForProfileReset) {
@@ -136,48 +138,83 @@ export class WwebjsStuckAuth {
         'stuck-auth client.destroy()',
       );
     }
-    const manager = this.host.config.braveProfileManager;
-    if (!manager) throw new Error('Brave profile manager is unavailable');
+    const manager = this.getProfileManager();
     await boundedBrowserOperation(
-      () => manager.killOrphanedBraveProcesses(this.host.config.sessionId, this.host.logger, false),
+      () => this.assertNoConflictingProcesses(manager),
       BROWSER_TEARDOWN_BUDGETS.leaseMs,
       'stuck-auth process verification',
     );
   }
 
   /**
-   * Delete the complete per-session Brave user-data directory. Do not selectively remove only
-   * Cookies/IndexedDB/Local Storage: WhatsApp/Chromium state spans multiple stores and a partial wipe
-   * can leave a half-linked profile that reproduces the same failure on the next generation.
+   * Resolve the shared manager. The Brave-named config property is a deprecated
+   * compatibility alias; production adapter construction always populates the
+   * browser-neutral property and makes both refer to the same instance.
    */
-  async clearBraveProfile(): Promise<void> {
-    const manager = this.host.config.braveProfileManager;
-    if (!manager) {
-      throw new Error('Brave profile manager is unavailable');
+  private getProfileManager(): BrowserProfileManager {
+    const manager = this.host.config.browserProfileManager ?? this.host.config.braveProfileManager;
+    if (!manager) throw new Error('Browser profile manager is unavailable');
+    if (this.host.config.browserProfileManager && this.host.config.braveProfileManager &&
+        this.host.config.browserProfileManager !== this.host.config.braveProfileManager) {
+      throw new Error('Conflicting browser profile managers; refusing credential deletion');
     }
+    return manager;
+  }
 
+  /**
+   * Prefer the browser-neutral check. Old standalone test hosts may inject a
+   * legacy manager double that only implements killOrphanedBraveProcesses().
+   * The production BrowserProfileManager always implements the neutral method.
+   */
+  private async assertNoConflictingProcesses(manager: BrowserProfileManager): Promise<void> {
+    if (typeof manager.assertNoConflictingBrowserProcesses === 'function') {
+      await manager.assertNoConflictingBrowserProcesses(this.host.config.sessionId, this.host.logger);
+      return;
+    }
+    await manager.killOrphanedBraveProcesses(this.host.config.sessionId, this.host.logger, false);
+  }
+
+  /**
+   * Delete the COMPLETE session-specific browser user-data directory, never
+   * individual cookies or storage files. The caller must first stop and verify
+   * the old browser, while WwebjsLifecycle retains the profile lease.
+   * Releasing the lease before deleting the profile would permit a new launch
+   * against partially removed credentials.
+   */
+  async clearBrowserProfile(): Promise<void> {
+    const manager = this.getProfileManager();
     const profilePath = manager.getProfilePath(this.host.config.sessionId);
 
     await manager.deleteProfile(this.host.config.sessionId);
 
     this.host.logger.warn(
-      `Deleted this session's persistent Brave profile at ${profilePath}. That profile contained the ` +
+      `Deleted this session's persistent browser profile at ${profilePath}. That profile contained the ` +
         'stored WhatsApp Web link, so the next start will require a fresh QR scan.',
       {
         sessionId: this.host.config.sessionId,
         dir: profilePath,
+        // Retain the old action for downstream logging dashboards until an
+        // explicitly coordinated observability migration.
         action: 'brave_auth_cleared',
+        eventType: 'engine.browser.auth_cleared',
       },
     );
   }
 
+  /** @deprecated Legacy API used by older tests/callers; use clearBrowserProfile(). */
+  async clearBraveProfile(): Promise<void> {
+    await this.clearBrowserProfile();
+  }
+
   /**
-   * Backward-compatible method name for older adapter/tests that still forward clearLocalAuth().
-   * In the Brave/NoAuth architecture it intentionally clears the Brave profile instead.
+   * Legacy NoAuth alias. Kept for the adapter's existing private proxy;
+   * callers must not invoke it against a running browser outside the
+   * lifecycle-controlled reset flow.
    */
   async clearLocalAuth(): Promise<void> {
-    await this.clearBraveProfile();
+    await this.clearBrowserProfile();
   }
+
 }
 
 

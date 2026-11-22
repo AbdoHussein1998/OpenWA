@@ -11,7 +11,9 @@ import { ConfigService } from '@nestjs/config';
 
 import { IWhatsAppEngine } from './interfaces/whatsapp-engine.interface';
 import { WhatsAppWebJsAdapter } from './adapters/whatsapp-web-js.adapter';
-import { BraveProfileManager } from './brave/brave-profile.manager';
+import { BrowserManager } from './browser/browser.manager';
+import { BrowserProfileManager } from './browser/browser-profile.manager';
+import { resolveBrowserSettings } from './browser/browser-config';
 
 import {
   PluginLoaderService,
@@ -75,6 +77,8 @@ export class EngineFactory
 
     private readonly lidMappingStore:
       LidMappingStoreService,
+
+    private readonly browserManager: BrowserManager = new BrowserManager(),
   ) {
     this.engineType =
       this.configService
@@ -133,6 +137,7 @@ export class EngineFactory
       new WhatsAppWebJsPlugin(
         engineConfig,
         this.lidMappingStore,
+        this.browserManager,
       );
 
     this.pluginLoader
@@ -323,16 +328,29 @@ export class EngineFactory
       throw new Error('Refusing to purge session data with unsafe session name');
     }
 
-    const braveProfileBasePath =
-      this.configService
-        .get<string>(
-          'engine.brave.profileBasePath',
-        ) ??
-      '/data/brave-profiles';
+    // A built-in plugin can hold an effective persisted override (context.config)
+    // different from ConfigService. Use the plugin's actual profile root to
+    // prevent deleting credentials from a different on-disk location.
+    const wwjsPlugin = this.pluginLoader.getPlugin('whatsapp-web.js')?.instance;
+    const browserProfileBasePath = wwjsPlugin instanceof WhatsAppWebJsPlugin
+      ? wwjsPlugin.getEffectiveProfileBasePath()
+      : (this.configService.get<string>('engine.browser.profileBasePath') ??
+         this.configService.get<string>('engine.brave.profileBasePath') ??
+         '/data/brave-profiles');
+    const profileManager = new BrowserProfileManager(browserProfileBasePath);
 
     // Credential deletion cannot race a peer's live browser or a crashed owner whose state
     // has not been verified. Check BEFORE deleting any engine directory, not after a partial purge.
-    await new BraveProfileManager(braveProfileBasePath).assertProfileUnlocked(sessionName);
+    await profileManager.assertProfileUnlocked(sessionName);
+    // An unmarked or externally launched browser may use the same profile even
+    // without our filesystem lease. Refuse ALL credential deletion unless the
+    // OS process scan can verify that no browser still uses this profile.
+    // SessionLifecycleFences separately prevents same-process start/delete races.
+    await profileManager.assertNoConflictingBrowserProcesses(sessionName, this.logger);
+    // Recheck after the (potentially slow) OS scan: a competing owner may have
+    // acquired a lease in the meantime. A distributed, atomic purge barrier is
+    // still a separate hardening concern for the final acceptance phase.
+    await profileManager.assertProfileUnlocked(sessionName);
 
     const dirs:
       Array<{
@@ -361,12 +379,10 @@ export class EngineFactory
 
         {
           engine:
-            'brave',
+            'browser',
 
           dir:
-            new BraveProfileManager(
-              braveProfileBasePath,
-            ).getProfilePath(
+            profileManager.getProfilePath(
               sessionName,
             ),
         },
@@ -528,6 +544,27 @@ export class EngineFactory
       );
     }
 
+    // Resolve the browser from the same configuration contract as the plugin.
+    // Keep legacy Brave/Puppeteer setting precedence and the existing profile root.
+    const browserSettings = resolveBrowserSettings({
+      browser: {
+        type: this.configService.get<unknown>('engine.browser.type'),
+        executablePath: this.configService.get<string>('engine.browser.executablePath'),
+        profileBasePath: this.configService.get<string>('engine.browser.profileBasePath'),
+      },
+      brave: {
+        executablePath: this.configService.get<string>('engine.brave.executablePath'),
+        profileBasePath: this.configService.get<string>('engine.brave.profileBasePath'),
+      },
+      puppeteer: {
+        executablePath: this.configService.get<string>('engine.puppeteer.executablePath'),
+      },
+    }, { profileBasePath: '/data/brave-profiles', executablePath: '/usr/bin/brave' });
+    const browserDriver = this.browserManager.getBrowser(browserSettings.type);
+    const browserProfileManager = new BrowserProfileManager(
+      browserSettings.profileBasePath, [browserDriver],
+    );
+
     return new WhatsAppWebJsAdapter({
       sessionId:
         options.sessionId,
@@ -570,34 +607,15 @@ export class EngineFactory
             ),
       },
 
-      brave: {
-        executablePath:
-          this.configService
-            .get<string>(
-              'engine.brave.executablePath',
-            ) ??
-          this.configService
-            .get<string>(
-              'engine.puppeteer.executablePath',
-            ) ??
-          '/usr/bin/brave',
-
-        profileBasePath:
-          this.configService
-            .get<string>(
-              'engine.brave.profileBasePath',
-            ) ??
-          '/data/brave-profiles',
-      },
-
-      braveProfileManager:
-        new BraveProfileManager(
-          this.configService
-            .get<string>(
-              'engine.brave.profileBasePath',
-            ) ??
-            '/data/brave-profiles',
-        ),
+      browser: browserSettings,
+      browserDriver,
+      browserProfileManager,
+      // Deprecated alias retained for direct adapter compatibility; Phase 6 uses the neutral manager.
+      braveProfileManager: browserProfileManager,
+      brave: browserSettings.type === 'brave' ? {
+        executablePath: browserSettings.executablePath,
+        profileBasePath: browserSettings.profileBasePath,
+      } : undefined,
 
       proxy:
         options.proxyUrl

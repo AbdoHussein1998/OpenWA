@@ -59,7 +59,11 @@ import { registerWwebjsGroupEvents } from './wwebjs-group-events';
 import { WwebjsOnboardingWatcher } from './wwebjs-onboarding';
 import { WwebjsLifecycle } from './wwebjs-lifecycle';
 import { WwebjsReadyReconcile } from './wwebjs-reconcile';
-import { BraveProfileManager } from '../brave/brave-profile.manager';
+import { BrowserProfileManager } from '../browser/browser-profile.manager';
+import { BrowserManager } from '../browser/browser.manager';
+import { resolveBrowserSettings } from '../browser/browser-config';
+import type { BrowserInterface } from '../browser/interfaces/browser.interface';
+import type { BrowserType } from '../browser/browser.types';
 import { WwebjsStuckAuth } from './wwebjs-stuck-auth';
 import { WwebjsCalls } from './wwebjs-calls';
 import {
@@ -85,66 +89,29 @@ export interface WhatsAppWebJsConfig {
     /** Per-CDP-command budget handed to Puppeteer. Must be positive — see wwebjs-lifecycle. */
     protocolTimeoutMs?: number;
   };
-  // ═══════════════════════════════════════════════════════════════════════
-  // BRAVE BROWSER CONFIGURATION — THE ARCHITECTURAL SHIFT
-  // ═══════════════════════════════════════════════════════════════════════
-  // 
-  // BEFORE: Puppeteer used its bundled Chromium with temporary profiles.
-  //   → No Brave-specific config existed.
-  //
-  // AFTER: Each session maps to a persistent Brave browser profile.
-  //   → brave.executablePath: Path to the Brave binary (e.g., /usr/bin/brave)
-  //   → brave.profileBasePath: Root directory for all session profiles
-  //     (e.g., /data/brave-profiles, mounted as Docker volume)
-  //
-  // These two fields enable the SESSION = BROWSER IDENTITY mapping:
-  //   sessionId → /data/brave-profiles/<sessionId> → real Brave process
-  //
-  // The `brave` object is optional for backward compatibility, but REQUIRED
-  // for the new persistent-profile behavior. If absent, the code falls back
-  // to puppeteer.executablePath (legacy behavior) or system default.
-  // ═══════════════════════════════════════════════════════════════════════
+  /**
+   * Legacy Brave settings: preserved for existing deployments and standalone
+   * adapter callers. `browser` below takes precedence when explicitly set.
+   * Do not relocate the existing session profile as part of browser selection.
+   */
   brave?: {
-    /** 
-     * Absolute path to the Brave browser executable.
-     * 
-     * Python reference: Like specifying the Chrome binary path in Selenium:
-     *   driver = webdriver.Chrome(executable_path='/usr/bin/brave')
-     * 
-     * Typical values:
-     *   - Docker: '/usr/bin/brave' (installed via apt in Dockerfile)
-     *   - macOS: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'
-     *   - Linux: '/usr/bin/brave' or '/usr/bin/brave-browser'
-     *   - Windows: 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe'
-     * 
-     * If omitted, falls back to config.puppeteer.executablePath, then '/usr/bin/brave'.
-     */
     executablePath?: string;
-
-    /** 
-     * Base directory where all session-specific Brave profiles are stored.
-     * 
-     * Python reference: Like a base data directory that gets subfoldered per session:
-     *   base_path = '/data/brave-profiles'
-     *   session_profile = os.path.join(base_path, session_id)
-     * 
-     * Each session gets its OWN subdirectory: <basePath>/<sessionId>
-     * This directory MUST be a persistent Docker volume to survive restarts.
-     * 
-     * If omitted, falls back to environment variable or a sensible default
-     * resolved by the BraveProfileManager constructor caller.
-     */
     profileBasePath?: string;
   };
-  /**
-   * Persistent Brave-profile manager.
-   *
-   * EngineFactory/plugin creation supplies this explicitly. It remains optional at the adapter
-   * boundary so direct construction (tests, standalone use, older integrations) keeps working;
-   * the constructor resolves a manager from brave.profileBasePath / BRAVE_PROFILE_PATH when absent.
-   */
-  braveProfileManager?: BraveProfileManager;
-  // ═══════════════════════════════════════════════════════════════════════
+  /** Selected browser configuration. Brave remains the only registered driver. */
+  browser?: {
+    type?: BrowserType;
+    executablePath?: string;
+    profileBasePath?: string;
+    /** Explicit BROWSER_EXECUTABLE_PATH must never fall through to another binary. */
+    strictExecutablePath?: boolean;
+  };
+  /** Provided by BrowserManager in the factory/plugin paths. */
+  browserDriver?: BrowserInterface;
+  /** Persistent profile management shared by all browser drivers. */
+  browserProfileManager?: BrowserProfileManager;
+  /** Deprecated Brave alias accepted from older direct adapter callers. */
+  braveProfileManager?: BrowserProfileManager;
 
   // Phase 3: Proxy per session
   proxy?: {
@@ -156,8 +123,11 @@ export interface WhatsAppWebJsConfig {
   lidMappingStore?: LidMappingStore;
 }
 
-type ResolvedWhatsAppWebJsConfig = Omit<WhatsAppWebJsConfig, 'braveProfileManager'> & {
-  braveProfileManager: BraveProfileManager;
+type ResolvedWhatsAppWebJsConfig = WhatsAppWebJsConfig & {
+  browserDriver: BrowserInterface;
+  browserProfileManager: BrowserProfileManager;
+  /** Deprecated alias retained for existing callers/tests. */
+  braveProfileManager: BrowserProfileManager;
 };
 
 
@@ -273,16 +243,29 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   constructor(config: WhatsAppWebJsConfig) {
     super();
 
-    const braveProfileBasePath =
-      config.brave?.profileBasePath ??
-      process.env.BRAVE_PROFILE_PATH ??
-      './data/brave-profiles';
+    const selection = resolveBrowserSettings(config, {
+      profileBasePath: process.env.BRAVE_PROFILE_PATH ?? './data/brave-profiles',
+    });
+    const browserDriver = config.browserDriver ?? new BrowserManager().getBrowser(selection.type);
+    if (browserDriver.type !== selection.type) {
+      throw new Error(`Browser driver mismatch: requested ${selection.type}, received ${browserDriver.type}`);
+    }
+    // Stuck-auth uses browserProfileManager. Keep one shared instance under the
+    // legacy name for existing direct callers and test fixtures.
+    const profileManager = config.browserProfileManager ?? config.braveProfileManager ??
+      new BrowserProfileManager(selection.profileBasePath, [browserDriver]);
+    if (config.browserProfileManager && config.braveProfileManager &&
+        config.browserProfileManager !== config.braveProfileManager) {
+      throw new Error('Conflicting browser profile manager instances');
+    }
 
     this.config = {
       ...config,
-      braveProfileManager:
-        config.braveProfileManager ??
-        new BraveProfileManager(braveProfileBasePath),
+      browser: { ...config.browser, type: selection.type,
+        executablePath: selection.executablePath, profileBasePath: selection.profileBasePath },
+      browserDriver,
+      browserProfileManager: profileManager,
+      braveProfileManager: profileManager,
     };
 
     // API-surface clusters live in ./wwebjs-* delegates; the public methods below forward to them.
@@ -378,7 +361,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         closeInboundMedia: () => this.inboundLimiter.close(),
         attachDomainEvents: client => this.attachDomainEvents(client),
       },
-      this.config.braveProfileManager,
+      this.config.browserProfileManager,
+      this.config.browserDriver,
     );
   }
 
@@ -572,7 +556,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
    * legacy LocalAuth session directory.
    */
   private clearLocalAuth(): Promise<void> {
-    return this.stuckAuth.clearLocalAuth();
+    // Legacy adapter entry point; the recovery delegate now uses the
+    // browser-neutral profile deletion method.
+    return this.stuckAuth.clearBrowserProfile();
   }
 
   private reportActionRequired(reason: string): void {

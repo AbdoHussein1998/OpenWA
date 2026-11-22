@@ -226,6 +226,18 @@ export default () => ({
       })(),
     },
 
+    // Browser selection is runtime-validated in env.validation.ts. Do not copy legacy
+    // defaults into browser.executablePath: that would turn a fallback into an explicit
+    // BROWSER_EXECUTABLE_PATH and defeat the new fail-closed launch policy.
+    browser: {
+      type: process.env.BROWSER_TYPE?.trim() || 'brave',
+      executablePath: process.env.BROWSER_EXECUTABLE_PATH || undefined,
+      profileBasePath: process.env.BROWSER_PROFILE_BASE_PATH || undefined,
+    },
+
+    // Legacy config remains populated as before. Existing engine consumers and
+    // deployments continue to use the same Brave executable and profile directory
+    // when none of the new BROWSER_* settings are supplied.
     brave: {
       executablePath:
         process.env.BRAVE_EXECUTABLE || '/usr/bin/brave',

@@ -22,6 +22,21 @@ export class SessionLivenessWatchdog {
   /** Consecutive failed liveness probes per session id. Cleared on recovery or on a status change. */
   private readonly failures = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
+  /** One probe per session generation, even when overlapping interval ticks are scheduled. */
+  private readonly inFlight = new Map<string, {
+    engine: IWhatsAppEngine;
+    promise: Promise<void>;
+    token: symbol;
+  }>();
+  /** A timed-out onDead callback may still be running. Never dispatch a second one for that engine. */
+  private readonly recoveries = new Map<string, {
+    engine: IWhatsAppEngine;
+    promise: Promise<void>;
+  }>();
+  /** Fences results from an earlier start/stop cycle. */
+  private epoch = 0;
+  /** clear() also invalidates an already-started probe for the current engine. */
+  private readonly invalidations = new WeakMap<IWhatsAppEngine, number>();
 
   /** Invoked when a session has failed enough consecutive probes to be treated as disconnected. */
   private onDead: (id: string, engine: IWhatsAppEngine, reason: string) => Promise<void> = () => Promise.resolve();
@@ -45,6 +60,7 @@ export class SessionLivenessWatchdog {
     this.logger.event(LogLevel.INFO, 'session.watchdog.started', 'start', 'Liveness watchdog start requested', { actorType: 'system' });
     this.onDead = onDead;
     if (this.timer) return;
+    this.epoch += 1;
     this.timer = setInterval(() => {
       // allSettled inside the tick keeps a failing session from ever throwing into the timer.
       void this.tick();
@@ -60,12 +76,18 @@ export class SessionLivenessWatchdog {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.epoch += 1;
     this.failures.clear();
+    this.inFlight.clear();
+    // Do not clear recoveries here: a timed-out disconnect handler may still be
+    // performing teardown. Its ownership fence must survive a watchdog restart.
   }
 
   /** Forget a session's accrued failures (e.g. it just reported ready). */
   clear(id: string): void {
     this.failures.delete(id);
+    const engine = this.engines.get(id);
+    if (engine) this.invalidations.set(engine, (this.invalidations.get(engine) ?? 0) + 1);
   }
 
   /** Probe all live engines in parallel; a slow/failed probe must not delay or abort the others. */
@@ -90,7 +112,29 @@ export class SessionLivenessWatchdog {
    * attention — so the probe result only reaches the log. Without probing at all, a page that dies
    * while waiting for the operator left no trace anywhere, which is what this closes.
    */
-  async probe(id: string, engine: IWhatsAppEngine): Promise<void> {
+  probe(id: string, engine: IWhatsAppEngine): Promise<void> {
+    // Overlapping setInterval ticks and direct probes must not count one failure
+    // twice or dispatch competing reconnects for the same browser/profile.
+    if (this.recoveries.get(id)?.engine === engine) return Promise.resolve();
+    const pending = this.inFlight.get(id);
+    if (pending?.engine === engine) return pending.promise;
+
+    const token = Symbol(id);
+    const epoch = this.epoch;
+    const version = this.invalidations.get(engine) ?? 0;
+    const current = () => this.epoch === epoch &&
+      this.inFlight.get(id)?.token === token &&
+      (this.invalidations.get(engine) ?? 0) === version;
+    const operation = Promise.resolve().then(() => this.probeOnce(id, engine, current));
+    const promise = operation.finally(() => {
+      if (this.inFlight.get(id)?.token === token) this.inFlight.delete(id);
+    });
+    this.inFlight.set(id, { engine, promise, token });
+    return promise;
+  }
+
+  private async probeOnce(id: string, engine: IWhatsAppEngine, current: () => boolean): Promise<void> {
+    if (!current()) return;
     this.logger.event(LogLevel.TRACE, 'session.watchdog.probe', 'probe', 'Session liveness probe started', { sessionId: id });
     const status = engine.getStatus();
     const observeOnly = status === EngineStatus.ACTION_REQUIRED;
@@ -130,7 +174,13 @@ export class SessionLivenessWatchdog {
 
     // The session may have been stopped/restarted (engine superseded) while the probe was in flight;
     // a stale result must not touch it (mirrors the isLive gate on engine callbacks).
-    if (!this.engines.isLive(id, engine)) {
+    if (!current() || !this.engines.isLive(id, engine)) {
+      return;
+    }
+    // READY -> ACTION_REQUIRED or -> DISCONNECTED during a hung probe must not
+    // accidentally schedule a reconnect using the stale READY observation.
+    if (engine.getStatus() !== status) {
+      this.failures.delete(id);
       return;
     }
 
@@ -179,7 +229,43 @@ export class SessionLivenessWatchdog {
       failures,
       action: 'watchdog_disconnect',
     });
-    await this.onDead(id, engine, 'liveness probe failed (watchdog)');
+    // A disconnect handler can itself become blocked on database/teardown I/O.
+    // Bound this watchdog tick's wait, but KEEP the actual handler in the
+    // recoveries map until it settles. Timeout does not cancel the handler and
+    // must never authorize a second, competing session recovery.
+    const recovery = Promise.resolve().then(() => {
+      if (!current() || !this.engines.isLive(id, engine) ||
+          engine.getStatus() !== EngineStatus.READY) return;
+      return this.onDead(id, engine, 'liveness probe failed (watchdog)');
+    });
+    this.recoveries.set(id, { engine, promise: recovery });
+    void recovery.then(
+      () => undefined,
+      error => this.logger.warn('Session watchdog disconnect handler failed', {
+        sessionId: id, action: 'watchdog_disconnect_failed', error: String(error),
+      }),
+    ).finally(() => {
+      if (this.recoveries.get(id)?.promise === recovery) this.recoveries.delete(id);
+    });
+    let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        recovery,
+        new Promise<never>((_, reject) => {
+          recoveryTimer = setTimeout(
+            () => reject(new Error('watchdog disconnect handler timed out')),
+            SESSION_WATCHDOG_DISCONNECT_TIMEOUT_MS,
+          );
+          recoveryTimer.unref?.();
+        }),
+      ]);
+    } catch (error) {
+      this.logger.warn('Session watchdog disconnect did not complete within its wait budget', {
+        sessionId: id, action: 'watchdog_disconnect_incomplete', error: String(error),
+      });
+    } finally {
+      if (recoveryTimer) clearTimeout(recoveryTimer);
+    }
   }
 }
 
@@ -192,3 +278,5 @@ export const SESSION_WATCHDOG_INTERVAL_MS = 60_000;
 export const SESSION_WATCHDOG_PROBE_TIMEOUT_MS = 15_000;
 /** Consecutive failed probes before a session is treated as disconnected. */
 export const SESSION_WATCHDOG_MAX_FAILURES = 2;
+/** Bounds watchdog waiting on a reconnect callback; does not cancel the underlying teardown. */
+export const SESSION_WATCHDOG_DISCONNECT_TIMEOUT_MS = 15_000;

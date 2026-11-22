@@ -5,6 +5,7 @@ jest.mock('../../adapters/whatsapp-web-js.adapter', () => ({
 import { WhatsAppWebJsPlugin } from './index';
 import { WhatsAppWebJsAdapter } from '../../adapters/whatsapp-web-js.adapter';
 import { PluginContext } from '../../../core/plugins';
+import { BrowserManager } from '../../browser/browser.manager';
 
 describe('WhatsAppWebJsPlugin.createEngine (opaque config)', () => {
   beforeEach(() => {
@@ -79,6 +80,42 @@ describe('WhatsAppWebJsPlugin.createEngine (opaque config)', () => {
         puppeteer: { headless: false, args: ['--flag'], executablePath: '/usr/bin/chromium' },
       }),
     );
+  });
+
+  it('injects the same selected driver and profile manager into the adapter', () => {
+    const browserManager = new BrowserManager();
+    const plugin = new WhatsAppWebJsPlugin(undefined, undefined, browserManager);
+    withContext(plugin, {
+      browser: { type: 'brave', executablePath: '/custom/browser', profileBasePath: '/existing/profiles' },
+      brave: { executablePath: '/old/brave', profileBasePath: '/old/profiles' },
+    });
+    plugin.createEngine({ sessionId: 'driver-1' });
+    const config = (WhatsAppWebJsAdapter as jest.Mock).mock.calls[0][0];
+    expect(config.browser).toEqual({
+      type: 'brave', executablePath: '/custom/browser', profileBasePath: '/existing/profiles',
+      strictExecutablePath: true,
+    });
+    expect(config.browserDriver).toBe(browserManager.getBrowser('brave'));
+    expect(config.browserProfileManager).toBe(config.braveProfileManager);
+    expect(config.browserProfileManager.getProfilePath('driver-1')).toContain('/existing/profiles/driver-1');
+  });
+
+  it('exposes the effective profile root used for safe credential purge', () => {
+    const plugin = new WhatsAppWebJsPlugin({ browser: { profileBasePath: '/registered' } });
+    withContext(plugin, { browser: { profileBasePath: '/effective' } });
+    expect(plugin.getEffectiveProfileBasePath()).toBe('/effective');
+  });
+
+  it('rejects an unregistered browser before creating a WhatsApp adapter', () => {
+    const plugin = new WhatsAppWebJsPlugin({ browser: { type: 'chrome' } });
+    expect(() => plugin.createEngine({ sessionId: 'driver-2' })).toThrow(/Unsupported browser type/);
+    expect(WhatsAppWebJsAdapter).not.toHaveBeenCalled();
+  });
+
+  it('prefers context browser selection over registered configuration', () => {
+    const plugin = new WhatsAppWebJsPlugin({ browser: { type: 'chrome' } });
+    withContext(plugin, { browser: { type: 'brave' } });
+    expect(() => plugin.createEngine({ sessionId: 'driver-3' })).not.toThrow();
   });
 
   it('Prefers context.config over the constructor blob on the healthy enable path', () => {

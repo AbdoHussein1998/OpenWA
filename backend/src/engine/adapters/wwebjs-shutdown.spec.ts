@@ -12,6 +12,7 @@ function createFixture(options: { destroy?: () => Promise<void>; pid?: number | 
   const manager = {
     terminateOwnedBrowserTree,
     killOrphanedBraveProcesses: jest.fn(async () => undefined),
+    assertNoConflictingBrowserProcesses: jest.fn(async () => undefined),
   } as unknown as BraveProfileManager;
   const release = jest.fn(async () => { ordered.push('release'); await options.release?.(); });
   const host = {

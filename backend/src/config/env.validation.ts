@@ -1,4 +1,5 @@
 import { resolve } from 'path';
+import { SUPPORTED_BROWSER_TYPES } from '../engine/browser/browser.types';
 
 type EnvConfig = Record<string, unknown>;
 
@@ -74,6 +75,23 @@ export function validateEnv(config: EnvConfig): EnvConfig {
   };
   checkEnum('ENGINE_TYPE', ['whatsapp-web.js', 'baileys']);
   checkEnum('STORAGE_TYPE', ['local', 's3']);
+  // The same supported-driver set used by BrowserManager: no independent allowlist
+  // that can drift when another verified Chromium driver is registered.
+  checkEnum('BROWSER_TYPE', [...SUPPORTED_BROWSER_TYPES]);
+  if (config.BROWSER_TYPE !== undefined && typeof config.BROWSER_TYPE !== 'string') {
+    errors.push('BROWSER_TYPE must be a string');
+  }
+
+  // New browser-neutral paths are explicit overrides. Empty paths or non-string
+  // values are rejected rather than silently falling back to a different binary
+  // or profile root. Blank Compose forwards must be cleared by load-env first.
+  for (const key of ['BROWSER_EXECUTABLE_PATH', 'BROWSER_PROFILE_BASE_PATH']) {
+    const value = config[key];
+    if (value !== undefined &&
+        (typeof value !== 'string' || value.trim() === '' || value.includes('\0'))) {
+      errors.push(`${key} must be a non-empty string path`);
+    }
+  }
 
   // Brave browser paths. Optional because configuration.ts supplies safe defaults.
   // When supplied, they must be strings.

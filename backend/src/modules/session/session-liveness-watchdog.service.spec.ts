@@ -3,6 +3,7 @@ import {
   SESSION_WATCHDOG_INTERVAL_MS,
   SESSION_WATCHDOG_MAX_FAILURES,
   SESSION_WATCHDOG_PROBE_TIMEOUT_MS,
+  SESSION_WATCHDOG_DISCONNECT_TIMEOUT_MS,
 } from './session-liveness-watchdog.service';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { EngineStatus, IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
@@ -288,5 +289,117 @@ describe('SessionLivenessWatchdog', () => {
         jest.useRealTimers();
       }
     });
+  });
+});
+
+describe('Phase 8: browser deadlock and overlapping-watchdog acceptance', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>(done => { resolve = done; });
+    return { promise, resolve };
+  }
+
+  let engines: EngineRegistry;
+  let watchdog: SessionLivenessWatchdog;
+  let onDead: jest.Mock;
+
+  beforeEach(() => {
+    engines = new EngineRegistry();
+    watchdog = new SessionLivenessWatchdog(engines);
+    onDead = jest.fn().mockResolvedValue(undefined);
+  });
+  afterEach(() => watchdog.stop());
+
+  it('runs only one health probe for a session across overlapping ticks', async () => {
+    const gate = deferred<boolean>();
+    const slow = engineOf(EngineStatus.READY, jest.fn(() => gate.promise));
+    const fast = engineOf(EngineStatus.READY, jest.fn().mockResolvedValue(true));
+    engines.set('slow', slow as unknown as IWhatsAppEngine);
+    engines.set('fast', fast as unknown as IWhatsAppEngine);
+
+    const first = watchdog.tick();
+    const second = watchdog.tick();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(slow.probeLiveness).toHaveBeenCalledTimes(1);
+    expect(fast.probeLiveness).toHaveBeenCalledTimes(1);
+    gate.resolve(false);
+    await Promise.all([first, second]);
+    expect((watchdog as unknown as {failures: Map<string, number>}).failures.get('slow')).toBe(1);
+  });
+
+  it('does not reconnect an engine that changes from READY to ACTION_REQUIRED during a stalled probe', async () => {
+    const gate = deferred<boolean>();
+    const engine = engineOf(EngineStatus.READY, jest.fn(() => gate.promise));
+    engines.set('a', engine as unknown as IWhatsAppEngine);
+    const first = watchdog.probe('a', engine as unknown as IWhatsAppEngine);
+    await Promise.resolve();
+    engine.getStatus.mockReturnValue(EngineStatus.ACTION_REQUIRED);
+    gate.resolve(false);
+    await first;
+    expect((watchdog as unknown as {failures: Map<string, number>}).failures.has('a')).toBe(false);
+    expect(onDead).not.toHaveBeenCalled();
+  });
+
+  it('clear() invalidates a probe started before the session became READY again', async () => {
+    const gate = deferred<boolean>();
+    const engine = engineOf(EngineStatus.READY, jest.fn(() => gate.promise));
+    engines.set('a', engine as unknown as IWhatsAppEngine);
+    const first = watchdog.probe('a', engine as unknown as IWhatsAppEngine);
+    await Promise.resolve();
+    watchdog.clear('a');
+    gate.resolve(false);
+    await first;
+    expect((watchdog as unknown as {failures: Map<string, number>}).failures.has('a')).toBe(false);
+  });
+
+  it('does not let an older engine generation affect its replacement after a pending probe', async () => {
+    const gate = deferred<boolean>();
+    const old = engineOf(EngineStatus.READY, jest.fn(() => gate.promise));
+    const next = engineOf(EngineStatus.READY, jest.fn().mockResolvedValue(true));
+    engines.set('a', old as unknown as IWhatsAppEngine);
+    const before = watchdog.probe('a', old as unknown as IWhatsAppEngine);
+    await Promise.resolve();
+    engines.set('a', next as unknown as IWhatsAppEngine);
+    await watchdog.probe('a', next as unknown as IWhatsAppEngine);
+    gate.resolve(false);
+    await before;
+    expect((watchdog as unknown as {failures: Map<string, number>}).failures.has('a')).toBe(false);
+  });
+
+  it('a hung disconnect handler cannot be dispatched twice for the same browser', async () => {
+    jest.useFakeTimers();
+    const gate = deferred<void>();
+    const engine = engineOf(EngineStatus.READY, jest.fn().mockResolvedValue(false));
+    const onDeadPending = jest.fn(() => gate.promise);
+    try {
+      engines.set('a', engine as unknown as IWhatsAppEngine);
+      watchdog.start(onDeadPending);
+      await watchdog.probe('a', engine as unknown as IWhatsAppEngine);
+      const pending = watchdog.probe('a', engine as unknown as IWhatsAppEngine);
+      await jest.advanceTimersByTimeAsync(SESSION_WATCHDOG_DISCONNECT_TIMEOUT_MS);
+      await pending;
+      expect(onDeadPending).toHaveBeenCalledTimes(1);
+      await watchdog.tick();
+      expect(onDeadPending).toHaveBeenCalledTimes(1);
+      gate.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    } finally {
+      watchdog.stop();
+      jest.useRealTimers();
+    }
+  });
+
+  it('stop() invalidates an old probe even when its promise resolves afterward', async () => {
+    const gate = deferred<boolean>();
+    const engine = engineOf(EngineStatus.READY, jest.fn(() => gate.promise));
+    engines.set('a', engine as unknown as IWhatsAppEngine);
+    const previous = watchdog.probe('a', engine as unknown as IWhatsAppEngine);
+    await Promise.resolve();
+    watchdog.stop();
+    gate.resolve(false);
+    await previous;
+    expect((watchdog as unknown as {failures: Map<string, number>}).failures.has('a')).toBe(false);
   });
 });
